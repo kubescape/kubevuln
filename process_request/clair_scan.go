@@ -1,81 +1,164 @@
 package process_request
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"os"
-
-	"github.com/optiopay/klar/clair"
-	"github.com/optiopay/klar/docker"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"strings"
 )
 
-type vulnerabilityResult struct {
-	LayerCount      int
-	Vulnerabilities map[string][]*clair.Vulnerability
+var clairUrl string
+
+func init() {
+	clairUrl = "http://35.246.251.137:6060"
 }
 
-func getClairScanResults(containerImageRefString string) (string, error) {
-	dockerConfiguration := docker.Config{ImageName: containerImageRefString}
+type ClairLayer struct {
+	Name             string
+	Path             string
+	Headers          map[string]string
+	ParentName       string
+	Format           string
+	NamespaceName    string
+	IndexedByVersion int
+	Features         []ClairFeature
+}
 
-	image, err := docker.NewImage(&dockerConfiguration)
-	if err != nil {
-		return "", err
+type EnclosedClairLayer struct {
+	Layer ClairLayer
+}
+
+type ClairVulnerabilty struct {
+	Name         string
+	NamepaceName string
+	Description  string
+	Severity     string
+	Link         string
+}
+
+type EnclosedClairVulnerabilities struct {
+	Vulnerabilities []ClairVulnerabilty
+	NextPage        string
+}
+
+type ClairFeature struct {
+	Name            string
+	NamespaceName   string
+	Version         string
+	Vulnerabilities []ClairVulnerabilty
+}
+
+func getLayerNameFromDigest(digest string) string {
+	cp := strings.Index(digest, ":")
+	if 0 < cp {
+		return digest[cp+1:]
 	}
+	return digest
+}
 
-	err = image.Pull()
-	if err != nil {
-		return "", err
-	}
-
-	output := vulnerabilityResult{
-		Vulnerabilities: make(map[string][]*clair.Vulnerability),
-	}
-
-	if len(image.FsLayers) == 0 {
-		return "", fmt.Errorf("problem pulling %s", containerImageRefString)
-	}
-
-	output.LayerCount = len(image.FsLayers)
-
-	var vs []*clair.Vulnerability
-	for _, ver := range []int{1, 3} {
-		c := clair.NewClair("http://35.246.251.137:6060", ver, 30)
-		vs, err = c.Analyse(image)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to analyze using API v%d: %s\n", ver, err)
-		} else {
-			if !conf.JSONOutput {
-				fmt.Printf("Got results from Clair API v%d\n", ver)
+func createClairLayersFromOciManifest(manifest *OciImageManifest) *[]ClairLayer {
+	uniqueLayerCount := 0
+	for i, _ := range manifest.Layers {
+		if 0 < i {
+			if manifest.Layers[i-1].Digest == manifest.Layers[i].Digest {
+				continue
 			}
-			break
 		}
+		uniqueLayerCount++
 	}
+	cLayers := make([]ClairLayer, uniqueLayerCount)
+	j := 0
+	for i, ociLayer := range manifest.Layers {
+		if 0 < i {
+			if manifest.Layers[i-1].Digest == manifest.Layers[i].Digest {
+				continue
+			}
+		}
+		cLayers[j].Name = getLayerNameFromDigest(ociLayer.Digest)
+		log.Printf("created layer %s -> %s", ociLayer.Digest, cLayers[j].Name)
+		cLayers[j].Path = ociLayer.DownloadPath
+		cLayers[j].Headers = ociLayer.RequestOptions.Headers
+		cLayers[j].Format = "Docker"
+		if 0 < j {
+			cLayers[j].ParentName = getLayerNameFromDigest(manifest.Layers[j-1].Digest)
+		}
+		j++
+	}
+	return &cLayers
+}
+
+func postClairLayerV1(layer *ClairLayer) error {
+	payload, err := json.Marshal(EnclosedClairLayer{Layer: *layer})
 	if err != nil {
-		fail("Failed to analyze, exiting")
+		return err
+	}
+	resp, err := http.Post(clairUrl+"/v1/layers", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 299 < resp.StatusCode {
+		return fmt.Errorf("clair post layer failed with %d", resp.StatusCode)
+	}
+	log.Printf("Posted layer %s to Clair with code %d", layer.Name, resp.StatusCode)
+	return nil
+}
+
+func getClairLayerV1(layer *ClairLayer) error {
+	resp, err := http.Get(clairUrl + "/v1/layers/" + layer.Name + "?features&vulnerabilities")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 299 < resp.StatusCode {
+		return fmt.Errorf("clair get layer failed with %d", resp.StatusCode)
+	}
+	//log.Printf("Got layer %s to Clair with code %d", layer.Name, resp.StatusCode)
+	jsonRaw, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var parsingLayer EnclosedClairLayer
+	err = json.Unmarshal(jsonRaw, &parsingLayer)
+	if err == nil {
+		log.Printf("Got back layer %s with %d features", parsingLayer.Layer.Name, len(parsingLayer.Layer.Features))
+		*layer = parsingLayer.Layer
+	}
+	return err
+}
+
+func CreateClairScanResults(manifest *OciImageManifest) (*[]ClairFeature, error) {
+	var clairLayers *[]ClairLayer
+	var err error
+
+	clairLayers = createClairLayersFromOciManifest(manifest)
+	log.Printf("Posting layers for %s to Clair", manifest.Config.Digest)
+	for _, cLayer := range *clairLayers {
+		err = postClairLayerV1(&cLayer)
+		if err != nil {
+			log.Printf("Failed to post layer %s (err: %s)", cLayer.Name, err)
+			return nil, err
+		}
 	}
 
-	vsNumber := 0
-
-	numVulnerabilites := len(vs)
-	vs = filterWhitelist(whitelist, vs, image.Name)
-	numVulnerabilitiesAfterWhitelist := len(vs)
-	groupBySeverity(vs)
-
-	if conf.JSONOutput {
-		vsNumber = jsonFormat(conf, output)
-	} else {
-		if numVulnerabilitiesAfterWhitelist < numVulnerabilites {
-			//display how many vulnerabilities were whitelisted
-			fmt.Printf("Whitelisted %d vulnerabilities\n", numVulnerabilites-numVulnerabilitiesAfterWhitelist)
+	features := make([]ClairFeature, 0)
+	log.Print("Reading vulnerabilities from Clair")
+	for _, cLayer := range *clairLayers {
+		err = getClairLayerV1(&cLayer)
+		for _, feature := range cLayer.Features {
+			features = append(features, feature)
 		}
-		fmt.Printf("Found %d vulnerabilities\n", len(vs))
-		switch style := conf.FormatStyle; style {
-		case "table":
-			vsNumber = tableFormat(conf, vs)
-		default:
-			vsNumber = standardFormat(conf, vs)
+		log.Printf("number of features %d", len(cLayer.Features))
+		if err != nil {
+			log.Printf("Failed to get layer %s (err: %s)", cLayer.Name, err)
+			return nil, err
 		}
 	}
 
-	//clair.Analyze
-	return "Not implemented yet", nil
+	log.Printf("Found %d affected features in scan", len(features))
+
+	return &features, nil
 }

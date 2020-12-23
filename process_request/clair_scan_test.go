@@ -1,11 +1,26 @@
 package process_request
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestClairScanResults(t *testing.T) {
-	resultString, ferr := getClairScanResults("postgres:9.5.1")
+	manifest, err := getContainerImageManifest("debian:9")
+	if err != nil {
+		t.Errorf("get manifest failed: %s", err)
+		return
+	}
+	featuresWithVulnerabilities, ferr := CreateClairScanResults(manifest)
 	if ferr != nil {
 		t.Errorf("scan failed: %s", ferr)
+		return
 	}
-	t.Logf("Result: %s", resultString)
+
+	for _, feature := range *featuresWithVulnerabilities {
+		fmt.Printf("=== %s ===\n", feature.Name)
+		for _, vulnerability := range feature.Vulnerabilities {
+			fmt.Printf("    %s\n", vulnerability.Name)
+		}
+	}
 }
