@@ -18,7 +18,7 @@ func TestClairScanResults(t *testing.T) {
 	}
 
 	for _, feature := range *featuresWithVulnerabilities {
-		fmt.Printf("=== %s ===\n", feature.Name)
+		fmt.Printf("=== %s %s ===\n", feature.Name, feature.Version)
 		for _, vulnerability := range feature.Vulnerabilities {
 			fmt.Printf("    %s\n", vulnerability.Name)
 		}

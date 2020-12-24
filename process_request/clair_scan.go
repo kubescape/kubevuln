@@ -37,6 +37,7 @@ type ClairVulnerabilty struct {
 	Description  string
 	Severity     string
 	Link         string
+	Relevance    string `json:"group,omitempty"`
 }
 
 type EnclosedClairVulnerabilities struct {

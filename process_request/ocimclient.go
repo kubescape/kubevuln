@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"time"
 )
 
 type OcimageClient struct {
@@ -103,6 +105,32 @@ func (image *OciImage) GetManifest() (*OciImageManifest, error) {
 		}
 
 		return &manifest, nil
+	}
+
+	return nil, fmt.Errorf("HTTP failed %d", resp.StatusCode)
+}
+
+func (image *OciImage) GetFile(fileName string) (*[]byte, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/images/id/%s/files?file=%s", image.Client.endpoint, image.ImageID, url.QueryEscape(fileName)), nil)
+
+	httpclient := &http.Client{
+		Timeout: 600 * time.Second,
+	}
+	resp, err := httpclient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		fileRaw, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return &fileRaw, nil
 	}
 
 	return nil, fmt.Errorf("HTTP failed %d", resp.StatusCode)
