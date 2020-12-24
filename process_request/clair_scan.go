@@ -7,13 +7,19 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
 var clairUrl string
 
 func init() {
-	clairUrl = "http://35.246.251.137:6060"
+	clairUrl = os.Getenv("CLAIR_URL")
+	if len(clairUrl) == 0 {
+		log.Fatal("Must configure CLAIR_URL")
+	}
+
+	//clairUrl = "http://35.246.251.137:6060"
 }
 
 type ClairLayer struct {
