@@ -1,0 +1,971 @@
+{
+    "name": "gcr.io/google-samples/microservices-demo/adservice:v0.2.0-1608821200538901072",
+    "guid": "30fce041-69e8-45ae-92fe-09d05604c7e3",
+    "platform": 10,
+    "architecture": 2,
+    "creation_time": "2020-12-24T14:46:40.560259",
+    "last_edit_time": "2020-12-24T14:46:40.560265",
+    "attributes": {
+        "containerName": "server",
+        "dockerImageTag": "gcr.io/google-samples/microservices-demo/adservice:v0.2.0",
+        "dockerImageSHA256": "docker-pullable://gcr.io/google-samples/microservices-demo/adservice@sha256:0acf0911298988295c0a9848fe1e588a1a92a5e1e16da62c76eb802ceac79d9b",
+        "generatedFor": "container: server, image: gcr.io/google-samples/microservices-demo/adservice:v0.2.0",
+        "generatedFrom": "cyberArmor auto generator"
+    },
+    "executablesList": [
+        {
+            "mainProcess": "java",
+            "modulesInfo": [
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java",
+                    "name": "java",
+                    "mandatory": 1,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libnio.so",
+                    "name": "libnio.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libnet.so",
+                    "name": "libnet.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libmanagement.so",
+                    "name": "libmanagement.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libzip.so",
+                    "name": "libzip.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libnss_nis-2.24.so",
+                    "name": "libnss_nis-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libnsl-2.24.so",
+                    "name": "libnsl-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libnss_compat-2.24.so",
+                    "name": "libnss_compat-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/opt/cprof/profiler_java_agent.so",
+                    "name": "profiler_java_agent.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libjava.so",
+                    "name": "libjava.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/libverify.so",
+                    "name": "libverify.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/server/libjvm.so",
+                    "name": "libjvm.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+                    "name": "libgcc_s.so.1",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libm-2.24.so",
+                    "name": "libm-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.22",
+                    "name": "libstdc++.so.6.0.22",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libresolv-2.24.so",
+                    "name": "libresolv-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libnss_dns-2.24.so",
+                    "name": "libnss_dns-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libnss_files-2.24.so",
+                    "name": "libnss_files-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/librt-2.24.so",
+                    "name": "librt-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libc-2.24.so",
+                    "name": "libc-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libdl-2.24.so",
+                    "name": "libdl-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/jli/libjli.so",
+                    "name": "libjli.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libz.so.1.2.8",
+                    "name": "libz.so.1.2.8",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/libpthread-2.24.so",
+                    "name": "libpthread-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/x86_64-linux-gnu/ld-2.24.so",
+                    "name": "ld-2.24.so",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-stats-stackdriver-0.25.0.jar",
+                    "name": "opencensus-exporter-stats-stackdriver-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/javax.annotation-api-1.3.2.jar",
+                    "name": "javax.annotation-api-1.3.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-metrics-util-0.25.0.jar",
+                    "name": "opencensus-exporter-metrics-util-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-resource-util-0.25.0.jar",
+                    "name": "opencensus-contrib-resource-util-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/rt.jar",
+                    "name": "rt.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/localedata.jar",
+                    "name": "localedata.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/proto-google-cloud-trace-v1-0.65.0.jar",
+                    "name": "proto-google-cloud-trace-v1-0.65.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jaeger-thrift-0.33.1.jar",
+                    "name": "jaeger-thrift-0.33.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-grpclb-1.21.0.jar",
+                    "name": "grpc-grpclb-1.21.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/okhttp-3.9.0.jar",
+                    "name": "okhttp-3.9.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-alts-1.21.0.jar",
+                    "name": "grpc-alts-1.21.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jackson-annotations-2.10.2.jar",
+                    "name": "jackson-annotations-2.10.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/proto-google-common-protos-1.17.0.jar",
+                    "name": "proto-google-common-protos-1.17.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-tcnative-boringssl-static-2.0.26.Final.jar",
+                    "name": "netty-tcnative-boringssl-static-2.0.26.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-trace-jaeger-0.25.0.jar",
+                    "name": "opencensus-exporter-trace-jaeger-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/jaccess.jar",
+                    "name": "jaccess.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/log4j-core-2.13.0.jar",
+                    "name": "log4j-core-2.13.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/checker-compat-qual-2.5.5.jar",
+                    "name": "checker-compat-qual-2.5.5.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/security/policy/unlimited/US_export_policy.jar",
+                    "name": "US_export_policy.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-handler-proxy-4.1.42.Final.jar",
+                    "name": "netty-handler-proxy-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/proto-google-cloud-monitoring-v3-1.64.0.jar",
+                    "name": "proto-google-cloud-monitoring-v3-1.64.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-codec-socks-4.1.42.Final.jar",
+                    "name": "netty-codec-socks-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-grpc-metrics-0.24.0.jar",
+                    "name": "opencensus-contrib-grpc-metrics-0.24.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-cloud-core-1.82.0.jar",
+                    "name": "google-cloud-core-1.82.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/guava-28.1-android.jar",
+                    "name": "guava-28.1-android.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-http-util-0.21.0.jar",
+                    "name": "opencensus-contrib-http-util-0.21.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-transport-4.1.42.Final.jar",
+                    "name": "netty-transport-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-handler-4.1.42.Final.jar",
+                    "name": "netty-handler-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/jsse.jar",
+                    "name": "jsse.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-cloud-core-grpc-1.82.0.jar",
+                    "name": "google-cloud-core-grpc-1.82.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-services-1.26.0.jar",
+                    "name": "grpc-services-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/security/policy/unlimited/local_policy.jar",
+                    "name": "local_policy.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-stub-1.26.0.jar",
+                    "name": "grpc-stub-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/gson-2.8.6.jar",
+                    "name": "gson-2.8.6.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-impl-0.25.0.jar",
+                    "name": "opencensus-impl-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/hipstershop-0.1.0-SNAPSHOT.jar",
+                    "name": "hipstershop-0.1.0-SNAPSHOT.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/resources.jar",
+                    "name": "resources.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/httpclient-4.5.8.jar",
+                    "name": "httpclient-4.5.8.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/jce.jar",
+                    "name": "jce.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/protobuf-java-3.11.0.jar",
+                    "name": "protobuf-java-3.11.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/threetenbp-1.3.3.jar",
+                    "name": "threetenbp-1.3.3.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-netty-1.26.0.jar",
+                    "name": "grpc-netty-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar",
+                    "name": "listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/dnsns.jar",
+                    "name": "dnsns.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/libthrift-0.11.0.jar",
+                    "name": "libthrift-0.11.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/httpcore-4.4.11.jar",
+                    "name": "httpcore-4.4.11.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/animal-sniffer-annotations-1.18.jar",
+                    "name": "animal-sniffer-annotations-1.18.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/api-common-1.8.1.jar",
+                    "name": "api-common-1.8.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-http-client-jackson2-1.30.1.jar",
+                    "name": "google-http-client-jackson2-1.30.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-resolver-4.1.42.Final.jar",
+                    "name": "netty-resolver-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/commons-lang3-3.5.jar",
+                    "name": "commons-lang3-3.5.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-common-4.1.42.Final.jar",
+                    "name": "netty-common-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jsr305-3.0.2.jar",
+                    "name": "jsr305-3.0.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jaeger-tracerresolver-0.33.1.jar",
+                    "name": "jaeger-tracerresolver-0.33.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/cldrdata.jar",
+                    "name": "cldrdata.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/sunpkcs11.jar",
+                    "name": "sunpkcs11.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-impl-core-0.25.0.jar",
+                    "name": "opencensus-impl-core-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/sunec.jar",
+                    "name": "sunec.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/icedtea-sound.jar",
+                    "name": "icedtea-sound.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-exemplar-util-0.25.0.jar",
+                    "name": "opencensus-contrib-exemplar-util-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/slf4j-api-1.7.25.jar",
+                    "name": "slf4j-api-1.7.25.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jaeger-core-0.33.1.jar",
+                    "name": "jaeger-core-0.33.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-grpc-util-0.25.0.jar",
+                    "name": "opencensus-contrib-grpc-util-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-http-client-1.30.1.jar",
+                    "name": "google-http-client-1.30.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-protobuf-1.26.0.jar",
+                    "name": "grpc-protobuf-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/proto-google-cloud-trace-v2-0.65.0.jar",
+                    "name": "proto-google-cloud-trace-v2-0.65.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/protobuf-java-util-3.11.0.jar",
+                    "name": "protobuf-java-util-3.11.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-trace-util-0.25.0.jar",
+                    "name": "opencensus-exporter-trace-util-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-trace-logging-0.25.0.jar",
+                    "name": "opencensus-exporter-trace-logging-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-codec-4.1.42.Final.jar",
+                    "name": "netty-codec-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opentracing-api-0.31.0.jar",
+                    "name": "opentracing-api-0.31.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/disruptor-3.4.2.jar",
+                    "name": "disruptor-3.4.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/log4j-api-2.13.0.jar",
+                    "name": "log4j-api-2.13.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jackson-core-2.10.2.jar",
+                    "name": "jackson-core-2.10.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opentracing-util-0.31.0.jar",
+                    "name": "opentracing-util-0.31.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-buffer-4.1.42.Final.jar",
+                    "name": "netty-buffer-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-codec-http-4.1.42.Final.jar",
+                    "name": "netty-codec-http-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/gax-1.47.1.jar",
+                    "name": "gax-1.47.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-api-1.26.0.jar",
+                    "name": "grpc-api-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/zipfs.jar",
+                    "name": "zipfs.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opentracing-tracerresolver-0.1.5.jar",
+                    "name": "opentracing-tracerresolver-0.1.5.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/j2objc-annotations-1.3.jar",
+                    "name": "j2objc-annotations-1.3.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/commons-codec-1.11.jar",
+                    "name": "commons-codec-1.11.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jaeger-client-0.33.1.jar",
+                    "name": "jaeger-client-0.33.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-protobuf-lite-1.26.0.jar",
+                    "name": "grpc-protobuf-lite-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-contrib-log-correlation-log4j2-0.25.0.jar",
+                    "name": "opencensus-contrib-log-correlation-log4j2-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-cloud-monitoring-1.82.0.jar",
+                    "name": "google-cloud-monitoring-1.82.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/gax-grpc-1.47.1.jar",
+                    "name": "gax-grpc-1.47.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-core-1.26.0.jar",
+                    "name": "grpc-core-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-netty-shaded-1.25.0.jar",
+                    "name": "grpc-netty-shaded-1.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/netty-codec-http2-4.1.42.Final.jar",
+                    "name": "netty-codec-http2-4.1.42.Final.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/commons-logging-1.2.jar",
+                    "name": "commons-logging-1.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-auth-library-credentials-0.17.1.jar",
+                    "name": "google-auth-library-credentials-0.17.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-auth-library-oauth2-http-0.16.2.jar",
+                    "name": "google-auth-library-oauth2-http-0.16.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/nashorn.jar",
+                    "name": "nashorn.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-exporter-trace-stackdriver-0.25.0.jar",
+                    "name": "opencensus-exporter-trace-stackdriver-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opentracing-noop-0.31.0.jar",
+                    "name": "opentracing-noop-0.31.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/ext/sunjce_provider.jar",
+                    "name": "sunjce_provider.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/jackson-databind-2.10.2.jar",
+                    "name": "jackson-databind-2.10.2.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/annotations-4.1.1.4.jar",
+                    "name": "annotations-4.1.1.4.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/opencensus-api-0.25.0.jar",
+                    "name": "opencensus-api-0.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/proto-google-iam-v1-0.12.0.jar",
+                    "name": "proto-google-iam-v1-0.12.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-auth-1.25.0.jar",
+                    "name": "grpc-auth-1.25.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/failureaccess-1.0.1.jar",
+                    "name": "failureaccess-1.0.1.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/grpc-context-1.26.0.jar",
+                    "name": "grpc-context-1.26.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/google-cloud-trace-0.100.0-beta.jar",
+                    "name": "google-cloud-trace-0.100.0-beta.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/perfmark-api-0.19.0.jar",
+                    "name": "perfmark-api-0.19.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/error_prone_annotations-2.3.3.jar",
+                    "name": "error_prone_annotations-2.3.3.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                },
+                {
+                    "fullPath": "/app/build/install/hipstershop/lib/okio-1.13.0.jar",
+                    "name": "okio-1.13.0.jar",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 20
+                }
+            ],
+            "filter": {
+                "includePaths": [
+                    "/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/",
+                    "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/",
+                    "/lib/x86_64-linux-gnu/",
+                    "/opt/cprof/",
+                    "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/server/",
+                    "/usr/lib/x86_64-linux-gnu/",
+                    "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/jli/"
+                ]
+            }
+        }
+    ]
+}

@@ -13,7 +13,7 @@ import (
 	"github.com/docker/distribution/reference"
 )
 
-type fullScanResult struct {
+type ScanResult struct {
 	ImageTag   string          `json:"imageTag"`
 	ImageHash  string          `json:"imageHash"`
 	WorkloadId string          `json:"wlid"`
@@ -61,7 +61,7 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 	return image, nil
 }
 
-func postScanResults(customerGuid string, solutionGuid string, result *fullScanResult) {
+func postScanResults(customerGuid string, solutionGuid string, result *ScanResult) {
 	key := customerGuid + "/" + solutionGuid + "/" + "result.json"
 	jsonRaw, err := json.Marshal(result)
 	sess, err := session.NewSession(&aws.Config{})
@@ -79,41 +79,47 @@ func postScanResults(customerGuid string, solutionGuid string, result *fullScanR
 	}
 }
 
-func ProcessScanRequest(requestID []byte, customerGuid string, solutionGuid string, workloadId string, signatureProfile *catypes.SigningProfile) error {
+func ProcessScanRequest(requestID []byte, workloadId string, signatureProfile *catypes.SigningProfile) (*ScanResult, error) {
 	containerImageRefernce := signatureProfile.Attributes.DockerImageTag
 
 	_, err := reference.Parse(containerImageRefernce)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ociImage, err := ociClient.Image(containerImageRefernce)
 	if err != nil {
 		log.Printf("Not able to get image %s", err)
-		return err
+		return nil, err
 	}
 
 	manifest, err := ociImage.GetManifest()
 	if err != nil {
 		log.Printf("Not able to get manifest %s", err)
-		return err
+		return nil, err
 	}
 
 	featuresWithVulnerabilities, err := CreateClairScanResults(manifest)
 	if err != nil {
 		log.Printf("Not able to read scan results from Clair %s", err)
-		return err
+		return nil, err
 	}
 
-	//fileListPerFeature := make(map[string]*[]string)
+	packageManager, err := CreatePackageHandler("dpkg", ociImage)
+	if err != nil {
+		log.Printf("Package handler cannot be initialized %s", err)
+		return nil, err
+	}
+
 	for _, feature := range *featuresWithVulnerabilities {
-		fileList, err := readFileListForPackage(feature.Name, "dpkg", ociImage)
+		fileList, err := packageManager.readFileListForPackage(feature.Name)
 		if err != nil {
 			log.Printf("Not found file list for package %s", feature.Name)
 			for i := range feature.Vulnerabilities {
 				feature.Vulnerabilities[i].Relevance = "Unknown"
 			}
 		} else {
+			log.Printf("Found file list for package %s", feature.Name)
 			relevance := "Irrelevant"
 			for _, fileName := range *fileList {
 				for _, executable := range signatureProfile.ExecutableList {
@@ -137,12 +143,23 @@ func ProcessScanRequest(requestID []byte, customerGuid string, solutionGuid stri
 		}
 	}
 
-	go postScanResults(customerGuid, solutionGuid, &fullScanResult{
+	var result *ScanResult
+
+	result = &ScanResult{
 		ImageTag:   signatureProfile.Attributes.DockerImageTag,
 		ImageHash:  signatureProfile.Attributes.DockerImageSHA256,
 		WorkloadId: workloadId,
 		Features:   featuresWithVulnerabilities,
-	})
+	}
 
-	return nil
+	return result, nil
+}
+
+func ProcessScanRequestWithS3Upload(requestID []byte, customerGuid string, solutionGuid string, workloadId string, signatureProfile *catypes.SigningProfile) (*ScanResult, error) {
+	result, err := ProcessScanRequest(requestID, workloadId, signatureProfile)
+	if err != nil {
+		return nil, err
+	}
+	go postScanResults(customerGuid, solutionGuid, result)
+	return result, nil
 }
