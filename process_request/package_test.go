@@ -30,7 +30,7 @@ func TestHandlerDpkgGetFilesList(t *testing.T) {
 		t.Fatalf("image failed: %s", err)
 		return
 	}
-	packageManager, err := CreatePackageHandler("dpkg", image)
+	packageManager, err := CreatePackageHandler(image)
 	if err != nil {
 		t.Fatalf("package manager failed: %s", err)
 		return

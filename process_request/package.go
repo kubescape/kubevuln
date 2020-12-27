@@ -15,6 +15,11 @@ type dpkgPackageHandler struct {
 	image             *OciImage
 }
 
+type apkPackageHandler struct {
+	packageFileMap *map[string][]string
+	image          *OciImage
+}
+
 func readFileListForPackageDpkg(packageName string, image *OciImage) (*[]string, error) {
 	var packageFileList = []string{"/var/lib/dpkg/info/%s.list", "/var/lib/dpkg/info/%s:amd64.list"}
 	for _, name := range packageFileList {
@@ -47,15 +52,34 @@ func readFileListForPackage(packageName string, packageManagerType string, image
 	return fileList, err
 }
 
-func CreatePackageHandler(packageManagerType string, image *OciImage) (PackageHandler, error) {
+func identifyPackageManager(image *OciImage) (string, error) {
+	fileList, err := image.ListDirectoryFile("/var/lib/dpkg/info", true, false)
+	if err == nil && len(*fileList) > 0 {
+		return "dpkg", nil
+	}
+	fileList, err = image.ListDirectoryFile("/lib/apk", false, false)
+	if err == nil && len(*fileList) > 0 {
+		return "apk", nil
+	}
+	return "", fmt.Errorf("Cannot identify package manager in image")
+}
+
+func CreatePackageHandler(image *OciImage) (PackageHandler, error) {
 	var err error
 	var packageHandler PackageHandler
+
+	packageManagerType, err := identifyPackageManager(image)
+	if err != nil {
+		return nil, err
+	}
+
 	switch packageManagerType {
 	case "dpkg":
 		packageHandler = &dpkgPackageHandler{}
 		err = packageHandler.initPackageHandler(image)
-	//case "apk":
-	//	err = nil
+	case "apk":
+		packageHandler = &apkPackageHandler{}
+		err = packageHandler.initPackageHandler(image)
 	default:
 		err = fmt.Errorf("Unsupported packager type %s", packageManagerType)
 	}
@@ -79,7 +103,8 @@ func (ph *dpkgPackageHandler) readFileListForPackage(packageName string) (*[]str
 		var packageFileList = []string{fmt.Sprintf("var/lib/dpkg/info/%s.list", packageName), fmt.Sprintf("var/lib/dpkg/info/%s:amd64.list", packageName)}
 		for _, packageFileName := range packageFileList {
 			//log.Printf("%s ?= %s", packageFileName, fsEntry.path)
-			if packageFileName == fsEntry.Path {
+			//if strings.HasPrefix(fsEntry.Path, packageFileName) && strings.HasSuffix(fsEntry.Path, ".list") {
+			if fsEntry.Path == packageFileName {
 				// gotcha!
 				fileContent, err := ph.image.GetFile("/" + fsEntry.Path)
 				if err != nil {
@@ -91,5 +116,25 @@ func (ph *dpkgPackageHandler) readFileListForPackage(packageName string) (*[]str
 			}
 		}
 	}
+	return nil, fmt.Errorf("Not found package %s", packageName)
+}
+
+func (ph *apkPackageHandler) initPackageHandler(image *OciImage) error {
+	ph.image = image
+	apkInstallDb, err := ph.image.GetFile("/lib/apk/db/installed")
+	if err != nil {
+		return err
+	}
+	ph.packageFileMap, err = apkInstallDbParser(apkInstallDb)
+	return err
+}
+
+func (ph *apkPackageHandler) readFileListForPackage(packageName string) (*[]string, error) {
+	// Check package name
+	if fileList, hasKey := (*ph.packageFileMap)[packageName]; hasKey {
+		return &fileList, nil
+	}
+	return nil, fmt.Errorf("package not found")
+
 	return nil, fmt.Errorf("Not found package %s", packageName)
 }

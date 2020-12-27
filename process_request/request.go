@@ -105,27 +105,32 @@ func ProcessScanRequest(requestID []byte, workloadId string, signatureProfile *c
 		return nil, err
 	}
 
-	packageManager, err := CreatePackageHandler("dpkg", ociImage)
+	packageManager, err := CreatePackageHandler(ociImage)
 	if err != nil {
 		log.Printf("Package handler cannot be initialized %s", err)
 		return nil, err
 	}
 
 	for _, feature := range *featuresWithVulnerabilities {
-		fileList, err := packageManager.readFileListForPackage(feature.Name)
-		if err != nil {
-			log.Printf("Not found file list for package %s", feature.Name)
-			for i := range feature.Vulnerabilities {
-				feature.Vulnerabilities[i].Relevance = "Unknown"
-			}
-		} else {
-			log.Printf("Found file list for package %s", feature.Name)
-			relevance := "Irrelevant"
-			for _, fileName := range *fileList {
-				for _, executable := range signatureProfile.ExecutableList {
-					for _, module := range executable.ModulesInfo {
-						if fileName == module.FullPath {
-							relevance = "Relevant"
+		if len(feature.Vulnerabilities) > 0 {
+			fileList, err := packageManager.readFileListForPackage(feature.Name)
+			if err != nil {
+				log.Printf("Not found file list for package %s", feature.Name)
+				for i := range feature.Vulnerabilities {
+					feature.Vulnerabilities[i].Relevance = "Unknown"
+				}
+			} else {
+				log.Printf("Found file list for package %s", feature.Name)
+				relevance := "Irrelevant"
+				for _, fileName := range *fileList {
+					for _, executable := range signatureProfile.ExecutableList {
+						for _, module := range executable.ModulesInfo {
+							if fileName == module.FullPath {
+								relevance = "Relevant"
+								break
+							}
+						}
+						if relevance == "Relevant" {
 							break
 						}
 					}
@@ -133,12 +138,9 @@ func ProcessScanRequest(requestID []byte, workloadId string, signatureProfile *c
 						break
 					}
 				}
-				if relevance == "Relevant" {
-					break
+				for i := range feature.Vulnerabilities {
+					feature.Vulnerabilities[i].Relevance = relevance
 				}
-			}
-			for i := range feature.Vulnerabilities {
-				feature.Vulnerabilities[i].Relevance = relevance
 			}
 		}
 	}

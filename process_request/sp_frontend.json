@@ -1,0 +1,42 @@
+{
+    "name": "gcr.io/google-samples/microservices-demo/frontend:v0.2.0-1593099047248882547",
+    "guid": "7956374b-854d-4073-b471-c9864aefd810",
+    "platform": 12,
+    "architecture": 2,
+    "creation_time": "2020-06-25T15:30:48.484362",
+    "last_edit_time": "2020-06-25T15:30:48.484371",
+    "attributes": {
+        "containerName": "server",
+        "dockerImageTag": "gcr.io/google-samples/microservices-demo/frontend:v0.2.0",
+        "dockerImageSHA256": "docker-pullable://gcr.io/google-samples/microservices-demo/frontend@sha256:574b28cddab734ae2fccd8f6bf6cdc7c7f4516450e041c5fb9d921b365f6f17b",
+        "generatedFor": "container: server, image: gcr.io/google-samples/microservices-demo/frontend:v0.2.0",
+        "generatedFrom": "cyberArmor auto generator"
+    },
+    "executablesList": [
+        {
+            "mainProcess": "server",
+            "modulesInfo": [
+                {
+                    "fullPath": "/frontend/server",
+                    "name": "server",
+                    "mandatory": 1,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                },
+                {
+                    "fullPath": "/lib/ld-musl-x86_64.so.1",
+                    "name": "ld-musl-x86_64.so.1",
+                    "mandatory": 2,
+                    "signatureMismatchAction": 1,
+                    "type": 1
+                }
+            ],
+            "filter": {
+                "includePaths": [
+                    "/frontend/",
+                    "/lib/"
+                ]
+            }
+        }
+    ]
+}
