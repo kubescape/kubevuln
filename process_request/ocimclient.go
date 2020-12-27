@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -111,15 +110,12 @@ func (image *OciImage) GetManifest() (*OciImageManifest, error) {
 }
 
 func (image *OciImage) GetFile(fileName string) (*[]byte, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/images/id/%s/files?file=%s", image.Client.endpoint, image.ImageID, url.QueryEscape(fileName)), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/images/id/%s/files/%s", image.Client.endpoint, image.ImageID, fileName), nil)
 
 	httpclient := &http.Client{
 		Timeout: 600 * time.Second,
 	}
 	resp, err := httpclient.Do(req)
-	if err != nil {
-		return nil, err
-	}
 	if err != nil {
 		return nil, err
 	}
