@@ -1,0 +1,4 @@
+[submodule "jenkinstools"]
+	path = jenkinstools
+	url = git@asterix.cyberarmor.io:cyberarmor/jenkinstools.git
+	branch = master
