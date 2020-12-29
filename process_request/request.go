@@ -63,6 +63,7 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 
 func postScanResults(customerGuid string, solutionGuid string, result *ScanResult) {
 	key := customerGuid + "/" + solutionGuid + "/" + "result.json"
+	log.Printf("Starting uploading %s to bucket %s", key, scanDeliveryBucket)
 	jsonRaw, err := json.Marshal(result)
 	sess, err := session.NewSession(&aws.Config{})
 	if err != nil {
@@ -75,7 +76,9 @@ func postScanResults(customerGuid string, solutionGuid string, result *ScanResul
 		Body:   bytes.NewReader(jsonRaw),
 	})
 	if err != nil {
-		log.Printf("Error posting scan results to S3 (%s - %s)", key, result.WorkloadId)
+		log.Printf("Error posting scan results to S3 - error: %s (%s - %s)", err, key, result.WorkloadId)
+	} else {
+		log.Printf("Uploaded %s to bucket %s", key, scanDeliveryBucket)
 	}
 }
 
@@ -162,6 +165,6 @@ func ProcessScanRequestWithS3Upload(requestID []byte, customerGuid string, solut
 	if err != nil {
 		return nil, err
 	}
-	go postScanResults(customerGuid, solutionGuid, result)
+	postScanResults(customerGuid, solutionGuid, result)
 	return result, nil
 }

@@ -55,6 +55,20 @@ func TestFullTestCycleDpkg(t *testing.T) {
 
 }
 
+func TestFullTestCycleDpkgWithS3(t *testing.T) {
+	requestID := make([]byte, 16)
+	sp, err := getTestNginxSigningProfile()
+	if err != nil {
+		t.Fatalf("Cannot read nginx signing profile: %s", err)
+		return
+	}
+	_, err = ProcessScanRequestWithS3Upload(requestID, "9f7454d6-0ef2-4abf-860b-3a342e0336b1", "81263196-c570-4152-b7b0-da9a875dcc1d", "wlid://datacenter-benlt/project-test/dockerized-nginx", sp)
+	if err != nil {
+		t.Fatalf("Failed scanning: %s", err)
+		return
+	}
+}
+
 func TestFullTestCycleApk(t *testing.T) {
 	requestID := make([]byte, 16)
 	sp, err := getTestFrontendSigningProfile()
