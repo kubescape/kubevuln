@@ -38,12 +38,12 @@ type EnclosedClairLayer struct {
 }
 
 type ClairVulnerabilty struct {
-	Name         string
-	NamepaceName string
-	Description  string
-	Severity     string
-	Link         string
-	Relevance    string `json:"group,omitempty"`
+	Name         string `json:"name,omitempty"`
+	NamepaceName string `json:"namepaceName,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Severity     string `json:"severity,omitempty"`
+	Link         string `json:"link,omitempty"`
+	Relevance    string `json:"relevance,omitempty"`
 }
 
 type EnclosedClairVulnerabilities struct {
