@@ -156,7 +156,9 @@ func CreateClairScanResults(manifest *OciImageManifest) (*[]ClairFeature, error)
 	for _, cLayer := range *clairLayers {
 		err = getClairLayerV1(&cLayer)
 		for _, feature := range cLayer.Features {
-			features = append(features, feature)
+			if 0 < len(feature.Vulnerabilities) {
+				features = append(features, feature)
+			}
 		}
 		log.Printf("number of features %d", len(cLayer.Features))
 		if err != nil {
