@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
 )
 
 var clairUrl string
@@ -19,7 +21,7 @@ func init() {
 		log.Fatal("Must configure CLAIR_URL")
 	}
 
-	//clairUrl = "http://35.246.251.137:6060"
+	// clairUrl = "http://172.17.0.5:6060"
 }
 
 type ClairLayer struct {
@@ -35,6 +37,10 @@ type ClairLayer struct {
 
 type EnclosedClairLayer struct {
 	Layer ClairLayer
+}
+
+type EnclosedClairVulnerabilityEventRecieverVersion struct {
+	vulnerability cs.Vulnerability
 }
 
 type ClairVulnerabilty struct {
@@ -114,6 +120,52 @@ func postClairLayerV1(layer *ClairLayer) error {
 	return nil
 }
 
+func getClairLayerV1FeatureAndVulnerabilities(layer *ClairLayer) error {
+	resp, err := http.Get(clairUrl + "/v1/layers/" + layer.Name + "?features&vulnerabilities")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 299 < resp.StatusCode {
+		return fmt.Errorf("clair get layer failed with %d", resp.StatusCode)
+	}
+	//log.Printf("Got layer %s to Clair with code %d", layer.Name, resp.StatusCode)
+	jsonRaw, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var parsingLayer EnclosedClairLayer
+	err = json.Unmarshal(jsonRaw, &parsingLayer)
+	if err == nil {
+		log.Printf("Got back layer %s with %d features", parsingLayer.Layer.Name, len(parsingLayer.Layer.Features))
+		*layer = parsingLayer.Layer
+	}
+	return err
+}
+
+func getClairLayerVulnerabilitiesV1(vulnerability *cs.Vulnerability, namespace string, vulnerabilityname string) error {
+	resp, err := http.Get(clairUrl + "/v1/namespaces/" + namespace + "/vulnerabilities/" + vulnerabilityname + "?fixedIn")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 299 < resp.StatusCode {
+		return fmt.Errorf("clair get vulnerability failed with %d", resp.StatusCode)
+	}
+	// log.Printf("Got layer %s to Clair with code %d", layer.Name, resp.StatusCode)
+	jsonRaw, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var parsingVulnerability EnclosedClairVulnerabilityEventRecieverVersion
+	err = json.Unmarshal(jsonRaw, &parsingVulnerability)
+	if err == nil {
+		*vulnerability = parsingVulnerability.vulnerability
+	}
+
+	return err
+}
+
 func getClairLayerV1(layer *ClairLayer) error {
 	resp, err := http.Get(clairUrl + "/v1/layers/" + layer.Name + "?features&vulnerabilities")
 	if err != nil {
@@ -137,9 +189,21 @@ func getClairLayerV1(layer *ClairLayer) error {
 	return err
 }
 
-func CreateClairScanResults(manifest *OciImageManifest) (*[]ClairFeature, error) {
+func convertToPkgFiles(fileList *[]string) (*cs.PkgFiles){
+	pkgFiles := make(cs.PkgFiles, 0)
+
+	for _, file := range *fileList {
+		filename := cs.PackageFile{Filename: file}
+		pkgFiles = append(pkgFiles, filename)
+	}
+
+	return &pkgFiles
+}
+
+func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler PackageHandler, imagetag string) (*cs.LayersList, error) {
 	var clairLayers *[]ClairLayer
 	var err error
+	featureToFileList := make(map[string]*cs.PkgFiles)
 
 	clairLayers = createClairLayersFromOciManifest(manifest)
 	log.Printf("Posting layers for %s to Clair", manifest.Config.Digest)
@@ -151,23 +215,61 @@ func CreateClairScanResults(manifest *OciImageManifest) (*[]ClairFeature, error)
 		}
 	}
 
-	features := make([]ClairFeature, 0)
-	log.Print("Reading vulnerabilities from Clair")
-	for _, cLayer := range *clairLayers {
-		err = getClairLayerV1(&cLayer)
-		for _, feature := range cLayer.Features {
-			if 0 < len(feature.Vulnerabilities) {
-				features = append(features, feature)
-			}
-		}
-		log.Printf("number of features %d", len(cLayer.Features))
+	for i, cLayer := range *clairLayers {
+		err = getClairLayerV1FeatureAndVulnerabilities(&cLayer)
 		if err != nil {
 			log.Printf("Failed to get layer %s (err: %s)", cLayer.Name, err)
 			return nil, err
 		}
+		(*clairLayers)[i] = cLayer
 	}
 
-	log.Printf("Found %d affected features in scan", len(features))
+	vulnerabilities := make(cs.VulnerabilitiesList, 0)
+	layersList := make(cs.LayersList, 0)
+	log.Print("Reading vulnerabilities from Clair")
+	for _, cLayer := range *clairLayers {
+		layerRes := cs.ScanResultLayer{}
+		for _, feature := range cLayer.Features {
+			if (len(feature.Vulnerabilities) != 0) {
+				linuxPackage := cs.LinuxPackage{}
+				for _, vuln := range feature.Vulnerabilities {
+					vulnerability := cs.Vulnerability{
+						Name: vuln.Name,
+						ImgHash: "",
+						ImgTag: imagetag,
+						RelatedPackageName: feature.Name,
+						Link: vuln.Link,
+						Description: vuln.Description,
+						Severity: vuln.Severity}
+					// we need to use this function in oredr to get more detailed data 
+					// err = getClairLayerVulnerabilitiesV1(&vulnerability, cLayer.NamespaceName, Vulnerability.Name)
+					// if err == nil {
+					// 	vulnerabilities = append(vulnerabilities, vulnerability)
+					// }
+					vulnerabilities = append(vulnerabilities, vulnerability)
+				}
+				var Files *cs.PkgFiles
+				if files, ok:= featureToFileList[feature.Name]; !ok {
+					fileList, err := packageHandler.readFileListForPackage(feature.Name)
+					if (err != nil){
+						log.Printf("Not found file list for package %s", feature.Name)
+					} else {
+						Files = convertToPkgFiles(fileList)
+						linuxPackage.Files = *Files
+						featureToFileList[feature.Name] = Files
+					}
+				} else {
+					linuxPackage.Files = *files
+				}
+				linuxPackage.PackageName = feature.Name
 
-	return &features, nil
+				layerRes.LayerHash = cLayer.Name
+				layerRes.Packages = append(layerRes.Packages, linuxPackage)
+				layerRes.Vulnerabilities = vulnerabilities
+			}	
+		}
+		layersList = append(layersList, layerRes)
+	}
+
+	return &layersList, err
 }

@@ -2,15 +2,14 @@ package process_request
 
 import (
 	"bytes"
-	"ca-vuln-scan/catypes"
+	// "ca-vuln-scan/catypes"
 	"encoding/json"
 	"log"
-	"os"
+	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/docker/distribution/reference"
+	"os"
+	"net/http"
+	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
 )
 
 type ScanResult struct {
@@ -21,23 +20,23 @@ type ScanResult struct {
 }
 
 var ociClient OcimageClient
-var scanDeliveryBucket string
+var eventRecieverURL string 
+var cusGUID string 
 
 func init() {
 	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
 	if len(ociClient.endpoint) == 0 {
 		log.Fatal("Must configure OCIMAGE_URL")
 	}
-	scanDeliveryBucket = os.Getenv("S3_BUCKET")
-	if len(scanDeliveryBucket) == 0 {
-		log.Fatal("Must configure S3_BUCKET")
+	eventRecieverURL = os.Getenv("EVENT_RECIEVER_URL")
+	if len(eventRecieverURL) == 0 {
+		log.Fatal("Must configure EVENT_RECIEVER_URL")
 	}
-	if len(os.Getenv("AWS_ACCESS_KEY_ID")) == 0 {
-		log.Fatal("Must configure AWS_ACCESS_KEY_ID")
+	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
+	if len(cusGUID) == 0 {
+		log.Fatal("Must configure CA_CUSTOMER_GUID")
 	}
-	if len(os.Getenv("AWS_SECRET_ACCESS_KEY")) == 0 {
-		log.Fatal("Must configure AWS_SECRET_ACCESS_KEY")
-	}
+
 }
 
 func getContainerImageManifest(containerImageRefernce string) (*OciImageManifest, error) {
@@ -61,36 +60,42 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 	return image, nil
 }
 
-func postScanResults(customerGuid string, solutionGuid string, result *ScanResult) {
-	key := customerGuid + "/" + solutionGuid + "/" + "result.json"
-	log.Printf("Starting uploading %s to bucket %s", key, scanDeliveryBucket)
-	jsonRaw, err := json.Marshal(result)
-	sess, err := session.NewSession(&aws.Config{})
-	if err != nil {
-		log.Printf("Error configuring S3 client (%s - %s)", key, result.WorkloadId)
+func postScanResultsToEventReciever(imagetag string, wlid string, layersList *cs.LayersList) error{
+
+	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
+	timestamp := int64(time.Now().Unix())
+	final_report := cs.ScanResultReport {
+		CustomerGUID: cusGUID,
+		ImgTag: imagetag,
+		ImgHash: "",
+		WLID: wlid,
+		Timestamp: timestamp,
+		Layers: *layersList,
 	}
-	uploader := s3manager.NewUploader(sess)
-	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(scanDeliveryBucket),
-		Key:    aws.String(key),
-		Body:   bytes.NewReader(jsonRaw),
-	})
+
+	payload, err := json.Marshal(final_report)
 	if err != nil {
-		log.Printf("Error posting scan results to S3 - error: %s (%s - %s)", err, key, result.WorkloadId)
-	} else {
-		log.Printf("Uploaded %s to bucket %s", key, scanDeliveryBucket)
+		log.Printf("fail convert to json")
+		return err
 	}
+	resp, err := http.Post(eventRecieverURL + "/k8s/containerScan", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 299 < resp.StatusCode {
+		log.Printf("clair post to event reciever failed with %d", resp.StatusCode)
+		return err
+	}
+	log.Printf("posting to event reciever image %s wlid %s finished seccessfully", imagetag, wlid)
+
+	return nil
 }
 
-func ProcessScanRequest(requestID []byte, workloadId string, signatureProfile *catypes.SigningProfile) (*ScanResult, error) {
-	containerImageRefernce := signatureProfile.Attributes.DockerImageTag
+func GetScanResult(imagetag string) (*cs.LayersList, error) {
 
-	_, err := reference.Parse(containerImageRefernce)
-	if err != nil {
-		return nil, err
-	}
-
-	ociImage, err := ociClient.Image(containerImageRefernce)
+	ociImage, err := ociClient.Image(imagetag)
 	if err != nil {
 		log.Printf("Not able to get image %s", err)
 		return nil, err
@@ -102,69 +107,26 @@ func ProcessScanRequest(requestID []byte, workloadId string, signatureProfile *c
 		return nil, err
 	}
 
-	featuresWithVulnerabilities, err := CreateClairScanResults(manifest)
-	if err != nil {
-		log.Printf("Not able to read scan results from Clair %s", err)
-		return nil, err
-	}
-
 	packageManager, err := CreatePackageHandler(ociImage)
 	if err != nil {
 		log.Printf("Package handler cannot be initialized %s", err)
 		return nil, err
 	}
-
-	for _, feature := range *featuresWithVulnerabilities {
-		if len(feature.Vulnerabilities) > 0 {
-			fileList, err := packageManager.readFileListForPackage(feature.Name)
-			if err != nil {
-				log.Printf("Not found file list for package %s", feature.Name)
-				for i := range feature.Vulnerabilities {
-					feature.Vulnerabilities[i].Relevance = "Unknown"
-				}
-			} else {
-				log.Printf("Found file list for package %s", feature.Name)
-				relevance := "Irrelevant"
-				for _, fileName := range *fileList {
-					for _, executable := range signatureProfile.ExecutableList {
-						for _, module := range executable.ModulesInfo {
-							if fileName == module.FullPath {
-								relevance = "Relevant"
-								break
-							}
-						}
-						if relevance == "Relevant" {
-							break
-						}
-					}
-					if relevance == "Relevant" {
-						break
-					}
-				}
-				for i := range feature.Vulnerabilities {
-					feature.Vulnerabilities[i].Relevance = relevance
-				}
-			}
-		}
+	
+	scanresultlayer, err := GetClairScanResultsByLayer(manifest, packageManager, imagetag)
+	if err != nil {
+		log.Printf("GetClairScanResultsByLayer failed with err %v", err)
+		return nil, err
 	}
 
-	var result *ScanResult
-
-	result = &ScanResult{
-		ImageTag:   signatureProfile.Attributes.DockerImageTag,
-		ImageHash:  signatureProfile.Attributes.DockerImageSHA256,
-		WorkloadId: workloadId,
-		Features:   featuresWithVulnerabilities,
-	}
-
-	return result, nil
+	return scanresultlayer, nil
 }
 
-func ProcessScanRequestWithS3Upload(requestID []byte, customerGuid string, solutionGuid string, workloadId string, signatureProfile *catypes.SigningProfile) (*ScanResult, error) {
-	result, err := ProcessScanRequest(requestID, workloadId, signatureProfile)
+func ProcessScanRequest(imagetag string, wlid string) (*cs.LayersList, error) {
+	result, err := GetScanResult(imagetag)
 	if err != nil {
 		return nil, err
 	}
-	postScanResults(customerGuid, solutionGuid, result)
+	postScanResultsToEventReciever(imagetag, wlid, result)
 	return result, nil
 }

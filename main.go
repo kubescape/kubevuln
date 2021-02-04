@@ -1,87 +1,52 @@
 package main
 
 import (
-	"crypto/rand"
+	"ca-vuln-scan/process_request"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 
-	"ca-vuln-scan/catypes"
-	"ca-vuln-scan/process_request"
-
-	"github.com/google/uuid"
+	wssc "asterix.cyberarmor.io/cyberarmor/capacketsgo/apis"
 )
 
+func scanImages(imagetag string, wlid string) {
+	log.Printf("Scan request to image %s is put on processing queue", imagetag)
+
+	go process_request.ProcessScanRequest(imagetag, wlid)
+
+}
+
 func scanImage(w http.ResponseWriter, req *http.Request) {
+	var WebsocketScan wssc.WebsocketScanCommand
+
 	if req.Method == http.MethodPost {
-		customerGuid := req.URL.Query().Get("customerGuid")
-		if len(customerGuid) == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "missing customerGuid\n")
-			return
-		}
-
-		solutionGuid := req.URL.Query().Get("solutionGuid")
-		if len(solutionGuid) == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "missing solutionGuid\n")
-			return
-		}
-
-		wlid := req.URL.Query().Get("wlid")
-		if len(wlid) == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "missing wlid\n")
-			return
-		}
-
-		var requestId []byte
-		requestIdStr := req.URL.Query().Get("requestId")
-		if len(requestIdStr) == 0 {
-			requestId = make([]byte, 16)
-			rand.Read(requestId)
-		} else {
-			requestUUID, err := uuid.Parse(requestIdStr)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprintf(w, "bad requestId (should be in format of UUID)\n")
-				return
-			}
-			requestId, _ = requestUUID.MarshalBinary()
-		}
-
-		body, err := ioutil.ReadAll(req.Body)
+		err := json.NewDecoder(req.Body).Decode(&WebsocketScan)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "cannot read body\n")
-		}
-
-		printUUID, _ := uuid.FromBytes(requestId)
-		log.Printf("Got scan request %s for %s", wlid, printUUID.String())
-
-		var requestSP catypes.SigningProfile
-		err = json.Unmarshal(body, &requestSP)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "request json could not been parsed\n")
+			log.Printf("fail decode json from web socket, error %v", err)
 			return
 		}
-
+		if WebsocketScan.IsScanned == true {
+			w.WriteHeader(http.StatusAccepted)
+			log.Printf("this image already scanned")
+			return
+		}
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 
-		log.Printf("Scan request %s is put on processing queue", printUUID.String())
+		scanImages(WebsocketScan.ImageTag, WebsocketScan.Wlid)
 
-		go process_request.ProcessScanRequestWithS3Upload(requestId, customerGuid, solutionGuid, wlid, &requestSP)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "unsupported method\n")
 	}
+
 }
 
 func main() {
-	http.HandleFunc("/scanImage", scanImage)
-	http.ListenAndServe(":8080", nil)
+	uri := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
+	log.Printf("uri %v", uri)
+	http.HandleFunc(uri, scanImage)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
