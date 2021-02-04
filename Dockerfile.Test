@@ -1,0 +1,5 @@
+FROM quay.io/armosec/k8s-ca-vuln-ubi:latest
+RUN echo $(date -u) > /build_date.txt
+COPY ./k8s-ca-vuln-scan . 
+
+ENTRYPOINT ["./k8s-ca-vuln-scan"]
