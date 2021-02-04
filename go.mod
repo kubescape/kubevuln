@@ -1,11 +1,11 @@
 module ca-vuln-scan
 
-go 1.15
+go 1.13
 
 replace asterix.cyberarmor.io/cyberarmor/capacketsgo => ./vendor/asterix.cyberarmor.io/cyberarmor/capacketsgo
 
 require (
-	asterix.cyberarmor.io/cyberarmor/capacketsgo v0.0.0 // indirect
+	asterix.cyberarmor.io/cyberarmor/capacketsgo v0.0.0
 	github.com/Microsoft/go-winio v0.4.16 // indirect
 	github.com/aws/aws-sdk-go v1.36.15
 	github.com/containerd/containerd v1.4.3 // indirect
