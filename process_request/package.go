@@ -37,6 +37,10 @@ func readFileListForPackageApk(packageName string, image *OciImage) (*[]string, 
 	return nil, fmt.Errorf("unsupported Apk")
 }
 
+func readFileListForPackageYum(packageName string, image *OciImage) (*[]string, error) {
+	return nil, fmt.Errorf("unsupported Yum")
+}
+
 func readFileListForPackage(packageName string, packageManagerType string, image *OciImage) (*[]string, error) {
 	var err error
 	var fileList *[]string
@@ -45,6 +49,8 @@ func readFileListForPackage(packageName string, packageManagerType string, image
 		fileList, err = readFileListForPackageDpkg(packageName, image)
 	case "apk":
 		fileList, err = readFileListForPackageApk(packageName, image)
+	case "yum":
+		fileList, err = readFileListForPackageYum(packageName, image)
 	default:
 		fileList = nil
 		err = fmt.Errorf("Unsupported packager type %s", packageManagerType)
@@ -61,7 +67,11 @@ func identifyPackageManager(image *OciImage) (string, error) {
 	if err == nil && len(*fileList) > 0 {
 		return "apk", nil
 	}
-	return "", fmt.Errorf("Cannot identify package manager in image")
+	fileList, err = image.ListDirectoryFile("/lib/rpm", false, false)
+	if err == nil && len(*fileList) > 0 {
+		return "yum", nil
+	}
+	return "", fmt.Errorf("Cannot identify package manager in image %s", image.ImageNameRef)
 }
 
 func CreatePackageHandler(image *OciImage) (PackageHandler, error) {
@@ -78,6 +88,9 @@ func CreatePackageHandler(image *OciImage) (PackageHandler, error) {
 		packageHandler = &dpkgPackageHandler{}
 		err = packageHandler.initPackageHandler(image)
 	case "apk":
+		packageHandler = &apkPackageHandler{}
+		err = packageHandler.initPackageHandler(image)
+	case "yum":
 		packageHandler = &apkPackageHandler{}
 		err = packageHandler.initPackageHandler(image)
 	default:
