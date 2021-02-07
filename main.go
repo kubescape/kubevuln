@@ -10,10 +10,10 @@ import (
 	wssc "asterix.cyberarmor.io/cyberarmor/capacketsgo/apis"
 )
 
-func scanImages(imagetag string, wlid string) {
+func startScanImage(imagetag string, wlid string, containerName string) {
 	log.Printf("Scan request to image %s is put on processing queue", imagetag)
 
-	go process_request.ProcessScanRequest(imagetag, wlid)
+	go process_request.ProcessScanRequest(imagetag, wlid, containerName)
 
 }
 
@@ -35,7 +35,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 
-		scanImages(WebsocketScan.ImageTag, WebsocketScan.Wlid)
+		startScanImage(WebsocketScan.ImageTag, WebsocketScan.Wlid, WebsocketScan.ContainerName)
 
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)

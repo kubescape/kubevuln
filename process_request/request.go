@@ -60,7 +60,7 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 	return image, nil
 }
 
-func postScanResultsToEventReciever(imagetag string, wlid string, layersList *cs.LayersList) error{
+func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error{
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
@@ -69,6 +69,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, layersList *cs
 		ImgTag: imagetag,
 		ImgHash: "",
 		WLID: wlid,
+		ContainerName: containerName,
 		Timestamp: timestamp,
 		Layers: *layersList,
 	}
@@ -122,11 +123,11 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 	return scanresultlayer, nil
 }
 
-func ProcessScanRequest(imagetag string, wlid string) (*cs.LayersList, error) {
+func ProcessScanRequest(imagetag string, wlid string, containerName string) (*cs.LayersList, error) {
 	result, err := GetScanResult(imagetag)
 	if err != nil {
 		return nil, err
 	}
-	postScanResultsToEventReciever(imagetag, wlid, result)
+	postScanResultsToEventReciever(imagetag, wlid, containerName, result)
 	return result, nil
 }
