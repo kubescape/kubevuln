@@ -27,6 +27,11 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 			log.Printf("fail decode json from web socket, error %v", err)
 			return
 		}
+		if WebsocketScan.ImageTag == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Printf("image tag is missing")
+			return
+		}
 		if WebsocketScan.IsScanned == true {
 			w.WriteHeader(http.StatusAccepted)
 			log.Printf("this image already scanned")

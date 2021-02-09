@@ -224,14 +224,15 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 		(*clairLayers)[i] = cLayer
 	}
 
-	vulnerabilities := make(cs.VulnerabilitiesList, 0)
 	layersList := make(cs.LayersList, 0)
 	log.Print("Reading vulnerabilities from Clair")
 	for _, cLayer := range *clairLayers {
-		layerRes := cs.ScanResultLayer{}
+		layerRes := cs.ScanResultLayer{
+			LayerHash: 	cLayer.Name}
+		vulnerabilities := make(cs.VulnerabilitiesList, 0)
 		for _, feature := range cLayer.Features {
+			linuxPackage := cs.LinuxPackage{}
 			if (len(feature.Vulnerabilities) != 0) {
-				linuxPackage := cs.LinuxPackage{}
 				for _, vuln := range feature.Vulnerabilities {
 					vulnerability := cs.Vulnerability{
 						Name: vuln.Name,
@@ -248,26 +249,26 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 					// }
 					vulnerabilities = append(vulnerabilities, vulnerability)
 				}
-				var Files *cs.PkgFiles
-				if files, ok:= featureToFileList[feature.Name]; !ok {
-					fileList, err := packageHandler.readFileListForPackage(feature.Name)
-					if (err != nil){
-						log.Printf("Not found file list for package %s", feature.Name)
-					} else {
-						Files = convertToPkgFiles(fileList)
-						linuxPackage.Files = *Files
-						featureToFileList[feature.Name] = Files
-					}
+			}
+			var Files *cs.PkgFiles
+			if files, ok:= featureToFileList[feature.Name]; !ok {
+				fileList, err := packageHandler.readFileListForPackage(feature.Name)
+				if (err != nil){
+					log.Printf("Not found file list for package %s", feature.Name)
 				} else {
-					linuxPackage.Files = *files
+					Files = convertToPkgFiles(fileList)
+					linuxPackage.Files = *Files
+					featureToFileList[feature.Name] = Files
 				}
-				linuxPackage.PackageName = feature.Name
+			} else {
+				linuxPackage.Files = *files
+			}
+			linuxPackage.PackageName = feature.Name
 
-				layerRes.LayerHash = cLayer.Name
-				layerRes.Packages = append(layerRes.Packages, linuxPackage)
-				layerRes.Vulnerabilities = vulnerabilities
-			}	
+			layerRes.Packages = append(layerRes.Packages, linuxPackage)
 		}
+
+		layerRes.Vulnerabilities = vulnerabilities			
 		layersList = append(layersList, layerRes)
 	}
 
