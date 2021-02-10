@@ -139,8 +139,8 @@ func postClairLayerV1(layer *ClairLayer) error {
 	return nil
 }
 
-func getClairLayerV1FeatureAndVulnerabilities(layer *ClairLayer) error {
-	resp, err := http.Get(clairUrl + "/v1/layers/" + layer.Name + "?features&vulnerabilities")
+func getClairLayerV1FeatureAndVulnerabilities(layer_name string, layer *ClairLayer) error {
+	resp, err := http.Get(clairUrl + "/v1/layers/" + layer_name + "?features&vulnerabilities")
 	if err != nil {
 		return err
 	}
@@ -236,12 +236,13 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 
 	ClairLayerWithVulns := make([]*ClairLayer, 0)
 	for _, cLayer := range *clairLayers {
-		err = getClairLayerV1FeatureAndVulnerabilities(&cLayer)
+		layer_data := ClairLayer{}
+		err = getClairLayerV1FeatureAndVulnerabilities(cLayer.Name, &layer_data)
 		if err != nil {
 			log.Printf("Failed to get layer %s (err: %s)", cLayer.Name, err)
 			return nil, err
 		}
-		ClairLayerWithVulns = append(ClairLayerWithVulns, &cLayer)
+		ClairLayerWithVulns = append(ClairLayerWithVulns, &layer_data)
 	}
 
 	layersList := make(cs.LayersList, 0)
