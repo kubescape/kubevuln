@@ -22,6 +22,7 @@ type ScanResult struct {
 var ociClient OcimageClient
 var eventRecieverURL string 
 var cusGUID string 
+var printPostJSON string
 
 func init() {
 	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
@@ -36,7 +37,7 @@ func init() {
 	if len(cusGUID) == 0 {
 		log.Fatal("Must configure CA_CUSTOMER_GUID")
 	}
-
+	printPostJSON = os.Getenv("PRINT_POST_JSON")
 }
 
 func getContainerImageManifest(containerImageRefernce string) (*OciImageManifest, error) {
@@ -73,12 +74,17 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 		Timestamp: timestamp,
 		Layers: *layersList,
 	}
-
+	
 	payload, err := json.Marshal(final_report)
 	if err != nil {
 		log.Printf("fail convert to json")
 		return err
 	}
+	
+	if printPostJSON != "" {
+		log.Printf("%v", string(payload))
+	}
+
 	resp, err := http.Post(eventRecieverURL + "/k8s/containerScan", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
