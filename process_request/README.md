@@ -3,15 +3,16 @@
 ## Environment variables
 
 ### OCImage
-* OCIMAGE_URL : http://localhost:8080
+* OCIMAGE_URL : http://localhost:8080 - mandatory
 
 ### Clair
-* CLAIR_URL : http://localhost:6060
+* CLAIR_URL : http://localhost:6060 - mandatory
 
-### S3
-According to https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html
+### Event Reciever
+* EVENT_RECIEVER_URL : http://localhost:7555 - mandatory
 
-* AWS_ACCESS_KEY_ID
-* AWS_SECRET_ACCESS_KEY
-* AWS_REGION
-* S3_BUCKET
+### ca customer GUID
+* CA_CUSTOMER_GUID : customer GUID - mandatory
+
+### print final post json 
+* PRINT_POST_JSON : any value - optional
