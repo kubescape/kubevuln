@@ -249,7 +249,8 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 	log.Print("Reading vulnerabilities from Clair")
 	for _, cLayer := range ClairLayerWithVulns {
 		layerRes := cs.ScanResultLayer{
-			LayerHash: 	cLayer.Name}
+			LayerHash: 			cLayer.Name,
+			ParentLayerHash: 	cLayer.ParentName}
 		vulnerabilities := make(cs.VulnerabilitiesList, 0)
 		for _, feature := range cLayer.Features {
 			linuxPackage := cs.LinuxPackage{}

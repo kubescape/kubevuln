@@ -82,6 +82,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 	}
 	
 	if printPostJSON != "" {
+		log.Printf("printPostJSON:")
 		log.Printf("%v", string(payload))
 	}
 
