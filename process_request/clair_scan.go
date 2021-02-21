@@ -36,21 +36,21 @@ type ClairLayer struct {
 }
 
 type FixedIn struct {
-	Name 			string `json:"name,omitempty"`
-	NamespaceName 	string `json:"namepaceName,omitempty"`
-	Version 		string `json:"version,omitempty"`
+	Name          string `json:"name,omitempty"`
+	NamespaceName string `json:"namepaceName,omitempty"`
+	Version       string `json:"version,omitempty"`
 }
 
 type VulFixes []FixedIn
 
 type ClairVulnerability struct {
-	Name         string 		`json:"name,omitempty"`
-	NamepaceName string 		`json:"namepaceName,omitempty"`
-	Description  string 		`json:"description,omitempty"`
-	Link         string 		`json:"link,omitempty"`
-	Severity     string 		`json:"severity,omitempty"`
-	Metadata     interface{} 	`json:"metadata",omitempty`
-	Fixes        VulFixes    	`json:"fixedIn",omitempty`
+	Name         string      `json:"name,omitempty"`
+	NamepaceName string      `json:"namepaceName,omitempty"`
+	Description  string      `json:"description,omitempty"`
+	Link         string      `json:"link,omitempty"`
+	Severity     string      `json:"severity,omitempty"`
+	Metadata     interface{} `json:"metadata",omitempty`
+	Fixes        VulFixes    `json:"fixedIn",omitempty`
 }
 
 type EnclosedClairLayer struct {
@@ -67,7 +67,7 @@ type ClairVulnerabilty struct {
 	Description  string `json:"description,omitempty"`
 	Severity     string `json:"severity,omitempty"`
 	Link         string `json:"link,omitempty"`
-	FixedBy		 string `json:"fixedBy,omitempty"`
+	FixedBy      string `json:"fixedBy,omitempty"`
 	Relevance    string `json:"relevance,omitempty"`
 }
 
@@ -153,6 +153,7 @@ func getClairLayerV1FeatureAndVulnerabilities(layer_name string, layer *ClairLay
 	if err != nil {
 		return err
 	}
+	// fmt.Printf("\n%s\n", string(jsonRaw))
 	var parsingLayer EnclosedClairLayer
 	err = json.Unmarshal(jsonRaw, &parsingLayer)
 	if err == nil {
@@ -176,6 +177,8 @@ func getClairLayerVulnerabilitiesV1(vulnerability *ClairVulnerability, namespace
 	if err != nil {
 		return err
 	}
+
+	// fmt.Printf("@@@@@@@@\n%s\n", string(jsonRaw))
 	parsingVulnerability := EnclosedClairVulnerabilityEventRecieverVersion{}
 	err = json.Unmarshal(jsonRaw, &parsingVulnerability)
 	if err == nil {
@@ -208,7 +211,7 @@ func getClairLayerV1(layer *ClairLayer) error {
 	return err
 }
 
-func convertToPkgFiles(fileList *[]string) (*cs.PkgFiles){
+func convertToPkgFiles(fileList *[]string) *cs.PkgFiles {
 	pkgFiles := make(cs.PkgFiles, 0)
 
 	for _, file := range *fileList {
@@ -249,14 +252,14 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 	log.Print("Reading vulnerabilities from Clair")
 	for _, cLayer := range ClairLayerWithVulns {
 		layerRes := cs.ScanResultLayer{
-			LayerHash: 			cLayer.Name,
-			ParentLayerHash: 	cLayer.ParentName}
+			LayerHash:       cLayer.Name,
+			ParentLayerHash: cLayer.ParentName}
 		vulnerabilities := make(cs.VulnerabilitiesList, 0)
 		for _, feature := range cLayer.Features {
 			linuxPackage := cs.LinuxPackage{}
-			if (len(feature.Vulnerabilities) != 0) {
+			if len(feature.Vulnerabilities) != 0 {
 				for _, vuln := range feature.Vulnerabilities {
-					// we need to use this function in oredr to get more detailed data 
+					// we need to use this function in oredr to get more detailed data
 					clairVulnerability := ClairVulnerability{}
 					err = getClairLayerVulnerabilitiesV1(&clairVulnerability, cLayer.NamespaceName, vuln.Name)
 					if err == nil {
@@ -265,34 +268,39 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 							log.Printf("namespace name getting from clair is different from image tag %s != %s", imagetag, clairVulnerability.NamepaceName)
 						}
 						vulnerability := cs.Vulnerability{
-							Name: clairVulnerability.Name,
-							ImgHash: "",
-							ImgTag: namespacename,
+							Name:               clairVulnerability.Name,
+							ImgHash:            "",
+							ImgTag:             namespacename,
 							RelatedPackageName: feature.Name,
-							PackageVersion: feature.Version,
-							Link: clairVulnerability.Link,
-							Description: clairVulnerability.Description,
-							Severity: clairVulnerability.Severity,
-							Metadata: clairVulnerability.Metadata}
+							PackageVersion:     feature.Version,
+							Link:               clairVulnerability.Link,
+							Description:        clairVulnerability.Description,
+							Severity:           clairVulnerability.Severity,
+							Metadata:           clairVulnerability.Metadata}
+
+						vulnerability.Fixes = make(cs.VulFixes, 0)
 						if clairVulnerability.Fixes != nil {
-							VulFixes := cs.VulFixes{}
 							for _, fix := range clairVulnerability.Fixes {
-								fixOurVersion := cs.FixedIn{
-									Name: fix.Name,
-									ImgTag: namespacename,
-									Version: fix.Version}
-								VulFixes = append(VulFixes, fixOurVersion)
+								//append only fixed...(until further notice Version == None -> is a default and not indicator if it was fixed or not )
+								if len(fix.Version) > 0 && fix.Version != "None" {
+									fixOurVersion := cs.FixedIn{
+										Name:    fix.Name,
+										ImgTag:  namespacename,
+										Version: fix.Version}
+									vulnerability.Fixes = append(vulnerability.Fixes, fixOurVersion)
+								}
+
 							}
-							vulnerability.Fixes = VulFixes
+
 						}
 						vulnerabilities = append(vulnerabilities, vulnerability)
 					}
 				}
 			}
 			var Files *cs.PkgFiles
-			if files, ok:= featureToFileList[feature.Name]; !ok {
+			if files, ok := featureToFileList[feature.Name]; !ok {
 				fileList, err := packageHandler.readFileListForPackage(feature.Name)
-				if (err != nil){
+				if err != nil {
 					log.Printf("Not found file list for package %s", feature.Name)
 				} else {
 					Files = convertToPkgFiles(fileList)
@@ -307,7 +315,7 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 			layerRes.Packages = append(layerRes.Packages, linuxPackage)
 		}
 
-		layerRes.Vulnerabilities = vulnerabilities			
+		layerRes.Vulnerabilities = vulnerabilities
 		layersList = append(layersList, layerRes)
 	}
 
