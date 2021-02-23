@@ -5,9 +5,15 @@ import (
 	"strings"
 )
 
+const (
+	debianBased = "dpkg"
+)
+
 type PackageHandler interface {
 	initPackageHandler(image *OciImage) error
 	readFileListForPackage(packageName string) (*[]string, error)
+	GetType() string
+	GetOCIMage() *OciImage
 }
 
 type dpkgPackageHandler struct {
@@ -20,14 +26,31 @@ type apkPackageHandler struct {
 	image          *OciImage
 }
 
+// GetOCIMage - gets the image client in case u want to get files and so on
+func (t *apkPackageHandler) GetOCIMage() *OciImage {
+	return t.image
+}
+
+// GetOCIMage - gets the image client in case u want to get files and so on
+func (t *dpkgPackageHandler) GetOCIMage() *OciImage {
+	return t.image
+}
+
 func readFileListForPackageDpkg(packageName string, image *OciImage) (*[]string, error) {
-	var packageFileList = []string{"/var/lib/dpkg/info/%s.list", "/var/lib/dpkg/info/%s:amd64.list"}
+	var packageFileList = []string{"/var/lib/dpkg/info/%s.list", "/var/lib/dpkg/info/%s:amd64.list", "/var/lib/dpkg/info/%s.conffiles"}
 	for _, name := range packageFileList {
 		listFilePath := fmt.Sprintf(name, packageName)
 		fileContent, err := image.GetFile(listFilePath)
 		if err == nil {
 			fileList := strings.Split(string(*fileContent), "\n")
 			return &fileList, nil
+		} else {
+			listFilePath := fmt.Sprintf(name, packageName)
+			fileContent, err := image.GetFile(listFilePath)
+			if err == nil {
+				fileList := strings.Split(string(*fileContent), "\n")
+				return &fileList, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("Could not find package %s", packageName)
@@ -99,6 +122,9 @@ func CreatePackageHandler(image *OciImage) (PackageHandler, error) {
 	return packageHandler, err
 }
 
+func (ph *dpkgPackageHandler) GetType() string {
+	return "dpkg"
+}
 func (ph *dpkgPackageHandler) initPackageHandler(image *OciImage) error {
 	ph.image = image
 	// Pre-read the list of files in /var/lib/dpkg/info
@@ -117,9 +143,14 @@ func (ph *dpkgPackageHandler) readFileListForPackage(packageName string) (*[]str
 		for _, packageFileName := range packageFileList {
 			//log.Printf("%s ?= %s", packageFileName, fsEntry.path)
 			//if strings.HasPrefix(fsEntry.Path, packageFileName) && strings.HasSuffix(fsEntry.Path, ".list") {
-			if fsEntry.Path == packageFileName {
+			// if fsEntry.Path == packageFileName
+			if fsEntry.Path == packageFileName /*|| strings.Contains(fsEntry.Path, packageName)*/ {
 				// gotcha!
 				fileContent, err := ph.image.GetFile("/" + fsEntry.Path)
+
+				if strings.Contains(fsEntry.Path, packageName) && fsEntry.Path != packageFileName {
+					fmt.Printf("package %s contains %s\n", fsEntry.Path, packageName)
+				}
 				if err != nil {
 					return nil, err
 				} else {
@@ -127,6 +158,7 @@ func (ph *dpkgPackageHandler) readFileListForPackage(packageName string) (*[]str
 					return &fileList, nil
 				}
 			}
+
 		}
 	}
 	return nil, fmt.Errorf("Not found package %s", packageName)
@@ -150,4 +182,8 @@ func (ph *apkPackageHandler) readFileListForPackage(packageName string) (*[]stri
 	return nil, fmt.Errorf("package not found")
 
 	return nil, fmt.Errorf("Not found package %s", packageName)
+}
+
+func (ph *apkPackageHandler) GetType() string {
+	return "apk"
 }

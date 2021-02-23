@@ -237,6 +237,28 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 		}
 	}
 
+	/*
+
+	   used to resolve package mapping issues with clair-
+	   they take src and not package itself since we're interested in package files
+	   we basically try to reverse their process
+
+	   WHY:
+	   I chose to do it here because fetching dkpg (for eg.)
+	   multiple times , calculating all maps is redundant(that's one of the reasons it's NOT part of packagemanager)
+	   also calculating it just per specific package name will still require to iterate over the same file multiple times is retarded.
+	   -Lior
+	*/
+	var pkgResolved map[string][]string //holds the mapping
+	if packageHandler.GetType() == "dpkg" {
+		file, err := packageHandler.GetOCIMage().GetFile("/var/lib/dpkg/status")
+		if err == nil {
+			pkgResolved, err = clairPkgName2packagename(packageHandler.GetType(), *file)
+		}
+		// pass file
+
+	}
+
 	ClairLayerWithVulns := make([]*ClairLayer, 0)
 	for _, cLayer := range *clairLayers {
 		layer_data := ClairLayer{}
@@ -301,11 +323,33 @@ func GetClairScanResultsByLayer(manifest *OciImageManifest, packageHandler Packa
 			if files, ok := featureToFileList[feature.Name]; !ok {
 				fileList, err := packageHandler.readFileListForPackage(feature.Name)
 				if err != nil {
-					log.Printf("Not found file list for package %s", feature.Name)
-				} else {
+					if fileList == nil {
+						fileList = &[]string{}
+						*fileList = make([]string, 0)
+					}
+
+					//see pkgResolved definition for more info
+					if realPkgNames, isOk := pkgResolved[feature.Name]; packageHandler.GetType() == "dpkg" && isOk {
+						for _, pkgname := range realPkgNames {
+							tmpfileList, err := packageHandler.readFileListForPackage(pkgname)
+							if err == nil {
+								*fileList = append(*fileList, *tmpfileList...)
+							}
+						}
+
+					} else {
+
+						log.Printf("package %s failed: no files found even after remapping", feature.Name)
+					}
+				}
+
+				if len(*fileList) > 0 {
+					log.Printf("package %s added files", feature.Name)
 					Files = convertToPkgFiles(fileList)
 					linuxPackage.Files = *Files
 					featureToFileList[feature.Name] = Files
+				} else {
+					log.Fatal("error no files found")
 				}
 			} else {
 				linuxPackage.Files = *files
