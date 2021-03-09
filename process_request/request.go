@@ -7,8 +7,9 @@ import (
 	"log"
 	"time"
 
-	"os"
 	"net/http"
+	"os"
+
 	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
 )
 
@@ -20,8 +21,8 @@ type ScanResult struct {
 }
 
 var ociClient OcimageClient
-var eventRecieverURL string 
-var cusGUID string 
+var eventRecieverURL string
+var cusGUID string
 var printPostJSON string
 
 func init() {
@@ -29,9 +30,9 @@ func init() {
 	if len(ociClient.endpoint) == 0 {
 		log.Fatal("Must configure OCIMAGE_URL")
 	}
-	eventRecieverURL = os.Getenv("EVENT_RECIEVER_URL")
+	eventRecieverURL = os.Getenv("EVENT_RECEIVER_URL")
 	if len(eventRecieverURL) == 0 {
-		log.Fatal("Must configure EVENT_RECIEVER_URL")
+		log.Fatal("Must configure EVENT_RECEIVER_URL")
 	}
 	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
 	if len(cusGUID) == 0 {
@@ -61,32 +62,32 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 	return image, nil
 }
 
-func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error{
+func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error {
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
-	final_report := cs.ScanResultReport {
-		CustomerGUID: cusGUID,
-		ImgTag: imagetag,
-		ImgHash: "",
-		WLID: wlid,
+	final_report := cs.ScanResultReport{
+		CustomerGUID:  cusGUID,
+		ImgTag:        imagetag,
+		ImgHash:       "",
+		WLID:          wlid,
 		ContainerName: containerName,
-		Timestamp: timestamp,
-		Layers: *layersList,
+		Timestamp:     timestamp,
+		Layers:        *layersList,
 	}
-	
+
 	payload, err := json.Marshal(final_report)
 	if err != nil {
 		log.Printf("fail convert to json")
 		return err
 	}
-	
+
 	if printPostJSON != "" {
 		log.Printf("printPostJSON:")
 		log.Printf("%v", string(payload))
 	}
 
-	resp, err := http.Post(eventRecieverURL + "/k8s/containerScan", "application/json", bytes.NewReader(payload))
+	resp, err := http.Post(eventRecieverURL+"/k8s/containerScan", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
 		return err
@@ -120,7 +121,7 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 		log.Printf("Package handler cannot be initialized %s", err)
 		return nil, err
 	}
-	
+
 	scanresultlayer, err := GetClairScanResultsByLayer(manifest, packageManager, imagetag)
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v", err)
