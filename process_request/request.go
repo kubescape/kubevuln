@@ -23,9 +23,9 @@ func init() {
 	if len(ociClient.endpoint) == 0 {
 		log.Fatal("Must configure OCIMAGE_URL")
 	}
-	eventRecieverURL = os.Getenv("EVENT_RECIEVER_URL")
+	eventRecieverURL = os.Getenv("EVENT_RECEIVER_URL")
 	if len(eventRecieverURL) == 0 {
-		log.Fatal("Must configure EVENT_RECIEVER_URL")
+		log.Fatal("Must configure EVENT_RECEIVER_URL")
 	}
 	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
 	if len(cusGUID) == 0 {
