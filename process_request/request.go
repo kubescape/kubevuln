@@ -7,21 +7,15 @@ import (
 	"log"
 	"time"
 
-	"os"
 	"net/http"
+	"os"
+
 	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
 )
 
-type ScanResult struct {
-	ImageTag   string          `json:"imageTag"`
-	ImageHash  string          `json:"imageHash"`
-	WorkloadId string          `json:"wlid"`
-	Features   *[]ClairFeature `json:"features"`
-}
-
 var ociClient OcimageClient
-var eventRecieverURL string 
-var cusGUID string 
+var eventRecieverURL string
+var cusGUID string
 var printPostJSON string
 
 func init() {
@@ -61,32 +55,32 @@ func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*Oci
 	return image, nil
 }
 
-func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error{
+func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error {
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
-	final_report := cs.ScanResultReport {
-		CustomerGUID: cusGUID,
-		ImgTag: imagetag,
-		ImgHash: "",
-		WLID: wlid,
+	final_report := cs.ScanResultReport{
+		CustomerGUID:  cusGUID,
+		ImgTag:        imagetag,
+		ImgHash:       "",
+		WLID:          wlid,
 		ContainerName: containerName,
-		Timestamp: timestamp,
-		Layers: *layersList,
+		Timestamp:     timestamp,
+		Layers:        *layersList,
 	}
-	
+
 	payload, err := json.Marshal(final_report)
 	if err != nil {
 		log.Printf("fail convert to json")
 		return err
 	}
-	
+
 	if printPostJSON != "" {
 		log.Printf("printPostJSON:")
 		log.Printf("%v", string(payload))
 	}
 
-	resp, err := http.Post(eventRecieverURL + "/k8s/containerScan", "application/json", bytes.NewReader(payload))
+	resp, err := http.Post(eventRecieverURL+"/k8s/containerScan", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
 		return err
@@ -120,8 +114,8 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 		log.Printf("Package handler cannot be initialized %s", err)
 		return nil, err
 	}
-	
-	scanresultlayer, err := GetClairScanResultsByLayer(manifest, packageManager, imagetag)
+
+	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager)
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v", err)
 		return nil, err
