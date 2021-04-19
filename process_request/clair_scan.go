@@ -19,6 +19,7 @@ var clairUrl string
 
 func init() {
 	clairUrl = os.Getenv("CLAIR_URL")
+	log.Printf("CLAIR_URL %v", clairUrl)
 	if len(clairUrl) == 0 {
 		log.Fatal("Must configure CLAIR_URL")
 	}
@@ -265,7 +266,7 @@ func ConvertManifestToClairPostIndexerReq(manifest *OciImageManifest) Manifest {
 func getVunurbilities(clair_manifest Manifest) (*VulnerabilityReport, error) {
 	var parsingVuln VulnerabilityReport
 
-	req, err := http.NewRequest("GET", "http://localhost:6060/matcher/api/v1/vulnerability_report/"+clair_manifest.Hash, nil)
+	req, err := http.NewRequest("GET", clairUrl+"/matcher/api/v1/vulnerability_report/"+clair_manifest.Hash, nil)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -446,16 +447,19 @@ func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
 	jsonReq, _ := json.Marshal(postManifest)
 
 	data := bytes.NewBuffer(jsonReq)
-	req, _ := http.NewRequest("POST", "http://localhost:6060/indexer/api/v1/index_report", data)
+	req, err := http.NewRequest("POST", clairUrl+"/indexer/api/v1/index_report", data)
+	if err != nil {
+		log.Printf("fail to create post request error %v", err)
+		return nil, err
+	}
 
 	// req.Body = ioutil.NopCloser(data)
 	req.Header = header
-
 	client := &http.Client{}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Got back layer error %v", err)
+		return nil, err
 	}
 
 	jsonRaw, _ := ioutil.ReadAll(resp.Body)
