@@ -449,30 +449,34 @@ func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
 	data := bytes.NewBuffer(jsonReq)
 	req, err := http.NewRequest("POST", clairUrl+"/indexer/api/v1/index_report", data)
 	if err != nil {
-		log.Printf("fail to create post request error %v", err)
+		log.Printf("fail to create post to indexer request error %v", err)
 		return nil, err
 	}
 
-	// req.Body = ioutil.NopCloser(data)
 	req.Header = header
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Got back layer error %v", err)
+		log.Printf("failed posting request to indexer error %v", err)
 		return nil, err
 	}
 
 	jsonRaw, _ := ioutil.ReadAll(resp.Body)
 	var parsingLayer IndexerReport
 	err = json.Unmarshal(jsonRaw, &parsingLayer)
-	if err == nil && parsingLayer.State == "IndexFinished" {
-		log.Printf("Got back layer ")
+	if err == nil && parsingLayer.Success == true && parsingLayer.State == "IndexFinished" {
+		log.Printf("finished parsing indexer response successfully and indexing is finished")
 		parsingLayers = append(parsingLayers, parsingLayer)
-	} else if parsingLayer.State == "" {
-		// waitTillIndexFinished()
-		log.Printf("Got back layer ")
+	} else if err == nil && parsingLayer.Success == true {
+		log.Printf("finished parsing indexer response successfully index State %s index error %s", parsingLayer.State, parsingLayer.Err)
+		//waitTillIndexIsFinished()
+	} else if err == nil && parsingLayer.Success == false {
+		log.Printf("error from indexer respons index State %s index error %s", parsingLayer.State, parsingLayer.Err)
+		//waitTillIndexIsFinished()
+		return parsingLayers, fmt.Errorf("indexer request failed")
 	} else {
-		log.Printf("Got back layer ")
+		log.Printf("failed parsing indexer response error %v", err)
+		return parsingLayers, err
 	}
 	println(parsingLayer.Err)
 	println(resp.StatusCode)

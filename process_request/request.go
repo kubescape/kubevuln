@@ -117,7 +117,7 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 
 	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager)
 	if err != nil {
-		log.Printf("GetClairScanResultsByLayer failed with err %v", err)
+		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, imagetag)
 		return nil, err
 	}
 
