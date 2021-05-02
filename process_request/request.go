@@ -112,7 +112,7 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 	packageManager, err := CreatePackageHandler(ociImage)
 	if err != nil {
 		log.Printf("Package handler cannot be initialized %s", err)
-		return nil, err
+		// return nil, err
 	}
 
 	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager)

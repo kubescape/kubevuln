@@ -293,7 +293,7 @@ func ConvertClairVulnStructToOurStruct(indexReport []IndexerReport, vulnReport *
 	featureToFileList := make(map[string]*cs.PkgFiles)
 
 	var pkgResolved map[string][]string //holds the mapping
-	if packageManager.GetType() == "dpkg" {
+	if packageManager != nil && packageManager.GetType() == "dpkg" {
 		file, err := packageManager.GetOCIMage().GetFile("/var/lib/dpkg/status")
 		if err == nil {
 			pkgResolved, err = clairPkgName2packagename(packageManager.GetType(), *file)
@@ -343,45 +343,47 @@ func ConvertClairVulnStructToOurStruct(indexReport []IndexerReport, vulnReport *
 			}
 		}
 
-		for _, package_data := range vulnReport.Packages {
-			if files, ok := featureToFileList[package_data.Name]; !ok {
-				fileList, err := packageManager.readFileListForPackage(package_data.Name)
-				if err != nil {
-					if fileList == nil {
-						fileList = &[]string{}
-						*fileList = make([]string, 0)
-					}
-
-					//see pkgResolved definition for more info
-					if realPkgNames, isOk := pkgResolved[package_data.Name]; packageManager.GetType() == "dpkg" && isOk {
-						for _, pkgname := range realPkgNames {
-							tmpfileList, err := packageManager.readFileListForPackage(pkgname)
-							if err == nil {
-								*fileList = append(*fileList, *tmpfileList...)
-							}
+		if packageManager != nil {
+			for _, package_data := range vulnReport.Packages {
+				if files, ok := featureToFileList[package_data.Name]; !ok {
+					fileList, err := packageManager.readFileListForPackage(package_data.Name)
+					if err != nil {
+						if fileList == nil {
+							fileList = &[]string{}
+							*fileList = make([]string, 0)
 						}
-					} else {
 
-						log.Printf("package %s failed: no files found even after remapping", package_data.Name)
+						//see pkgResolved definition for more info
+						if realPkgNames, isOk := pkgResolved[package_data.Name]; packageManager.GetType() == "dpkg" && isOk {
+							for _, pkgname := range realPkgNames {
+								tmpfileList, err := packageManager.readFileListForPackage(pkgname)
+								if err == nil {
+									*fileList = append(*fileList, *tmpfileList...)
+								}
+							}
+						} else {
+
+							log.Printf("package %s failed: no files found even after remapping", package_data.Name)
+						}
 					}
-				}
 
-				if len(*fileList) > 0 {
-					log.Printf("package %s added files", package_data.Name)
-					Files = convertToPkgFiles(fileList)
-					linuxPackage.Files = *Files
-					featureToFileList[package_data.Name] = Files
+					if len(*fileList) > 0 {
+						log.Printf("package %s added files", package_data.Name)
+						Files = convertToPkgFiles(fileList)
+						linuxPackage.Files = *Files
+						featureToFileList[package_data.Name] = Files
+					} else {
+						log.Printf("error no files found")
+					}
 				} else {
-					log.Printf("error no files found")
+					linuxPackage.Files = *files
 				}
-			} else {
-				linuxPackage.Files = *files
+				linuxPackage.PackageName = package_data.Name
 			}
-			linuxPackage.PackageName = package_data.Name
+			layersData.Packages = append(layersData.Packages, linuxPackage)
 		}
 
 		layersData.Vulnerabilities = vuln_list
-		layersData.Packages = append(layersData.Packages, linuxPackage)
 		layersList = append(layersList, layersData)
 
 		parentLayerHash = layer.Hash

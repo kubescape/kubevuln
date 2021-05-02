@@ -6,5 +6,5 @@ replace asterix.cyberarmor.io/cyberarmor/capacketsgo => ./vendor/asterix.cyberar
 
 require (
 	asterix.cyberarmor.io/cyberarmor/capacketsgo v0.0.0
-	github.com/stretchr/testify v1.5.1 // indirect
+	github.com/quay/claircore v0.4.0
 )
