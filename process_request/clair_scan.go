@@ -16,12 +16,30 @@ import (
 )
 
 var clairUrl string
+var clairUrlIndexer string
+var clairUrlMatcher string
+var getVulnsUsingMethod string
 
 func init() {
 	clairUrl = os.Getenv("CLAIR_URL")
 	log.Printf("CLAIR_URL %v", clairUrl)
 	if len(clairUrl) == 0 {
 		log.Fatal("Must configure CLAIR_URL")
+	}
+	clairUrlIndexer = os.Getenv("CLAIR_URL_INDEXER")
+	log.Printf("CLAIR_URL_INDEXER %v", clairUrlIndexer)
+	if len(clairUrlIndexer) == 0 {
+		clairUrlIndexer = clairUrl
+	}
+	clairUrlMatcher = os.Getenv("CLAIR_URL_MATCHER")
+	log.Printf("CLAIR_URL_MATCHER %v", clairUrlMatcher)
+	if len(clairUrlMatcher) == 0 {
+		clairUrlMatcher = clairUrl
+	}
+	getVulnsUsingMethod = os.Getenv("GET_VULNS_METHOD")
+	log.Printf("GET_VULNS_METHOD %v", getVulnsUsingMethod)
+	if len(getVulnsUsingMethod) == 0 || getVulnsUsingMethod != "POST" {
+		getVulnsUsingMethod = "GET"
 	}
 
 	// clairUrl = "http://172.17.0.5:6060"
@@ -266,7 +284,12 @@ func ConvertManifestToClairPostIndexerReq(manifest *OciImageManifest) Manifest {
 func getVunurbilities(clair_manifest Manifest) (*VulnerabilityReport, error) {
 	var parsingVuln VulnerabilityReport
 
-	req, err := http.NewRequest("GET", clairUrl+"/matcher/api/v1/vulnerability_report/"+clair_manifest.Hash, nil)
+	headers := map[string][]string{
+		"Accept": []string{"application/json"},
+	}
+
+	req, err := http.NewRequest("GET", clairUrlMatcher+"/matcher/api/v1/vulnerability_report/"+clair_manifest.Hash, nil)
+	req.Header = headers
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -284,10 +307,49 @@ func getVunurbilities(clair_manifest Manifest) (*VulnerabilityReport, error) {
 		return nil, err
 	}
 
+	log.Printf("getVunurbilities: number of vulns %v", len(parsingVuln.Vulnerabilities))
 	return &parsingVuln, nil
 }
 
-func ConvertClairVulnStructToOurStruct(indexReport []IndexerReport, vulnReport *VulnerabilityReport, packageManager PackageHandler, manifes_clair_format Manifest) *cs.LayersList {
+func getVunurbilitiesUsingPOST(clair_manifest Manifest, indexRepList *IndexerReport) (*VulnerabilityReport, error) {
+	var parsingVuln VulnerabilityReport
+
+	headers := map[string][]string{
+		"Accept": []string{"application/json"},
+	}
+
+	jsonReq, err := json.Marshal(*indexRepList)
+
+	data := bytes.NewBuffer(jsonReq)
+	req, err := http.NewRequest("POST", clairUrlMatcher+"/matcher/api/v1/vulnerability_report/"+clair_manifest.Hash, data)
+	if err != nil {
+		log.Printf("fail to create post to indexer request error %v", err)
+		return nil, err
+	}
+
+	req.Header = headers
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("failed posting request to indexer error %v", err)
+		return nil, err
+	}
+
+	jsonRaw, err := ioutil.ReadAll(resp.Body)
+	err = json.Unmarshal(jsonRaw, &parsingVuln)
+	if err == nil {
+		log.Printf("getVunurbilitiesUsingPOST: get vuln from matcher succeed")
+	} else {
+		fmt.Errorf("error %s", err)
+		log.Printf("getVunurbilitiesUsingPOST: while get vuln from matcher ", err)
+		return nil, err
+	}
+
+	log.Printf("getVunurbilitiesUsingPOST: number of vulns %v", len(parsingVuln.Vulnerabilities))
+	return &parsingVuln, nil
+}
+
+func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *VulnerabilityReport, packageManager PackageHandler, manifes_clair_format Manifest) *cs.LayersList {
 	parentLayerHash := ""
 	layersList := make(cs.LayersList, 0)
 	featureToFileList := make(map[string]*cs.PkgFiles)
@@ -401,9 +463,20 @@ func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager Pac
 		return nil, err
 	}
 
-	vulnsReport, err := getVunurbilities(manifes_clair_format)
-	if err != nil {
-		return nil, err
+	var vulnsReport *VulnerabilityReport
+	switch getVulnsUsingMethod {
+	case "GET":
+		vulnsReportTemp, err := getVunurbilities(manifes_clair_format)
+		if err != nil {
+			return nil, err
+		}
+		vulnsReport = vulnsReportTemp
+	case "POST":
+		vulnsReportTemp, err := getVunurbilitiesUsingPOST(manifes_clair_format, indexerReport)
+		if err != nil {
+			return nil, err
+		}
+		vulnsReport = vulnsReportTemp
 	}
 
 	layersList := ConvertClairVulnStructToOurStruct(indexerReport, vulnsReport, packageManager, manifes_clair_format)
@@ -411,7 +484,7 @@ func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager Pac
 	return layersList, err
 }
 
-func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
+func IndexManifestContents(clair_manifest Manifest) (*IndexerReport, error) {
 
 	parsingLayers := make([]IndexerReport, 0)
 
@@ -446,10 +519,11 @@ func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
 		"Authorization": []string{authorization[0]},
 	}
 	postManifest.Layers = Layers
-	jsonReq, _ := json.Marshal(postManifest)
+	// postManifest.Hash = "sha256:dc95f357f226415aced988a213fb5c1e45e1a6d202e38e2951a4618e14111111"
+	jsonReq, err := json.Marshal(postManifest)
 
 	data := bytes.NewBuffer(jsonReq)
-	req, err := http.NewRequest("POST", clairUrl+"/indexer/api/v1/index_report", data)
+	req, err := http.NewRequest("POST", clairUrlIndexer+"/indexer/api/v1/index_report", data)
 	if err != nil {
 		log.Printf("fail to create post to indexer request error %v", err)
 		return nil, err
@@ -462,8 +536,12 @@ func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
 		log.Printf("failed posting request to indexer error %v", err)
 		return nil, err
 	}
-
 	jsonRaw, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("failed posting request to indexer error %v body %v", resp.Status, string(jsonRaw))
+		return nil, fmt.Errorf("%v %v", resp.Status, string(jsonRaw))
+	}
 	var parsingLayer IndexerReport
 	err = json.Unmarshal(jsonRaw, &parsingLayer)
 	if err == nil && parsingLayer.Success == true && parsingLayer.State == "IndexFinished" {
@@ -475,14 +553,15 @@ func IndexManifestContents(clair_manifest Manifest) ([]IndexerReport, error) {
 	} else if err == nil && parsingLayer.Success == false {
 		log.Printf("error from indexer respons index State %s index error %s", parsingLayer.State, parsingLayer.Err)
 		//waitTillIndexIsFinished()
-		return parsingLayers, fmt.Errorf("indexer request failed")
+		return nil, fmt.Errorf("indexer request failed")
 	} else {
 		log.Printf("failed parsing indexer response error %v", err)
-		return parsingLayers, err
+		return nil, err
 	}
+
 	println(parsingLayer.Err)
 	println(resp.StatusCode)
 	println(resp.Status)
-	// break
-	return parsingLayers, nil
+
+	return &parsingLayer, nil
 }
