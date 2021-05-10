@@ -281,7 +281,50 @@ func ConvertManifestToClairPostIndexerReq(manifest *OciImageManifest) Manifest {
 	return clair_manifest
 }
 
-func getVunurbilities(clair_manifest Manifest) (*VulnerabilityReport, error) {
+func updateUnknownSeverities(parsingVuln *VulnerabilityReport) {
+
+	for _, vuln_data := range parsingVuln.Vulnerabilities {
+		if vuln_data.NormalizedSeverity == "Unknown" {
+			if strings.HasPrefix(vuln_data.Name, "CVE") {
+				req, err := http.NewRequest("GET", "https://nvd.nist.gov/vuln/detail/"+vuln_data.Name, nil)
+				if err != nil {
+					log.Printf("failed to create get request to %v for getting severity err %v", vuln_data.Name, err)
+					continue
+				}
+				client := &http.Client{}
+				resp, err := client.Do(req)
+				if err != nil {
+					log.Printf("failed to do get request to %v for getting severity err %v", vuln_data.Name, err)
+					continue
+				}
+				htmlRaw, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					continue
+				}
+				html := string(htmlRaw)
+				if 0 < strings.Index(html, " CRITICAL") {
+					vuln_data.NormalizedSeverity = "Critical"
+					continue
+				}
+				if 0 < strings.Index(html, " HIGH") {
+					vuln_data.NormalizedSeverity = "High"
+					continue
+				}
+				if 0 < strings.Index(html, " MEDIUM") {
+					vuln_data.NormalizedSeverity = "Medium"
+					continue
+				}
+				if 0 < strings.Index(html, " LOW") {
+					vuln_data.NormalizedSeverity = "Low"
+					continue
+				}
+			}
+		}
+	}
+
+}
+
+func getVunurbilities(clair_manifest Manifest, imagetag string) (*VulnerabilityReport, error) {
 	var parsingVuln VulnerabilityReport
 
 	headers := map[string][]string{
@@ -293,21 +336,23 @@ func getVunurbilities(clair_manifest Manifest) (*VulnerabilityReport, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("getVunurbilities: Get requests from the matcher failed with error %v", err)
+		log.Printf("image %v: getVunurbilities: Get requests from the matcher failed with error %v", imagetag, err)
 		return nil, err
 	}
 
 	jsonRaw, err := ioutil.ReadAll(resp.Body)
 	err = json.Unmarshal(jsonRaw, &parsingVuln)
 	if err == nil {
-		log.Printf("getVunurbilities: get vuln from matcher succeed")
+		log.Printf("image %v: getVunurbilities: get vuln from matcher succeed", imagetag)
 	} else {
 		fmt.Errorf("error %s", err)
-		log.Printf("getVunurbilities: while get vuln from matcher ", err)
+		log.Printf("image %v: getVunurbilities: while get vuln from matcher ", imagetag, err)
 		return nil, err
 	}
 
-	log.Printf("getVunurbilities: number of vulns %v", len(parsingVuln.Vulnerabilities))
+	updateUnknownSeverities(&parsingVuln)
+
+	log.Printf("image %v: getVunurbilities: number of vulns %v", imagetag, len(parsingVuln.Vulnerabilities))
 	return &parsingVuln, nil
 }
 
@@ -454,11 +499,11 @@ func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *V
 	return &layersList
 }
 
-func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager PackageHandler) (*cs.LayersList, error) {
+func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager PackageHandler, imagetag string) (*cs.LayersList, error) {
 
 	manifes_clair_format := ConvertManifestToClairPostIndexerReq(manifest)
 
-	indexerReport, err := IndexManifestContents(manifes_clair_format)
+	indexerReport, err := IndexManifestContents(manifes_clair_format, imagetag)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +511,7 @@ func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager Pac
 	var vulnsReport *VulnerabilityReport
 	switch getVulnsUsingMethod {
 	case "GET":
-		vulnsReportTemp, err := getVunurbilities(manifes_clair_format)
+		vulnsReportTemp, err := getVunurbilities(manifes_clair_format, imagetag)
 		if err != nil {
 			return nil, err
 		}
@@ -484,7 +529,7 @@ func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager Pac
 	return layersList, err
 }
 
-func IndexManifestContents(clair_manifest Manifest) (*IndexerReport, error) {
+func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerReport, error) {
 
 	parsingLayers := make([]IndexerReport, 0)
 
@@ -545,17 +590,17 @@ func IndexManifestContents(clair_manifest Manifest) (*IndexerReport, error) {
 	var parsingLayer IndexerReport
 	err = json.Unmarshal(jsonRaw, &parsingLayer)
 	if err == nil && parsingLayer.Success == true && parsingLayer.State == "IndexFinished" {
-		log.Printf("finished parsing indexer response successfully and indexing is finished")
+		log.Printf("image %v: finished parsing indexer response successfully and indexing is finished", imagetag)
 		parsingLayers = append(parsingLayers, parsingLayer)
 	} else if err == nil && parsingLayer.Success == true {
-		log.Printf("finished parsing indexer response successfully index State %s index error %s", parsingLayer.State, parsingLayer.Err)
+		log.Printf("image %v: finished parsing indexer response successfully index State %s index error %s", imagetag, parsingLayer.State, parsingLayer.Err)
 		//waitTillIndexIsFinished()
 	} else if err == nil && parsingLayer.Success == false {
-		log.Printf("error from indexer respons index State %s index error %s", parsingLayer.State, parsingLayer.Err)
+		log.Printf("image %v: error from indexer respons index State %s index error %s", imagetag, parsingLayer.State, parsingLayer.Err)
 		//waitTillIndexIsFinished()
 		return nil, fmt.Errorf("indexer request failed")
 	} else {
-		log.Printf("failed parsing indexer response error %v", err)
+		log.Printf("image %v: failed parsing indexer response error %v", imagetag, err)
 		return nil, err
 	}
 
