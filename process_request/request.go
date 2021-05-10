@@ -120,7 +120,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 		// return nil, err
 	}
 
-	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, imagetag)
+	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, scanCmd.ImageTag)
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
 		return nil, err
