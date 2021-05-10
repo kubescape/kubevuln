@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	wssc "github.com/armosec/capacketsgo/apis"
 )
 
 type OcimageClient struct {
@@ -63,8 +65,14 @@ func CreateOciClient(endpoint string) (*OcimageClient, error) {
 	}, nil
 }
 
-func (OciClient *OcimageClient) Image(containerImageRef string) (*OciImage, error) {
-	postStr := []byte(fmt.Sprintf(`{"image": "%s"}`, containerImageRef))
+func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
+	var postStr []byte
+	if scanCmd.Credentials == nil || scanCmd.Credentials.Username == "" || scanCmd.Credentials.Password == "" {
+		postStr = []byte(fmt.Sprintf(`{"image": "%s"}`, scanCmd.ImageTag))
+	} else {
+		postStr = []byte(fmt.Sprintf(`{"image": "%s","username": %s,"password": %s}`, scanCmd.ImageTag, scanCmd.Credentials.Username, scanCmd.Credentials.Password))
+	}
+
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v1/images/id", OciClient.endpoint), bytes.NewBuffer(postStr))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -82,7 +90,7 @@ func (OciClient *OcimageClient) Image(containerImageRef string) (*OciImage, erro
 		}
 
 		return &OciImage{
-			ImageNameRef: containerImageRef,
+			ImageNameRef: scanCmd.ImageTag,
 			ImageID:      imageID,
 			Client:       OciClient,
 		}, nil

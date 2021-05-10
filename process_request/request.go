@@ -2,6 +2,8 @@ package process_request
 
 import (
 	"bytes"
+	"fmt"
+
 	// "ca-vuln-scan/catypes"
 	"encoding/json"
 	"log"
@@ -10,7 +12,10 @@ import (
 	"net/http"
 	"os"
 
-	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
+	wssc "github.com/armosec/capacketsgo/apis"
+	sysreport "github.com/armosec/capacketsgo/system-reports/datastructures"
+
+	cs "github.com/armosec/capacketsgo/containerscan"
 )
 
 var ociClient OcimageClient
@@ -34,9 +39,9 @@ func init() {
 	printPostJSON = os.Getenv("PRINT_POST_JSON")
 }
 
-func getContainerImageManifest(containerImageRefernce string) (*OciImageManifest, error) {
+func getContainerImageManifest(scanCmd *wssc.WebsocketScanCommand) (*OciImageManifest, error) {
 	oci := OcimageClient{endpoint: "http://localhost:8080"}
-	image, err := oci.Image(containerImageRefernce)
+	image, err := oci.Image(scanCmd)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +52,8 @@ func getContainerImageManifest(containerImageRefernce string) (*OciImageManifest
 	return manifest, nil
 }
 
-func (oci *OcimageClient) GetContainerImage(containerImageRefernce string) (*OciImage, error) {
-	image, err := oci.Image(containerImageRefernce)
+func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
+	image, err := oci.Image(scanCmd)
 	if err != nil {
 		return nil, err
 	}
@@ -95,9 +100,9 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 	return nil
 }
 
-func GetScanResult(imagetag string) (*cs.LayersList, error) {
+func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 
-	ociImage, err := ociClient.Image(imagetag)
+	ociImage, err := ociClient.Image(scanCmd)
 	if err != nil {
 		log.Printf("Not able to get image %s", err)
 		return nil, err
@@ -117,18 +122,36 @@ func GetScanResult(imagetag string) (*cs.LayersList, error) {
 
 	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager)
 	if err != nil {
-		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, imagetag)
+		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
 		return nil, err
 	}
 
 	return scanresultlayer, nil
 }
 
-func ProcessScanRequest(imagetag string, wlid string, containerName string) (*cs.LayersList, error) {
-	result, err := GetScanResult(imagetag)
+func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
+	report := &sysreport.BaseReport{
+		CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
+		Reporter:     "ca-vuln-scan",
+		Status:       sysreport.JobStarted,
+		ActionName:   fmt.Sprintf("vuln scan:: scanning wlid:%v , container:%v image: %v", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag),
+		ActionID:     "1",
+		ActionIDN:    1,
+	}
+	report.SendAsRoutine([]string{}, true)
+	// NewBaseReport(cusGUID, )
+	result, err := GetScanResult(scanCmd)
 	if err != nil {
+		report.SendError(err, true, true)
 		return nil, err
 	}
-	postScanResultsToEventReciever(imagetag, wlid, containerName, result)
+	report.SendStatus(sysreport.JobSuccess, true)
+	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true)
+	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.Wlid, scanCmd.ContainerName, result)
+	if err != nil {
+		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
+	} else {
+		report.SendStatus(sysreport.JobSuccess, true)
+	}
 	return result, nil
 }

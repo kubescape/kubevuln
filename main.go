@@ -8,17 +8,17 @@ import (
 	"log"
 	"net/http"
 
-	wssc "asterix.cyberarmor.io/cyberarmor/capacketsgo/apis"
+	wssc "github.com/armosec/capacketsgo/apis"
 )
 
 var goroutineLimit *colim.CoroutineGuardian
 
-func startScanImage(imagetag string, wlid string, containerName string) {
-	log.Printf("Scan request to image %s is put on processing queue", imagetag)
+func startScanImage(scanCmd *wssc.WebsocketScanCommand) {
+	log.Printf("Scan request to image %s is put on processing queue", scanCmd.ImageTag)
 
 	goroutineLimit.Wait()
 	go func() {
-		process_request.ProcessScanRequest(imagetag, wlid, containerName)
+		process_request.ProcessScanRequest(scanCmd)
 		goroutineLimit.Release()
 	}()
 
@@ -47,7 +47,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 
-		startScanImage(WebsocketScan.ImageTag, WebsocketScan.Wlid, WebsocketScan.ContainerName)
+		startScanImage(&WebsocketScan)
 
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)

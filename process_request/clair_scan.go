@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	cs "asterix.cyberarmor.io/cyberarmor/capacketsgo/containerscan"
+	cs "github.com/armosec/capacketsgo/containerscan"
 	"github.com/quay/claircore/pkg/cpe"
 )
 
