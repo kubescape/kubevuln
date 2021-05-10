@@ -1,19 +1,26 @@
 package main
 
 import (
+	colim "ca-vuln-scan/goroutinelimits"
 	"ca-vuln-scan/process_request"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 
-	wssc "asterix.cyberarmor.io/cyberarmor/capacketsgo/apis"
+	wssc "github.com/armosec/capacketsgo/apis"
 )
 
-func startScanImage(imagetag string, wlid string, containerName string) {
-	log.Printf("Scan request to image %s is put on processing queue", imagetag)
+var goroutineLimit *colim.CoroutineGuardian
 
-	go process_request.ProcessScanRequest(imagetag, wlid, containerName)
+func startScanImage(scanCmd *wssc.WebsocketScanCommand) {
+	log.Printf("Scan request to image %s is put on processing queue", scanCmd.ImageTag)
+
+	goroutineLimit.Wait()
+	go func() {
+		process_request.ProcessScanRequest(scanCmd)
+		goroutineLimit.Release()
+	}()
 
 }
 
@@ -40,7 +47,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 
-		startScanImage(WebsocketScan.ImageTag, WebsocketScan.Wlid, WebsocketScan.ContainerName)
+		startScanImage(&WebsocketScan)
 
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -50,6 +57,8 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	goroutineLimit, _ = colim.CreateCoroutineGuardian(colim.MAX_VULN_SCAN_ROUTINS)
+
 	uri := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
 	log.Printf("uri %v", uri)
 	http.HandleFunc(uri, scanImage)
