@@ -90,6 +90,8 @@ github.com/armosec/armopa v0.0.2/go.mod h1:/DB/y9ePSlME0zONeEuTft+CMDT4d90vxrEEg
 github.com/armosec/capacketsgo v0.0.0-20210425063635-bcd2cb990f5a/go.mod h1:Qy/LJCtUPR2uCqu0KG5zK2J9YPSecnkMuhGGmk8Rss8=
 github.com/armosec/capacketsgo v0.0.4 h1:zWh5HPCQwyexWtsQMUMwZu1DnUXlAFBrvG92bPahsGM=
 github.com/armosec/capacketsgo v0.0.4/go.mod h1:EmswD61z440zOm+2DFZjOrtlDr4pSrFttAzIVzM8lhU=
+github.com/armosec/capacketsgo v0.0.5 h1:D59j0R2HGuFFg3KxscJbhUlz7ddceRsoONEate7LYvI=
+github.com/armosec/capacketsgo v0.0.5/go.mod h1:EmswD61z440zOm+2DFZjOrtlDr4pSrFttAzIVzM8lhU=
 github.com/aryann/difflib v0.0.0-20170710044230-e206f873d14a/go.mod h1:DAHtR1m6lCRdSC2Tm3DSWRPvIPr6xNKyeHdqDQSQT+A=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=
 github.com/aws/aws-lambda-go v1.13.3/go.mod h1:4UKl9IzQMoD+QF79YdCuzCwp8VbmG4VAQwij/eHl5CU=
