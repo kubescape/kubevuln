@@ -32,7 +32,7 @@ func init() {
 	if len(eventRecieverURL) == 0 {
 		eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP") // @dwert next time u do it u go and fix it!
 		if len(eventRecieverURL) == 0 {
-			log.Fatal("Must configure EVENT_RECEIVER_URL")
+			log.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP or EVENT_RECEIVER_URL")
 
 		}
 	}
