@@ -9,6 +9,7 @@ import (
 	"time"
 
 	wssc "github.com/armosec/capacketsgo/apis"
+	"github.com/golang/glog"
 )
 
 type OcimageClient struct {
@@ -67,6 +68,9 @@ func CreateOciClient(endpoint string) (*OcimageClient, error) {
 
 func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
 	var postStr []byte
+	if scanCmd.Credentials != nil {
+		glog.Infof("current image %v current creds : \n%v\nscancmd: %v\n\n", scanCmd.ImageTag, *scanCmd.Credentials, scanCmd)
+	}
 	if scanCmd.Credentials == nil || scanCmd.Credentials.Username == "" || scanCmd.Credentials.Password == "" {
 		postStr = []byte(fmt.Sprintf(`{"image": "%s"}`, scanCmd.ImageTag))
 	} else {
