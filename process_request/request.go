@@ -30,7 +30,11 @@ func init() {
 	}
 	eventRecieverURL = os.Getenv("EVENT_RECEIVER_URL")
 	if len(eventRecieverURL) == 0 {
-		log.Fatal("Must configure EVENT_RECEIVER_URL")
+		eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP") // @dwert next time u do it u go and fix it!
+		if len(eventRecieverURL) == 0 {
+			log.Fatal("Must configure EVENT_RECEIVER_URL")
+
+		}
 	}
 	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
 	if len(cusGUID) == 0 {
@@ -137,6 +141,14 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		ActionName:   fmt.Sprintf("vuln scan:: scanning wlid:%v , container:%v image: %v", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag),
 		ActionID:     "1",
 		ActionIDN:    1,
+		Target:       fmt.Sprintf("wlid: %v / image: %v", scanCmd.Wlid, scanCmd.ImageTag),
+	}
+
+	if len(scanCmd.JobID) != 0 {
+		report.SetJobID(scanCmd.JobID)
+	}
+	if scanCmd.LastAction > 0 {
+		report.SetActionIDN(scanCmd.LastAction)
 	}
 	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
