@@ -148,7 +148,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		report.SetJobID(scanCmd.JobID)
 	}
 	if scanCmd.LastAction > 0 {
-		report.SetActionIDN(scanCmd.LastAction)
+		report.SetActionIDN(scanCmd.LastAction + 1)
 	}
 	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
