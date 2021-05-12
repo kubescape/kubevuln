@@ -67,21 +67,22 @@ func CreateOciClient(endpoint string) (*OcimageClient, error) {
 }
 
 func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
-	var postStr []byte
-	if scanCmd.Credentials != nil {
-		glog.Infof("current image %v current creds : \n%v\nscancmd: %v\n\n", scanCmd.ImageTag, *scanCmd.Credentials, scanCmd)
-	}
-	if scanCmd.Credentials == nil || scanCmd.Credentials.Username == "" || scanCmd.Credentials.Password == "" {
-		glog.Infof("no credentials scenario")
-		postStr = []byte(fmt.Sprintf(`{"image": "%s"}`, scanCmd.ImageTag))
-	} else {
-		glog.Infof("credentials scenario")
-		postStr = []byte(fmt.Sprintf(`{"image": "%s","username": %s,"password": %s}`, scanCmd.ImageTag, scanCmd.Credentials.Username, scanCmd.Credentials.Password))
-	}
 
+	values := map[string]string{"image": scanCmd.ImageTag}
+
+	if scanCmd.Credentials != nil && len(scanCmd.Credentials.Username) != 0 && len(scanCmd.Credentials.Password) != 0 {
+		glog.Infof("credentials scenario")
+		values["username"] = scanCmd.Credentials.Username
+		values["password"] = scanCmd.Credentials.Password
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		glog.Errorf("unable to marshal ocimage payload")
+		return nil, err
+	}
 	url := fmt.Sprintf("%s/v1/images/id", OciClient.endpoint)
 	glog.Infof("Image() creating request to %v", url)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(postStr))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	if err != nil {
 		glog.Errorf("Image(): failed to create request to url: %v\n%v", url, err.Error())
 		return nil, err
@@ -108,7 +109,7 @@ func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciI
 			Client:       OciClient,
 		}, nil
 	}
-	return nil, fmt.Errorf("HTTP failed %d", resp.StatusCode)
+	return nil, fmt.Errorf("HTTP failed %d due to: %v", resp.StatusCode, resp.Status)
 }
 
 func (image *OciImage) GetManifest() (*OciImageManifest, error) {
