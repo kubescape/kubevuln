@@ -80,6 +80,7 @@ func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciI
 	}
 
 	url := fmt.Sprintf("%s/v1/images/id", OciClient.endpoint)
+	glog.Infof("Image() creating request to %v", url)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(postStr))
 	if err != nil {
 		glog.Errorf("Image(): failed to create request to url: %v\n%v", url, err.Error())

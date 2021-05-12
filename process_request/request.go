@@ -105,7 +105,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 }
 
 func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
-
+	log.Printf("in GetScanResult")
 	ociImage, err := ociClient.Image(scanCmd)
 	if err != nil {
 		log.Printf("Not able to get image %s", err)
@@ -118,18 +118,20 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 		return nil, err
 	}
 
+	log.Printf("got manifest")
 	packageManager, err := CreatePackageHandler(ociImage)
 	if err != nil {
 		log.Printf("Package handler cannot be initialized %s", err)
 		// return nil, err
 	}
 
+	log.Printf("after CreatePackageHandler")
 	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, scanCmd.ImageTag)
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
 		return nil, err
 	}
-
+	log.Printf("GetClairScanResultsByLayerV4 succeeded")
 	return scanresultlayer, nil
 }
 
