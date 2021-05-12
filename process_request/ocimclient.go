@@ -72,17 +72,25 @@ func (OciClient *OcimageClient) Image(scanCmd *wssc.WebsocketScanCommand) (*OciI
 		glog.Infof("current image %v current creds : \n%v\nscancmd: %v\n\n", scanCmd.ImageTag, *scanCmd.Credentials, scanCmd)
 	}
 	if scanCmd.Credentials == nil || scanCmd.Credentials.Username == "" || scanCmd.Credentials.Password == "" {
+		glog.Infof("no credentials scenario")
 		postStr = []byte(fmt.Sprintf(`{"image": "%s"}`, scanCmd.ImageTag))
 	} else {
+		glog.Infof("credentials scenario")
 		postStr = []byte(fmt.Sprintf(`{"image": "%s","username": %s,"password": %s}`, scanCmd.ImageTag, scanCmd.Credentials.Username, scanCmd.Credentials.Password))
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v1/images/id", OciClient.endpoint), bytes.NewBuffer(postStr))
+	url := fmt.Sprintf("%s/v1/images/id", OciClient.endpoint)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(postStr))
+	if err != nil {
+		glog.Errorf("Image(): failed to create request to url: %v\n%v", url, err.Error())
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	httpclient := &http.Client{}
 	resp, err := httpclient.Do(req)
 	if err != nil {
+		glog.Errorf("Image(): failed to request to url: %v\n%v", url, err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()

@@ -154,6 +154,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	// NewBaseReport(cusGUID, )
 	result, err := GetScanResult(scanCmd)
 	if err != nil {
+
 		report.SendError(err, true, true)
 		return nil, err
 	}
