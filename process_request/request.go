@@ -23,6 +23,7 @@ var eventRecieverURL string
 var cusGUID string
 var printPostJSON string
 
+//
 func init() {
 	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
 	if len(ociClient.endpoint) == 0 {
@@ -88,7 +89,6 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 		log.Printf("printPostJSON:")
 		log.Printf("%v", string(payload))
 	}
-
 	resp, err := http.Post(eventRecieverURL+"/k8s/containerScan", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
