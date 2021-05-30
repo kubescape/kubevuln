@@ -7,10 +7,10 @@ import (
 	// "ca-vuln-scan/catypes"
 	"encoding/json"
 	"log"
-	"time"
-
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	wssc "github.com/armosec/capacketsgo/apis"
 	sysreport "github.com/armosec/capacketsgo/system-reports/datastructures"
@@ -69,6 +69,18 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
+
+	//BEN's REQUEST UGLy HACK MUST BE REMOVED AFTER DEMO
+	if strings.HasPrefix(wlid, "wlid://cluster-BenMinikube/namespace-hipster/deployment-shippingservice") && len(*layersList) > 0 {
+		(*layersList)[0].Vulnerabilities = append((*layersList)[0].Vulnerabilities, cs.Vulnerability{Name: "CVE-2021-33525",
+			ImgHash:            "sha256:0cf0f74061d93e8699bcf09123bdc2c64000720f6d1ed58ee7331273c6375001",
+			ImgTag:             "gcr.io/shippingservice:v0.2.1",
+			RelatedPackageName: "busybox",
+			Link:               "https://nvd.nist.gov/vuln/detail/CVE-2021-33525",
+			Description:        "EyesOfNetwork eonweb through 5.3-11 allows Remote Command Execution (by authenticated users) via shell metacharacters in the nagios_path parameter to lilac/export.php, as demonstrated by %26%26+curl to insert an \"&& curl\" substring for the shell.",
+			Severity:           "Critical",
+		})
+	}
 	final_report := cs.ScanResultReport{
 		CustomerGUID:  cusGUID,
 		ImgTag:        imagetag,
@@ -162,6 +174,9 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendStatus(sysreport.JobSuccess, true)
 	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true)
+
+	//Benh - dangerous hack
+
 	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.Wlid, scanCmd.ContainerName, result)
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)

@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+
 	wssc "github.com/armosec/capacketsgo/apis"
 )
 
@@ -57,12 +59,15 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	scanRoutinslimit := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
-	if len(scanRoutinslimit) == 0 {
-		scanRoutinslimit = colim.MAX_VULN_SCAN_ROUTINS
+	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
+	scanRoutinslimit := colim.MAX_VULN_SCAN_ROUTINS
+	if len(scanRoutinslimitStr) != 0 {
+		if i, err := strconv.Atoi(scanRoutinslimitStr); err == nil {
+			scanRoutinslimit = i
+		}
 	}
 	goroutineLimit, _ = colim.CreateCoroutineGuardian(scanRoutinslimit)
-	
+
 	uri := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
 	log.Printf("uri %v", uri)
 	http.HandleFunc(uri, scanImage)
