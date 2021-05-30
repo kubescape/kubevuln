@@ -1,7 +1,7 @@
 package goroutinelimits
 
 const (
-	MAX_VULN_SCAN_ROUTINS = 10
+	MAX_VULN_SCAN_ROUTINS = 2
 )
 
 /*
