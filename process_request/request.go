@@ -71,10 +71,10 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 	timestamp := int64(time.Now().Unix())
 
 	//BEN's REQUEST UGLy HACK MUST BE REMOVED AFTER DEMO
-	if strings.HasPrefix(wlid, "wlid://cluster-BenMinikube/namespace-hipster/deployment-shippingservice") && len(*layersList) > 0 {
+	if strings.Contains(wlid, "/deployment-shippingservice") && len(*layersList) > 0 {
 		(*layersList)[0].Vulnerabilities = append((*layersList)[0].Vulnerabilities, cs.Vulnerability{Name: "CVE-2021-33525",
 			ImgHash:            "sha256:0cf0f74061d93e8699bcf09123bdc2c64000720f6d1ed58ee7331273c6375001",
-			ImgTag:             "gcr.io/shippingservice:v0.2.1",
+			ImgTag:             "gcr.io/google-samples/microservices-demo/shippingservice:v0.2.0",
 			RelatedPackageName: "busybox",
 			Link:               "https://nvd.nist.gov/vuln/detail/CVE-2021-33525",
 			Description:        "EyesOfNetwork eonweb through 5.3-11 allows Remote Command Execution (by authenticated users) via shell metacharacters in the nagios_path parameter to lilac/export.php, as demonstrated by %26%26+curl to insert an \"&& curl\" substring for the shell.",
