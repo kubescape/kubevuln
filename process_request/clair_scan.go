@@ -577,7 +577,13 @@ func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerRe
 	req.Header = header
 	client := &http.Client{}
 	resp, err := client.Do(req)
+
+	//simplistic retry mechanism
+	for i := 0; i < 3 && err != nil; i++ {
+		resp, err = client.Do(req)
+	}
 	if err != nil {
+
 		log.Printf("failed posting request to indexer error %v", err)
 		return nil, err
 	}
