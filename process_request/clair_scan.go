@@ -15,6 +15,10 @@ import (
 	"github.com/quay/claircore/pkg/cpe"
 )
 
+const (
+	RETRY_REQUEST = 3
+)
+
 var clairUrl string
 var clairUrlIndexer string
 var clairUrlMatcher string
@@ -579,7 +583,7 @@ func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerRe
 	resp, err := client.Do(req)
 
 	//simplistic retry mechanism
-	for i := 0; i < 3 && err != nil; i++ {
+	for i := 0; i < RETRY_REQUEST && err != nil; i++ {
 		resp, err = client.Do(req)
 	}
 	if err != nil {
