@@ -405,9 +405,16 @@ func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *V
 
 	var pkgResolved map[string][]string //holds the mapping
 	if packageManager != nil && packageManager.GetType() == "dpkg" {
+		log.Printf("getting dpkg/status from ociMage")
 		file, err := packageManager.GetOCIMage().GetFile("/var/lib/dpkg/status")
 		if err == nil {
+			log.Printf("starting to convert clair package 2 parent packages")
 			pkgResolved, err = clairPkgName2packagename(packageManager.GetType(), *file)
+			if err != nil {
+				log.Printf("ERROR: %v", err)
+			}
+			log.Printf("converting clair package 2 parent packages has ended")
+
 		}
 		// pass file
 

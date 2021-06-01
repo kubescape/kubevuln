@@ -131,14 +131,16 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 	}
 
 	log.Printf("got manifest")
-	packageManager, err := CreatePackageHandler(ociImage)
-	if err != nil {
-		log.Printf("Package handler cannot be initialized %s", err)
-		// return nil, err
-	}
+	// packageManager, err := CreatePackageHandler(ociImage)
+	// if err != nil {
+	// 	log.Printf("Package handler cannot be initialized %s", err)
+	// 	// return nil, err
+	// }
 
 	log.Printf("after CreatePackageHandler")
-	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, scanCmd.ImageTag)
+	// scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, scanCmd.ImageTag)
+	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, nil, scanCmd.ImageTag)
+
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
 		return nil, err
