@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -ex
 
-export WTAG=latest
+export WTAG=test
 
 # dep ensure
 CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o k8s-ca-vuln-scan .
@@ -9,7 +9,7 @@ chmod +x k8s-ca-vuln-scan
 
 docker build --no-cache -f Dockerfile.Test -t quay.io/armosec/k8s-ca-vuln-scan-ubi:$WTAG .
 rm -rf k8s-ca-vuln-scan
-docker push quay.io/armosec/k8s-ca-vuln-scan-ubi:$WTAG
+# docker push quay.io/armosec/k8s-ca-vuln-scan-ubi:$WTAG
 
 echo "update vuln-scan"
 

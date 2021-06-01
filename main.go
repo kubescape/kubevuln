@@ -4,6 +4,7 @@ import (
 	colim "ca-vuln-scan/goroutinelimits"
 	"ca-vuln-scan/process_request"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -59,6 +60,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	flag.Parse()
 	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
 	scanRoutinslimit := colim.MAX_VULN_SCAN_ROUTINS
 	if len(scanRoutinslimitStr) != 0 {
