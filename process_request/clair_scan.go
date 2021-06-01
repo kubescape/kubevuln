@@ -474,7 +474,7 @@ func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *V
 							}
 						} else {
 
-							log.Printf("package %s failed: no files found even after remapping", package_data.Name)
+							log.Printf("warning: package '%s', files not found even after remapping", package_data.Name)
 						}
 					}
 
@@ -484,7 +484,7 @@ func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *V
 						linuxPackage.Files = *Files
 						featureToFileList[package_data.Name] = Files
 					} else {
-						log.Printf("error no files found")
+						log.Printf("warning: files not found")
 					}
 				} else {
 					linuxPackage.Files = *files
