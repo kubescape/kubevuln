@@ -16,3 +16,6 @@
 
 ### print final post json 
 * PRINT_POST_JSON : any value - optional
+
+git config --global url."ssh://git@github.com/armosec/".insteadOf "https://github.com/armosec/"
+go env -w GOPRIVATE=github.com/armosec
