@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"time"
 
 	wssc "github.com/armosec/capacketsgo/apis"
@@ -161,6 +162,41 @@ func (image *OciImage) GetFile(fileName string) (*[]byte, error) {
 			return nil, err
 		}
 		return &fileRaw, nil
+	}
+
+	return nil, fmt.Errorf("HTTP failed %d", resp.StatusCode)
+}
+func (image *OciImage) GetFiles(fileList []string, followSymLink bool, checkExist bool) (*[]byte, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/images/id/%s/files", image.Client.endpoint, image.ImageID), nil)
+	if err != nil {
+		return nil, err
+	}
+	q := req.URL.Query()
+	for _, file := range fileList {
+		q.Add("file", file)
+	}
+	q.Add("followSymLink", strconv.FormatBool(followSymLink))
+	q.Add("checkExist", strconv.FormatBool(checkExist))
+
+	req.URL.RawQuery = q.Encode()
+	req.Header.Add("Accept-Encoding", "gzip")
+	httpclient := &http.Client{
+		Timeout: (60 * time.Duration(len(fileList))) * time.Second,
+	}
+
+	resp, err := httpclient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		return &bodyBytes, nil
 	}
 
 	return nil, fmt.Errorf("HTTP failed %d", resp.StatusCode)

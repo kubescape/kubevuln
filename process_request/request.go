@@ -1,8 +1,13 @@
 package process_request
 
 import (
+	"archive/tar"
 	"bytes"
 	"fmt"
+	"io"
+	"io/fs"
+	"io/ioutil"
+	"math/rand"
 
 	// "ca-vuln-scan/catypes"
 	"encoding/json"
@@ -65,7 +70,7 @@ func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) 
 	return image, nil
 }
 
-func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList) error {
+func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
@@ -82,13 +87,14 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 		})
 	}
 	final_report := cs.ScanResultReport{
-		CustomerGUID:  cusGUID,
-		ImgTag:        imagetag,
-		ImgHash:       "",
-		WLID:          wlid,
-		ContainerName: containerName,
-		Timestamp:     timestamp,
-		Layers:        *layersList,
+		CustomerGUID:             cusGUID,
+		ImgTag:                   imagetag,
+		ImgHash:                  "",
+		WLID:                     wlid,
+		ContainerName:            containerName,
+		Timestamp:                timestamp,
+		Layers:                   *layersList,
+		ListOfDangerousArtifcats: listOfBash,
 	}
 
 	payload, err := json.Marshal(final_report)
@@ -115,19 +121,24 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 
 	return nil
 }
+func RemoveFile(filename string) {
+	err := os.Remove(filename)
+	if err != nil {
+		log.Printf("Error removing file %s", filename)
+	}
+}
 
-func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
-	log.Printf("in GetScanResult")
+func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, error) {
 	ociImage, err := ociClient.Image(scanCmd)
 	if err != nil {
 		log.Printf("Not able to get image %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	manifest, err := ociImage.GetManifest()
 	if err != nil {
 		log.Printf("Not able to get manifest %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.Printf("got manifest")
@@ -137,16 +148,78 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 	// 	// return nil, err
 	// }
 
-	log.Printf("after CreatePackageHandler")
-	// scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, packageManager, scanCmd.ImageTag)
-	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, nil, scanCmd.ImageTag)
+	filteredResultsChan := make(chan []string)
+	go func() {
+		listOfPrograms := []string{
+			"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
+			"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
+			"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
+		}
+		filteredResult := []string{}
+		directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
+		if err != nil {
+			log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
+			filteredResultsChan <- nil
+			return
+		}
+		rand.Seed(time.Now().UnixNano())
+		randomNum := rand.Intn(100)
+		filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
+		permissions := 0644
+		ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
 
+		reader, err := os.Open(filename)
+		if err != nil {
+			log.Printf("Couldn't open file : %s" + filename)
+			filteredResultsChan <- nil
+			return
+		}
+		defer reader.Close()
+		defer RemoveFile(filename)
+
+		tarReader := tar.NewReader(reader)
+		buf := new(strings.Builder)
+		for {
+			currentFile, err := tarReader.Next()
+			if err == io.EOF {
+				break
+			}
+
+			if currentFile.Name == "symlinkMap.json" {
+				_, err := io.Copy(buf, tarReader)
+				if err != nil {
+					log.Printf("Couldn't parse symlinkMap.json file")
+					filteredResultsChan <- nil
+					return
+				}
+
+			}
+		}
+		var fileInJson map[string]string
+		err = json.Unmarshal([]byte(buf.String()), &fileInJson)
+		if err != nil {
+			log.Printf("Failed to marshal file  %s", filename)
+			filteredResultsChan <- nil
+			return
+		}
+
+		for _, element := range listOfPrograms {
+			if element, ok := fileInJson[element]; ok {
+				filteredResult = append(filteredResult, element)
+			}
+		}
+		filteredResultsChan <- filteredResult
+	}()
+
+	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, nil, scanCmd.ImageTag)
 	if err != nil {
 		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
-		return nil, err
+		return nil, nil, err
 	}
-	log.Printf("GetClairScanResultsByLayerV4 succeeded")
-	return scanresultlayer, nil
+
+	filteredResult := <-filteredResultsChan
+
+	return scanresultlayer, filteredResult, nil
 }
 
 func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
@@ -168,7 +241,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
-	result, err := GetScanResult(scanCmd)
+	result, bashList, err := GetScanResult(scanCmd)
 	if err != nil {
 
 		report.SendError(err, true, true)
@@ -179,7 +252,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 
 	//Benh - dangerous hack
 
-	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.Wlid, scanCmd.ContainerName, result)
+	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
 	} else {

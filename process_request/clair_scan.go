@@ -513,7 +513,6 @@ func ConvertClairVulnStructToOurStruct(indexReport *IndexerReport, vulnReport *V
 func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager PackageHandler, imagetag string) (*cs.LayersList, error) {
 
 	manifes_clair_format := ConvertManifestToClairPostIndexerReq(manifest)
-
 	indexerReport, err := IndexManifestContents(manifes_clair_format, imagetag)
 	if err != nil {
 		return nil, err
@@ -522,6 +521,7 @@ func GetClairScanResultsByLayerV4(manifest *OciImageManifest, packageManager Pac
 	var vulnsReport *VulnerabilityReport
 	switch getVulnsUsingMethod {
 	case "GET":
+
 		vulnsReportTemp, err := getVunurbilities(manifes_clair_format, imagetag)
 		if err != nil {
 			return nil, err
@@ -577,6 +577,9 @@ func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerRe
 	postManifest.Layers = Layers
 	// postManifest.Hash = "sha256:dc95f357f226415aced988a213fb5c1e45e1a6d202e38e2951a4618e14111111"
 	jsonReq, err := json.Marshal(postManifest)
+	if err != nil {
+		log.Println("IndexManifestContents: ERROR: failed to marshal manifest req")
+	}
 
 	data := bytes.NewBuffer(jsonReq)
 	req, err := http.NewRequest("POST", clairUrlIndexer+"/indexer/api/v1/index_report", data)
@@ -584,10 +587,12 @@ func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerRe
 		log.Printf("fail to create post to indexer request error %v", err)
 		return nil, err
 	}
-
 	req.Header = header
 	client := &http.Client{}
 	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("IndexManifestContents: ERROR ")
+	}
 
 	//simplistic retry mechanism
 	for i := 0; i < RETRY_REQUEST && err != nil; i++ {
@@ -621,10 +626,6 @@ func IndexManifestContents(clair_manifest Manifest, imagetag string) (*IndexerRe
 		log.Printf("image %v: failed parsing indexer response error %v", imagetag, err)
 		return nil, err
 	}
-
-	println(parsingLayer.Err)
-	println(resp.StatusCode)
-	println(resp.Status)
 
 	return &parsingLayer, nil
 }
