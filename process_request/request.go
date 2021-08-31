@@ -3,19 +3,20 @@ package process_request
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"io/ioutil"
 	"math/rand"
-
-	// "ca-vuln-scan/catypes"
-	"encoding/json"
-	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	// "ca-vuln-scan/catypes"
+
+	"log"
+	"os"
 
 	wssc "github.com/armosec/capacketsgo/apis"
 	sysreport "github.com/armosec/capacketsgo/system-reports/datastructures"
@@ -76,7 +77,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 	timestamp := int64(time.Now().Unix())
 
 	//BEN's REQUEST UGLy HACK MUST BE REMOVED AFTER DEMO
-	if strings.Contains(wlid, "/deployment-shippingservice") && len(*layersList) > 0 {
+	if strings.Contains(wlid, "/deployment-shippingservice") && layersList != nil && len(*layersList) > 0 {
 		(*layersList)[0].Vulnerabilities = append((*layersList)[0].Vulnerabilities, cs.Vulnerability{Name: "CVE-2021-33525",
 			ImgHash:            "sha256:0cf0f74061d93e8699bcf09123bdc2c64000720f6d1ed58ee7331273c6375001",
 			ImgTag:             "gcr.io/google-samples/microservices-demo/shippingservice:v0.2.0",
@@ -86,6 +87,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 			Severity:           "Critical",
 		})
 	}
+
 	final_report := cs.ScanResultReport{
 		CustomerGUID:             cusGUID,
 		ImgTag:                   imagetag,
@@ -112,6 +114,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
 		return err
 	}
+
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || 299 < resp.StatusCode {
 		log.Printf("clair post to event reciever failed with %d", resp.StatusCode)
@@ -134,19 +137,6 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		log.Printf("Not able to get image %s", err)
 		return nil, nil, err
 	}
-
-	manifest, err := ociImage.GetManifest()
-	if err != nil {
-		log.Printf("Not able to get manifest %s", err)
-		return nil, nil, err
-	}
-
-	log.Printf("got manifest")
-	// packageManager, err := CreatePackageHandler(ociImage)
-	// if err != nil {
-	// 	log.Printf("Package handler cannot be initialized %s", err)
-	// 	// return nil, err
-	// }
 
 	filteredResultsChan := make(chan []string)
 	go func() {
@@ -211,9 +201,9 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		filteredResultsChan <- filteredResult
 	}()
 
-	scanresultlayer, err := GetClairScanResultsByLayerV4(manifest, nil, scanCmd.ImageTag)
+	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
-		log.Printf("GetClairScanResultsByLayer failed with err %v to image %s", err, scanCmd.ImageTag)
+		log.Printf("GetAnchoreScanResults failed with err %v to image %s", err, scanCmd.ImageTag)
 		return nil, nil, err
 	}
 

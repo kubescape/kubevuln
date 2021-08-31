@@ -60,6 +60,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
 	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
 	scanRoutinslimit := colim.MAX_VULN_SCAN_ROUTINS
