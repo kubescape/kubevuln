@@ -1,9 +1,10 @@
 module ca-vuln-scan
 
-go 1.13
+go 1.15
 
 require (
-	github.com/armosec/capacketsgo v0.0.16
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/quay/claircore v0.4.0
+	github.com/armosec/capacketsgo v0.0.34
+	github.com/golang/glog v1.0.0
+	github.com/quay/claircore v1.0.5
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
