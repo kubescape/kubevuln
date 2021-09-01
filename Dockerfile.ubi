@@ -5,8 +5,6 @@ LABEL name="Armo image scanner connector"
 LABEL summary="Armo image scanner connector image"
 LABEL vendor="Armo Ltd."
 
-COPY ./dist /.
-COPY ./build_number.txt /
 
 WORKDIR /etc
 RUN mkdir -p vuln-scan
@@ -14,6 +12,9 @@ WORKDIR /etc/vuln-scan
 RUN mkdir -p anchore-resources
 COPY ./anchore-resources/grype-cmd .
 # COPY ./k8s-ca-vuln-scan .
+
+COPY ./dist .
+COPY ./build_number.txt /
 
 RUN echo $(date -u) > /tmp/build_date.txt
 ENTRYPOINT ["./k8s-ca-vuln-scan"]
