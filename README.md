@@ -3,7 +3,7 @@
 ## Environment variables
 
 ### OCImage
-* OCIMAGE_URL : http://localhost:8080 - mandatory
+* OCIMAGE_URL : http://localhost:8080 - optional - will ignore getting bash commands and various enhanchments to it
 
 ### Clair
 * CLAIR_URL : http://localhost:6060 - mandatory

@@ -181,7 +181,6 @@ func (ph *apkPackageHandler) readFileListForPackage(packageName string) (*[]stri
 	}
 	return nil, fmt.Errorf("package not found")
 
-	return nil, fmt.Errorf("Not found package %s", packageName)
 }
 
 func (ph *apkPackageHandler) GetType() string {

@@ -33,7 +33,8 @@ var printPostJSON string
 func init() {
 	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
 	if len(ociClient.endpoint) == 0 {
-		log.Fatal("Must configure OCIMAGE_URL")
+		log.Printf("OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
+
 	}
 	eventRecieverURL = os.Getenv("EVENT_RECEIVER_URL")
 	if len(eventRecieverURL) == 0 {
@@ -132,74 +133,79 @@ func RemoveFile(filename string) {
 }
 
 func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, error) {
-	ociImage, err := ociClient.Image(scanCmd)
-	if err != nil {
-		log.Printf("Not able to get image %s", err)
-		return nil, nil, err
-	}
-
 	filteredResultsChan := make(chan []string)
-	go func() {
-		listOfPrograms := []string{
-			"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
-			"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
-			"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
-		}
-		filteredResult := []string{}
-		directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
-		if err != nil {
-			log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
-			filteredResultsChan <- nil
-			return
-		}
-		rand.Seed(time.Now().UnixNano())
-		randomNum := rand.Intn(100)
-		filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
-		permissions := 0644
-		ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
 
-		reader, err := os.Open(filename)
+	if ociClient.endpoint != "" {
+		ociImage, err := ociClient.Image(scanCmd)
 		if err != nil {
-			log.Printf("Couldn't open file : %s" + filename)
-			filteredResultsChan <- nil
-			return
+			log.Printf("unable to get image %s", err)
+			return nil, nil, err
 		}
-		defer reader.Close()
-		defer RemoveFile(filename)
-
-		tarReader := tar.NewReader(reader)
-		buf := new(strings.Builder)
-		for {
-			currentFile, err := tarReader.Next()
-			if err == io.EOF {
-				break
+		go func() {
+			listOfPrograms := []string{
+				"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
+				"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
+				"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
 			}
+			filteredResult := []string{}
 
-			if currentFile.Name == "symlinkMap.json" {
-				_, err := io.Copy(buf, tarReader)
-				if err != nil {
-					log.Printf("Couldn't parse symlinkMap.json file")
-					filteredResultsChan <- nil
-					return
+			directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
+			if err != nil {
+				log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
+				filteredResultsChan <- nil
+				return
+			}
+			rand.Seed(time.Now().UnixNano())
+			randomNum := rand.Intn(100)
+			filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
+			permissions := 0644
+			ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
+
+			reader, err := os.Open(filename)
+			if err != nil {
+				log.Printf("Couldn't open file : %s" + filename)
+				filteredResultsChan <- nil
+				return
+			}
+			defer reader.Close()
+			defer RemoveFile(filename)
+
+			tarReader := tar.NewReader(reader)
+			buf := new(strings.Builder)
+			for {
+				currentFile, err := tarReader.Next()
+				if err == io.EOF {
+					break
 				}
 
-			}
-		}
-		var fileInJson map[string]string
-		err = json.Unmarshal([]byte(buf.String()), &fileInJson)
-		if err != nil {
-			log.Printf("Failed to marshal file  %s", filename)
-			filteredResultsChan <- nil
-			return
-		}
+				if currentFile.Name == "symlinkMap.json" {
+					_, err := io.Copy(buf, tarReader)
+					if err != nil {
+						log.Printf("Couldn't parse symlinkMap.json file")
+						filteredResultsChan <- nil
+						return
+					}
 
-		for _, element := range listOfPrograms {
-			if element, ok := fileInJson[element]; ok {
-				filteredResult = append(filteredResult, element)
+				}
 			}
-		}
-		filteredResultsChan <- filteredResult
-	}()
+			var fileInJson map[string]string
+			err = json.Unmarshal([]byte(buf.String()), &fileInJson)
+			if err != nil {
+				log.Printf("Failed to marshal file  %s", filename)
+				filteredResultsChan <- nil
+				return
+			}
+
+			for _, element := range listOfPrograms {
+				if element, ok := fileInJson[element]; ok {
+					filteredResult = append(filteredResult, element)
+				}
+			}
+			filteredResultsChan <- filteredResult
+		}()
+	} else {
+		filteredResultsChan <- nil
+	}
 
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
