@@ -33,17 +33,17 @@ var printPostJSON string
 func init() {
 	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
 	if len(ociClient.endpoint) == 0 {
-		log.Printf("OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
-
-	}
-	eventRecieverURL = os.Getenv("EVENT_RECEIVER_URL")
-	if len(eventRecieverURL) == 0 {
-		eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP") // @dwert next time u do it u go and fix it!
-		if len(eventRecieverURL) == 0 {
-			log.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP or EVENT_RECEIVER_URL")
-
+		ociClient.endpoint = os.Getenv("CA_OCIMAGE_URL")
+		if len(ociClient.endpoint) == 0 {
+			log.Printf("OCIMAGE_URL/CA_OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
 		}
 	}
+
+	eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP")
+	if len(eventRecieverURL) == 0 {
+		log.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP")
+	}
+
 	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
 	if len(cusGUID) == 0 {
 		log.Fatal("Must configure CA_CUSTOMER_GUID")
