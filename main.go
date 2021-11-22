@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 
+	pkgcautils "github.com/armosec/capacketsgo/cautils"
+
 	wssc "github.com/armosec/capacketsgo/apis"
 )
 
@@ -42,7 +44,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 			log.Printf("image tag is missing")
 			return
 		}
-		if WebsocketScan.IsScanned == true {
+		if WebsocketScan.IsScanned {
 			w.WriteHeader(http.StatusAccepted)
 			log.Printf("this image already scanned")
 			return
@@ -62,6 +64,9 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 func main() {
 	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
+
+	pkgcautils.LoadConfig("", true)
+
 	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
 	scanRoutinslimit := colim.MAX_VULN_SCAN_ROUTINS
 	if len(scanRoutinslimitStr) != 0 {
