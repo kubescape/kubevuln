@@ -204,9 +204,14 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 			filteredResultsChan <- filteredResult
 		}()
 	} else {
-		filteredResultsChan <- nil
+		go func() {
+			log.Printf("skipping dangerous executables enrichment")
+			filteredResultsChan <- nil
+		}()
+
 	}
 
+	log.Printf("sending command to anchore")
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
 		log.Printf("GetAnchoreScanResults failed with err %v to image %s", err, scanCmd.ImageTag)
