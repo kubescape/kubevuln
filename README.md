@@ -9,7 +9,7 @@
 * CLAIR_URL : http://localhost:6060 - mandatory
 
 ### Event Reciever
-* EVENT_RECIEVER_URL : http://localhost:7555 - mandatory
+* CA_EVENT_RECEIVER_HTTP : http://localhost:7555 - mandatory
 
 ### ca customer GUID
 * CA_CUSTOMER_GUID : customer GUID - mandatory
