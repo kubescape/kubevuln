@@ -268,7 +268,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
 	} else {
-		report.SendStatus(sysreport.JobSuccess, true)
+		report.SendStatus(sysreport.JobDone, true)
 	}
 	return result, nil
 }
