@@ -437,6 +437,10 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	for i := 0; i != len(scanCmd.Credentialslist); i++ {
 		err := AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
 		if err != nil {
+			err_chdir := os.Chdir(dir)
+			if err_chdir != nil {
+				log.Printf("failed return to anchore resources dir with error %v", err_chdir)
+			}
 			return nil, err
 		}
 	}
@@ -445,7 +449,12 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	err = cmd.Run()
 	mutex_edit_conf.Unlock()
 	if err != nil {
+		log.Printf("failed ancore exec")
 		log.Println(string(out.Bytes()[:]))
+		err_chdir := os.Chdir(dir)
+		if err_chdir != nil {
+			log.Printf("failed return to anchore resources dir with error %v", err_chdir)
+		}
 		return nil, err
 	}
 
@@ -458,6 +467,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 
 	err = os.Chdir(dir)
 	if err != nil {
+		log.Printf("failed return to anchore resources dir with error %v", err)
 		return nil, err
 	}
 
