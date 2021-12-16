@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	wssc "github.com/armosec/capacketsgo/apis"
+	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/golang/glog"
 )
 

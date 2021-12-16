@@ -3,18 +3,19 @@ package process_request
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	yaml "gopkg.in/yaml.v3"
 
-	wssc "github.com/armosec/capacketsgo/apis"
+	wssc "github.com/armosec/armoapi-go/apis"
 	cs "github.com/armosec/capacketsgo/containerscan"
+	types "github.com/docker/docker/api/types"
 )
 
 var anchoreBinaryName = "/grype-cmd"
@@ -34,8 +35,8 @@ type Application struct {
 	Db                 Database    `mapstructure:"db"`
 	Dev                Development `mapstructure:"dev"`
 	CheckForAppUpdate  bool        `mapstructure:"check-for-app-update"`
-	FailOn             string      `mapstructure:"fail-on-severity"`
-	FailOnSeverity     Severity    `json:"-"`
+	FailOn             string      `yaml:"-" mapstructure:"fail-on-severity"`
+	FailOnSeverity     Severity    `yaml:"-" json:"-"`
 	Registry           registry    `yaml:"registry" json:"registry" mapstructure:"registry"`
 }
 
@@ -81,13 +82,13 @@ type registry struct {
 }
 
 type RegistryCredentials struct {
-	Authority string `yaml:"authority" json:"authority" mapstructure:"authority"`
+	Authority string `yaml:"authority" json:"authority" mapstructure:"authority,omitempty"`
 	// IMPORTANT: do not show the username in any YAML/JSON output (sensitive information)
-	Username string `yaml:"-" json:"-" mapstructure:"username"`
+	Username string `yaml:"username" json:"username" mapstructure:"username,omitempty"`
 	// IMPORTANT: do not show the password in any YAML/JSON output (sensitive information)
-	Password string `yaml:"-" json:"-" mapstructure:"password"`
+	Password string `yaml:"password" json:"password" mapstructure:"password,omitempty"`
 	// IMPORTANT: do not show the token in any YAML/JSON output (sensitive information)
-	Token string `yaml:"-" json:"-" mapstructure:"token"`
+	Token string `yaml:"token" json:"token" mapstructure:"token,omitempty"`
 }
 
 type Development struct {
@@ -310,6 +311,13 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 		CheckForAppUpdate: true,
 		Output:            "json",
 		Scope:             "Squashed",
+		FailOn:            "critical",
+		Log: Logging{
+			Structured:   false,
+			LevelOpt:     0,
+			Level:        "trace",
+			FileLocation: "",
+		},
 		Db: Database{
 			AutoUpdate: true,
 			Dir:        anchoreDirectoryPath + "/Db",
@@ -333,12 +341,12 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 	copyFileToOtherPath(dir+"/grype-cmd", anchoreDirectoryPath+anchoreBinaryName)
 }
 
-func AddCredentialsToAnchoreConfiguratioFile(username string, password string) error {
+func AddCredentialsToAnchoreConfiguratioFile(cred types.AuthConfig) error {
 	var App Application
 
 	mutex_edit_conf.Lock()
 
-	bytes, err := ioutil.ReadAll(strings.NewReader(anchoreDirectoryPath + "/config.yaml"))
+	bytes, err := ioutil.ReadFile(anchoreDirectoryPath + "/.grype/config.yaml")
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -348,9 +356,25 @@ func AddCredentialsToAnchoreConfiguratioFile(username string, password string) e
 		mutex_edit_conf.Unlock()
 		return err
 	}
-	App.Registry.Auth = append(App.Registry.Auth, RegistryCredentials{Username: username, Password: password})
+
+	if cred.Auth != "" {
+		App.Registry.Auth = append(App.Registry.Auth, RegistryCredentials{Authority: cred.Auth})
+	}
+	if cred.RegistryToken != "" {
+		App.Registry.Auth = append(App.Registry.Auth, RegistryCredentials{Token: cred.RegistryToken})
+	}
+	if cred.Username != "" && cred.Password != "" {
+		App.Registry.Auth = append(App.Registry.Auth, RegistryCredentials{Username: cred.Username, Password: cred.Password})
+	}
+	if len(App.Registry.Auth) == 0 {
+		/*
+			should never happend
+		*/
+		return fmt.Errorf("error: no crediantials added")
+	}
+
 	config_yaml_data, err := yaml.Marshal(&App)
-	err = ioutil.WriteFile(anchoreDirectoryPath+"/.grype"+"/config.yaml", config_yaml_data, 0)
+	err = ioutil.WriteFile(anchoreDirectoryPath+"/.grype"+"/config.yaml", config_yaml_data, 0755)
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -360,12 +384,12 @@ func AddCredentialsToAnchoreConfiguratioFile(username string, password string) e
 	return nil
 }
 
-func RemoveCredentialsFromAnchoreConfiguratioFile(username string, password string) error {
+func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 	var App Application
 
 	mutex_edit_conf.Lock()
 
-	bytes, err := ioutil.ReadAll(strings.NewReader(anchoreDirectoryPath + "/.grype" + "/config.yaml"))
+	bytes, err := ioutil.ReadFile(anchoreDirectoryPath + "/.grype/config.yaml")
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -377,9 +401,9 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(username string, password stri
 	}
 	for i := 0; i < (len(App.Registry.Auth)); {
 
-		if username == App.Registry.Auth[i].Username && password == App.Registry.Auth[i].Password {
+		if (cred.Username == App.Registry.Auth[i].Username) && (cred.Password == App.Registry.Auth[i].Password) || (cred.Auth == App.Registry.Auth[i].Authority) || (cred.IdentityToken == App.Registry.Auth[i].Token) {
 			App.Registry.Auth = append(App.Registry.Auth[:i], App.Registry.Auth[i+1:]...)
-			break
+			i--
 		}
 		i++
 	}
@@ -397,23 +421,48 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(username string, password stri
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) {
 
 	vuln_anchore_report := &JSONReport{}
-	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, scanCmd.ImageTag, "-o", "json")
+	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if scanCmd.Credentials != nil && scanCmd.Credentials.Username != "" && scanCmd.Credentials.Password != "" {
-		AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentials.Username, scanCmd.Credentials.Password)
-	}
-	err := cmd.Run()
-	if scanCmd.Credentials != nil && scanCmd.Credentials.Username != "" && scanCmd.Credentials.Password != "" {
-		RemoveCredentialsFromAnchoreConfiguratioFile(scanCmd.Credentials.Username, scanCmd.Credentials.Password)
-	}
+
+	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
+	err = os.Chdir(dir + anchoreDirectoryName)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := 0; i != len(scanCmd.Credentialslist); i++ {
+		err := AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	mutex_edit_conf.Lock()
+	err = cmd.Run()
+	mutex_edit_conf.Unlock()
+	if err != nil {
+		log.Println(string(out.Bytes()[:]))
+		return nil, err
+	}
+
+	for i := 0; i != len(scanCmd.Credentialslist); i++ {
+		err = RemoveCredentialsFromAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
+		if err != nil {
+			log.Println("failed to remove Credentials")
+		}
+	}
+
+	err = os.Chdir(dir)
+	if err != nil {
+		return nil, err
+	}
+
 	json.Unmarshal(out.Bytes(), vuln_anchore_report)
-
 	return vuln_anchore_report, nil
-
 }
 
 func convertToPkgFiles(fileList *[]string) *cs.PkgFiles {
@@ -554,12 +603,10 @@ func AnchoreStructConversion(anchore_vuln_struct *JSONReport) (*cs.LayersList, e
 
 func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 
-	log.Println("before GetAnchoreScanRes " + scanCmd.ImageTag)
 	anchore_vuln_struct, err := GetAnchoreScanRes(scanCmd)
 	if err != nil {
 		return nil, err
 	}
-	log.Println("after GetAnchoreScanRes " + scanCmd.ImageTag)
 
 	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct)
 	if err != nil {

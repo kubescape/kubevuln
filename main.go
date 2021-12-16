@@ -11,9 +11,9 @@ import (
 	"os"
 	"strconv"
 
-	pkgcautils "github.com/armosec/capacketsgo/cautils"
+	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 
-	wssc "github.com/armosec/capacketsgo/apis"
+	wssc "github.com/armosec/armoapi-go/apis"
 )
 
 var goroutineLimit *colim.CoroutineGuardian
@@ -46,7 +46,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		}
 		if WebsocketScan.IsScanned {
 			w.WriteHeader(http.StatusAccepted)
-			log.Printf("this image already scanned")
+			log.Printf("the image %s already scanned", WebsocketScan.ImageTag)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)

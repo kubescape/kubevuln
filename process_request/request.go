@@ -18,8 +18,8 @@ import (
 	"log"
 	"os"
 
-	wssc "github.com/armosec/capacketsgo/apis"
-	sysreport "github.com/armosec/capacketsgo/system-reports/datastructures"
+	wssc "github.com/armosec/armoapi-go/apis"
+	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 
 	cs "github.com/armosec/capacketsgo/containerscan"
 )
@@ -135,74 +135,82 @@ func RemoveFile(filename string) {
 func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, error) {
 	filteredResultsChan := make(chan []string)
 
+	/*
+		This code get list of execuatables that can be dangerous
+	*/
 	if ociClient.endpoint != "" {
 		ociImage, err := ociClient.Image(scanCmd)
 		if err != nil {
 			log.Printf("unable to get image %s", err)
-			return nil, nil, err
-		}
-		go func() {
-			listOfPrograms := []string{
-				"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
-				"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
-				"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
-			}
-			filteredResult := []string{}
-
-			directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
-			if err != nil {
-				log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
+			go func() {
+				log.Printf("skipping dangerous executables enrichment")
 				filteredResultsChan <- nil
-				return
-			}
-			rand.Seed(time.Now().UnixNano())
-			randomNum := rand.Intn(100)
-			filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
-			permissions := 0644
-			ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
-
-			reader, err := os.Open(filename)
-			if err != nil {
-				log.Printf("Couldn't open file : %s" + filename)
-				filteredResultsChan <- nil
-				return
-			}
-			defer reader.Close()
-			defer RemoveFile(filename)
-
-			tarReader := tar.NewReader(reader)
-			buf := new(strings.Builder)
-			for {
-				currentFile, err := tarReader.Next()
-				if err == io.EOF {
-					break
+			}()
+			// return nil, nil, err
+		} else {
+			go func() {
+				listOfPrograms := []string{
+					"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
+					"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
+					"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
 				}
+				filteredResult := []string{}
 
-				if currentFile.Name == "symlinkMap.json" {
-					_, err := io.Copy(buf, tarReader)
-					if err != nil {
-						log.Printf("Couldn't parse symlinkMap.json file")
-						filteredResultsChan <- nil
-						return
+				directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
+				if err != nil {
+					log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
+					filteredResultsChan <- nil
+					return
+				}
+				rand.Seed(time.Now().UnixNano())
+				randomNum := rand.Intn(100)
+				filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
+				permissions := 0644
+				ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
+
+				reader, err := os.Open(filename)
+				if err != nil {
+					log.Printf("Couldn't open file : %s" + filename)
+					filteredResultsChan <- nil
+					return
+				}
+				defer reader.Close()
+				defer RemoveFile(filename)
+
+				tarReader := tar.NewReader(reader)
+				buf := new(strings.Builder)
+				for {
+					currentFile, err := tarReader.Next()
+					if err == io.EOF {
+						break
 					}
 
-				}
-			}
-			var fileInJson map[string]string
-			err = json.Unmarshal([]byte(buf.String()), &fileInJson)
-			if err != nil {
-				log.Printf("Failed to marshal file  %s", filename)
-				filteredResultsChan <- nil
-				return
-			}
+					if currentFile.Name == "symlinkMap.json" {
+						_, err := io.Copy(buf, tarReader)
+						if err != nil {
+							log.Printf("Couldn't parse symlinkMap.json file")
+							filteredResultsChan <- nil
+							return
+						}
 
-			for _, element := range listOfPrograms {
-				if element, ok := fileInJson[element]; ok {
-					filteredResult = append(filteredResult, element)
+					}
 				}
-			}
-			filteredResultsChan <- filteredResult
-		}()
+				var fileInJson map[string]string
+				err = json.Unmarshal([]byte(buf.String()), &fileInJson)
+				if err != nil {
+					log.Printf("Failed to marshal file  %s", filename)
+					filteredResultsChan <- nil
+					return
+				}
+
+				for _, element := range listOfPrograms {
+					if element, ok := fileInJson[element]; ok {
+						filteredResult = append(filteredResult, element)
+					}
+				}
+				filteredResultsChan <- filteredResult
+			}()
+		}
 	} else {
 		go func() {
 			log.Printf("skipping dangerous executables enrichment")
@@ -210,6 +218,9 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		}()
 
 	}
+	/*
+		End of dangerous execuatables collect code
+	*/
 
 	log.Printf("sending command to anchore")
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
