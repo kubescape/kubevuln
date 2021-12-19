@@ -311,7 +311,6 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 		CheckForAppUpdate: true,
 		Output:            "json",
 		Scope:             "Squashed",
-		FailOn:            "critical",
 		Log: Logging{
 			Structured:   false,
 			LevelOpt:     0,
