@@ -339,6 +339,11 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 	}
 
 	copyFileToOtherPath(dir+"/grype-cmd", anchoreDirectoryPath+anchoreBinaryName)
+
+	err = os.Chdir(dir + anchoreDirectoryName)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func AddCredentialsToAnchoreConfiguratioFile(cred types.AuthConfig) error {
@@ -425,36 +430,19 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	err = os.Chdir(dir + anchoreDirectoryName)
-	if err != nil {
-		return nil, err
-	}
-
 	for i := 0; i != len(scanCmd.Credentialslist); i++ {
 		err := AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
 		if err != nil {
-			err_chdir := os.Chdir(dir)
-			if err_chdir != nil {
-				log.Printf("failed return to anchore resources dir with error %v", err_chdir)
-			}
 			return nil, err
 		}
 	}
 
 	mutex_edit_conf.Lock()
-	err = cmd.Run()
+	err := cmd.Run()
 	mutex_edit_conf.Unlock()
 	if err != nil {
 		log.Printf("failed ancore exec")
 		log.Println(string(out.Bytes()[:]))
-		err_chdir := os.Chdir(dir)
-		if err_chdir != nil {
-			log.Printf("failed return to anchore resources dir with error %v", err_chdir)
-		}
 		return nil, err
 	}
 
@@ -463,12 +451,6 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 		if err != nil {
 			log.Println("failed to remove Credentials")
 		}
-	}
-
-	err = os.Chdir(dir)
-	if err != nil {
-		log.Printf("failed return to anchore resources dir with error %v", err)
-		return nil, err
 	}
 
 	json.Unmarshal(out.Bytes(), vuln_anchore_report)
