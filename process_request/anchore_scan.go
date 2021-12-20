@@ -443,7 +443,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	err := cmd.Run()
 	mutex_edit_conf.Unlock()
 	if err != nil {
-		log.Printf("failed ancore exec")
+		log.Printf("failed ancore exec for image: %s :original error:: %v", scanCmd.ImageTag, err.Error())
 		if len(out.Bytes()) != 0 {
 			log.Printf("ancore print log from stdout")
 			log.Println(string(out.Bytes()[:]))
