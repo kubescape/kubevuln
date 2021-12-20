@@ -311,6 +311,7 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 		CheckForAppUpdate: true,
 		Output:            "json",
 		Scope:             "Squashed",
+		Quiet:             false,
 		Log: Logging{
 			Structured:   false,
 			LevelOpt:     0,
@@ -427,7 +428,9 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	vuln_anchore_report := &JSONReport{}
 	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
 	var out bytes.Buffer
+	var out_err bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &out_err
 
 	for i := 0; i != len(scanCmd.Credentialslist); i++ {
 		err := AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
@@ -441,7 +444,15 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	mutex_edit_conf.Unlock()
 	if err != nil {
 		log.Printf("failed ancore exec")
-		log.Println(string(out.Bytes()[:]))
+		if len(out.Bytes()) != 0 {
+			log.Printf("ancore print log from stdout")
+			log.Println(string(out.Bytes()[:]))
+		} else if len(out_err.Bytes()) != 0 {
+			log.Printf("ancore print log from stderr")
+			log.Println(string(out_err.Bytes()[:]))
+		} else {
+			log.Printf("ancore exec failed for image %s but no log exist in anchore", scanCmd.ImageTag)
+		}
 		return nil, err
 	}
 
