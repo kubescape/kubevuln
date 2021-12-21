@@ -9,7 +9,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
+	"syscall"
 
 	yaml "gopkg.in/yaml.v3"
 
@@ -443,15 +445,22 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	err := cmd.Run()
 	mutex_edit_conf.Unlock()
 	if err != nil {
-		log.Printf("failed ancore exec for image: %s :original error:: %v", scanCmd.ImageTag, err.Error())
+		var err_str string
+		var err_anchore_str string
 		if len(out.Bytes()) != 0 {
-			log.Printf("ancore print log from stdout")
-			log.Println(string(out.Bytes()[:]))
+			err_anchore_str = string(out.Bytes()[:])
 		} else if len(out_err.Bytes()) != 0 {
-			log.Printf("ancore print log from stderr")
-			log.Println(string(out_err.Bytes()[:]))
+			err_anchore_str = string(out_err.Bytes()[:])
 		} else {
-			log.Printf("ancore exec failed for image %s but no log exist in anchore", scanCmd.ImageTag)
+			err_anchore_str = "There is no verbose error from vuln scanner"
+		}
+		if werr, ok := err.(*exec.ExitError); ok {
+			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
+				if s == 9 || (s == 1 && strings.Contains(err_anchore_str, "failed to load vulnerability db: vulnerability database is corrupt")) {
+					err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %d :original error:: %v\n%v", scanCmd.ImageTag, s, err, err_anchore_str)
+					err = fmt.Errorf(err_str)
+				}
+			}
 		}
 		return nil, err
 	}
