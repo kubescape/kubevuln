@@ -225,7 +225,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 	log.Printf("sending command to anchore")
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
-		log.Printf("GetAnchoreScanResults failed with err %v to image %s", err, scanCmd.ImageTag)
+		log.Printf("%v", err.Error())
 		return nil, nil, err
 	}
 
@@ -239,10 +239,10 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
 		Reporter:     "ca-vuln-scan",
 		Status:       sysreport.JobStarted,
-		ActionName:   fmt.Sprintf("vuln scan:: scanning wlid:%v , container:%v image: %v", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag),
+		Target:       fmt.Sprintf("vuln scan:: scanning wlid:%v , container:%v image: %v", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag),
 		ActionID:     "1",
 		ActionIDN:    1,
-		Target:       fmt.Sprintf("wlid: %v / image: %v", scanCmd.Wlid, scanCmd.ImageTag),
+		ActionName:   fmt.Sprintf("vuln scan"),
 	}
 
 	if len(scanCmd.JobID) != 0 {
