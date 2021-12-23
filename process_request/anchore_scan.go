@@ -461,7 +461,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 		}
 		if werr, ok := err.(*exec.ExitError); ok {
 			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
-				if s == 9 || (s == 1 && (strings.Contains(err_anchore_str, "failed to load vulnerability db: vulnerability database is corrupt") || strings.Contains(err_anchore_str, "UNAUTHORIZED: You don't have the needed permissions to perform this operation, and you may have invalid credentials."))) {
+				if strings.Contains(err_anchore_str, "failed to load vulnerability db: vulnerability database is corrupt") || strings.Contains(err_anchore_str, "UNAUTHORIZED: You don't have the needed permissions to perform this operation, and you may have invalid credentials.") {
 					err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %d :original error:: %v\n%v", scanCmd.ImageTag, s, err, err_anchore_str)
 					err = fmt.Errorf(err_str)
 				}
