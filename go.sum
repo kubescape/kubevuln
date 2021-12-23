@@ -80,8 +80,8 @@ github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e/go.mod h1:3U/XgcO3hC
 github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmVTwzkszR9V5SSuryQ31EELlFMUz1kKyl939pY=
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armosec/armoapi-go v0.0.8/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
-github.com/armosec/armoapi-go v0.0.35 h1:1BYIb9lWIc5qc+l7mU1ANnRsCnO/IWps1gxepzr2VbY=
-github.com/armosec/armoapi-go v0.0.35/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
+github.com/armosec/armoapi-go v0.0.40 h1:KQRJXFqw95s6cV7HoGgw1x8qrRZ9eNVze//yQbo24Lk=
+github.com/armosec/armoapi-go v0.0.40/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
 github.com/armosec/armopa v0.0.2/go.mod h1:/DB/y9ePSlME0zONeEuTft+CMDT4d90vxrEEgB1ZKZ4=
 github.com/armosec/armopa v0.0.4/go.mod h1:fgRCoRy4SqI/5DSu0yDY2dK4B5uu5Qq9lCuf2njDDR0=
 github.com/armosec/capacketsgo v0.0.0-20210425063635-bcd2cb990f5a/go.mod h1:Qy/LJCtUPR2uCqu0KG5zK2J9YPSecnkMuhGGmk8Rss8=

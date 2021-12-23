@@ -3,38 +3,11 @@ module ca-vuln-scan
 go 1.15
 
 require (
-	github.com/armosec/armoapi-go v0.0.35
+	github.com/armosec/armoapi-go v0.0.40
 	github.com/armosec/capacketsgo v0.0.41
 	github.com/armosec/logger-go v0.0.4
 	github.com/armosec/utils-k8s-go v0.0.2
-	github.com/coreos/go-oidc v2.2.1+incompatible
 	github.com/docker/docker v20.10.9+incompatible
-	github.com/docker/go-connections v0.4.0
-	github.com/docker/go-units v0.4.0
-	github.com/francoispqt/gojay v1.2.13
-	github.com/gofrs/uuid v4.0.0+incompatible
-	github.com/gogo/protobuf v1.3.2
 	github.com/golang/glog v1.0.0
-	github.com/golang/protobuf v1.5.2
-	github.com/google/go-cmp v0.5.5
-	github.com/google/gofuzz v1.1.0
-	github.com/json-iterator/go v1.1.11
-	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
-	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.0.1
-	github.com/pquerna/cachecontrol v0.1.0
-	github.com/satori/go.uuid v1.2.0
-	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
-	golang.org/x/net v0.0.0-20210825183410-e898025ed96a
-	golang.org/x/oauth2 v0.0.0-20211005180243-6b3c2da341f1
-	golang.org/x/text v0.3.6
-	google.golang.org/appengine v1.6.7
-	google.golang.org/protobuf v1.27.1
-	gopkg.in/inf.v0 v0.9.1
-	gopkg.in/square/go-jose.v2 v2.6.0
-	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
-	k8s.io/apimachinery v0.22.2
-	k8s.io/klog/v2 v2.9.0
-	sigs.k8s.io/structured-merge-diff/v4 v4.1.2
 )

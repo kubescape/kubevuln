@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 
+	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -52,6 +53,19 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 
+		report := &sysreport.BaseReport{
+			CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
+			Reporter:     "ca-vuln-scan",
+			Status:       sysreport.JobStarted,
+			Target:       fmt.Sprintf("vuln scan:: scanning wlid: %v ,containerName: %v imageTag: %v imageHash: %s", WebsocketScan.Wlid, WebsocketScan.ContainerName, WebsocketScan.ImageTag, WebsocketScan.ImageHash),
+			ActionID:     "1",
+			ActionIDN:    1,
+			ActionName:   "vuln scan",
+			JobID:        WebsocketScan.JobID,
+			ParentAction: WebsocketScan.ParentJobID,
+			Details:      "Inqueueing",
+		}
+		report.SendAsRoutine([]string{}, true)
 		startScanImage(&WebsocketScan)
 
 	} else {

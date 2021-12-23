@@ -239,10 +239,14 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
 		Reporter:     "ca-vuln-scan",
 		Status:       sysreport.JobStarted,
-		Target:       fmt.Sprintf("vuln scan:: scanning wlid:%v , container:%v image: %v", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag),
-		ActionID:     "1",
-		ActionIDN:    1,
-		ActionName:   fmt.Sprintf("vuln scan"),
+		Target: fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s", scanCmd.Wlid,
+			scanCmd.ContainerName, scanCmd.ImageTag, scanCmd.ImageHash),
+		ActionID:     "2",
+		ActionIDN:    2,
+		ActionName:   "vuln scan",
+		JobID:        scanCmd.JobID,
+		ParentAction: scanCmd.ParentJobID,
+		Details:      "Dequeueing",
 	}
 
 	if len(scanCmd.JobID) != 0 {
