@@ -52,7 +52,8 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		}
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
-
+		// Backend aggregation depends on this report!!!
+		// don't change any parameter before checking with BE side first!!!!
 		report := &sysreport.BaseReport{
 			CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
 			Reporter:     "ca-vuln-scan",
@@ -66,6 +67,7 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 			Details:      "Inqueueing",
 		}
 		report.SendAsRoutine([]string{}, true)
+		// End of Backend must not change report
 		startScanImage(&WebsocketScan)
 
 	} else {
