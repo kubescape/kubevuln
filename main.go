@@ -40,9 +40,9 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 			log.Printf("fail decode json from web socket, error %v", err)
 			return
 		}
-		if WebsocketScan.ImageTag == "" {
+		if WebsocketScan.ImageTag == "" && WebsocketScan.ImageHash == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			log.Printf("image tag is missing")
+			log.Printf("image tag and image hash are missing")
 			return
 		}
 		if WebsocketScan.IsScanned {

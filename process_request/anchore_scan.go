@@ -428,7 +428,12 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) {
 
 	vuln_anchore_report := &JSONReport{}
-	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
+	var cmd *exec.Cmd
+	if scanCmd.ImageHash != "" {
+		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json")
+	} else {
+		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
+	}
 	var out bytes.Buffer
 	var out_err bytes.Buffer
 	cmd.Stdout = &out
