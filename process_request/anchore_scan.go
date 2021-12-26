@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -429,10 +428,14 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 
 	vuln_anchore_report := &JSONReport{}
 	var cmd *exec.Cmd
+	var imageID string
+
 	if scanCmd.ImageHash != "" {
 		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json")
+		imageID = scanCmd.ImageHash
 	} else {
 		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
+		imageID = scanCmd.ImageTag
 	}
 	var out bytes.Buffer
 	var out_err bytes.Buffer
@@ -447,6 +450,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	}
 
 	mutex_edit_conf.Lock()
+	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
 	err := cmd.Run()
 	mutex_edit_conf.Unlock()
 	if err != nil {
@@ -459,14 +463,14 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 		} else {
 			err_anchore_str = "There is no verbose error from vuln scanner"
 		}
+		exit_code := "unknown"
 		if werr, ok := err.(*exec.ExitError); ok {
 			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
-				if strings.Contains(err_anchore_str, "failed to load vulnerability db: vulnerability database is corrupt") || strings.Contains(err_anchore_str, "UNAUTHORIZED: You don't have the needed permissions to perform this operation, and you may have invalid credentials.") {
-					err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %d :original error:: %v\n%v", scanCmd.ImageTag, s, err, err_anchore_str)
-					err = fmt.Errorf(err_str)
-				}
+				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
+		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v", imageID, exit_code, err, err_anchore_str)
+		err = fmt.Errorf(err_str)
 		return nil, err
 	}
 

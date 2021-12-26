@@ -222,7 +222,6 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		End of dangerous execuatables collect code
 	*/
 
-	log.Printf("sending command to anchore")
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
 		log.Printf("%v", err.Error())
