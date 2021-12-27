@@ -72,7 +72,7 @@ func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) 
 	return image, nil
 }
 
-func postScanResultsToEventReciever(imagetag string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
+func postScanResultsToEventReciever(imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
@@ -92,7 +92,7 @@ func postScanResultsToEventReciever(imagetag string, wlid string, containerName 
 	final_report := cs.ScanResultReport{
 		CustomerGUID:             cusGUID,
 		ImgTag:                   imagetag,
-		ImgHash:                  "",
+		ImgHash:                  imageHash,
 		WLID:                     wlid,
 		ContainerName:            containerName,
 		Timestamp:                timestamp,
@@ -267,7 +267,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 
 	//Benh - dangerous hack
 
-	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
+	err = postScanResultsToEventReciever(scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
 	} else {
