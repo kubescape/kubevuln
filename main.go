@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/golang/glog"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 )
@@ -81,6 +83,8 @@ func main() {
 	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
 
+	displayBuildTag()
+
 	pkgcautils.LoadConfig("", true)
 
 	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
@@ -96,4 +100,18 @@ func main() {
 	log.Printf("uri %v", uri)
 	http.HandleFunc(uri, scanImage)
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func displayBuildTag() {
+	imageVersion := "local build"
+	dat, err := ioutil.ReadFile("./build_number.txt")
+	if err == nil {
+		imageVersion = string(dat)
+	} else {
+		dat, err = ioutil.ReadFile("./build_date.txt")
+		if err == nil {
+			imageVersion = fmt.Sprintf("%s, date: %s", imageVersion, string(dat))
+		}
+	}
+	glog.Infof("Image version: %s", imageVersion)
 }
