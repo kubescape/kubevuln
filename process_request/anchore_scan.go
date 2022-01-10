@@ -469,7 +469,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
-		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v", imageID, exit_code, err, err_anchore_str)
+		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v\n troubleshooting in the following link: https://hub.armo.cloud/docs/limitations", imageID, exit_code, err, err_anchore_str)
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}
