@@ -7,11 +7,13 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"sync"
 	"syscall"
 
+	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -347,19 +349,15 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 	}
 }
 
-func AddCredentialsToAnchoreConfiguratioFile(cred types.AuthConfig) error {
+func AddCredentialsToAnchoreConfiguratioFile(configFilePath string, cred types.AuthConfig) error {
 	var App Application
 
-	mutex_edit_conf.Lock()
-
-	bytes, err := ioutil.ReadFile(anchoreDirectoryPath + "/.grype/config.yaml")
+	bytes, err := ioutil.ReadFile(configFilePath)
 	if err != nil {
-		mutex_edit_conf.Unlock()
 		return err
 	}
 	err = yaml.Unmarshal(bytes, &App)
 	if err != nil {
-		mutex_edit_conf.Unlock()
 		return err
 	}
 
@@ -380,13 +378,11 @@ func AddCredentialsToAnchoreConfiguratioFile(cred types.AuthConfig) error {
 	}
 
 	config_yaml_data, err := yaml.Marshal(&App)
-	err = ioutil.WriteFile(anchoreDirectoryPath+"/.grype"+"/config.yaml", config_yaml_data, 0755)
+	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
-		mutex_edit_conf.Unlock()
 		return err
 	}
 
-	mutex_edit_conf.Unlock()
 	return nil
 }
 
@@ -424,17 +420,41 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 	return nil
 }
 
+func copyFileData(anchoreConfigPath string) error {
+	source, err := os.Open(anchoreDirectoryPath + "/.grype" + "/config.yaml")
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(anchoreConfigPath)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+	_, err = io.Copy(destination, source)
+	return err
+}
+
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) {
 
 	vuln_anchore_report := &JSONReport{}
 	var cmd *exec.Cmd
 	var imageID string
 
+	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
+	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".json"
+	err := copyFileData(anchoreConfigPath)
+	if err != nil {
+		log.Printf("fail to copy default file config to %v with err %v\n", anchoreConfigPath, err)
+		return nil, err
+	}
+
 	if scanCmd.ImageHash != "" {
-		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json")
+		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json", "-c", anchoreConfigPath)
 		imageID = scanCmd.ImageHash
 	} else {
-		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json")
+		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json", "-c", anchoreConfigPath)
 		imageID = scanCmd.ImageTag
 	}
 	var out bytes.Buffer
@@ -443,16 +463,16 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	cmd.Stderr = &out_err
 
 	for i := 0; i != len(scanCmd.Credentialslist); i++ {
-		err := AddCredentialsToAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
+		err := AddCredentialsToAnchoreConfiguratioFile(anchoreConfigPath, scanCmd.Credentialslist[i])
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	mutex_edit_conf.Lock()
+	// mutex_edit_conf.Lock()
 	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
-	err := cmd.Run()
-	mutex_edit_conf.Unlock()
+	err = cmd.Run()
+	// mutex_edit_conf.Unlock()
 	if err != nil {
 		var err_str string
 		var err_anchore_str string
@@ -471,15 +491,20 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 		}
 		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v\n troubleshooting in the following link: https://hub.armo.cloud/docs/limitations", imageID, exit_code, err, err_anchore_str)
 		err = fmt.Errorf(err_str)
+		os.Remove(anchoreConfigPath)
 		return nil, err
 	}
 
-	for i := 0; i != len(scanCmd.Credentialslist); i++ {
-		err = RemoveCredentialsFromAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
-		if err != nil {
-			log.Println("failed to remove Credentials")
-		}
+	err = os.Remove(anchoreConfigPath)
+	if err != nil {
+		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
 	}
+	// for i := 0; i != len(scanCmd.Credentialslist); i++ {
+	// 	err = RemoveCredentialsFromAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
+	// 	if err != nil {
+	// 		log.Println("failed to remove Credentials")
+	// 	}
+	// }
 
 	json.Unmarshal(out.Bytes(), vuln_anchore_report)
 	return vuln_anchore_report, nil
