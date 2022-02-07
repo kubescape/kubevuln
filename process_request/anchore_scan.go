@@ -443,7 +443,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	var imageID string
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
-	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".json"
+	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
 	err := copyFileData(anchoreConfigPath)
 	if err != nil {
 		log.Printf("fail to copy default file config to %v with err %v\n", anchoreConfigPath, err)
