@@ -445,7 +445,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	var imageID string
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
-	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".json"
+	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
 	err := copyFileData(anchoreConfigPath)
 	if err != nil {
 		log.Printf("fail to copy default file config to %v with err %v\n", anchoreConfigPath, err)
@@ -471,10 +471,8 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 		}
 	}
 
-	// mutex_edit_conf.Lock()
 	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
 	err = cmd.Run()
-	// mutex_edit_conf.Unlock()
 	if err != nil {
 		var err_str string
 		var err_anchore_str string
@@ -501,14 +499,12 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) 
 	if err != nil {
 		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
 	}
-	// for i := 0; i != len(scanCmd.Credentialslist); i++ {
-	// 	err = RemoveCredentialsFromAnchoreConfiguratioFile(scanCmd.Credentialslist[i])
-	// 	if err != nil {
-	// 		log.Println("failed to remove Credentials")
-	// 	}
-	// }
 
-	json.Unmarshal(out.Bytes(), vuln_anchore_report)
+	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
+	if err != nil {
+		err = fmt.Errorf("json unmarshall failed with an error:" + err.Error() + "\n vuln scanner error:" + string(out_err.Bytes()[:]) + "\n")
+		return nil, err
+	}
 	return vuln_anchore_report, nil
 }
 
