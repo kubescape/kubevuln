@@ -20,6 +20,7 @@ import (
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
+	"k8s.io/utils/strings/slices"
 
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 )
@@ -98,8 +99,10 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		Timestamp:                timestamp,
 		Layers:                   *layersList,
 		ListOfDangerousArtifcats: listOfBash,
+		Session:                  scanCmd.Session,
 	}
 
+	log.Printf("session: %v\n===\n", final_report.Session)
 	payload, err := json.Marshal(final_report)
 	if err != nil {
 		log.Printf("fail convert to json")
@@ -121,7 +124,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		log.Printf("clair post to event reciever failed with %d", resp.StatusCode)
 		return err
 	}
-	log.Printf("posting to event reciever image %s wlid %s finished seccessfully", imagetag, wlid)
+	log.Printf("posting to event reciever image %s wlid %s finished successfully", imagetag, wlid)
 
 	return nil
 }
@@ -254,6 +257,12 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	if scanCmd.LastAction > 0 {
 		report.SetActionIDN(scanCmd.LastAction + 1)
 	}
+
+	jobID := report.GetJobID()
+	if !slices.Contains(scanCmd.Session.JobIDs, jobID) {
+		scanCmd.Session.JobIDs = append(scanCmd.Session.JobIDs, jobID)
+	}
+
 	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
 	result, bashList, err := GetScanResult(scanCmd)
