@@ -26,7 +26,12 @@ func startScanImage(scanCmd *wssc.WebsocketScanCommand) {
 
 	goroutineLimit.Wait()
 	go func() {
-		process_request.ProcessScanRequest(scanCmd)
+		log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag)
+
+		_, err := process_request.ProcessScanRequest(scanCmd)
+		if err != nil {
+			log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s failed due to: %s", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag, err.Error())
+		}
 		goroutineLimit.Release()
 	}()
 

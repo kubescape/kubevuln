@@ -17,7 +17,9 @@ import (
 	yaml "gopkg.in/yaml.v3"
 
 	wssc "github.com/armosec/armoapi-go/apis"
-	cs "github.com/armosec/capacketsgo/containerscan"
+	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
+
+	// cs "github.com/armosec/capacketsgo/containerscan"
 	types "github.com/docker/docker/api/types"
 )
 
