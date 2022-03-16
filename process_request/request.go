@@ -19,6 +19,7 @@ import (
 	"os"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/armotypes"
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	"k8s.io/utils/strings/slices"
 
@@ -88,6 +89,12 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		Layers:                   *layersList,
 		ListOfDangerousArtifcats: listOfBash,
 		Session:                  scanCmd.Session,
+		Designators: armotypes.PortalDesignator{
+			Attributes: map[string]string{},
+		},
+	}
+	if val, ok := scanCmd.Args["registryName"]; ok {
+		final_report.Designators.Attributes["registryName"] = val.(string)
 	}
 
 	log.Printf("session: %v\n===\n", final_report.Session)
