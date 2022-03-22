@@ -1,0 +1,26 @@
+configpath: ""
+output: json
+outputtemplatefile: ""
+scopeopt: ""
+scope: Squashed
+quiet: false
+log:
+    structured: false
+    levelopt: 0
+    level: trace
+    filelocation: ""
+clioptions:
+    configpath: ""
+    verbosity: 0
+db:
+    dir: ./anchore-resources/Db
+    updateurl: https://toolbox-data.anchore.io/grype/databases/listing.json
+    autoupdate: false
+    validatebyhashonstart: false
+dev:
+    profilecpu: false
+checkforappupdate: true
+registry:
+    insecure-skip-tls-verify: false
+    insecure-use-http: false
+    auth: []

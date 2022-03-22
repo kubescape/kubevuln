@@ -8,10 +8,13 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
@@ -22,6 +25,8 @@ import (
 	// cs "github.com/armosec/capacketsgo/containerscan"
 	types "github.com/docker/docker/api/types"
 )
+
+const DEFAULT_DB_UPDATE_TIME_IN_MINUTES = 60 * 6
 
 var anchoreBinaryName = "/grype-cmd"
 var anchoreDirectoryName = "/anchore-resources"
@@ -295,60 +300,12 @@ func copyFileToOtherPath(src, dst string) error {
 
 func CreateAnchoreResourcesDirectoryAndFiles() {
 
-	mutex_edit_conf = &sync.Mutex{}
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	anchoreDirectoryPath = dir + anchoreDirectoryName
-	err = os.Mkdir(anchoreDirectoryPath, 0755)
-	if err != nil {
-		// log.Fatal(err)
-	}
-
-	err = os.Mkdir(anchoreDirectoryPath+"/.grype", 0755)
-	if err != nil {
-		// log.Fatal(err)
-	}
-
-	config_data := Application{
-		CheckForAppUpdate: true,
-		Output:            "json",
-		Scope:             "Squashed",
-		Quiet:             false,
-		Log: Logging{
-			Structured:   false,
-			LevelOpt:     0,
-			Level:        "trace",
-			FileLocation: "",
-		},
-		Db: Database{
-			AutoUpdate: true,
-			Dir:        anchoreDirectoryPath + "/Db",
-			UpdateURL:  "https://toolbox-data.anchore.io/grype/databases/listing.json",
-		},
-		Registry: registry{
-			InsecureSkipTLSVerify: false,
-			InsecureUseHTTP:       false,
-			Auth:                  []RegistryCredentials{},
-		},
-	}
-	config_yaml_data, err := yaml.Marshal(&config_data)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = ioutil.WriteFile(anchoreDirectoryPath+"/.grype"+"/config.yaml", config_yaml_data, 0755)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	copyFileToOtherPath(dir+"/grype-cmd", anchoreDirectoryPath+anchoreBinaryName)
-
-	err = os.Chdir(dir + anchoreDirectoryName)
-	if err != nil {
-		log.Fatal(err)
-	}
 }
 
 func AddCredentialsToAnchoreConfiguratioFile(configFilePath string, cred types.AuthConfig) error {
@@ -658,4 +615,65 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 	log.Println("after AnchoreStructConversion " + scanCmd.ImageTag)
 
 	return LayersVulnsList, nil
+}
+
+func HandleAnchoreDBUpdate(uri string) {
+
+	DBCommands := make(map[string]interface{})
+	update_wait_time, err := strconv.Atoi(os.Getenv("DB_UPDATE_TIME_IN_MINUTES"))
+	if err != nil {
+		update_wait_time = DEFAULT_DB_UPDATE_TIME_IN_MINUTES
+	}
+
+	for {
+		DBCommands["updateDB"] = ""
+		commandDB := wssc.DBCommand{
+			Commands: DBCommands,
+		}
+		buf, err := json.Marshal(commandDB)
+		if err == nil {
+			fullURL := "http://localhost:8080" + uri
+			req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(buf))
+			if err != nil {
+				fmt.Println("fail create http request with err:", err)
+			}
+			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+			fmt.Println("start db update")
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println("response create err:", err)
+			}
+			if resp != nil {
+				fmt.Println("db update: response Status:", resp.Status)
+				resp.Body.Close()
+			}
+		} else {
+			fmt.Println("HandleAnchoreDBUpdate: fail marshal ", err)
+		}
+
+		timer := time.NewTimer(time.Duration(update_wait_time) * time.Minute)
+		<-timer.C
+	}
+
+}
+
+func StartUpdateDB(payload interface{}) (interface{}, error) {
+	var out bytes.Buffer
+	var out_err bytes.Buffer
+
+	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "db", "update")
+	cmd.Stdout = &out
+	cmd.Stderr = &out_err
+
+	log.Printf("handle update DB command")
+	err := cmd.Run()
+	if err != nil {
+		log.Printf("failed update CVE DB with err %v", err)
+		return nil, err
+	}
+
+	log.Printf("DB updated successfully")
+	return nil, nil
 }

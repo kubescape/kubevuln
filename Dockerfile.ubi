@@ -10,11 +10,18 @@ WORKDIR /etc
 RUN mkdir -p vuln-scan
 WORKDIR /etc/vuln-scan
 RUN mkdir -p anchore-resources
-COPY ./anchore-resources/grype-cmd .
+COPY ./anchore-resources/grype-cmd ./anchore-resources/
 # COPY ./k8s-ca-vuln-scan .
+WORKDIR /etc/vuln-scan/anchore-resources
+RUN mkdir -m a=rwx .grype
+COPY anchore-resources/.grype/config.yaml .grype/
+RUN chmod 444 .grype/config.yaml
+WORKDIR /etc/vuln-scan
 
 COPY ./dist .
-COPY ./build_number.txt /
+# COPY ./build_number.txt /
 
 RUN echo $(date -u) > /tmp/build_date.txt
+RUN useradd -ms /bin/bash vuln-scanner
+USER vuln-scanner
 ENTRYPOINT ["./k8s-ca-vuln-scan"]

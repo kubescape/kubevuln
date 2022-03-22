@@ -1,7 +1,6 @@
 package main
 
 import (
-	colim "ca-vuln-scan/goroutinelimits"
 	"ca-vuln-scan/process_request"
 	"encoding/json"
 	"flag"
@@ -10,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
@@ -19,25 +17,66 @@ import (
 	wssc "github.com/armosec/armoapi-go/apis"
 )
 
-var goroutineLimit *colim.CoroutineGuardian
+type task func(payload interface{}) (interface{}, error)
 
-func startScanImage(scanCmd *wssc.WebsocketScanCommand) {
-	log.Printf("Scan request to image %s is put on processing queue", scanCmd.ImageTag)
-
-	goroutineLimit.Wait()
-	go func() {
-		log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag)
-
-		_, err := process_request.ProcessScanRequest(scanCmd)
-		if err != nil {
-			log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s failed due to: %s", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag, err.Error())
-		}
-		goroutineLimit.Release()
-	}()
-
+type taskData struct {
+	cb            task
+	payload       interface{}
+	returnError   error
+	returnPayload interface{}
 }
 
-func scanImage(w http.ResponseWriter, req *http.Request) {
+var taskChan chan taskData
+
+func startScanImage(scanCmdInterface interface{}) (interface{}, error) {
+	scanCmd := scanCmdInterface.(*wssc.WebsocketScanCommand)
+
+	log.Printf("Scan request to image %s is put on processing queue", scanCmd.ImageTag)
+	log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag)
+
+	_, err := process_request.ProcessScanRequest(scanCmd)
+	if err != nil {
+		log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s failed due to: %s", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag, err.Error())
+	}
+
+	return nil, nil
+}
+
+func commandDBHandler(w http.ResponseWriter, req *http.Request) {
+
+	var err error
+	var innerDBCommand wssc.DBCommand
+
+	if req.Method == http.MethodPost {
+		err = json.NewDecoder(req.Body).Decode(&innerDBCommand)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Printf("fail decode json from web socket, error %v", err)
+			return
+		}
+		for op, data := range innerDBCommand.Commands {
+			td := taskData{}
+			switch {
+			case op == "updateDB":
+				td.cb = process_request.StartUpdateDB
+				td.payload = data
+				td.returnError = err
+				taskChan <- td
+			}
+
+			if nil != td.returnError {
+				w.WriteHeader(http.StatusInternalServerError)
+			} else {
+				w.WriteHeader(http.StatusAccepted)
+			}
+		}
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprintf(w, "unsupported method\n")
+	}
+}
+
+func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 	var WebsocketScan wssc.WebsocketScanCommand
 
 	if req.Method == http.MethodPost {
@@ -75,13 +114,23 @@ func scanImage(w http.ResponseWriter, req *http.Request) {
 		}
 		report.SendAsRoutine([]string{}, true)
 		// End of Backend must not change report
-		startScanImage(&WebsocketScan)
+		td := taskData{
+			cb:      startScanImage,
+			payload: &WebsocketScan,
+		}
+
+		taskChan <- td
 
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "unsupported method\n")
 	}
+}
 
+func taskChannelHandler(taskChan <-chan taskData) {
+	for td := range taskChan {
+		td.cb(td.payload)
+	}
 }
 
 func main() {
@@ -92,19 +141,18 @@ func main() {
 
 	pkgcautils.LoadConfig("", true)
 
-	scanRoutinslimitStr := os.Getenv("CA_MAX_VULN_SCAN_ROUTINS")
-	scanRoutinslimit := colim.MAX_VULN_SCAN_ROUTINS
-	if len(scanRoutinslimitStr) != 0 {
-		if i, err := strconv.Atoi(scanRoutinslimitStr); err == nil {
-			scanRoutinslimit = i
-		}
-	}
-	goroutineLimit, _ = colim.CreateCoroutineGuardian(scanRoutinslimit)
+	scanURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
+	DBCommandURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.DBCommandPath
 
-	uri := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
-	log.Printf("uri %v", uri)
-	http.HandleFunc(uri, scanImage)
+	log.Printf("uri %v", scanURI)
+
+	taskChan = make(chan taskData, 100)
+	go taskChannelHandler(taskChan)
+	go process_request.HandleAnchoreDBUpdate(DBCommandURI)
+	http.HandleFunc(scanURI, scanImageHandler)
+	http.HandleFunc(DBCommandURI, commandDBHandler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
+
 }
 
 func displayBuildTag() {
