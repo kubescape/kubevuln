@@ -670,7 +670,23 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 	log.Printf("handle update DB command")
 	err := cmd.Run()
 	if err != nil {
-		log.Printf("failed update CVE DB with err %v", err)
+		var err_str string
+		var err_anchore_str string
+		if len(out.Bytes()) != 0 {
+			err_anchore_str = string(out.Bytes()[:])
+		} else if len(out_err.Bytes()) != 0 {
+			err_anchore_str = string(out_err.Bytes()[:])
+		} else {
+			err_anchore_str = "There is no verbose error from vuln scanner"
+		}
+		exit_code := "unknown"
+		if werr, ok := err.(*exec.ExitError); ok {
+			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
+				exit_code = fmt.Sprintf("%d", s)
+			}
+		}
+		err_str = fmt.Sprintf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
+		err = fmt.Errorf(err_str)
 		return nil, err
 	}
 
