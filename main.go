@@ -60,14 +60,10 @@ func commandDBHandler(w http.ResponseWriter, req *http.Request) {
 			case op == "updateDB":
 				td.cb = process_request.StartUpdateDB
 				td.payload = data
-				td.returnError = err
 				taskChan <- td
-			}
-
-			if nil != td.returnError {
-				w.WriteHeader(http.StatusInternalServerError)
-			} else {
 				w.WriteHeader(http.StatusAccepted)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
 			}
 		}
 	} else {

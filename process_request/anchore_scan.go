@@ -685,7 +685,7 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
-		err_str = fmt.Sprintf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
+		log.Printf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}
