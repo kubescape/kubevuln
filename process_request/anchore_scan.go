@@ -663,7 +663,8 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 	var out bytes.Buffer
 	var out_err bytes.Buffer
 
-	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "db", "update")
+	anchoreConfigPath := anchoreDirectoryPath + "/.grype/config.yaml"
+	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "db", "update", "-vv", "-c", anchoreConfigPath)
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
 
@@ -686,6 +687,7 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 			}
 		}
 		log.Printf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
+		log.Printf("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:]))
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}

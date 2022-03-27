@@ -31,7 +31,6 @@ var taskChan chan taskData
 func startScanImage(scanCmdInterface interface{}) (interface{}, error) {
 	scanCmd := scanCmdInterface.(*wssc.WebsocketScanCommand)
 
-	log.Printf("Scan request to image %s is put on processing queue", scanCmd.ImageTag)
 	log.Printf("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag)
 
 	_, err := process_request.ProcessScanRequest(scanCmd)
@@ -115,6 +114,7 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 			payload: &WebsocketScan,
 		}
 
+		log.Printf("Scan request to image %s is put on processing queue", WebsocketScan.ImageTag)
 		taskChan <- td
 
 	} else {

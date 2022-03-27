@@ -10,13 +10,12 @@ log:
     level: trace
     filelocation: ""
 clioptions:
-    configpath: ""
     verbosity: 0
 db:
-    dir: ./anchore-resources/Db
-    updateurl: https://toolbox-data.anchore.io/grype/databases/listing.json
-    autoupdate: false
-    validatebyhashonstart: false
+  auto-update: false
+  cache-dir: "/etc/vuln-scan/anchore-resources/db"
+  update-url: "https://toolbox-data.anchore.io/grype/databases/listing.json"
+  validatebyhashonstart: false
 dev:
     profilecpu: false
 checkforappupdate: true
