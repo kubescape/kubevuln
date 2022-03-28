@@ -11,7 +11,7 @@ RUN mkdir -p vuln-scan
 WORKDIR /etc/vuln-scan
 RUN mkdir -m a=rwx anchore-resources
 COPY ./anchore-resources/grype-cmd ./anchore-resources/
-COPY ./k8s-ca-vuln-scan .
+# COPY ./k8s-ca-vuln-scan .
 WORKDIR /etc/vuln-scan/anchore-resources
 RUN mkdir -m a=rwx .grype
 COPY anchore-resources/.grype/config.yaml .grype/
