@@ -1,5 +1,4 @@
-FROM golang:1.17-alpine as builder
-RUN rm -rf /tmp/*
+FROM golang:1.17
 
 LABEL description="Armo image scanner connector - this image is part of the CyberArmor operator deployment and it is not meant to be used alone"
 LABEL name="Armo image scanner connector"
@@ -21,20 +20,9 @@ WORKDIR /etc/vuln-scan
 
 COPY ./dist .
 
-RUN apk update
-RUN apk add ca-certificates && apk add python3 
 RUN echo $(date -u) > /tmp/build_date.txt
 
-RUN addgroup -S vuln_scanner && adduser -S vuln_scanner -G vuln_scanner
+RUN useradd vuln_scanner
 USER vuln_scanner
-
-FROM scratch
-
-WORKDIR /etc/vuln-scan
-
-COPY --from=0 /etc/ssl/certs /etc/ssl/certs
-COPY --from=0 /tmp /tmp
-COPY ./dist /etc/vuln-scan
-# COPY ./build_number.txt /
 
 ENTRYPOINT ["./k8s-ca-vuln-scan"]
