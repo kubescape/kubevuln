@@ -77,10 +77,10 @@ type CliOnlyOptions struct {
 }
 
 type Database struct {
-	Dir                   string `mapstructure:"cache-dir"`
-	UpdateURL             string `mapstructure:"update-url"`
-	AutoUpdate            bool   `mapstructure:"auto-update"`
-	ValidateByHashOnStart bool   `mapstructure:"validate-by-hash-on-start"`
+	Dir                   string `yaml:"cache-dir" mapstructure:"cache-dir"`
+	UpdateURL             string `yaml:"update-url" mapstructure:"update-url"`
+	AutoUpdate            bool   `yaml:"auto-update" mapstructure:"auto-update"`
+	ValidateByHashOnStart bool   `yaml:"validate-by-hash-on-start" mapstructure:"validate-by-hash-on-start"`
 }
 
 type Severity int
