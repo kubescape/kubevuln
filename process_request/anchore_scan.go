@@ -23,6 +23,7 @@ import (
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 
 	// cs "github.com/armosec/capacketsgo/containerscan"
+	"github.com/anchore/grype/grype/presenter/models"
 	types "github.com/docker/docker/api/types"
 )
 
@@ -103,173 +104,6 @@ type RegistryCredentials struct {
 
 type Development struct {
 	ProfileCPU bool `mapstructure:"profile-cpu"`
-}
-
-type JSONReport struct {
-	Matches    []Match      `json:"matches"`
-	Source     *source      `json:"source"`
-	Distro     distribution `json:"distro"`
-	Descriptor descriptor   `json:"descriptor"`
-}
-
-type Match struct {
-	Vulnerability          Vulnerability           `json:"vulnerability"`
-	RelatedVulnerabilities []VulnerabilityMetadata `json:"relatedVulnerabilities"`
-	MatchDetails           []MatchDetails          `json:"matchDetails"`
-	Artifact               Package                 `json:"artifact"`
-}
-
-type Vulnerability struct {
-	VulnerabilityMetadata
-	Fix        Fix        `json:"fix"`
-	Advisories []Advisory `json:"advisories"`
-}
-
-type VulnerabilityMetadata struct {
-	ID          string   `json:"id"`
-	DataSource  string   `json:"dataSource"`
-	Namespace   string   `json:"namespace,omitempty"`
-	Severity    string   `json:"severity,omitempty"`
-	URLs        []string `json:"urls"`
-	Description string   `json:"description,omitempty"`
-	Cvss        []Cvss   `json:"cvss"`
-}
-
-type Cvss struct {
-	Version        string      `json:"version"`
-	Vector         string      `json:"vector"`
-	Metrics        CvssMetrics `json:"metrics"`
-	VendorMetadata interface{} `json:"vendorMetadata"`
-}
-
-type CvssMetrics struct {
-	BaseScore           float64  `json:"baseScore"`
-	ExploitabilityScore *float64 `json:"exploitabilityScore,omitempty"`
-	ImpactScore         *float64 `json:"impactScore,omitempty"`
-}
-
-type Fix struct {
-	Versions []string `json:"versions"`
-	State    string   `json:"state"`
-}
-
-type Advisory struct {
-	ID   string `json:"id"`
-	Link string `json:"link"`
-}
-
-type MatchDetails struct {
-	Matcher    string      `json:"matcher"`
-	SearchedBy interface{} `json:"searchedBy"`
-	Found      interface{} `json:"found"`
-}
-
-type SearchedByData struct {
-	distro       Distro      `json:"distro"`
-	namespace    string      `json:"namespace"`
-	package_data PackageData `json:"packsge"`
-}
-
-type Distro struct {
-	distro_type    string `json:"type"`
-	distro_version string `json:"version"`
-}
-
-type PackageData struct {
-	name    string `json:"name"`
-	version string `json:"version"`
-}
-
-type Package struct {
-	Name      string      `json:"name"`
-	Version   string      `json:"version"`
-	Type      Type        `json:"type"`
-	Locations []Location  `json:"locations"`
-	Language  Language    `json:"language"`
-	Licenses  []string    `json:"licenses"`
-	CPEs      []string    `json:"cpes"`
-	PURL      string      `json:"purl"`
-	Metadata  interface{} `json:"metadata"`
-}
-
-type Type string
-
-const (
-	// the full set of supported packages
-	UnknownPkg       Type = "UnknownPackage"
-	ApkPkg           Type = "apk"
-	GemPkg           Type = "gem"
-	DebPkg           Type = "deb"
-	RpmPkg           Type = "rpm"
-	NpmPkg           Type = "npm"
-	PythonPkg        Type = "python"
-	JavaPkg          Type = "java-archive"
-	JenkinsPluginPkg Type = "jenkins-plugin"
-	GoModulePkg      Type = "go-module"
-	RustPkg          Type = "rust-crate"
-	KbPkg            Type = "msrc-kb"
-)
-
-type Location struct {
-	RealPath     string    `json:"path"`              // The path where all path ancestors have no hardlinks / symlinks
-	VirtualPath  string    `json:"-"`                 // The path to the file which may or may not have hardlinks / symlinks
-	FileSystemID string    `json:"layerID,omitempty"` // An ID representing the filesystem. For container images this is a layer digest, directories or root filesystem this is blank.
-	ref          Reference // The file reference relative to the stereoscope.FileCatalog that has more information about this location.
-}
-
-// ID is used for file tree manipulation to uniquely identify tree nodes.
-type ID uint64
-
-// Path represents a file path
-type Path string
-
-// Reference represents a unique file. This is useful when path is not good enough (i.e. you have the same file path for two files in two different container image layers, and you need to be able to distinguish them apart)
-type Reference struct {
-	id       ID
-	RealPath Path // file path with NO symlinks or hardlinks in constituent paths
-}
-
-type Language string
-
-type source struct {
-	Type   string      `json:"type"`
-	Target interface{} `json:"target"`
-}
-
-type distribution struct {
-	Name    string `json:"name"`    // Name of the Linux distribution
-	Version string `json:"version"` // Version of the Linux distribution (major or major.minor version)
-	IDLike  string `json:"idLike"`  // the ID_LIKE field found within the /etc/os-release file
-}
-
-type descriptor struct {
-	Name                  string      `json:"name"`
-	Version               string      `json:"version"`
-	Configuration         interface{} `json:"configuration,omitempty"`
-	VulnerabilityDbStatus interface{} `json:"db,omitempty"`
-}
-
-type TargetMapData struct {
-	map_trget_data map[string]TargetData
-}
-
-type TargetData struct {
-	UserInput      string          `json:"userInput"`
-	ImageID        string          `json:"imageID"`
-	ManifestDigest string          `json:"manifestDigest"`
-	MediaType      string          `json:"mediaType"`
-	Tags           []string        `json:"tags"`
-	ImageSize      uint64          `json:"imageSize"`
-	Layers         []AnchoreLayers `json:"layers"`
-	Manifest       string          `json:"manifest"`
-	Config         string          `json:"config"`
-	RepoDigests    []string        `json:"repoDigests"`
-}
-
-type AnchoreLayers struct {
-	MediaType string `json:"mediaType"`
-	Digest    string `json:"digest"`
-	Size      uint64 `json:"size"`
 }
 
 func copyFileToOtherPath(src, dst string) error {
@@ -395,9 +229,9 @@ func copyFileData(anchoreConfigPath string) error {
 	return err
 }
 
-func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*JSONReport, error) {
+func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
-	vuln_anchore_report := &JSONReport{}
+	vuln_anchore_report := &models.Document{}
 	var cmd *exec.Cmd
 	var imageID string
 
@@ -476,7 +310,7 @@ func convertToPkgFiles(fileList *[]string) *cs.PkgFiles {
 	return &pkgFiles
 }
 
-func GetPackagesInLayer(layer string, anchore_vuln_struct *JSONReport, packageManager PackageHandler) cs.LinuxPkgs {
+func GetPackagesInLayer(layer string, anchore_vuln_struct *models.Document, packageManager PackageHandler) cs.LinuxPkgs {
 
 	packages := make(cs.LinuxPkgs, 0)
 	featureToFileList := make(map[string]*cs.PkgFiles)
@@ -540,7 +374,7 @@ func GetPackagesInLayer(layer string, anchore_vuln_struct *JSONReport, packageMa
 	return packages
 }
 
-func AnchoreStructConversion(anchore_vuln_struct *JSONReport) (*cs.LayersList, error) {
+func AnchoreStructConversion(anchore_vuln_struct *models.Document) (*cs.LayersList, error) {
 	layersList := make(cs.LayersList, 0)
 
 	if anchore_vuln_struct.Source != nil {

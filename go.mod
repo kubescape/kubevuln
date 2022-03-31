@@ -3,7 +3,7 @@ module ca-vuln-scan
 go 1.15
 
 require (
-	github.com/anchore/grype v0.34.5
+	github.com/anchore/grype v0.34.7
 	github.com/armosec/armoapi-go v0.0.63
 	github.com/armosec/cluster-container-scanner-api v0.0.26
 	github.com/armosec/logger-go v0.0.4
