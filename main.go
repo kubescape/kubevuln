@@ -12,6 +12,7 @@ import (
 
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/armosec/utils-k8s-go/probes"
 	"github.com/golang/glog"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -132,6 +133,8 @@ func taskChannelHandler(taskChan <-chan taskData) {
 func main() {
 	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
+	isReadinessReady := false
+	go probes.InitReadinessV1(&isReadinessReady)
 
 	displayBuildTag()
 
@@ -147,6 +150,8 @@ func main() {
 	go process_request.HandleAnchoreDBUpdate(DBCommandURI)
 	http.HandleFunc(scanURI, scanImageHandler)
 	http.HandleFunc(DBCommandURI, commandDBHandler)
+
+	isReadinessReady = true
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }

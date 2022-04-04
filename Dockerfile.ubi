@@ -9,7 +9,7 @@ WORKDIR /etc
 RUN mkdir -p vuln-scan
 WORKDIR /etc/vuln-scan
 RUN mkdir -m a=rwx anchore-resources
-COPY ./anchore-resources/grype-cmd ./anchore-resources/
+COPY ./grype-versioning/grype-binaries/grype-cmd ./anchore-resources/
 # COPY ./k8s-ca-vuln-scan .
 WORKDIR /etc/vuln-scan/anchore-resources
 RUN mkdir -m a=rwx .grype
