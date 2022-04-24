@@ -1,0 +1,95 @@
+name: build
+
+on:
+  push:
+    branches: [ master ]
+jobs:
+  test:
+    name: Create cross-platform release build, tag and upload binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+
+      - name: Test pkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go test -v ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go build -v ./...
+  tag:
+    name: Create tag
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create a tag
+        id: create_tag
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v0.0.${{ github.run_number }}
+          release_name: Release v0.0.${{ github.run_number }}
+          draft: false
+          prerelease: false
+  
+      
+  #     - name: Upload release binaries
+  #       id: upload-release-asset
+  #       uses: actions/upload-release-asset@v1
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         upload_url: ${{ needs.once.outputs.upload_url }}
+  #         asset_path: build/http_request
+  #         asset_name: http_request
+  #         asset_content_type: application/octet-stream
+
+  build-docker:
+    name: Build docker container, tag and upload to registry
+    needs: tag
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set image version
+        id: image-version
+        run: echo '::set-output name=IMAGE_VERSION::v0.0.${{ github.run_number }}'
+
+      - name: Set image name
+        id: image-name
+        run: echo '::set-output name=IMAGE_NAME::quay.io/${{ github.repository_owner }}/images-vulnerabilities-scan'
+
+      - name: Build the Docker image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }}
+      
+      - name: Re-Tag Image to latest
+        run: docker tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      
+      - name: Login to Quay.io
+        env: # Or as an environment variable
+          QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+          QUAY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+        run: docker login -u="${QUAY_USERNAME}" -p="${QUAY_PASSWORD}" quay.io
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
+          docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+       
