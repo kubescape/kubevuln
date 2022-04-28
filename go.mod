@@ -1,6 +1,6 @@
 module ca-vuln-scan
 
-go 1.17
+go 1.18
 
 require (
 	github.com/anchore/grype v0.35.0
