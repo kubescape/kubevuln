@@ -13,7 +13,7 @@ clioptions:
     verbosity: 0
 db:
   auto-update: false
-  cache-dir: "/etc/vuln-scan/anchore-resources/db"
+  cache-dir: "/home/armo/anchore-resources/db"
   update-url: "https://toolbox-data.anchore.io/grype/databases/listing.json"
   validatebyhashonstart: false
 dev:
