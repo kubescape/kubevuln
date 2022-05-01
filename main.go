@@ -42,6 +42,12 @@ func startScanImage(scanCmdInterface interface{}) (interface{}, error) {
 	return nil, nil
 }
 
+func serverReadyHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodHead {
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
 func commandDBHandler(w http.ResponseWriter, req *http.Request) {
 
 	var err error
@@ -142,14 +148,16 @@ func main() {
 
 	scanURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.WebsocketScanCommandPath
 	DBCommandURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.DBCommandPath
+	ServerReadyURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.ServerReady
 
 	log.Printf("uri %v", scanURI)
 
 	taskChan = make(chan taskData, 100)
 	go taskChannelHandler(taskChan)
-	go process_request.HandleAnchoreDBUpdate(DBCommandURI)
+	go process_request.HandleAnchoreDBUpdate(DBCommandURI, ServerReadyURI)
 	http.HandleFunc(scanURI, scanImageHandler)
 	http.HandleFunc(DBCommandURI, commandDBHandler)
+	http.HandleFunc(ServerReadyURI, serverReadyHandler)
 
 	isReadinessReady = true
 	log.Fatal(http.ListenAndServe(":8080", nil))

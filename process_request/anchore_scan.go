@@ -502,12 +502,37 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 	return LayersVulnsList, nil
 }
 
-func HandleAnchoreDBUpdate(uri string) {
+func HandleAnchoreDBUpdate(uri, serverReady string) {
 
 	DBCommands := make(map[string]interface{})
 	update_wait_time, err := strconv.Atoi(os.Getenv("DB_UPDATE_TIME_IN_MINUTES"))
 	if err != nil {
 		update_wait_time = DEFAULT_DB_UPDATE_TIME_IN_MINUTES
+	}
+
+	for {
+		fullURL := "http://localhost:8080" + serverReady
+		req, err := http.NewRequest("HEAD", fullURL, nil)
+		if err != nil {
+			fmt.Println("fail create http request with err:", err)
+		}
+		fmt.Println("check if vuln scan server ready")
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println("server ready: response create err:", err)
+		}
+		if resp != nil {
+			fmt.Println("server ready: response Status:", resp.Status)
+			resp.Body.Close()
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			fmt.Println("server is ready")
+			break
+		} else {
+			fmt.Println("server is not yet ready, wait 5 secs before check again")
+			time.Sleep(time.Second * 5)
+		}
 	}
 
 	for {
