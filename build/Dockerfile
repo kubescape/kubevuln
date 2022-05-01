@@ -10,6 +10,7 @@ WORKDIR /work
 ADD . .
 
 RUN apk add git
+RUN git submodule update --recursive --init 
 
 WORKDIR /work
 RUN go build -o build/vuln
