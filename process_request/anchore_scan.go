@@ -16,10 +16,12 @@ import (
 	"syscall"
 	"time"
 
+	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 
 	// cs "github.com/armosec/capacketsgo/containerscan"
@@ -374,7 +376,22 @@ func GetPackagesInLayer(layer string, anchore_vuln_struct *models.Document, pack
 	return packages
 }
 
-func AnchoreStructConversion(anchore_vuln_struct *models.Document) (*cs.LayersList, error) {
+func getCVEExeceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) ([]armotypes.VulnerabilityExceptionPolicy, bool) {
+	var l []armotypes.VulnerabilityExceptionPolicy
+
+	for i := range srcCVEList {
+		if srcCVEList[i].PortalBase.Name == CVEName {
+			l = append(l, srcCVEList[i])
+		}
+	}
+
+	if len(l) > 0 {
+		return l, true
+	}
+	return nil, false
+}
+
+func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
 	layersList := make(cs.LayersList, 0)
 
 	if anchore_vuln_struct.Source != nil {
@@ -422,6 +439,9 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document) (*cs.LayersLi
 								},
 							},
 						}
+						if cveExceptions, ok := getCVEExeceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, vuln.Name); ok {
+							vuln.ExceptionApplied = cveExceptions
+						}
 						scanRes.Vulnerabilities = append(scanRes.Vulnerabilities, vuln)
 						break
 					}
@@ -435,6 +455,32 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document) (*cs.LayersLi
 	return &layersList, nil
 }
 
+func GetCVEEceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+
+	backendURL := os.Getenv("CA_DASHBOARD_BACKEND")
+	if backendURL == "" {
+		return nil, fmt.Errorf("GetCVEEceptions: failed, you must provide the backend URL in the armor backend config map")
+	}
+	designator := armotypes.PortalDesignator{
+		DesignatorType: armotypes.DesignatorAttribute,
+		Attributes: map[string]string{
+			"customerGUID":  os.Getenv("CA_CUSTOMER_GUID"),
+			"cluster":       wlidpkg.GetClusterFromWlid(scanCmd.Wlid),
+			"namespace":     wlidpkg.GetNamespaceFromWlid(scanCmd.Wlid),
+			"kind":          wlidpkg.GetKindFromWlid(scanCmd.Wlid),
+			"name":          wlidpkg.GetNameFromWlid(scanCmd.Wlid),
+			"containerName": scanCmd.ContainerName,
+		},
+	}
+
+	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, os.Getenv("CA_CUSTOMER_GUID"), &designator)
+	if err != nil {
+		return nil, err
+	}
+
+	return vulnExceptionList, nil
+}
+
 func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 
 	anchore_vuln_struct, err := GetAnchoreScanRes(scanCmd)
@@ -442,7 +488,12 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 		return nil, err
 	}
 
-	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct)
+	execeptions, err := GetCVEEceptions(scanCmd)
+	if err != nil {
+		fmt.Println("no cve exceptions found")
+	}
+
+	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, execeptions)
 	if err != nil {
 		return nil, err
 	}
