@@ -10,7 +10,6 @@ WORKDIR /work
 ADD . .
 
 RUN apk add git
-RUN git submodule update --recursive --init 
 
 WORKDIR /work
 RUN go build -o build/vuln
@@ -18,7 +17,7 @@ RUN go build -o build/vuln
 RUN mkdir -p vuln-scan
 WORKDIR /work/vuln-scan
 RUN mkdir -m a=rwx anchore-resources
-COPY ./grype-versioning/grype-binaries/grype-cmd ./anchore-resources/
+COPY ./grype-binaries/grype-cmd ./anchore-resources/
 WORKDIR /work/vuln-scan/anchore-resources
 RUN mkdir -m a=rwx .grype
 COPY anchore-resources/.grype/config.yaml .grype/
