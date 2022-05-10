@@ -526,7 +526,7 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			fmt.Println("server ready: response Status:", resp.Status)
 			resp.Body.Close()
 		}
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			fmt.Println("server is ready")
 			break
 		} else {
