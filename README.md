@@ -19,3 +19,8 @@
 
 git config --global url."ssh://git@github.com/armosec/".insteadOf "https://github.com/armosec/"
 go env -w GOPRIVATE=github.com/armosec
+
+to test locally:
+```
+python3 runmock.py
+```
