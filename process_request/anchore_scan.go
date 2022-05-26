@@ -455,11 +455,11 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerability
 	return &layersList, nil
 }
 
-func GetCVEEceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 
 	backendURL := os.Getenv("CA_DASHBOARD_BACKEND")
 	if backendURL == "" {
-		return nil, fmt.Errorf("GetCVEEceptions: failed, you must provide the backend URL in the armor backend config map")
+		return nil, fmt.Errorf("GetCVEExceptions: failed, you must provide the backend URL in the armor backend config map")
 	}
 	designator := armotypes.PortalDesignator{
 		DesignatorType: armotypes.DesignatorAttribute,
@@ -488,12 +488,12 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 		return nil, err
 	}
 
-	execeptions, err := GetCVEEceptions(scanCmd)
+	exceptions, err := GetCVEExceptions(scanCmd)
 	if err != nil {
 		fmt.Println("no cve exceptions found")
 	}
 
-	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, execeptions)
+	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, exceptions)
 	if err != nil {
 		return nil, err
 	}
