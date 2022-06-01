@@ -93,8 +93,16 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 			Attributes: map[string]string{},
 		},
 	}
-	if val, ok := scanCmd.Args["registryName"]; ok {
-		final_report.Designators.Attributes["registryName"] = val.(string)
+	if val, ok := scanCmd.Args[armotypes.AttributeRegistryName]; ok {
+		final_report.Designators.Attributes[armotypes.AttributeRegistryName] = val.(string)
+	}
+
+	if val, ok := scanCmd.Args[armotypes.AttributeRepository]; ok {
+		final_report.Designators.Attributes[armotypes.AttributeRepository] = val.(string)
+	}
+
+	if val, ok := scanCmd.Args[armotypes.AttributeTag]; ok {
+		final_report.Designators.Attributes[armotypes.AttributeTag] = val.(string)
 	}
 
 	log.Printf("session: %v\n===\n", final_report.Session)
