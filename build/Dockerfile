@@ -11,18 +11,20 @@ ADD . .
 
 RUN apk add git
 
-WORKDIR /work
 RUN go build -o build/vuln
 
-RUN mkdir -p vuln-scan
+RUN mkdir /work/vuln-scan
+
+RUN git clone https://github.com/anchore/grype.git --branch v0.39.0 --depth 1
+RUN cd grype && go build -o /work/vuln-scan/anchore-resources/grype-cmd
+
 WORKDIR /work/vuln-scan
-RUN mkdir -m a=rwx anchore-resources
-COPY ./grype-binaries/grype-cmd ./anchore-resources/
+
 WORKDIR /work/vuln-scan/anchore-resources
 RUN mkdir -m a=rwx .grype
 COPY anchore-resources/.grype/config.yaml .grype/
-RUN chmod 444 .grype/config.yaml
-RUN chmod 111 grype-cmd
+RUN chmod 777 .grype/config.yaml
+RUN chmod 777 grype-cmd
 
 FROM alpine
 
@@ -32,5 +34,6 @@ WORKDIR /home/armo/
 
 COPY --from=builder /work/vuln-scan/ ./
 COPY --from=builder /work/build/vuln /usr/bin/vuln
+
 
 ENTRYPOINT ["vuln"]
