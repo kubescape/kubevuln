@@ -21,10 +21,12 @@ RUN cd grype && go build -o /work/vuln-scan/anchore-resources/grype-cmd
 WORKDIR /work/vuln-scan
 
 WORKDIR /work/vuln-scan/anchore-resources
+
 RUN mkdir -m a=rwx .grype
 COPY anchore-resources/.grype/config.yaml .grype/
 RUN chmod 777 .grype/config.yaml
 RUN chmod 777 grype-cmd
+RUN chmod 777 -R /work/vuln-scan/anchore-resources
 
 FROM alpine
 
