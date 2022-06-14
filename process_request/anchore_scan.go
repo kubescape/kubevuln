@@ -30,6 +30,7 @@ import (
 )
 
 const DEFAULT_DB_UPDATE_TIME_IN_MINUTES = 60 * 6
+const DB_IS_READY = "db is ready"
 
 var anchoreBinaryName = "/grype-cmd"
 var anchoreDirectoryName = "/anchore-resources"
@@ -569,6 +570,26 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 
 }
 
+func informDatabaseIsReadyToUse() {
+	ServerReadyURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.ServerReady
+	fullURL := "http://localhost:8080" + ServerReadyURI
+	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(DB_IS_READY)))
+	if err != nil {
+		fmt.Println("fail create http request with err:", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("response create err:", err)
+	}
+	if resp != nil {
+		fmt.Println("database of server ready: response Status:", resp.Status)
+		resp.Body.Close()
+	}
+}
+
 func StartUpdateDB(payload interface{}) (interface{}, error) {
 	var out bytes.Buffer
 	var out_err bytes.Buffer
@@ -603,5 +624,6 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 	}
 
 	log.Printf("DB updated successfully")
+	informDatabaseIsReadyToUse()
 	return nil, nil
 }

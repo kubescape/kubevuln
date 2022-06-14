@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -28,6 +29,7 @@ type taskData struct {
 }
 
 var taskChan chan taskData
+var isReadinessReady bool = false
 
 func startScanImage(scanCmdInterface interface{}) (interface{}, error) {
 	scanCmd := scanCmdInterface.(*wssc.WebsocketScanCommand)
@@ -45,6 +47,20 @@ func startScanImage(scanCmdInterface interface{}) (interface{}, error) {
 func serverReadyHandler(w http.ResponseWriter, req *http.Request) {
 	if req.Method == http.MethodHead {
 		w.WriteHeader(http.StatusAccepted)
+	} else if req.Method == http.MethodPost {
+		bytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Printf("serverReadyHandler: fail decode post req, error %v", err)
+			return
+		}
+		data := string(bytes)
+		if data == process_request.DB_IS_READY {
+			isReadinessReady = true
+			w.WriteHeader(http.StatusAccepted)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+		}
 	}
 }
 
@@ -57,7 +73,7 @@ func commandDBHandler(w http.ResponseWriter, req *http.Request) {
 		err = json.NewDecoder(req.Body).Decode(&innerDBCommand)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			log.Printf("fail decode json from web socket, error %v", err)
+			log.Printf("commandDBHandler: fail decode json, error %v", err)
 			return
 		}
 		for op, data := range innerDBCommand.Commands {
@@ -139,7 +155,6 @@ func taskChannelHandler(taskChan <-chan taskData) {
 func main() {
 	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
-	isReadinessReady := false
 	go probes.InitReadinessV1(&isReadinessReady)
 
 	displayBuildTag()
@@ -159,9 +174,7 @@ func main() {
 	http.HandleFunc(DBCommandURI, commandDBHandler)
 	http.HandleFunc(ServerReadyURI, serverReadyHandler)
 
-	isReadinessReady = true
 	log.Fatal(http.ListenAndServe(":8080", nil))
-
 }
 
 func displayBuildTag() {
