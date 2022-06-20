@@ -105,7 +105,7 @@ func testSplit(chunkSize int, vulns []cs.CommonContainerVulnerabilityResult) spl
 		defer testWg.Done()
 		for v := range chunksChan {
 			results.numOfChunks++
-			vSize := getJsonSize(v)
+			vSize := jsonSize(v)
 			vLen := len(v)
 			results.totalReceived += vLen
 			if results.maxChunkSize < vSize {
