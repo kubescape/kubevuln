@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -145,6 +146,28 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 	anchoreDirectoryPath = dir + anchoreDirectoryName
 }
 
+func AllowHTTPScansToAnchoreConfiguratioFile(configFilePath string) error {
+	var App Application
+
+	bytes, err := ioutil.ReadFile(configFilePath)
+	if err != nil {
+		return err
+	}
+	err = yaml.Unmarshal(bytes, &App)
+	if err != nil {
+		return err
+	}
+
+	App.Registry.InsecureUseHTTP = true
+	config_yaml_data, err := yaml.Marshal(&App)
+	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func AddCredentialsToAnchoreConfiguratioFile(configFilePath string, cred types.AuthConfig) error {
 	var App Application
 
@@ -234,10 +257,6 @@ func copyFileData(anchoreConfigPath string) error {
 
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
-	vuln_anchore_report := &models.Document{}
-	var cmd *exec.Cmd
-	var imageID string
-
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
 	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
 	err := copyFileData(anchoreConfigPath)
@@ -246,6 +265,60 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 		return nil, err
 	}
 
+	for i := 0; i != len(scanCmd.Credentialslist); i++ {
+		err := AddCredentialsToAnchoreConfiguratioFile(anchoreConfigPath, scanCmd.Credentialslist[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	cmd, imageID, out, out_err := executeAnchoreCommand(scanCmd, anchoreConfigPath)
+
+	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
+	err = cmd.Run()
+	if err != nil {
+
+		err_str, err_anchore_str, exit_code := anchoreErrorHandler(out, out_err, err)
+		if strings.Contains(err_anchore_str, "server gave HTTP response to HTTPS client") || strings.Contains(err_str, "server gave HTTP response to HTTPS client") {
+			log.Printf("trying to scan image %s via HTTP and not HTTPS", imageID)
+			if err = AllowHTTPScansToAnchoreConfiguratioFile(anchoreConfigPath); err == nil {
+				cmd, imageID, out, out_err = executeAnchoreCommand(scanCmd, anchoreConfigPath)
+				err = cmd.Run()
+				err_str, err_anchore_str, exit_code = anchoreErrorHandler(out, out_err, err)
+				if err == nil {
+					return createAnchoreReport(anchoreConfigPath, out, out_err)
+				}
+
+			}
+		}
+		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v\n troubleshooting in the following link: https://hub.armo.cloud/docs/limitations", imageID, exit_code, err, err_anchore_str)
+		err = fmt.Errorf(err_str)
+		os.Remove(anchoreConfigPath)
+		return nil, err
+	}
+
+	return createAnchoreReport(anchoreConfigPath, out, out_err)
+}
+
+func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *bytes.Buffer) (*models.Document, error) {
+	vuln_anchore_report := &models.Document{}
+	err := os.Remove(anchoreConfigPath)
+	if err != nil {
+		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
+		return nil, err
+	}
+
+	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
+	if err != nil {
+		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s \n", err.Error(), string(out_err.Bytes()[:]))
+		return nil, err
+	}
+	return vuln_anchore_report, nil
+}
+
+func executeAnchoreCommand(scanCmd *wssc.WebsocketScanCommand, anchoreConfigPath string) (*exec.Cmd, string, *bytes.Buffer, *bytes.Buffer) {
+	var cmd *exec.Cmd
+	var imageID string
 	if scanCmd.ImageHash != "" {
 		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json", "-c", anchoreConfigPath)
 		imageID = scanCmd.ImageHash
@@ -257,49 +330,26 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 	var out_err bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
+	return cmd, imageID, &out, &out_err
+}
 
-	for i := 0; i != len(scanCmd.Credentialslist); i++ {
-		err := AddCredentialsToAnchoreConfiguratioFile(anchoreConfigPath, scanCmd.Credentialslist[i])
-		if err != nil {
-			return nil, err
+func anchoreErrorHandler(out *bytes.Buffer, out_err *bytes.Buffer, err error) (string, string, string) {
+	var err_str string
+	var err_anchore_str string
+	if len(out.Bytes()) != 0 {
+		err_anchore_str = string(out.Bytes()[:])
+	} else if len(out_err.Bytes()) != 0 {
+		err_anchore_str = string(out_err.Bytes()[:])
+	} else {
+		err_anchore_str = "There is no verbose error from vuln scanner"
+	}
+	exit_code := "unknown"
+	if werr, ok := err.(*exec.ExitError); ok {
+		if s := werr.Sys().(syscall.WaitStatus); s != 0 {
+			exit_code = fmt.Sprintf("%d", s)
 		}
 	}
-
-	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
-	err = cmd.Run()
-	if err != nil {
-		var err_str string
-		var err_anchore_str string
-		if len(out.Bytes()) != 0 {
-			err_anchore_str = string(out.Bytes()[:])
-		} else if len(out_err.Bytes()) != 0 {
-			err_anchore_str = string(out_err.Bytes()[:])
-		} else {
-			err_anchore_str = "There is no verbose error from vuln scanner"
-		}
-		exit_code := "unknown"
-		if werr, ok := err.(*exec.ExitError); ok {
-			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
-				exit_code = fmt.Sprintf("%d", s)
-			}
-		}
-		err_str = fmt.Sprintf("failed vuln scanner for image: %s exit code %s :original error:: %v\n%v\n troubleshooting in the following link: https://hub.armo.cloud/docs/limitations", imageID, exit_code, err, err_anchore_str)
-		err = fmt.Errorf(err_str)
-		os.Remove(anchoreConfigPath)
-		return nil, err
-	}
-
-	err = os.Remove(anchoreConfigPath)
-	if err != nil {
-		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
-	}
-
-	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
-	if err != nil {
-		err = fmt.Errorf("json unmarshall failed with an error:" + err.Error() + "\n vuln scanner error:" + string(out_err.Bytes()[:]) + "\n")
-		return nil, err
-	}
-	return vuln_anchore_report, nil
+	return err_str, err_anchore_str, exit_code
 }
 
 func convertToPkgFiles(fileList *[]string) *cs.PkgFiles {
