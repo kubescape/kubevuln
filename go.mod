@@ -10,6 +10,8 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.7
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/golang/glog v1.0.0
+	github.com/hashicorp/go-multierror v1.1.1
+	github.com/stretchr/testify v1.7.1
 	github.com/xyproto/randomstring v0.0.0-20220311122621-4964ec363205
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 	k8s.io/utils v0.0.0-20220210201930-3a6ce19ff2f9
@@ -32,6 +34,7 @@ require (
 	github.com/containerd/containerd v1.5.10 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.10.1 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/cli v20.10.12+incompatible // indirect
 	github.com/docker/distribution v2.8.0+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.4 // indirect
@@ -52,7 +55,6 @@ require (
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.4.0 // indirect
 	github.com/jinzhu/copier v0.3.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -74,6 +76,7 @@ require (
 	github.com/pelletier/go-toml v1.9.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/scylladb/go-set v1.0.3-0.20200225121959-cc7b2070d91e // indirect

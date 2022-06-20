@@ -8,10 +8,15 @@ import (
 	"io"
 	"io/fs"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
 
 	// "ca-vuln-scan/catypes"
 
@@ -74,6 +79,8 @@ func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) 
 	return image, nil
 }
 
+const maxBodySize int = 30000
+
 func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
 	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
@@ -106,31 +113,119 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	}
 
 	log.Printf("session: %v\n===\n", final_report.Session)
-	payload, err := json.Marshal(final_report)
-	if err != nil {
-		log.Printf("fail convert to json")
-		return err
+
+	//split vulnerabilities to chunks
+	chunksChan := make(chan []cs.CommonContainerVulnerabilityResult, 10)
+
+	vulnerabilities := final_report.ToFlatVulnerabilities()
+	totalVulnerabilities := len(vulnerabilities)
+	go func(vulnerabilities []cs.CommonContainerVulnerabilityResult, chunksChan chan<- []cs.CommonContainerVulnerabilityResult) {
+		splitWg := &sync.WaitGroup{}
+		split2Chunks(vulnerabilities, maxBodySize, chunksChan, splitWg)
+		splitWg.Wait()
+		//done splitting - close the chunks channel
+		close(chunksChan)
+	}(vulnerabilities, chunksChan)
+	//free memory
+	vulnerabilities = nil
+
+	//send report(s)
+	scanID := final_report.AsFNVHash()
+	sendWG := &sync.WaitGroup{}
+	errChan := make(chan error, 10)
+
+	//first post the summary report with the first vulnerabilities chunk
+	firstVulnerabilitiesChunk := <-chunksChan
+	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
+	postResultsAsGoroutine(&cs.ScanResultReportV1{
+		PartNum:         1,
+		LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
+		Summery:         final_report.Summarize(),
+		Vulnerabilities: firstVulnerabilitiesChunk,
+		ContainerScanID: scanID,
+		CustomerGUID:    final_report.CustomerGUID,
+		Timestamp:       final_report.Timestamp,
+		Designators:     final_report.Designators,
+		WLID:            final_report.WLID,
+		ContainerName:   final_report.ContainerName,
+	}, final_report.ImgTag, final_report.WLID, errChan, sendWG)
+	//free memory
+	firstVulnerabilitiesChunk = nil
+
+	//if not all vulnerabilities got into the first chunk
+	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
+		//post each vulnerabilities chunk in a different report
+		go func(scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int) {
+			chunksVulnerabilitiesCount := 0
+			partNum := 2
+			for vulnerabilities := range chunksChan {
+				chunksVulnerabilitiesCount += len(vulnerabilities)
+				postResultsAsGoroutine(&cs.ScanResultReportV1{
+					PartNum:         partNum,
+					LastPart:        chunksVulnerabilitiesCount == expectedVulnerabilitiesSum,
+					Vulnerabilities: vulnerabilities,
+					ContainerScanID: scanID,
+					CustomerGUID:    final_report.CustomerGUID,
+					Timestamp:       final_report.Timestamp,
+					Designators:     final_report.Designators,
+					WLID:            final_report.WLID,
+					ContainerName:   final_report.ContainerName,
+				}, final_report.ImgTag, final_report.WLID, errorChan, sendWG)
+				partNum++
+			}
+			sendWG.Wait()
+			//verify that all vulnerabilities were sent
+			if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
+				errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
+					" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
+			}
+			//done sending close the errors channel
+			close(errorChan)
+		}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount)
 	}
 
+	//collect send-report errors if occurred
+	var err error
+	for e := range errChan {
+		err = multierror.Append(err, e)
+	}
+	return err
+}
+
+func postResultsAsGoroutine(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+		defer wg.Done()
+		postResults(report, imagetag, wlid, errorChan)
+	}(report, imagetag, wlid, errorChan, wg)
+
+}
+func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error) {
+	payload, err := json.Marshal(report)
+	if err != nil {
+		log.Printf("fail convert to json")
+		errorChan <- err
+		return
+	}
 	if printPostJSON != "" {
 		log.Printf("printPostJSON:")
 		log.Printf("%v", string(payload))
 	}
-	resp, err := http.Post(eventRecieverURL+"/k8s/containerScan", "application/json", bytes.NewReader(payload))
+	resp, err := http.Post(eventRecieverURL+"/k8s/containerScanV1?CustomerGUID="+report.CustomerGUID, "application/json", bytes.NewReader(payload))
 	if err != nil {
-		log.Printf("fail posting to event reciever image %s wlid %s", imagetag, wlid)
-		return err
+		log.Printf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
+		errorChan <- err
+		return
 	}
-
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || 299 < resp.StatusCode {
-		log.Printf("clair post to event reciever failed with %d", resp.StatusCode)
-		return err
+		log.Printf("clair post to event receiver failed with %d", resp.StatusCode)
+		errorChan <- err
+		return
 	}
 	log.Printf("posting to event reciever image %s wlid %s finished successfully", imagetag, wlid)
-
-	return nil
 }
+
 func RemoveFile(filename string) {
 	err := os.Remove(filename)
 	if err != nil {
@@ -142,7 +237,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 	filteredResultsChan := make(chan []string)
 
 	/*
-		This code get list of execuatables that can be dangerous
+		This code get list of executables that can be dangerous
 	*/
 	if ociClient.endpoint != "" {
 		ociImage, err := ociClient.Image(scanCmd)
@@ -286,4 +381,65 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		report.SendStatus(sysreport.JobDone, true)
 	}
 	return result, nil
+}
+
+//split2Chunks - splits a slice to chunks of sub slices that do not exceed max bytes size
+//uses optimistic average size splitting to enhance performance
+//fits for long slices with elements with more or less the same size per element
+func split2Chunks[T any](slice []T, maxSize int, chunks chan<- []T, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func(slice []T, maxSize int, chunks chan<- []T, wg *sync.WaitGroup) {
+		defer wg.Done()
+		if len(slice) < 2 {
+			//cannot split if the slice is empty or has one element
+			chunks <- slice
+			return
+		}
+		//check slice size
+		jsonSize := getJsonSize(slice)
+		if jsonSize <= maxSize {
+			//slice size is smaller than max size no splitting needed
+			chunks <- slice
+			return
+		}
+		//slice is bigger than max size
+		//calculate the average size + 5% of a single element T
+		avgTSize := int(math.Round(float64(jsonSize) * 1.05 / float64(len(slice))))
+		//calculate the average number of elements that will not exceed max size
+		avgSliceSize := maxSize / avgTSize
+		last := len(slice)
+		if avgSliceSize >= last {
+			avgSliceSize = last / 2
+		} else if avgSliceSize < 1 {
+			avgSliceSize = 1
+		}
+
+		//split the slice to slices of avgSliceSize size
+		startIndex := 0
+		for i := avgSliceSize; i < last; i += avgSliceSize {
+			split2Chunks(slice[startIndex:i], maxSize, chunks, wg)
+			startIndex = i
+		}
+		//send the last part of the slice
+		split2Chunks(slice[startIndex:last], maxSize, chunks, wg)
+	}(slice, maxSize, chunks, wg)
+}
+
+//getJsonSize returns the size in bytes of the json encoding of i
+func getJsonSize(i interface{}) int {
+	counter := bytesCounter{}
+	enc := json.NewEncoder(&counter)
+	enc.Encode(i)
+	return counter.count
+}
+
+//bytesCounter - dummy io writer that just counts bytes without writing
+type bytesCounter struct {
+	count int
+}
+
+func (bc *bytesCounter) Write(p []byte) (n int, err error) {
+	pSize := len(p)
+	bc.count += pSize
+	return pSize, nil
 }
