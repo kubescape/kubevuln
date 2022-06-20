@@ -431,8 +431,10 @@ func getCVEExeceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityEx
 	var l []armotypes.VulnerabilityExceptionPolicy
 
 	for i := range srcCVEList {
-		if srcCVEList[i].PortalBase.Name == CVEName {
-			l = append(l, srcCVEList[i])
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
+				l = append(l, srcCVEList[i])
+			}
 		}
 	}
 
@@ -515,12 +517,12 @@ func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.Vulnerabi
 	designator := armotypes.PortalDesignator{
 		DesignatorType: armotypes.DesignatorAttribute,
 		Attributes: map[string]string{
-			"customerGUID":  os.Getenv("CA_CUSTOMER_GUID"),
-			"cluster":       wlidpkg.GetClusterFromWlid(scanCmd.Wlid),
-			"namespace":     wlidpkg.GetNamespaceFromWlid(scanCmd.Wlid),
-			"kind":          wlidpkg.GetKindFromWlid(scanCmd.Wlid),
-			"name":          wlidpkg.GetNameFromWlid(scanCmd.Wlid),
-			"containerName": scanCmd.ContainerName,
+			"customerGUID":        os.Getenv("CA_CUSTOMER_GUID"),
+			"scope.cluster":       wlidpkg.GetClusterFromWlid(scanCmd.Wlid),
+			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(scanCmd.Wlid),
+			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(scanCmd.Wlid)),
+			"scope.name":          wlidpkg.GetNameFromWlid(scanCmd.Wlid),
+			"scope.containerName": scanCmd.ContainerName,
 		},
 	}
 
@@ -541,7 +543,7 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 
 	exceptions, err := GetCVEExceptions(scanCmd)
 	if err != nil {
-		fmt.Println("no cve exceptions found")
+		log.Println(scanCmd.ImageTag + " no cve exceptions found")
 	}
 
 	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, exceptions)
