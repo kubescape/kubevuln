@@ -3,7 +3,6 @@ package process_request
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"os"
 	"sync"
 	"testing"
@@ -20,22 +19,26 @@ var _ = (func() interface{} {
 	return nil
 }())
 
-var vulnerabilitiesTestCase []cs.CommonContainerVulnerabilityResult
-var numOfVulnerabilities int
-
-func TestMain(m *testing.M) {
-	//load vulnerabilities test case
-	file, _ := ioutil.ReadFile("test_vulnerabilities.json")
-	vulnerabilitiesTestCase = []cs.CommonContainerVulnerabilityResult{}
-	err := json.Unmarshal([]byte(file), &vulnerabilitiesTestCase)
-	if err != nil {
-		log.Fatal("Could not read configuration", err)
-	}
-	numOfVulnerabilities = len(vulnerabilitiesTestCase)
-	m.Run()
+type splitResults struct {
+	totalReceived  int
+	numOfChunks    int
+	maxChunkSize   int
+	minChunkSize   int
+	maxChunkLength int
+	minChunkLength int
 }
 
 func TestSplit2Chunks(t *testing.T) {
+	//load vulnerabilities test case
+	file, _ := ioutil.ReadFile("test_vulnerabilities.json")
+	vulnerabilitiesTestCase := []cs.CommonContainerVulnerabilityResult{}
+	err := json.Unmarshal([]byte(file), &vulnerabilitiesTestCase)
+	if err != nil {
+		t.Error("Could not read configuration", err)
+
+	}
+	numOfVulnerabilities := len(vulnerabilitiesTestCase)
+
 	tests := map[int]splitResults{
 		//normal chunk size - expected splitting
 		30000: {totalReceived: numOfVulnerabilities,
@@ -89,15 +92,6 @@ func TestSplit2Chunks(t *testing.T) {
 
 	}
 
-}
-
-type splitResults struct {
-	totalReceived  int
-	numOfChunks    int
-	maxChunkSize   int
-	minChunkSize   int
-	maxChunkLength int
-	minChunkLength int
 }
 
 func testSplit(chunkSize int, vulns []cs.CommonContainerVulnerabilityResult) splitResults {
