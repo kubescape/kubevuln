@@ -166,8 +166,8 @@ github.com/armosec/cluster-container-scanner-api v0.0.30 h1:5efZerCs1u5HySVPfrRt
 github.com/armosec/cluster-container-scanner-api v0.0.30/go.mod h1:7mplPRDcyASxFMwfIXHk3CajOaIFoFwTUoTRNwV3Jwg=
 github.com/armosec/logger-go v0.0.6 h1:V8iMCC/XQ7Af88F/k3uWuDQskgLHUY5MXI5L1fMoPU8=
 github.com/armosec/logger-go v0.0.6/go.mod h1:ZnocpQc+z6phNJSLVfXgHcOW4rg4NCO70ApmF0Y7W6w=
-github.com/armosec/utils-go v0.0.4 h1:BUoFY4dps+R11i6rRlYCZ43mHH7P01AzWT/qDum4Rhw=
-github.com/armosec/utils-go v0.0.4/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
+github.com/armosec/utils-go v0.0.5 h1:+pfZirWrOvfqvVYlL7OG1wMQD4T4YMwC78zzosB+mlQ=
+github.com/armosec/utils-go v0.0.5/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
 github.com/armosec/utils-k8s-go v0.0.7 h1:g68GQ9Vm5LgVp/czcu2ZV1igm2azYLf9vNapyoXBfYI=
 github.com/armosec/utils-k8s-go v0.0.7/go.mod h1:YFdWi3rEQQLbN6mZO21TSdoda8kGQYRV4rs5CRp8Kjs=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=
@@ -580,8 +580,8 @@ github.com/google/go-cmp v0.5.3/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/
 github.com/google/go-cmp v0.5.4/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.5/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
-github.com/google/go-cmp v0.5.7 h1:81/ik6ipDQS2aGcBfIN5dHDB36BwrStyeAQquSYCV4o=
-github.com/google/go-cmp v0.5.7/go.mod h1:n+brtR0CgQNWTVd5ZUFpTBC8YFBDLK/h/bpaJ8/DtOE=
+github.com/google/go-cmp v0.5.8 h1:e6P7q2lk1O+qJJb4BtCQXlK8vWEO8V1ZeuEdJNOqZyg=
+github.com/google/go-cmp v0.5.8/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/google/go-containerregistry v0.7.0/go.mod h1:2zaoelrL0d08gGbpdP3LqyUuBmhWbpD6IOe2s9nLS2k=
 github.com/google/go-containerregistry v0.8.1-0.20220209165246-a44adc326839 h1:7PunQZxMao2q43If8gKj1JFRzapmhgny9NWwXY4PGa4=
 github.com/google/go-containerregistry v0.8.1-0.20220209165246-a44adc326839/go.mod h1:cwx3SjrH84Rh9VFJSIhPh43ovyOp3DCWgY3h8nWmdGQ=

@@ -1,0 +1,2246 @@
+{
+    "designators": {
+        "designatorType": "",
+        "attributes": {}
+    },
+    "customerGUID": "e57ec5a0-695f-4777-8366-1c64fada00a0",
+    "imageTag": "docker.io/kibana:8.2.2",
+    "imageHash": "",
+    "wlid": "wlid://cluster-fdsfd/namespace-fdsfdfd/deployment-nmnmnuid",
+    "containerName": "",
+    "timestamp": 1655828821,
+    "layers": [
+        {
+            "layerHash": "sha256:e265835b28ac16782ef429b44427c7a72cdefc642794515d78a390a72a2eab42",
+            "parentLayerHash": "",
+            "vulnerabilities": [
+                {
+                    "name": "CVE-2016-2781",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "coreutils",
+                    "packageVersion": "8.30-3ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2016-2781",
+                    "description": "chroot in GNU coreutils, when used with --userspec, allows local users to escape to the parent session via a crafted TIOCSTI ioctl call, which pushes characters to the terminal's input buffer.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-16156",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "perl-base",
+                    "packageVersion": "5.30.0-9ubuntu0.2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2020-16156",
+                    "description": "CPAN 2.28 allows Signature Verification Bypass.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncurses6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncursesw6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libtinfo6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-base",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-bin",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-43618",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libgmp10",
+                    "packageVersion": "2:6.2.0+dfsg-4",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-43618",
+                    "description": "GNU Multiple Precision Arithmetic Library (GMP) through 6.2.1 has an mpz/inp_raw.c integer overflow and resultant buffer overflow via crafted input, leading to a segmentation fault on 32-bit platforms.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "e2fsprogs",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libcom-err2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libext2fs2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libss2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "logsave",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1586",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libpcre2-8-0",
+                    "packageVersion": "10.34-7",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1586",
+                    "description": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the compile_xclass_matchingpath() function of the pcre2_jit_compile.c file. This involves a unicode property matching issue in JIT-compiled regular expressions. The issue occurs because the character was not fully read in case-less matching within JIT.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1587",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libpcre2-8-0",
+                    "packageVersion": "10.34-7",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1587",
+                    "description": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the get_recurse_data_length() function of the pcre2_jit_compile.c file. This issue affects recursions in JIT-compiled regular expressions caused by duplicate data transfers.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1664",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "dpkg",
+                    "packageVersion": "1.19.7ubuntu3",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1664",
+                    "description": "Dpkg::Source::Archive in dpkg, the Debian package management system, before version 1.21.8, 1.20.10, 1.19.8, 1.18.26 is prone to a directory traversal vulnerability. When extracting untrusted source packages in v2 and v3 source package formats that include a debian.tar, the in-place extraction can lead to directory traversal situations on specially crafted orig.tar and debian.tar tarballs.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.19.7ubuntu3.2"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncurses6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncursesw6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libtinfo6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-base",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-bin",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                }
+            ],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:ae34a4cc9a4e0255b5d3379bbe5c8009c99b1b2da9bd20876f73b864d379afdf",
+            "parentLayerHash": "sha256:e265835b28ac16782ef429b44427c7a72cdefc642794515d78a390a72a2eab42",
+            "vulnerabilities": [
+                {
+                    "name": "CVE-2013-4235",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "login",
+                    "packageVersion": "1:4.8.1-1ubuntu5.20.04.2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2013-4235",
+                    "description": "shadow: TOCTOU (time-of-check time-of-use) race condition when copying and removing directory trees",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2013-4235",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "passwd",
+                    "packageVersion": "1:4.8.1-1ubuntu5.20.04.2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2013-4235",
+                    "description": "shadow: TOCTOU (time-of-check time-of-use) race condition when copying and removing directory trees",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2016-20013",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libc-bin",
+                    "packageVersion": "2.31-0ubuntu9.9",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2016-20013",
+                    "description": "sha256crypt and sha512crypt through 0.6 allow attackers to cause a denial of service (CPU consumption) because the algorithm's runtime is proportional to the square of the length of the password.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2016-20013",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libc6",
+                    "packageVersion": "2.31-0ubuntu9.9",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2016-20013",
+                    "description": "sha256crypt and sha512crypt through 0.6 allow attackers to cause a denial of service (CPU consumption) because the algorithm's runtime is proportional to the square of the length of the password.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2016-2781",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "coreutils",
+                    "packageVersion": "8.30-3ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2016-2781",
+                    "description": "chroot in GNU coreutils, when used with --userspec, allows local users to escape to the parent session via a crafted TIOCSTI ioctl call, which pushes characters to the terminal's input buffer.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2017-11164",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libpcre3",
+                    "packageVersion": "2:8.39-12ubuntu0.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2017-11164",
+                    "description": "In PCRE 8.41, the OP_KETRMAX feature in the match function in pcre_exec.c allows stack exhaustion (uncontrolled recursion) when processing a crafted regular expression.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-16156",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "perl-base",
+                    "packageVersion": "5.30.0-9ubuntu0.2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2020-16156",
+                    "description": "CPAN 2.28 allows Signature Verification Bypass.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-9794",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libsqlite3-0",
+                    "packageVersion": "3.31.1-4ubuntu0.3",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2020-9794",
+                    "description": "An out-of-bounds read was addressed with improved bounds checking. This issue is fixed in iOS 13.5 and iPadOS 13.5, macOS Catalina 10.15.5, tvOS 13.4.5, watchOS 6.2.5, iTunes 12.10.7 for Windows, iCloud for Windows 11.2, iCloud for Windows 7.19. A malicious application may cause a denial of service or potentially disclose memory contents.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-9849",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libsqlite3-0",
+                    "packageVersion": "3.31.1-4ubuntu0.3",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2020-9849",
+                    "description": "An information disclosure issue was addressed with improved state management. This issue is fixed in macOS Big Sur 11.0.1, watchOS 7.0, iOS 14.0 and iPadOS 14.0, iTunes for Windows 12.10.9, iCloud for Windows 11.5, tvOS 14.0. A remote attacker may be able to leak memory.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-9991",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libsqlite3-0",
+                    "packageVersion": "3.31.1-4ubuntu0.3",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2020-9991",
+                    "description": "This issue was addressed with improved checks. This issue is fixed in macOS Big Sur 11.0.1, watchOS 7.0, iOS 14.0 and iPadOS 14.0, iCloud for Windows 7.21, tvOS 14.0. A remote attacker may be able to cause a denial of service.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-36222",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libgssapi-krb5-2",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-36222",
+                    "description": "ec_verify in kdc/kdc_preauth_ec.c in the Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.4 and 1.19.x before 1.19.2 allows remote attackers to cause a NULL pointer dereference and daemon crash. This occurs because a return value is not properly managed in a certain situation.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-36222",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libk5crypto3",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-36222",
+                    "description": "ec_verify in kdc/kdc_preauth_ec.c in the Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.4 and 1.19.x before 1.19.2 allows remote attackers to cause a NULL pointer dereference and daemon crash. This occurs because a return value is not properly managed in a certain situation.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-36222",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libkrb5-3",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-36222",
+                    "description": "ec_verify in kdc/kdc_preauth_ec.c in the Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.4 and 1.19.x before 1.19.2 allows remote attackers to cause a NULL pointer dereference and daemon crash. This occurs because a return value is not properly managed in a certain situation.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-36222",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libkrb5support0",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-36222",
+                    "description": "ec_verify in kdc/kdc_preauth_ec.c in the Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.4 and 1.19.x before 1.19.2 allows remote attackers to cause a NULL pointer dereference and daemon crash. This occurs because a return value is not properly managed in a certain situation.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libasn1-8-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libgssapi3-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libhcrypto4-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libheimbase1-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libheimntlm0-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libhx509-5-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libkrb5-26-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libroken18-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3671",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libwind0-heimdal",
+                    "packageVersion": "7.7.0+dfsg-1ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-3671",
+                    "description": "A null pointer de-reference was found in the way samba kerberos server handled missing sname in TGS-REQ (Ticket Granting Server - Request). An authenticated user could use this flaw to crash the samba server.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-37750",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libgssapi-krb5-2",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-37750",
+                    "description": "The Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.5 and 1.19.x before 1.19.3 has a NULL pointer dereference in kdc/do_tgs_req.c via a FAST inner body that lacks a server field.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-37750",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libk5crypto3",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-37750",
+                    "description": "The Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.5 and 1.19.x before 1.19.3 has a NULL pointer dereference in kdc/do_tgs_req.c via a FAST inner body that lacks a server field.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-37750",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libkrb5-3",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-37750",
+                    "description": "The Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.5 and 1.19.x before 1.19.3 has a NULL pointer dereference in kdc/do_tgs_req.c via a FAST inner body that lacks a server field.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-37750",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libkrb5support0",
+                    "packageVersion": "1.17-6ubuntu4.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-37750",
+                    "description": "The Key Distribution Center (KDC) in MIT Kerberos 5 (aka krb5) before 1.18.5 and 1.19.x before 1.19.3 has a NULL pointer dereference in kdc/do_tgs_req.c via a FAST inner body that lacks a server field.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncurses6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncursesw6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libtinfo6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-base",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-39537",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-bin",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-39537",
+                    "description": "An issue was discovered in ncurses through v6.2-1. _nc_captoinfo in captoinfo.c has a heap-based buffer overflow.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-43618",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libgmp10",
+                    "packageVersion": "2:6.2.0+dfsg-4",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2021-43618",
+                    "description": "GNU Multiple Precision Arithmetic Library (GMP) through 6.2.1 has an mpz/inp_raw.c integer overflow and resultant buffer overflow via crafted input, leading to a segmentation fault on 32-bit platforms.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "e2fsprogs",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libcom-err2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libext2fs2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libss2",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1304",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "logsave",
+                    "packageVersion": "1.45.5-2ubuntu1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1304",
+                    "description": "An out-of-bounds read/write vulnerability was found in e2fsprogs 1.46.5. This issue leads to a segmentation fault and possibly arbitrary code execution via a specially crafted filesystem.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.45.5-2ubuntu1.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1586",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libpcre2-8-0",
+                    "packageVersion": "10.34-7",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1586",
+                    "description": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the compile_xclass_matchingpath() function of the pcre2_jit_compile.c file. This involves a unicode property matching issue in JIT-compiled regular expressions. The issue occurs because the character was not fully read in case-less matching within JIT.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1587",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libpcre2-8-0",
+                    "packageVersion": "10.34-7",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1587",
+                    "description": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the get_recurse_data_length() function of the pcre2_jit_compile.c file. This issue affects recursions in JIT-compiled regular expressions caused by duplicate data transfers.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-1664",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "dpkg",
+                    "packageVersion": "1.19.7ubuntu3",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-1664",
+                    "description": "Dpkg::Source::Archive in dpkg, the Debian package management system, before version 1.21.8, 1.20.10, 1.19.8, 1.18.26 is prone to a directory traversal vulnerability. When extracting untrusted source packages in v2 and v3 source package formats that include a debian.tar, the in-place extraction can lead to directory traversal situations on specially crafted orig.tar and debian.tar tarballs.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "1.19.7ubuntu3.2"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-22747",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libnss3",
+                    "packageVersion": "2:3.49.1-1ubuntu1.7",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-22747",
+                    "description": "",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-27404",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libfreetype6",
+                    "packageVersion": "2.10.1-2ubuntu0.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-27404",
+                    "description": "FreeType commit 1e2eb65048f75c64b68708efed6ce904c31f3b2f was discovered to contain a heap buffer overflow via the function sfnt_init_face.",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-27405",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libfreetype6",
+                    "packageVersion": "2.10.1-2ubuntu0.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-27405",
+                    "description": "FreeType commit 53dfdcd8198d2b3201a23c4bad9190519ba918db was discovered to contain a segmentation violation via the function FNT_Size_Request.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-27406",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libfreetype6",
+                    "packageVersion": "2.10.1-2ubuntu0.1",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-27406",
+                    "description": "FreeType commit 22a0cccb4d9d002f33c1ba7a4b36812c7d4f46b5 was discovered to contain a segmentation violation via the function FT_Request_Size.",
+                    "severity": "Low",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncurses6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libncursesw6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "libtinfo6",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-base",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-29458",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "ncurses-bin",
+                    "packageVersion": "6.2-0ubuntu2",
+                    "link": "http://people.ubuntu.com/~ubuntu-security/cve/CVE-2022-29458",
+                    "description": "ncurses 6.3 before patch 20220416 has an out-of-bounds read and segmentation violation in convert_strings in tinfo/read_entry.c in the terminfo library.",
+                    "severity": "Negligible",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "not-fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                }
+            ],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:ef658550591d9b6955dffeb5ab72e347bef9d12f67f4a0858a08238366b926fa",
+            "parentLayerHash": "sha256:ae34a4cc9a4e0255b5d3379bbe5c8009c99b1b2da9bd20876f73b864d379afdf",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:6ad5dc1e2ee8a35542b7a73779a6e99407fc35c94f8d7636a5dd992cb611756c",
+            "parentLayerHash": "sha256:ef658550591d9b6955dffeb5ab72e347bef9d12f67f4a0858a08238366b926fa",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:611a9400b84607fb672ca6fb85ba5df2c5ef68f0646790ba7bd2c2c6a81cdc83",
+            "parentLayerHash": "sha256:6ad5dc1e2ee8a35542b7a73779a6e99407fc35c94f8d7636a5dd992cb611756c",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "parentLayerHash": "sha256:611a9400b84607fb672ca6fb85ba5df2c5ef68f0646790ba7bd2c2c6a81cdc83",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:481eeb8bc092cf91effcd53913f1b4fd3d149ffda2553a70a73987ad0df04ac6",
+            "parentLayerHash": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:17addc41cfe6bd364b142a3b3ba7135dcfe2589ad12fc8165e8293ff169baa53",
+            "parentLayerHash": "sha256:481eeb8bc092cf91effcd53913f1b4fd3d149ffda2553a70a73987ad0df04ac6",
+            "vulnerabilities": [
+                {
+                    "name": "CVE-2002-1647",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "slash",
+                    "packageVersion": "3.0.0",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2002-1647",
+                    "description": "",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2006-1611",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "archiver",
+                    "packageVersion": "5.2.0",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2006-1611",
+                    "description": "",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2017-18589",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "cookie",
+                    "packageVersion": "0.4.0",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2017-18589",
+                    "description": "",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2019-10743",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "archiver",
+                    "packageVersion": "5.2.0",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-10743",
+                    "description": "",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-10743",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "kibana",
+                    "packageVersion": "8.2.2",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-10743",
+                    "description": "",
+                    "severity": "Medium",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2020-7753",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "trim",
+                    "packageVersion": "1.0.1",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-7753",
+                    "description": "",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-29940",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "through",
+                    "packageVersion": "2.3.8",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2021-29940",
+                    "description": "",
+                    "severity": "Critical",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2021-3749",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "axios",
+                    "packageVersion": "0.21.1",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2021-3749",
+                    "description": "",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "CVE-2022-0323",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "mustache",
+                    "packageVersion": "2.3.2",
+                    "link": "https://nvd.nist.gov/vuln/detail/CVE-2022-0323",
+                    "description": "",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "unknown",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": ""
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "GHSA-cph5-m8f7-6c5x",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "axios",
+                    "packageVersion": "0.21.1",
+                    "link": "https://github.com/advisories/GHSA-cph5-m8f7-6c5x",
+                    "description": "axios is vulnerable to Inefficient Regular Expression Complexity",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "0.21.2"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                },
+                {
+                    "name": "GHSA-pgw7-wx7w-2w33",
+                    "imageHash": "sha256:2ea42debc6decb83612b024b63d3c7042a20d87b362c4a97ee1e2783cbb04d0b",
+                    "imageTag": "docker.io/kibana:8.2.2",
+                    "packageName": "undici",
+                    "packageVersion": "4.14.1",
+                    "link": "https://github.com/advisories/GHSA-pgw7-wx7w-2w33",
+                    "description": "",
+                    "severity": "High",
+                    "severityScore": 0,
+                    "metadata": null,
+                    "fixedIn": [
+                        {
+                            "name": "fixed",
+                            "imageTag": "docker.io/kibana:8.2.2",
+                            "version": "5.5.1"
+                        }
+                    ],
+                    "relevant": "",
+                    "urgent": 0,
+                    "neglected": 0,
+                    "healthStatus": "",
+                    "categories": {
+                        "isRce": false
+                    }
+                }
+            ],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "parentLayerHash": "sha256:17addc41cfe6bd364b142a3b3ba7135dcfe2589ad12fc8165e8293ff169baa53",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:46ef1e63d2e9bcae8c8651adda4558abe59d93bb6d1b6ac08b84f796e8c198eb",
+            "parentLayerHash": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:e93d321f0df05d02eb5945021a6f35aad069e0a60b042c5f30208582b74ec5d4",
+            "parentLayerHash": "sha256:46ef1e63d2e9bcae8c8651adda4558abe59d93bb6d1b6ac08b84f796e8c198eb",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:c888cb839ce3f6f55d5fc28ec35733abf05cf1ea00273e06bb130e30a353aa7d",
+            "parentLayerHash": "sha256:e93d321f0df05d02eb5945021a6f35aad069e0a60b042c5f30208582b74ec5d4",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:a317050994ecfbd09c40aa67a1e30cb3b3a84f4d377a4caa2b30b9801cb67d4c",
+            "parentLayerHash": "sha256:c888cb839ce3f6f55d5fc28ec35733abf05cf1ea00273e06bb130e30a353aa7d",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:3a57d0cbdd59ce2d9e6b64ed53b4b5fd782c5b5edd73749243a794803e35717a",
+            "parentLayerHash": "sha256:a317050994ecfbd09c40aa67a1e30cb3b3a84f4d377a4caa2b30b9801cb67d4c",
+            "vulnerabilities": [],
+            "packageToFile": null
+        },
+        {
+            "layerHash": "sha256:ac1efe560f4c94651be15272f9a07c61397c226f94eebcf48d3513d3aa9a7bf9",
+            "parentLayerHash": "sha256:3a57d0cbdd59ce2d9e6b64ed53b4b5fd782c5b5edd73749243a794803e35717a",
+            "vulnerabilities": [],
+            "packageToFile": null
+        }
+    ],
+    "listOfDangerousArtifcats": null,
+    "session": {
+        "jobIDs": [
+            ""
+        ],
+        "timestamp": "0001-01-01T00:00:00Z"
+    }
+}

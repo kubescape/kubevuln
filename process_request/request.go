@@ -8,13 +8,14 @@ import (
 	"io"
 	"io/fs"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	armoUtils "github.com/armosec/utils-go/httputils"
 
 	"github.com/hashicorp/go-multierror"
 
@@ -113,26 +114,8 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	}
 
 	log.Printf("session: %v\n===\n", final_report.Session)
-
 	//split vulnerabilities to chunks
-	chunksChan := make(chan []cs.CommonContainerVulnerabilityResult, 10)
-	vulnerabilities := final_report.ToFlatVulnerabilities()
-	totalVulnerabilities := len(vulnerabilities)
-	if totalVulnerabilities > 0 {
-		go func(vulnerabilities []cs.CommonContainerVulnerabilityResult, chunksChan chan<- []cs.CommonContainerVulnerabilityResult) {
-			splitWg := &sync.WaitGroup{}
-			split2Chunks(vulnerabilities, maxBodySize, chunksChan, splitWg)
-			splitWg.Wait()
-			//done splitting - close the chunks channel
-			close(chunksChan)
-		}(vulnerabilities, chunksChan)
-		//free memory
-		vulnerabilities = nil
-	} else {
-		//no vulnerabilities just close the channel
-		close(chunksChan)
-	}
-
+	chunksChan, totalVulnerabilities := splitVulnerabilities2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize)
 	//send report(s)
 	scanID := final_report.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
@@ -140,20 +123,75 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	//get the first chunk
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
+	firstVulnerabilitiesChunk = nil
+	//send the summery and the first chunk in one or two reports according to the size
+	nextPartNum := sendSummeryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	//if not all vulnerabilities got into the first chunk
+	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
+		//send the rest of the vulnerabilities
+		sendVulnerabilitiesRoutine(chunksChan, scanID, final_report, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+	}
+	//collect post report errors if occurred
+	var err error
+	for e := range errChan {
+		err = multierror.Append(err, e)
+	}
+	return err
+}
+
+func sendVulnerabilitiesRoutine(chunksChan <-chan []cs.CommonContainerVulnerabilityResult, scanID string, final_report cs.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
+	go func(scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int, partNum int) {
+		sendVulnerabilities(chunksChan, partNum, expectedVulnerabilitiesSum, scanID, final_report, errorChan, sendWG)
+	}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, nextPartNum)
+}
+
+func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResult, partNum int, expectedVulnerabilitiesSum int, scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
+	//post each vulnerabilities chunk in a different report
+	chunksVulnerabilitiesCount := 0
+	for vulnerabilities := range chunksChan {
+		chunksVulnerabilitiesCount += len(vulnerabilities)
+		postResultsAsGoroutine(&cs.ScanResultReportV1{
+			PartNum:         partNum,
+			LastPart:        chunksVulnerabilitiesCount == expectedVulnerabilitiesSum,
+			Vulnerabilities: vulnerabilities,
+			ContainerScanID: scanID,
+			CustomerGUID:    final_report.CustomerGUID,
+			Timestamp:       final_report.Timestamp,
+			Designators:     final_report.Designators,
+			WLID:            final_report.WLID,
+			ContainerName:   final_report.ContainerName,
+		}, final_report.ImgTag, final_report.WLID, errorChan, sendWG)
+		partNum++
+	}
+
+	//verify that all vulnerabilities received and sent
+	if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
+		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
+			" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
+	}
+	sendWG.Wait()
+
+	close(errorChan)
+}
+
+func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []cs.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
+	//get the first chunk
+	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//prepare summery report
+	nextPartNum = 1
 	summeryReport := &cs.ScanResultReportV1{
-		PartNum:         1,
+		PartNum:         nextPartNum,
 		LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
-		Summery:         final_report.Summarize(),
+		Summery:         report.Summarize(),
 		ContainerScanID: scanID,
-		CustomerGUID:    final_report.CustomerGUID,
-		Timestamp:       final_report.Timestamp,
-		Designators:     final_report.Designators,
-		WLID:            final_report.WLID,
-		ContainerName:   final_report.ContainerName,
+		CustomerGUID:    report.CustomerGUID,
+		Timestamp:       report.Timestamp,
+		Designators:     report.Designators,
+		WLID:            report.WLID,
+		ContainerName:   report.ContainerName,
 	}
 	//if size of summery + first chunk does not exceed max size
-	if jsonSize(summeryReport)+jsonSize(firstVulnerabilitiesChunk) <= maxBodySize {
+	if armoUtils.JSONSize(summeryReport)+armoUtils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
 		//then post the summary report with the first vulnerabilities chunk
 		summeryReport.Vulnerabilities = firstVulnerabilitiesChunk
 		//if all vulnerabilities got into the first chunk set this as the last report
@@ -165,62 +203,47 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		summeryReport.LastPart = firstChunkVulnerabilitiesCount < 0
 	}
 	//send the summery report
-	postResultsAsGoroutine(summeryReport, final_report.ImgTag, final_report.WLID, errChan, sendWG)
+	postResultsAsGoroutine(summeryReport, report.ImgTag, report.WLID, errChan, sendWG)
 	//free memory
 	summeryReport = nil
-	partNum := 2
+	nextPartNum++
 	//send the first chunk if it was not sent yet (because of summery size)
 	if firstVulnerabilitiesChunk != nil {
 		postResultsAsGoroutine(&cs.ScanResultReportV1{
-			PartNum:         partNum,
+			PartNum:         nextPartNum,
 			LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
 			Vulnerabilities: firstVulnerabilitiesChunk,
 			ContainerScanID: scanID,
-			CustomerGUID:    final_report.CustomerGUID,
-			Timestamp:       final_report.Timestamp,
-			Designators:     final_report.Designators,
-			WLID:            final_report.WLID,
-			ContainerName:   final_report.ContainerName,
-		}, final_report.ImgTag, final_report.WLID, errChan, sendWG)
-		partNum++
+			CustomerGUID:    report.CustomerGUID,
+			Timestamp:       report.Timestamp,
+			Designators:     report.Designators,
+			WLID:            report.WLID,
+			ContainerName:   report.ContainerName,
+		}, report.ImgTag, report.WLID, errChan, sendWG)
+		nextPartNum++
 	}
-	//if not all vulnerabilities got into the first chunk
-	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
-		//post each vulnerabilities chunk in a different report
-		go func(scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int, partNum int) {
-			chunksVulnerabilitiesCount := 0
-			for vulnerabilities := range chunksChan {
-				chunksVulnerabilitiesCount += len(vulnerabilities)
-				postResultsAsGoroutine(&cs.ScanResultReportV1{
-					PartNum:         partNum,
-					LastPart:        chunksVulnerabilitiesCount == expectedVulnerabilitiesSum,
-					Vulnerabilities: vulnerabilities,
-					ContainerScanID: scanID,
-					CustomerGUID:    final_report.CustomerGUID,
-					Timestamp:       final_report.Timestamp,
-					Designators:     final_report.Designators,
-					WLID:            final_report.WLID,
-					ContainerName:   final_report.ContainerName,
-				}, final_report.ImgTag, final_report.WLID, errorChan, sendWG)
-				partNum++
-			}
-			sendWG.Wait()
-			//verify that all vulnerabilities received and sent
-			if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
-				errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
-					" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
-			}
-			//done sending, closing the errors channel
-			close(errorChan)
-		}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, partNum)
-	}
+	return nextPartNum
+}
 
-	//collect post report errors if occurred
-	var err error
-	for e := range errChan {
-		err = multierror.Append(err, e)
+func splitVulnerabilities2Chunks(vulnerabilities []cs.CommonContainerVulnerabilityResult, maxChunkSize int) (chunksChan <-chan []cs.CommonContainerVulnerabilityResult, totalVulnerabilities int) {
+	//split vulnerabilities to chunks
+	channel := make(chan []cs.CommonContainerVulnerabilityResult, 10)
+	totalVulnerabilities = len(vulnerabilities)
+	if totalVulnerabilities > 0 {
+		go func(vulnerabilities []cs.CommonContainerVulnerabilityResult, chunksChan chan<- []cs.CommonContainerVulnerabilityResult) {
+			splitWg := &sync.WaitGroup{}
+			armoUtils.SplitSlice2Chunks(vulnerabilities, maxChunkSize, chunksChan, splitWg)
+			splitWg.Wait()
+			//done splitting - close the chunks channel
+			close(channel)
+		}(vulnerabilities, channel)
+		//free memory
+		vulnerabilities = nil
+	} else {
+		//no vulnerabilities just close the channel
+		close(channel)
 	}
-	return err
+	return channel, totalVulnerabilities
 }
 
 func postResultsAsGoroutine(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
@@ -250,11 +273,11 @@ func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || 299 < resp.StatusCode {
-		log.Printf("clair post to event receiver failed with %d", resp.StatusCode)
+		log.Printf("Vulnerabilities post to event receiver failed with %d", resp.StatusCode)
 		errorChan <- err
 		return
 	}
-	log.Printf("posting to event reciever image %s wlid %s finished successfully", imagetag, wlid)
+	log.Printf("posting to event receiver image %s wlid %s finished successfully", imagetag, wlid)
 }
 
 func RemoveFile(filename string) {
@@ -412,68 +435,4 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 		report.SendStatus(sysreport.JobDone, true)
 	}
 	return result, nil
-}
-
-//split2Chunks - splits a slice to chunks of sub slices that do not exceed max bytes size
-//uses optimistic average size splitting to enhance performance
-//fits for long slices with elements with more or less the same size per element
-func split2Chunks[T any](slice []T, maxSize int, chunks chan<- []T, wg *sync.WaitGroup) {
-	wg.Add(1)
-	go func(slice []T, maxSize int, chunks chan<- []T, wg *sync.WaitGroup) {
-		defer wg.Done()
-		if len(slice) < 2 {
-			//cannot split if the slice is empty or has one element
-			chunks <- slice
-			return
-		}
-		//check slice size
-		jsonSize := jsonSize(slice)
-		if jsonSize <= maxSize {
-			//slice size is smaller than max size no splitting needed
-			chunks <- slice
-			return
-		}
-		//slice is bigger than max size
-		//calculate the average size + 5% of a single element T
-		avgTSize := int(math.Round(float64(jsonSize) * 1.05 / float64(len(slice))))
-		//calculate the average number of elements that will not exceed max size
-		avgSliceSize := maxSize / avgTSize
-		last := len(slice)
-		if avgSliceSize >= last {
-			avgSliceSize = last / 2
-		} else if avgSliceSize < 1 {
-			avgSliceSize = 1
-		}
-
-		//split the slice to slices of avgSliceSize size
-		startIndex := 0
-		for i := avgSliceSize; i < last; i += avgSliceSize {
-			split2Chunks(slice[startIndex:i], maxSize, chunks, wg)
-			startIndex = i
-		}
-		//send the last part of the slice
-		split2Chunks(slice[startIndex:last], maxSize, chunks, wg)
-	}(slice, maxSize, chunks, wg)
-}
-
-//jsonSize returns the size in bytes of the json encoding of i
-func jsonSize(i interface{}) int {
-	if i == nil {
-		return 0
-	}
-	counter := bytesCounter{}
-	enc := json.NewEncoder(&counter)
-	enc.Encode(i)
-	return counter.count
-}
-
-//bytesCounter - dummy io writer that just counts bytes without writing
-type bytesCounter struct {
-	count int
-}
-
-func (bc *bytesCounter) Write(p []byte) (n int, err error) {
-	pSize := len(p)
-	bc.count += pSize
-	return pSize, nil
 }

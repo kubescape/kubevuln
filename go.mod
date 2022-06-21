@@ -7,9 +7,11 @@ require (
 	github.com/armosec/armoapi-go v0.0.95
 	github.com/armosec/cluster-container-scanner-api v0.0.30
 	github.com/armosec/logger-go v0.0.6
+	github.com/armosec/utils-go v0.0.5
 	github.com/armosec/utils-k8s-go v0.0.7
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/golang/glog v1.0.0
+	github.com/google/go-cmp v0.5.8
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/stretchr/testify v1.7.1
 	github.com/xyproto/randomstring v0.0.0-20220311122621-4964ec363205
@@ -28,7 +30,6 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20220406160859-c03a18a6b270 // indirect
 	github.com/anchore/syft v0.44.0 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/armosec/utils-go v0.0.4 // indirect
 	github.com/bmatcuk/doublestar/v2 v2.0.4 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.0.2 // indirect
 	github.com/containerd/containerd v1.5.10 // indirect
@@ -50,7 +51,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/google/go-cmp v0.5.7 // indirect
 	github.com/google/go-containerregistry v0.8.1-0.20220209165246-a44adc326839 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
