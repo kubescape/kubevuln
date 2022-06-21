@@ -152,7 +152,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		WLID:            final_report.WLID,
 		ContainerName:   final_report.ContainerName,
 	}
-	//if size of summery + vulnerabilities does not exceed max size
+	//if size of summery + first chunk does not exceed max size
 	if jsonSize(summeryReport)+jsonSize(firstVulnerabilitiesChunk) <= maxBodySize {
 		//then post the summary report with the first vulnerabilities chunk
 		summeryReport.Vulnerabilities = firstVulnerabilitiesChunk
@@ -169,7 +169,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	//free memory
 	summeryReport = nil
 	partNum := 2
-	//send the first chunk if it not sent yet (because of summery size)
+	//send the first chunk if it was not sent yet (because of summery size)
 	if firstVulnerabilitiesChunk != nil {
 		postResultsAsGoroutine(&cs.ScanResultReportV1{
 			PartNum:         partNum,
@@ -205,17 +205,17 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 				partNum++
 			}
 			sendWG.Wait()
-			//verify that all vulnerabilities were sent
+			//verify that all vulnerabilities received and sent
 			if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
 				errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
 					" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
 			}
-			//done sending close the errors channel
+			//done sending, closing the errors channel
 			close(errorChan)
 		}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, partNum)
 	}
 
-	//collect send-report errors if occurred
+	//collect post report errors if occurred
 	var err error
 	for e := range errChan {
 		err = multierror.Append(err, e)
