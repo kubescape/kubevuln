@@ -64,9 +64,9 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 			accumulatedReport = &report
 		} else {
 			accumulatedReport.Vulnerabilities = append(accumulatedReport.Vulnerabilities, report.Vulnerabilities...)
-			if report.Summery != nil {
-				assert.Nil(t, accumulatedReport.Summery, "got more than one summery")
-				accumulatedReport.Summery = report.Summery
+			if report.Summary != nil {
+				assert.Nil(t, accumulatedReport.Summary, "got more than one summary")
+				accumulatedReport.Summary = report.Summary
 			}
 		}
 		w.WriteHeader(http.StatusOK)
@@ -86,11 +86,11 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	sort.Slice(accumulatedReport.Vulnerabilities, func(i, j int) bool {
 		return strings.Compare(accumulatedReport.Vulnerabilities[i].Name, accumulatedReport.Vulnerabilities[j].Name) == -1
 	})
-	sort.Slice(accumulatedReport.Summery.SeveritiesStats, func(i, j int) bool {
-		return strings.Compare(accumulatedReport.Summery.SeveritiesStats[i].Severity, accumulatedReport.Summery.SeveritiesStats[j].Severity) == -1
+	sort.Slice(accumulatedReport.Summary.SeveritiesStats, func(i, j int) bool {
+		return strings.Compare(accumulatedReport.Summary.SeveritiesStats[i].Severity, accumulatedReport.Summary.SeveritiesStats[j].Severity) == -1
 	})
-	sort.Slice(accumulatedReport.Summery.Context, func(i, j int) bool {
-		return strings.Compare(accumulatedReport.Summery.Context[i].Attribute, accumulatedReport.Summery.Context[j].Attribute) == -1
+	sort.Slice(accumulatedReport.Summary.Context, func(i, j int) bool {
+		return strings.Compare(accumulatedReport.Summary.Context[i].Attribute, accumulatedReport.Summary.Context[j].Attribute) == -1
 	})
 	//compare accumulatedReport with expected
 	diff := gcmp.Diff(accumulatedReport, &expectedScanReport,

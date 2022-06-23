@@ -124,7 +124,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	firstVulnerabilitiesChunk = nil
-	//send the summery and the first chunk in one or two reports according to the size
+	//send the summary and the first chunk in one or two reports according to the size
 	nextPartNum := sendSummeryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	//if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
@@ -142,6 +142,10 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 func sendVulnerabilitiesRoutine(chunksChan <-chan []cs.CommonContainerVulnerabilityResult, scanID string, final_report cs.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
 	go func(scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int, partNum int) {
 		sendVulnerabilities(chunksChan, partNum, expectedVulnerabilitiesSum, scanID, final_report, errorChan, sendWG)
+		//wait for all post request to end (including summary report)
+		sendWG.Wait()
+		//no more post requests - close the error channel
+		close(errorChan)
 	}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, nextPartNum)
 }
 
@@ -169,20 +173,17 @@ func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResu
 		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
 			" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
 	}
-	sendWG.Wait()
-
-	close(errorChan)
 }
 
 func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []cs.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
-	//prepare summery report
+	//prepare summary report
 	nextPartNum = 1
 	summeryReport := &cs.ScanResultReportV1{
 		PartNum:         nextPartNum,
 		LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
-		Summery:         report.Summarize(),
+		Summary:         report.Summarize(),
 		ContainerScanID: scanID,
 		CustomerGUID:    report.CustomerGUID,
 		Timestamp:       report.Timestamp,
@@ -190,7 +191,7 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 		WLID:            report.WLID,
 		ContainerName:   report.ContainerName,
 	}
-	//if size of summery + first chunk does not exceed max size
+	//if size of summary + first chunk does not exceed max size
 	if armoUtils.JSONSize(summeryReport)+armoUtils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
 		//then post the summary report with the first vulnerabilities chunk
 		summeryReport.Vulnerabilities = firstVulnerabilitiesChunk
@@ -199,15 +200,15 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 		//first chunk sent (or is nil) so set to nil
 		firstVulnerabilitiesChunk = nil
 	} else {
-		//first chunk is not included in the summery, so if there are vulnerabilities to send set the last part to false
-		summeryReport.LastPart = firstChunkVulnerabilitiesCount < 0
+		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
+		summeryReport.LastPart = firstChunkVulnerabilitiesCount != 0
 	}
-	//send the summery report
+	//send the summary report
 	postResultsAsGoroutine(summeryReport, report.ImgTag, report.WLID, errChan, sendWG)
 	//free memory
 	summeryReport = nil
 	nextPartNum++
-	//send the first chunk if it was not sent yet (because of summery size)
+	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
 		postResultsAsGoroutine(&cs.ScanResultReportV1{
 			PartNum:         nextPartNum,
