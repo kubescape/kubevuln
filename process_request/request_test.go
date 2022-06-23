@@ -39,14 +39,9 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 		t.Error("Could not read expectedScanReport.json", err)
 	}
 	//setup dummy event receiver server to catch post reports requests
-	l, err := net.Listen("tcp", "127.0.0.1:7555")
-	if err != nil {
-		t.Error("cannot crete tcp listener")
-	}
-
 	var accumulatedReport *cs.ScanResultReportV1
 	var reportsPartsSum, reportPartsReceived = -1, 0
-	testServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testServer, err := startTestClientServer("127.0.0.1:7555", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.URL.Path, "/k8s/containerScanV1", "request path must be /k8s/containerScanV1")
 		report := cs.ScanResultReportV1{}
 		bodybyte, err := ioutil.ReadAll(r.Body)
@@ -57,8 +52,8 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 			t.Error("cannot unmarshal request body", err)
 		}
 		reportPartsReceived++
-		if report.LastPart {
-			reportsPartsSum = report.PartNum
+		if report.PaginationInfo.IsLastReport {
+			reportsPartsSum = report.PaginationInfo.ReportNumber
 		}
 		if accumulatedReport == nil {
 			accumulatedReport = &report
@@ -71,9 +66,10 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	testServer.Listener.Close()
-	testServer.Listener = l
-	testServer.Start()
+
+	if err != nil {
+		t.Error("cannot client test server", err)
+	}
 	defer testServer.Close()
 
 	//call postScanResultsToEventReciever
@@ -92,43 +88,29 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	sort.Slice(accumulatedReport.Summary.Context, func(i, j int) bool {
 		return strings.Compare(accumulatedReport.Summary.Context[i].Attribute, accumulatedReport.Summary.Context[j].Attribute) == -1
 	})
+
+	/* uncomment to update expected results
+	sort.Slice(expectedScanReport.Vulnerabilities, func(i, j int) bool {
+		return strings.Compare(expectedScanReport.Vulnerabilities[i].Name, expectedScanReport.Vulnerabilities[j].Name) == -1
+	})
+	sort.Slice(expectedScanReport.Summary.SeveritiesStats, func(i, j int) bool {
+		return strings.Compare(expectedScanReport.Summary.SeveritiesStats[i].Severity, expectedScanReport.Summary.SeveritiesStats[j].Severity) == -1
+	})
+	sort.Slice(expectedScanReport.Summary.Context, func(i, j int) bool {
+		return strings.Compare(expectedScanReport.Summary.Context[i].Attribute, expectedScanReport.Summary.Context[j].Attribute) == -1
+	})
+	file, _ := json.MarshalIndent(expectedScanReport, "", " ")
+
+	_ = ioutil.WriteFile("rest_files/expectedScanReport.json", file, 0644)
+	*/
+
 	//compare accumulatedReport with expected
 	diff := gcmp.Diff(accumulatedReport, &expectedScanReport,
-		cmpopts.IgnoreFields(cs.ScanResultReportV1{}, "LastPart", "PartNum", "Timestamp", "ContainerScanID"),
+		cmpopts.IgnoreFields(cs.ScanResultReportV1{}, "PaginationInfo", "Timestamp", "ContainerScanID"),
 		cmpopts.IgnoreFields(cs.CommonContainerScanSummaryResult{}, "ContainerScanID", "Timestamp"),
 		cmpopts.IgnoreFields(cs.CommonContainerVulnerabilityResult{}, "ContainerScanID", "Timestamp", "Context"))
 
 	assert.Empty(t, diff, "actual compare with expected should not have diffs")
-}
-
-func testSplit(chunkSize int, vulns []cs.CommonContainerVulnerabilityResult) splitResults {
-	results := splitResults{}
-	chunksChan, _ := splitVulnerabilities2Chunks(vulns, chunkSize)
-	testWg := sync.WaitGroup{}
-	testWg.Add(1)
-	go func(results *splitResults) {
-		defer testWg.Done()
-		for v := range chunksChan {
-			results.numOfChunks++
-			vSize := armoUtils.JSONSize(v)
-			vLen := len(v)
-			results.totalReceived += vLen
-			if results.maxChunkSize < vSize {
-				results.maxChunkSize = vSize
-			}
-			if results.minChunkSize > vSize || results.minChunkSize == 0 {
-				results.minChunkSize = vSize
-			}
-			if results.maxChunkLength < vLen {
-				results.maxChunkLength = vLen
-			}
-			if results.minChunkLength > vLen || results.minChunkLength == 0 {
-				results.minChunkLength = vLen
-			}
-		}
-	}(&results)
-	testWg.Wait()
-	return results
 }
 
 func TestSplit2Chunks(t *testing.T) {
@@ -204,4 +186,46 @@ type splitResults struct {
 func loadTestFile(i interface{}, filename string) error {
 	file, _ := ioutil.ReadFile("test_files/" + filename)
 	return json.Unmarshal([]byte(file), i)
+}
+
+func startTestClientServer(requestUrl string, handler http.Handler) (*httptest.Server, error) {
+	l, err := net.Listen("tcp", requestUrl)
+	if err != nil {
+		return nil, err
+	}
+	testServer := httptest.NewUnstartedServer(handler)
+	testServer.Listener.Close()
+	testServer.Listener = l
+	testServer.Start()
+	return testServer, nil
+}
+
+func testSplit(chunkSize int, vulns []cs.CommonContainerVulnerabilityResult) splitResults {
+	results := splitResults{}
+	chunksChan, _ := splitVulnerabilities2Chunks(vulns, chunkSize)
+	testWg := sync.WaitGroup{}
+	testWg.Add(1)
+	go func(results *splitResults) {
+		defer testWg.Done()
+		for v := range chunksChan {
+			results.numOfChunks++
+			vSize := armoUtils.JSONSize(v)
+			vLen := len(v)
+			results.totalReceived += vLen
+			if results.maxChunkSize < vSize {
+				results.maxChunkSize = vSize
+			}
+			if results.minChunkSize > vSize || results.minChunkSize == 0 {
+				results.minChunkSize = vSize
+			}
+			if results.maxChunkLength < vLen {
+				results.maxChunkLength = vLen
+			}
+			if results.minChunkLength > vLen || results.minChunkLength == 0 {
+				results.minChunkLength = vLen
+			}
+		}
+	}(&results)
+	testWg.Wait()
+	return results
 }

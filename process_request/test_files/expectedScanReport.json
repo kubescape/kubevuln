@@ -2629,6 +2629,8 @@
             }
         ]
     },
-    "partNum": 0,
-    "lastPart": false
+    "paginationInfo": {
+        "chunkNumber": 0,
+        "isLastChunk": false
+    }
 }

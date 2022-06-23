@@ -155,8 +155,7 @@ func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResu
 	for vulnerabilities := range chunksChan {
 		chunksVulnerabilitiesCount += len(vulnerabilities)
 		postResultsAsGoroutine(&cs.ScanResultReportV1{
-			PartNum:         partNum,
-			LastPart:        chunksVulnerabilitiesCount == expectedVulnerabilitiesSum,
+			PaginationInfo:  wssc.PaginationMarks{ReportNumber: partNum, IsLastReport: chunksVulnerabilitiesCount == expectedVulnerabilitiesSum},
 			Vulnerabilities: vulnerabilities,
 			ContainerScanID: scanID,
 			CustomerGUID:    final_report.CustomerGUID,
@@ -181,8 +180,7 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 	//prepare summary report
 	nextPartNum = 1
 	summeryReport := &cs.ScanResultReportV1{
-		PartNum:         nextPartNum,
-		LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
+		PaginationInfo:  wssc.PaginationMarks{ReportNumber: nextPartNum},
 		Summary:         report.Summarize(),
 		ContainerScanID: scanID,
 		CustomerGUID:    report.CustomerGUID,
@@ -196,12 +194,12 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 		//then post the summary report with the first vulnerabilities chunk
 		summeryReport.Vulnerabilities = firstVulnerabilitiesChunk
 		//if all vulnerabilities got into the first chunk set this as the last report
-		summeryReport.LastPart = totalVulnerabilities == firstChunkVulnerabilitiesCount
+		summeryReport.PaginationInfo.IsLastReport = totalVulnerabilities == firstChunkVulnerabilitiesCount
 		//first chunk sent (or is nil) so set to nil
 		firstVulnerabilitiesChunk = nil
 	} else {
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
-		summeryReport.LastPart = firstChunkVulnerabilitiesCount != 0
+		summeryReport.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount != 0
 	}
 	//send the summary report
 	postResultsAsGoroutine(summeryReport, report.ImgTag, report.WLID, errChan, sendWG)
@@ -211,8 +209,7 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
 		postResultsAsGoroutine(&cs.ScanResultReportV1{
-			PartNum:         nextPartNum,
-			LastPart:        totalVulnerabilities == firstChunkVulnerabilitiesCount,
+			PaginationInfo:  wssc.PaginationMarks{ReportNumber: nextPartNum, IsLastReport: totalVulnerabilities == firstChunkVulnerabilitiesCount},
 			Vulnerabilities: firstVulnerabilitiesChunk,
 			ContainerScanID: scanID,
 			CustomerGUID:    report.CustomerGUID,
