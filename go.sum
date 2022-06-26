@@ -166,8 +166,8 @@ github.com/armosec/cluster-container-scanner-api v0.0.30 h1:5efZerCs1u5HySVPfrRt
 github.com/armosec/cluster-container-scanner-api v0.0.30/go.mod h1:7mplPRDcyASxFMwfIXHk3CajOaIFoFwTUoTRNwV3Jwg=
 github.com/armosec/logger-go v0.0.6 h1:V8iMCC/XQ7Af88F/k3uWuDQskgLHUY5MXI5L1fMoPU8=
 github.com/armosec/logger-go v0.0.6/go.mod h1:ZnocpQc+z6phNJSLVfXgHcOW4rg4NCO70ApmF0Y7W6w=
-github.com/armosec/utils-go v0.0.5 h1:+pfZirWrOvfqvVYlL7OG1wMQD4T4YMwC78zzosB+mlQ=
-github.com/armosec/utils-go v0.0.5/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
+github.com/armosec/utils-go v0.0.7 h1:YGyIzfo7JKocx0SVrKEpQLSKLNLgm+JOEeH0XkO23yQ=
+github.com/armosec/utils-go v0.0.7/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.7 h1:g68GQ9Vm5LgVp/czcu2ZV1igm2azYLf9vNapyoXBfYI=
 github.com/armosec/utils-k8s-go v0.0.7/go.mod h1:YFdWi3rEQQLbN6mZO21TSdoda8kGQYRV4rs5CRp8Kjs=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=

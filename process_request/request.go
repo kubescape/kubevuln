@@ -16,12 +16,12 @@ import (
 	"time"
 
 	armoUtils "github.com/armosec/utils-go/httputils"
+	"github.com/golang/glog"
 
 	"github.com/hashicorp/go-multierror"
 
 	// "ca-vuln-scan/catypes"
 
-	"log"
 	"os"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -43,22 +43,23 @@ func init() {
 	if len(ociClient.endpoint) == 0 {
 		ociClient.endpoint = os.Getenv("CA_OCIMAGE_URL")
 		if len(ociClient.endpoint) == 0 {
-			log.Printf("OCIMAGE_URL/CA_OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
+			glog.Warning("OCIMAGE_URL/CA_OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
 		}
 	}
 
 	eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP")
 	if len(eventRecieverURL) == 0 {
-		log.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP")
+		glog.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP")
 	}
 
 	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
 	if len(cusGUID) == 0 {
-		log.Fatal("Must configure CA_CUSTOMER_GUID")
+		glog.Fatal("Must configure CA_CUSTOMER_GUID")
 	}
 	printPostJSON = os.Getenv("PRINT_POST_JSON")
 }
 
+/* unused to be deleted
 func getContainerImageManifest(scanCmd *wssc.WebsocketScanCommand) (*OciImageManifest, error) {
 	oci := OcimageClient{endpoint: "http://localhost:8080"}
 	image, err := oci.Image(scanCmd)
@@ -71,6 +72,7 @@ func getContainerImageManifest(scanCmd *wssc.WebsocketScanCommand) (*OciImageMan
 	}
 	return manifest, nil
 }
+*/
 
 func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
 	image, err := oci.Image(scanCmd)
@@ -84,7 +86,7 @@ const maxBodySize int = 30000
 
 func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
-	log.Printf("posting to event reciever image %s wlid %s", imagetag, wlid)
+	glog.Infof("posting to event reciever image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
 
 	final_report := cs.ScanResultReport{
@@ -113,9 +115,13 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		final_report.Designators.Attributes[armotypes.AttributeTag] = val.(string)
 	}
 
-	log.Printf("session: %v\n===\n", final_report.Session)
+	//complete designators info
+	finalDesignators, _ := final_report.GetDesignatorsNContext()
+	final_report.Designators = *finalDesignators
+
+	glog.Infof("session: %v\n===\n", final_report.Session)
 	//split vulnerabilities to chunks
-	chunksChan, totalVulnerabilities := splitVulnerabilities2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize)
+	chunksChan, totalVulnerabilities := armoUtils.SplitSlice2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize, 10)
 	//send report(s)
 	scanID := final_report.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
@@ -125,7 +131,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	firstVulnerabilitiesChunk = nil
 	//send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := sendSummeryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := sendSummaryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	//if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities
@@ -158,11 +164,8 @@ func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResu
 			PaginationInfo:  wssc.PaginationMarks{ReportNumber: partNum, IsLastReport: chunksVulnerabilitiesCount == expectedVulnerabilitiesSum},
 			Vulnerabilities: vulnerabilities,
 			ContainerScanID: scanID,
-			CustomerGUID:    final_report.CustomerGUID,
 			Timestamp:       final_report.Timestamp,
 			Designators:     final_report.Designators,
-			WLID:            final_report.WLID,
-			ContainerName:   final_report.ContainerName,
 		}, final_report.ImgTag, final_report.WLID, errorChan, sendWG)
 		partNum++
 	}
@@ -174,37 +177,34 @@ func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResu
 	}
 }
 
-func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []cs.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
+func sendSummaryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []cs.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//prepare summary report
 	nextPartNum = 1
-	summeryReport := &cs.ScanResultReportV1{
+	summaryReport := &cs.ScanResultReportV1{
 		PaginationInfo:  wssc.PaginationMarks{ReportNumber: nextPartNum},
 		Summary:         report.Summarize(),
 		ContainerScanID: scanID,
-		CustomerGUID:    report.CustomerGUID,
 		Timestamp:       report.Timestamp,
 		Designators:     report.Designators,
-		WLID:            report.WLID,
-		ContainerName:   report.ContainerName,
 	}
 	//if size of summary + first chunk does not exceed max size
-	if armoUtils.JSONSize(summeryReport)+armoUtils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
+	if armoUtils.JSONSize(summaryReport)+armoUtils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
 		//then post the summary report with the first vulnerabilities chunk
-		summeryReport.Vulnerabilities = firstVulnerabilitiesChunk
+		summaryReport.Vulnerabilities = firstVulnerabilitiesChunk
 		//if all vulnerabilities got into the first chunk set this as the last report
-		summeryReport.PaginationInfo.IsLastReport = totalVulnerabilities == firstChunkVulnerabilitiesCount
+		summaryReport.PaginationInfo.IsLastReport = totalVulnerabilities == firstChunkVulnerabilitiesCount
 		//first chunk sent (or is nil) so set to nil
 		firstVulnerabilitiesChunk = nil
 	} else {
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
-		summeryReport.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount != 0
+		summaryReport.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount != 0
 	}
 	//send the summary report
-	postResultsAsGoroutine(summeryReport, report.ImgTag, report.WLID, errChan, sendWG)
+	postResultsAsGoroutine(summaryReport, report.ImgTag, report.WLID, errChan, sendWG)
 	//free memory
-	summeryReport = nil
+	summaryReport = nil
 	nextPartNum++
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
@@ -212,36 +212,12 @@ func sendSummeryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 			PaginationInfo:  wssc.PaginationMarks{ReportNumber: nextPartNum, IsLastReport: totalVulnerabilities == firstChunkVulnerabilitiesCount},
 			Vulnerabilities: firstVulnerabilitiesChunk,
 			ContainerScanID: scanID,
-			CustomerGUID:    report.CustomerGUID,
 			Timestamp:       report.Timestamp,
 			Designators:     report.Designators,
-			WLID:            report.WLID,
-			ContainerName:   report.ContainerName,
 		}, report.ImgTag, report.WLID, errChan, sendWG)
 		nextPartNum++
 	}
 	return nextPartNum
-}
-
-func splitVulnerabilities2Chunks(vulnerabilities []cs.CommonContainerVulnerabilityResult, maxChunkSize int) (chunksChan <-chan []cs.CommonContainerVulnerabilityResult, totalVulnerabilities int) {
-	//split vulnerabilities to chunks
-	channel := make(chan []cs.CommonContainerVulnerabilityResult, 10)
-	totalVulnerabilities = len(vulnerabilities)
-	if totalVulnerabilities > 0 {
-		go func(vulnerabilities []cs.CommonContainerVulnerabilityResult, chunksChan chan<- []cs.CommonContainerVulnerabilityResult) {
-			splitWg := &sync.WaitGroup{}
-			armoUtils.SplitSlice2Chunks(vulnerabilities, maxChunkSize, chunksChan, splitWg)
-			splitWg.Wait()
-			//done splitting - close the chunks channel
-			close(channel)
-		}(vulnerabilities, channel)
-		//free memory
-		vulnerabilities = nil
-	} else {
-		//no vulnerabilities just close the channel
-		close(channel)
-	}
-	return channel, totalVulnerabilities
 }
 
 func postResultsAsGoroutine(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
@@ -255,33 +231,34 @@ func postResultsAsGoroutine(report *cs.ScanResultReportV1, imagetag string, wlid
 func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
-		log.Printf("fail convert to json")
+		glog.Error("fail convert to json")
 		errorChan <- err
 		return
 	}
 	if printPostJSON != "" {
-		log.Printf("printPostJSON:")
-		log.Printf("%v", string(payload))
+		glog.Info("printPostJSON:")
+		glog.Infof("%v", string(payload))
 	}
-	resp, err := http.Post(eventRecieverURL+"/k8s/containerScanV1?CustomerGUID="+report.CustomerGUID, "application/json", bytes.NewReader(payload))
+	resp, err := http.Post(eventRecieverURL+"/k8s/containerScanV1?"+armotypes.CustomerGuidQuery+"="+report.Designators.Attributes[armotypes.AttributeCustomerGUID], "application/json", bytes.NewReader(payload))
 	if err != nil {
-		log.Printf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
+		glog.Errorf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
 		errorChan <- err
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || 299 < resp.StatusCode {
-		log.Printf("Vulnerabilities post to event receiver failed with %d", resp.StatusCode)
+	body, err := armoUtils.HttpRespToString(resp)
+	if err != nil {
+		glog.Errorf("Vulnerabilities post to event receiver failed with error:%s response body: %s", err.Error(), body)
 		errorChan <- err
 		return
 	}
-	log.Printf("posting to event receiver image %s wlid %s finished successfully", imagetag, wlid)
+	glog.Infof("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)
 }
 
 func RemoveFile(filename string) {
 	err := os.Remove(filename)
 	if err != nil {
-		log.Printf("Error removing file %s", filename)
+		glog.Errorf("Error removing file %s error:%s", filename, err.Error())
 	}
 }
 
@@ -294,9 +271,9 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 	if ociClient.endpoint != "" {
 		ociImage, err := ociClient.Image(scanCmd)
 		if err != nil {
-			log.Printf("unable to get image %s", err)
+			glog.Errorf("unable to get image %s", err)
 			go func() {
-				log.Printf("skipping dangerous executables enrichment")
+				glog.Info("skipping dangerous executables enrichment")
 				filteredResultsChan <- nil
 			}()
 			// return nil, nil, err
@@ -311,7 +288,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 
 				directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
 				if err != nil {
-					log.Printf("Couldn't get filelist from ocimage  due to %s", err.Error())
+					glog.Errorf("can not get filelist from ocimage due to %s", err.Error())
 					filteredResultsChan <- nil
 					return
 				}
@@ -323,7 +300,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 
 				reader, err := os.Open(filename)
 				if err != nil {
-					log.Printf("Couldn't open file : %s" + filename)
+					glog.Errorf("can not open file : %s error:%s", filename, err.Error())
 					filteredResultsChan <- nil
 					return
 				}
@@ -341,7 +318,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 					if currentFile.Name == "symlinkMap.json" {
 						_, err := io.Copy(buf, tarReader)
 						if err != nil {
-							log.Printf("Couldn't parse symlinkMap.json file")
+							glog.Error("can not parse symlinkMap.json file")
 							filteredResultsChan <- nil
 							return
 						}
@@ -351,7 +328,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 				var fileInJson map[string]string
 				err = json.Unmarshal([]byte(buf.String()), &fileInJson)
 				if err != nil {
-					log.Printf("Failed to marshal file  %s", filename)
+					glog.Errorf("failed to marshal file %s. error:%s", filename, err.Error())
 					filteredResultsChan <- nil
 					return
 				}
@@ -366,7 +343,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		}
 	} else {
 		go func() {
-			log.Printf("skipping dangerous executables enrichment")
+			glog.Info("skipping dangerous executables enrichment")
 			filteredResultsChan <- nil
 		}()
 
@@ -377,7 +354,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 
 	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
-		log.Printf("%v", err.Error())
+		glog.Errorf("getAnchoreScanResults returned an error:%s", err.Error())
 		return nil, nil, err
 	}
 

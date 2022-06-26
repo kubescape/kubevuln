@@ -7,7 +7,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.95
 	github.com/armosec/cluster-container-scanner-api v0.0.30
 	github.com/armosec/logger-go v0.0.6
-	github.com/armosec/utils-go v0.0.5
+	github.com/armosec/utils-go v0.0.7
 	github.com/armosec/utils-k8s-go v0.0.7
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/golang/glog v1.0.0
