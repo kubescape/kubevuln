@@ -24,7 +24,7 @@ import (
 //set required env vars
 var _ = (func() interface{} {
 	os.Setenv("CA_CUSTOMER_GUID", "e57ec5a0-695f-4777-8366-1c64fada00a0")
-	os.Setenv("CA_EVENT_RECEIVER_HTTP", "http://localhost:7555")
+	os.Setenv("CA_EVENT_RECEIVER_HTTP", "http://localhost:9111")
 	return nil
 }())
 
@@ -47,8 +47,8 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	}
 	//setup dummy event receiver server to catch post reports requests
 	var accumulatedReport *cs.ScanResultReportV1
-	var reportsPartsSum, reportPartsReceived = -1, 0
-	testServer, err := startTestClientServer("127.0.0.1:7555", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var reportsPartsSum, reportPartsReceived = -1, -1
+	testServer, err := startTestClientServer("127.0.0.1:9111", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.URL.Path, "/k8s/containerScanV1", "request path must be /k8s/containerScanV1")
 		report := cs.ScanResultReportV1{}
 		bodybyte, err := ioutil.ReadAll(r.Body)
@@ -97,7 +97,7 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 		return strings.Compare(accumulatedReport.Summary.Context[i].Attribute, accumulatedReport.Summary.Context[j].Attribute) == -1
 	})
 
-	/*/ uncomment to update expected results
+	/* uncomment to update expected results
 	file, _ := json.MarshalIndent(accumulatedReport, "", " ")
 	_ = ioutil.WriteFile("fixtures/expectedScanReport.json", file, 0644)
 	*/

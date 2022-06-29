@@ -160,10 +160,10 @@ github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmV
 github.com/armon/go-metrics v0.3.10/go.mod h1:4O98XIr/9W0sxpJ8UaYkvjk10Iff7SnFrb4QAOwNTFc=
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
-github.com/armosec/armoapi-go v0.0.95 h1:SCtsGbYLLkQtfJQ5MQkFJ43LBPjWTzT5WJjYi/vDY3E=
-github.com/armosec/armoapi-go v0.0.95/go.mod h1:vpKd2UroTmzXKE1dSNQ6y2zRF13auJEmy9X2XBoFZYc=
-github.com/armosec/cluster-container-scanner-api v0.0.30 h1:5efZerCs1u5HySVPfrRt6Izg0m7/3VzgybcYnWZgzLI=
-github.com/armosec/cluster-container-scanner-api v0.0.30/go.mod h1:7mplPRDcyASxFMwfIXHk3CajOaIFoFwTUoTRNwV3Jwg=
+github.com/armosec/armoapi-go v0.0.97 h1:uGcwCRpCr8cuC4Ck2aVLFH/ZJGbvSHkD9oXnZfTm+BE=
+github.com/armosec/armoapi-go v0.0.97/go.mod h1:v7rUl9eo5qL3kHxiP8tFCyRYERUGPgm2rwTIqkVOouw=
+github.com/armosec/cluster-container-scanner-api v0.0.35 h1:SonRXz8rqjA2+Sz2jW3X5efmHJeq+MVprVVzk84Srhw=
+github.com/armosec/cluster-container-scanner-api v0.0.35/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
 github.com/armosec/logger-go v0.0.6 h1:V8iMCC/XQ7Af88F/k3uWuDQskgLHUY5MXI5L1fMoPU8=
 github.com/armosec/logger-go v0.0.6/go.mod h1:ZnocpQc+z6phNJSLVfXgHcOW4rg4NCO70ApmF0Y7W6w=
 github.com/armosec/utils-go v0.0.7 h1:YGyIzfo7JKocx0SVrKEpQLSKLNLgm+JOEeH0XkO23yQ=
@@ -1954,8 +1954,8 @@ gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b/go.mod h1:K4uyk7z7BCEPqu6E+C
 gotest.tools v2.2.0+incompatible h1:VsBPFP1AI068pPrMxtb/S8Zkgf9xEmTLJjfM+P5UIEo=
 gotest.tools v2.2.0+incompatible/go.mod h1:DsYFclhRJ6vuDpmuTbkuFWG+y2sxOXAzmJt81HFBacw=
 gotest.tools/v3 v3.0.2/go.mod h1:3SzNCllyD9/Y+b5r9JIKQ474KzkZyqLqEfYqMsX94Bk=
-gotest.tools/v3 v3.0.3 h1:4AuOwCGf4lLR9u3YOe2awrHygurzhO/HeQ6laiA6Sx0=
 gotest.tools/v3 v3.0.3/go.mod h1:Z7Lb0S5l+klDB31fvDQX8ss/FlKDxtlFlw3Oa8Ymbl8=
+gotest.tools/v3 v3.3.0 h1:MfDY1b1/0xN1CyMlQDac0ziEy9zJQd9CXBRRDHw2jJo=
 grpc.go4.org v0.0.0-20170609214715-11d0a25b4919/go.mod h1:77eQGdRu53HpSqPFJFmuJdjuHRquDANNeA4x7B8WQ9o=
 honnef.co/go/tools v0.0.0-20180728063816-88497007e858/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=

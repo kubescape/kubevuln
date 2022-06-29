@@ -129,9 +129,9 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	//get the first chunk
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
-	firstVulnerabilitiesChunk = nil
 	//send the summary and the first chunk in one or two reports according to the size
 	nextPartNum := sendSummaryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	firstVulnerabilitiesChunk = nil
 	//if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities
@@ -181,7 +181,7 @@ func sendSummaryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//prepare summary report
-	nextPartNum = 1
+	nextPartNum = 0
 	summaryReport := &cs.ScanResultReportV1{
 		PaginationInfo:  wssc.PaginationMarks{ReportNumber: nextPartNum},
 		Summary:         report.Summarize(),
