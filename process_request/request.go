@@ -32,6 +32,8 @@ import (
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 )
 
+const maxBodySize int = 30000
+
 var ociClient OcimageClient
 var eventRecieverURL string
 var cusGUID string
@@ -81,8 +83,6 @@ func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) 
 	}
 	return image, nil
 }
-
-const maxBodySize int = 30000
 
 func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
