@@ -49,7 +49,7 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	var accumulatedReport *cs.ScanResultReportV1
 	var reportsPartsSum, reportPartsReceived = -1, -1
 	testServer, err := startTestClientServer("127.0.0.1:9111", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, r.URL.Path, "/k8s/containerScanV1", "request path must be /k8s/containerScanV1")
+		assert.Equal(t, r.URL.Path, "/k8s/v2/containerScan", "request path must be /k8s/containerScanV1")
 		report := cs.ScanResultReportV1{}
 		bodybyte, err := ioutil.ReadAll(r.Body)
 		if err != nil {

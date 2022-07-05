@@ -239,7 +239,7 @@ func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, er
 		glog.Info("printPostJSON:")
 		glog.Infof("%v", string(payload))
 	}
-	resp, err := http.Post(eventRecieverURL+"/k8s/containerScanV1?"+armotypes.CustomerGuidQuery+"="+report.Designators.Attributes[armotypes.AttributeCustomerGUID], "application/json", bytes.NewReader(payload))
+	resp, err := http.Post(eventRecieverURL+"/k8s/v2/containerScan?"+armotypes.CustomerGuidQuery+"="+report.Designators.Attributes[armotypes.AttributeCustomerGUID], "application/json", bytes.NewReader(payload))
 	if err != nil {
 		glog.Errorf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
 		errorChan <- err
