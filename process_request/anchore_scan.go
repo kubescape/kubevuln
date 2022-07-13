@@ -146,7 +146,7 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 	anchoreDirectoryPath = dir + anchoreDirectoryName
 }
 
-func AllowHTTPScansToAnchoreConfiguratioFile(configFilePath string) error {
+func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool) error {
 	var App Application
 
 	bytes, err := ioutil.ReadFile(configFilePath)
@@ -158,7 +158,28 @@ func AllowHTTPScansToAnchoreConfiguratioFile(configFilePath string) error {
 		return err
 	}
 
-	App.Registry.InsecureUseHTTP = true
+	App.Registry.InsecureUseHTTP = useHTTP
+	config_yaml_data, err := yaml.Marshal(&App)
+	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerify bool) error {
+	var App Application
+
+	bytes, err := ioutil.ReadFile(configFilePath)
+	if err != nil {
+		return err
+	}
+	err = yaml.Unmarshal(bytes, &App)
+	if err != nil {
+		return err
+	}
+
+	App.Registry.InsecureSkipTLSVerify = skipVerify
 	config_yaml_data, err := yaml.Marshal(&App)
 	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
@@ -168,7 +189,7 @@ func AllowHTTPScansToAnchoreConfiguratioFile(configFilePath string) error {
 	return nil
 }
 
-func AddCredentialsToAnchoreConfiguratioFile(configFilePath string, cred types.AuthConfig) error {
+func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.AuthConfig) error {
 	var App Application
 
 	bytes, err := ioutil.ReadFile(configFilePath)
@@ -266,10 +287,16 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 	}
 
 	for i := 0; i != len(scanCmd.Credentialslist); i++ {
-		err := AddCredentialsToAnchoreConfiguratioFile(anchoreConfigPath, scanCmd.Credentialslist[i])
+		err := AddCredentialsToAnchoreConfigurationFile(anchoreConfigPath, scanCmd.Credentialslist[i])
 		if err != nil {
 			return nil, err
 		}
+	}
+	if val, ok := scanCmd.Args[armotypes.AttributeUseHTTP]; ok && val.(bool) {
+		SetHTTPScansToAnchoreConfigurationFile(anchoreConfigPath, true)
+	}
+	if val, ok := scanCmd.Args[armotypes.AttributeSkipTLSVerify]; ok && val.(bool) {
+		SetSkipTLSVerifyToAnchoreConfigurationFile(anchoreConfigPath, true)
 	}
 
 	cmd, imageID, out, out_err := executeAnchoreCommand(scanCmd, anchoreConfigPath)
@@ -281,7 +308,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 		err_str, err_anchore_str, exit_code := anchoreErrorHandler(out, out_err, err)
 		if strings.Contains(err_anchore_str, "server gave HTTP response to HTTPS client") || strings.Contains(err_str, "server gave HTTP response to HTTPS client") {
 			log.Printf("trying to scan image %s via HTTP and not HTTPS", imageID)
-			if err = AllowHTTPScansToAnchoreConfiguratioFile(anchoreConfigPath); err == nil {
+			if err = SetHTTPScansToAnchoreConfigurationFile(anchoreConfigPath, true); err == nil {
 				cmd, imageID, out, out_err = executeAnchoreCommand(scanCmd, anchoreConfigPath)
 				err = cmd.Run()
 				err_str, err_anchore_str, exit_code = anchoreErrorHandler(out, out_err, err)

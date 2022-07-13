@@ -48,7 +48,10 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	//setup dummy event receiver server to catch post reports requests
 	var accumulatedReport *cs.ScanResultReportV1
 	var reportsPartsSum, reportPartsReceived = -1, -1
+	mutex := sync.Mutex{}
 	testServer, err := startTestClientServer("127.0.0.1:9111", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mutex.Lock()
+		defer mutex.Unlock()
 		assert.Equal(t, r.URL.Path, "/k8s/v2/containerScan", "request path must be /k8s/containerScanV1")
 		report := cs.ScanResultReportV1{}
 		bodybyte, err := ioutil.ReadAll(r.Body)
