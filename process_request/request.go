@@ -134,13 +134,14 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	firstVulnerabilitiesChunk = nil
 	//if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
-		//send the rest of the vulnerabilities
+		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
 		sendVulnerabilitiesRoutine(chunksChan, scanID, final_report, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
+		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {
-			//wait for all post request to end (including summary report)
+			//wait for summary post request to end
 			wg.Wait()
-			//no more post requests - close the error channel
+			//close the error channel
 			close(errorChan)
 		}(sendWG, errChan)
 	}
