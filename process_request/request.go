@@ -260,9 +260,8 @@ func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, er
 		errorChan <- err
 		return
 	}
-	glog.Infof("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)
+	glog.Infof("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body) // systest dependent
 }
-
 func RemoveFile(filename string) {
 	err := os.Remove(filename)
 	if err != nil {
