@@ -396,25 +396,48 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	if !slices.Contains(scanCmd.Session.JobIDs, jobID) {
 		scanCmd.Session.JobIDs = append(scanCmd.Session.JobIDs, jobID)
 	}
-
-	report.SendAsRoutine([]string{}, true)
+	errChan := make(chan error)
+	report.SendAsRoutine(true, errChan)
+	if err := <-errChan; err != nil {
+		glog.Errorf("ProcessScanRequest failed to send report: %v due to ERROR:: %s",
+			report, err.Error())
+	}
 	// NewBaseReport(cusGUID, )
 	result, bashList, err := GetScanResult(scanCmd)
 	if err != nil {
-
-		report.SendError(err, true, true)
+		report.SendError(err, true, true, errChan)
+		if err := <-errChan; err != nil {
+			glog.Errorf("ProcessScanRequest failed to send error report: %v due to ERROR:: %s",
+				report, err.Error())
+		}
 		return nil, err
 	}
-	report.SendStatus(sysreport.JobSuccess, true)
-	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true)
+
+	report.SendStatus(sysreport.JobSuccess, true, errChan)
+	if err := <-errChan; err != nil {
+		glog.Errorf("ProcessScanRequest failed to send status report: %v due to ERROR:: %s",
+			report, err.Error())
+	}
+	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, errChan)
+	if err := <-errChan; err != nil {
+		glog.Errorf("ProcessScanRequest failed to send action report: %v due to ERROR:: %s",
+			report, err.Error())
+	}
 
 	//Benh - dangerous hack
-
 	err = postScanResultsToEventReciever(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
-		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
+		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, errChan)
+		if err := <-errChan; err != nil {
+			glog.Errorf("ProcessScanRequest failed to send error report: %v due to ERROR:: %s",
+				report, err.Error())
+		}
 	} else {
-		report.SendStatus(sysreport.JobDone, true)
+		report.SendStatus(sysreport.JobDone, true, errChan)
+		if err := <-errChan; err != nil {
+			glog.Errorf("ProcessScanRequest failed to send status report: %v due to ERROR:: %s",
+				report, err.Error())
+		}
 	}
 	return result, nil
 }
