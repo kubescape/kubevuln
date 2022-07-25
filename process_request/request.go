@@ -64,7 +64,7 @@ func init() {
 	reportErrorsChan = make(chan error)
 	go func() {
 		for err := range reportErrorsChan {
-			glog.Errorf("Error while sending report: %s", err.Error())
+			glog.Errorf("failed to send job report ERROR: %s", err.Error())
 		}
 	}()
 }

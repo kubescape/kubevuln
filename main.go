@@ -133,7 +133,7 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 		errChan := make(chan error)
 		report.SendAsRoutine(true, errChan)
 		if err := <-errChan; err != nil {
-			glog.Errorf("scanImageHandler failed to send report: %v due to ERROR:: %s",
+			glog.Errorf("scanImageHandler failed to send job report: %v due to ERROR:: %s",
 				report, err.Error())
 		}
 		// End of Backend must not change report
