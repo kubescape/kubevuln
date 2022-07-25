@@ -130,12 +130,8 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 			ParentAction: WebsocketScan.ParentJobID,
 			Details:      "Inqueueing",
 		}
-		errChan := make(chan error)
-		report.SendAsRoutine(true, errChan)
-		if err := <-errChan; err != nil {
-			glog.Errorf("scanImageHandler failed to send job report: %v due to ERROR:: %s",
-				report, err.Error())
-		}
+
+		report.SendAsRoutine(true, process_request.ReportErrorsChan)
 		// End of Backend must not change report
 		td := taskData{
 			cb:      startScanImage,

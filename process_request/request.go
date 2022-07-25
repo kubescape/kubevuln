@@ -38,7 +38,7 @@ var ociClient OcimageClient
 var eventRecieverURL string
 var cusGUID string
 var printPostJSON string
-var reportErrorsChan chan error
+var ReportErrorsChan chan error
 
 //
 func init() {
@@ -61,10 +61,10 @@ func init() {
 	}
 	printPostJSON = os.Getenv("PRINT_POST_JSON")
 
-	reportErrorsChan = make(chan error)
+	ReportErrorsChan = make(chan error)
 	go func() {
-		for err := range reportErrorsChan {
-			glog.Errorf("failed to send job report ERROR: %s", err.Error())
+		for err := range ReportErrorsChan {
+			glog.Errorf("failed to send job report due to ERROR: %s", err.Error())
 		}
 	}()
 }
@@ -404,25 +404,25 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	if !slices.Contains(scanCmd.Session.JobIDs, jobID) {
 		scanCmd.Session.JobIDs = append(scanCmd.Session.JobIDs, jobID)
 	}
-	report.SendAsRoutine(true, reportErrorsChan)
+	report.SendAsRoutine(true, ReportErrorsChan)
 
 	// NewBaseReport(cusGUID, )
 	result, bashList, err := GetScanResult(scanCmd)
 	if err != nil {
-		report.SendError(err, true, true, reportErrorsChan)
+		report.SendError(err, true, true, ReportErrorsChan)
 		return nil, err
 	}
 
-	report.SendStatus(sysreport.JobSuccess, true, reportErrorsChan)
+	report.SendStatus(sysreport.JobSuccess, true, ReportErrorsChan)
 
-	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, reportErrorsChan)
+	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, ReportErrorsChan)
 
 	//Benh - dangerous hack
 	err = postScanResultsToEventReciever(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
-		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, reportErrorsChan)
+		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, ReportErrorsChan)
 	} else {
-		report.SendStatus(sysreport.JobDone, true, reportErrorsChan)
+		report.SendStatus(sysreport.JobDone, true, ReportErrorsChan)
 
 	}
 	return result, nil
