@@ -38,6 +38,7 @@ var ociClient OcimageClient
 var eventRecieverURL string
 var cusGUID string
 var printPostJSON string
+var ReportErrorsChan chan error
 
 //
 func init() {
@@ -59,6 +60,15 @@ func init() {
 		glog.Fatal("Must configure CA_CUSTOMER_GUID")
 	}
 	printPostJSON = os.Getenv("PRINT_POST_JSON")
+
+	ReportErrorsChan = make(chan error)
+	go func() {
+		for err := range ReportErrorsChan {
+			if err != nil {
+				glog.Errorf("failed to send job report due to ERROR: %s", err.Error())
+			}
+		}
+	}()
 }
 
 /* unused to be deleted
@@ -396,25 +406,26 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	if !slices.Contains(scanCmd.Session.JobIDs, jobID) {
 		scanCmd.Session.JobIDs = append(scanCmd.Session.JobIDs, jobID)
 	}
+	report.SendAsRoutine(true, ReportErrorsChan)
 
-	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
 	result, bashList, err := GetScanResult(scanCmd)
 	if err != nil {
-
-		report.SendError(err, true, true)
+		report.SendError(err, true, true, ReportErrorsChan)
 		return nil, err
 	}
-	report.SendStatus(sysreport.JobSuccess, true)
-	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true)
+
+	report.SendStatus(sysreport.JobSuccess, true, ReportErrorsChan)
+
+	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, ReportErrorsChan)
 
 	//Benh - dangerous hack
-
 	err = postScanResultsToEventReciever(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
-		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true)
+		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, ReportErrorsChan)
 	} else {
-		report.SendStatus(sysreport.JobDone, true)
+		report.SendStatus(sysreport.JobDone, true, ReportErrorsChan)
+
 	}
 	return result, nil
 }
