@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Azure/go-autorest/autorest/date"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
@@ -67,6 +68,22 @@ const (
 	AllLayersScope Scope = "AllLayers"
 )
 
+// Document represents the JSON document to be presented
+type Document struct {
+	*models.Document
+	Layers []ESLayer `json:"layers"`
+}
+
+type ESLayer struct {
+	LayerHash       string `json:"layerHash"`
+	ParentLayerHash string `json:"parentLayerHash"`
+	LayerInfo       *LayerInfo
+}
+
+type LayerInfo struct {
+	CreatedBy string
+	Date      *date.Date
+}
 type Logging struct {
 	Structured   bool   `mapstructure:"structured"`
 	LevelOpt     Level  `json:"-"`
@@ -276,7 +293,7 @@ func copyFileData(anchoreConfigPath string) error {
 	return err
 }
 
-func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
+func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*Document, error) {
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
 	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
@@ -327,14 +344,13 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 	return createAnchoreReport(anchoreConfigPath, out, out_err)
 }
 
-func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *bytes.Buffer) (*models.Document, error) {
-	vuln_anchore_report := &models.Document{}
+func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *bytes.Buffer) (*Document, error) {
+	vuln_anchore_report := &Document{}
 	err := os.Remove(anchoreConfigPath)
 	if err != nil {
 		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
-
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
 	if err != nil {
 		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s \n", err.Error(), string(out_err.Bytes()[:]))
@@ -471,7 +487,7 @@ func getCVEExeceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityEx
 	return nil, false
 }
 
-func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
+func AnchoreStructConversion(anchore_vuln_struct *Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
 	layersList := make(cs.LayersList, 0)
 
 	if anchore_vuln_struct.Source != nil {

@@ -173,7 +173,7 @@ func main() {
 	http.HandleFunc(scanURI, scanImageHandler)
 	http.HandleFunc(DBCommandURI, commandDBHandler)
 	http.HandleFunc(ServerReadyURI, serverReadyHandler)
-
+	log.Printf("listening on port 8080\n")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
