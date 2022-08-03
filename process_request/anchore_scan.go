@@ -293,7 +293,7 @@ func copyFileData(anchoreConfigPath string) error {
 	return err
 }
 
-func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*Document, error) {
+func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
 	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
@@ -344,8 +344,8 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*Document, error) {
 	return createAnchoreReport(anchoreConfigPath, out, out_err)
 }
 
-func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *bytes.Buffer) (*Document, error) {
-	vuln_anchore_report := &Document{}
+func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *bytes.Buffer) (*models.Document, error) {
+	vuln_anchore_report := &models.Document{}
 	err := os.Remove(anchoreConfigPath)
 	if err != nil {
 		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
@@ -487,7 +487,7 @@ func getCVEExeceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityEx
 	return nil, false
 }
 
-func AnchoreStructConversion(anchore_vuln_struct *Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
+func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
 	layersList := make(cs.LayersList, 0)
 
 	if anchore_vuln_struct.Source != nil {
