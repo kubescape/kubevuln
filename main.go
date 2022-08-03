@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ca-vuln-scan/docs"
 	"ca-vuln-scan/process_request"
 	"encoding/json"
 	"flag"
@@ -153,6 +154,7 @@ func taskChannelHandler(taskChan <-chan taskData) {
 	}
 }
 
+//go:generate swagger generate spec -o ./docs/swagger.yaml
 func main() {
 	process_request.CreateAnchoreResourcesDirectoryAndFiles()
 	flag.Parse()
@@ -174,7 +176,11 @@ func main() {
 	http.HandleFunc(scanURI, scanImageHandler)
 	http.HandleFunc(DBCommandURI, commandDBHandler)
 	http.HandleFunc(ServerReadyURI, serverReadyHandler)
-	log.Printf("listening on port 8080\n")
+
+	// Set up OpenAPI UI
+	openAPIUIHandler := docs.NewOpenAPIUIHandler()
+	http.Handle(docs.OpenAPIV2Prefix, openAPIUIHandler)
+
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
