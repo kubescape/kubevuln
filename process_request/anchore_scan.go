@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Azure/go-autorest/autorest/date"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
@@ -68,22 +67,6 @@ const (
 	AllLayersScope Scope = "AllLayers"
 )
 
-// Document represents the JSON document to be presented
-type Document struct {
-	*models.Document
-	Layers []ESLayer `json:"layers"`
-}
-
-type ESLayer struct {
-	LayerHash       string `json:"layerHash"`
-	ParentLayerHash string `json:"parentLayerHash"`
-	LayerInfo       *LayerInfo
-}
-
-type LayerInfo struct {
-	CreatedBy string
-	Date      *date.Date
-}
 type Logging struct {
 	Structured   bool   `mapstructure:"structured"`
 	LevelOpt     Level  `json:"-"`
