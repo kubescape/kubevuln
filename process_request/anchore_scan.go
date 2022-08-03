@@ -334,6 +334,7 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
+
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
 	if err != nil {
 		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s \n", err.Error(), string(out_err.Bytes()[:]))
