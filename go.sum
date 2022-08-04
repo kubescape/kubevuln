@@ -160,8 +160,8 @@ github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmV
 github.com/armon/go-metrics v0.3.10/go.mod h1:4O98XIr/9W0sxpJ8UaYkvjk10Iff7SnFrb4QAOwNTFc=
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
-github.com/armosec/armoapi-go v0.0.99 h1:BHhOBK2V+GHcKPNkvRvVyMAgHXllBQZpNazWglGGXbE=
-github.com/armosec/armoapi-go v0.0.99/go.mod h1:v7rUl9eo5qL3kHxiP8tFCyRYERUGPgm2rwTIqkVOouw=
+github.com/armosec/armoapi-go v0.0.111 h1:yQSKz95wnlU7Zucee0+hizMyKgJGdEyiPdsIz/LH7nY=
+github.com/armosec/armoapi-go v0.0.111/go.mod h1:v7rUl9eo5qL3kHxiP8tFCyRYERUGPgm2rwTIqkVOouw=
 github.com/armosec/cluster-container-scanner-api v0.0.36 h1:K7ABE186FTM6ILJFkmKVKxgae5ree7XoBt4eijQSQF0=
 github.com/armosec/cluster-container-scanner-api v0.0.36/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
 github.com/armosec/logger-go v0.0.11 h1:u8rN76gAMi3fRl6I6LQdrd5jPzyiKKFcmrcDsggS1OM=
