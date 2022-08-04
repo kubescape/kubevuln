@@ -130,7 +130,8 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 			ParentAction: WebsocketScan.ParentJobID,
 			Details:      "Inqueueing",
 		}
-		report.SendAsRoutine([]string{}, true)
+
+		report.SendAsRoutine(true, process_request.ReportErrorsChan)
 		// End of Backend must not change report
 		td := taskData{
 			cb:      startScanImage,
