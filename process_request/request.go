@@ -125,6 +125,9 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		final_report.Designators.Attributes[armotypes.AttributeTag] = val.(string)
 	}
 
+	if val, ok := scanCmd.Args[armotypes.AttributeSensor]; ok {
+		final_report.Designators.Attributes[armotypes.AttributeSensor] = val.(string)
+	}
 	//complete designators info
 	finalDesignators, _ := final_report.GetDesignatorsNContext()
 	final_report.Designators = *finalDesignators
