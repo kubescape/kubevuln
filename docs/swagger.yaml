@@ -299,5 +299,6 @@ responses:
   readinessServiceUnavailable:
     description: The service is not ready to accept requests.
 schemes:
+- https
 - http
 swagger: "2.0"

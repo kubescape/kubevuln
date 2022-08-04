@@ -3,7 +3,7 @@ Package classification Kubescape Vulnerability Scanner
 
 The Kubescape vulnerability scanner allows clients to check images for vulnerabilities.
 
-Schemes: http
+Schemes: https, http
 BasePath: /
 Version: 1.0.0
 
