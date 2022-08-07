@@ -15,12 +15,10 @@ import (
 	"sync"
 	"time"
 
-	armoUtils "github.com/armosec/utils-go/httputils"
+	"github.com/armosec/utils-go/httputils"
 	"github.com/golang/glog"
 
 	"github.com/hashicorp/go-multierror"
-
-	// "ca-vuln-scan/catypes"
 
 	"os"
 
@@ -35,31 +33,30 @@ import (
 const maxBodySize int = 30000
 
 var ociClient OcimageClient
-var eventRecieverURL string
-var cusGUID string
+var eventReceiverURL string
+var customerGUID string
 var printPostJSON string
 var ReportErrorsChan chan error
 
-//
 func init() {
-	ociClient.endpoint = os.Getenv("OCIMAGE_URL")
+	ociClient.endpoint = os.Getenv(OciClientUrlEnvironmentVariableV1)
 	if len(ociClient.endpoint) == 0 {
-		ociClient.endpoint = os.Getenv("CA_OCIMAGE_URL")
+		ociClient.endpoint = os.Getenv(OciClientUrlEnvironmentVariableV2)
 		if len(ociClient.endpoint) == 0 {
-			glog.Warning("OCIMAGE_URL/CA_OCIMAGE_URL is not configured- some features might not work, please install OCIMAGE to get more features")
+			glog.Warningf("%s/%s is not configured- some features might not work, please install OCIMAGE to get more features", OciClientUrlEnvironmentVariableV1, OciClientUrlEnvironmentVariableV2)
 		}
 	}
 
-	eventRecieverURL = os.Getenv("CA_EVENT_RECEIVER_HTTP")
-	if len(eventRecieverURL) == 0 {
-		glog.Fatal("Must configure either CA_EVENT_RECEIVER_HTTP")
+	eventReceiverURL = os.Getenv(EventReceiverUrlEnvironmentVariable)
+	if len(eventReceiverURL) == 0 {
+		glog.Fatalf("Must configure either %s", EventReceiverUrlEnvironmentVariable)
 	}
 
-	cusGUID = os.Getenv("CA_CUSTOMER_GUID")
-	if len(cusGUID) == 0 {
-		glog.Fatal("Must configure CA_CUSTOMER_GUID")
+	customerGUID = os.Getenv(CustomerGuidEnvironmentVariable)
+	if len(customerGUID) == 0 {
+		glog.Fatalf("Must configure %s", CustomerGuidEnvironmentVariable)
 	}
-	printPostJSON = os.Getenv("PRINT_POST_JSON")
+	printPostJSON = os.Getenv(PrintResultsJsonEnvironmentVariable)
 
 	ReportErrorsChan = make(chan error)
 	go func() {
@@ -71,36 +68,13 @@ func init() {
 	}()
 }
 
-/* unused to be deleted
-func getContainerImageManifest(scanCmd *wssc.WebsocketScanCommand) (*OciImageManifest, error) {
-	oci := OcimageClient{endpoint: "http://localhost:8080"}
-	image, err := oci.Image(scanCmd)
-	if err != nil {
-		return nil, err
-	}
-	manifest, err := image.GetManifest()
-	if err != nil {
-		return nil, err
-	}
-	return manifest, nil
-}
-*/
+func postScanResultsToEventReceiver(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
 
-func (oci *OcimageClient) GetContainerImage(scanCmd *wssc.WebsocketScanCommand) (*OciImage, error) {
-	image, err := oci.Image(scanCmd)
-	if err != nil {
-		return nil, err
-	}
-	return image, nil
-}
-
-func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
-
-	glog.Infof("posting to event reciever image %s wlid %s", imagetag, wlid)
+	glog.Infof("posting to event receiver image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
 
 	final_report := cs.ScanResultReport{
-		CustomerGUID:             cusGUID,
+		CustomerGUID:             customerGUID,
 		ImgTag:                   imagetag,
 		ImgHash:                  imageHash,
 		WLID:                     wlid,
@@ -134,7 +108,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 
 	glog.Infof("session: %v\n===\n", final_report.Session)
 	//split vulnerabilities to chunks
-	chunksChan, totalVulnerabilities := armoUtils.SplitSlice2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize, 10)
+	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize, 10)
 	//send report(s)
 	scanID := final_report.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
@@ -211,7 +185,7 @@ func sendSummaryAndVulnerabilities(report cs.ScanResultReport, totalVulnerabilit
 		Designators:     report.Designators,
 	}
 	//if size of summary + first chunk does not exceed max size
-	if armoUtils.JSONSize(summaryReport)+armoUtils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
+	if httputils.JSONSize(summaryReport)+httputils.JSONSize(firstVulnerabilitiesChunk) <= maxBodySize {
 		//then post the summary report with the first vulnerabilities chunk
 		summaryReport.Vulnerabilities = firstVulnerabilitiesChunk
 		//if all vulnerabilities got into the first chunk set this as the last report
@@ -260,14 +234,15 @@ func postResults(report *cs.ScanResultReportV1, imagetag string, wlid string, er
 		glog.Info("printPostJSON:")
 		glog.Infof("%v", string(payload))
 	}
-	resp, err := http.Post(eventRecieverURL+"/k8s/v2/containerScan?"+armotypes.CustomerGuidQuery+"="+report.Designators.Attributes[armotypes.AttributeCustomerGUID], "application/json", bytes.NewReader(payload))
+
+	resp, err := http.Post(eventReceiverURL+"/k8s/v2/containerScan?"+armotypes.CustomerGuidQuery+"="+report.Designators.Attributes[armotypes.AttributeCustomerGUID], "application/json", bytes.NewReader(payload))
 	if err != nil {
 		glog.Errorf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
 		errorChan <- err
 		return
 	}
 	defer resp.Body.Close()
-	body, err := armoUtils.HttpRespToString(resp)
+	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
 		glog.Errorf("Vulnerabilities post to event receiver failed with error:%s response body: %s", err.Error(), body)
 		errorChan <- err
@@ -296,7 +271,6 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 				glog.Info("skipping dangerous executables enrichment")
 				filteredResultsChan <- nil
 			}()
-			// return nil, nil, err
 		} else {
 			go func() {
 				listOfPrograms := []string{
@@ -385,7 +359,7 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 
 func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
 	report := &sysreport.BaseReport{
-		CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
+		CustomerGUID: os.Getenv(CustomerGuidEnvironmentVariable),
 		Reporter:     "ca-vuln-scan",
 		Status:       sysreport.JobStarted,
 		Target: fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s", scanCmd.Wlid,
@@ -411,7 +385,6 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendAsRoutine(true, ReportErrorsChan)
 
-	// NewBaseReport(cusGUID, )
 	result, bashList, err := GetScanResult(scanCmd)
 	if err != nil {
 		report.SendError(err, true, true, ReportErrorsChan)
@@ -423,7 +396,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, ReportErrorsChan)
 
 	//Benh - dangerous hack
-	err = postScanResultsToEventReciever(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
+	err = postScanResultsToEventReceiver(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, ReportErrorsChan)
 	} else {

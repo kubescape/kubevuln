@@ -41,19 +41,6 @@ jobs:
           release_name: Release v0.0.${{ github.run_number }}
           draft: false
           prerelease: false
-  
-      
-  #     - name: Upload release binaries
-  #       id: upload-release-asset
-  #       uses: actions/upload-release-asset@v1
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       with:
-  #         upload_url: ${{ needs.once.outputs.upload_url }}
-  #         asset_path: build/http_request
-  #         asset_name: http_request
-  #         asset_content_type: application/octet-stream
-
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: tag
