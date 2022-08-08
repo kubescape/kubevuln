@@ -85,7 +85,8 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	//call postScanResultsToEventReciever
 	dummyScanCmd := &wssc.WebsocketScanCommand{}
 	//postScanResultsToEventReciever blocks until all report chunks are sent to the event receiver
-	err = postScanResultsToEventReciever(dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, scanReport.ListOfDangerousArtifcats)
+	dummyLayers := make(map[string]cs.ESLayer)
+	err = postScanResultsToEventReciever(dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, scanReport.ListOfDangerousArtifcats, dummyLayers)
 	assert.NoError(t, err, "postScanResultsToEventReceiver returned an error")
 	assert.Equal(t, reportsPartsSum, reportPartsReceived, "reportPartsReceived must be equal to reportsPartsSum")
 	assert.NotNil(t, accumulatedReport, "accumulated report should not be nil ")
@@ -126,41 +127,41 @@ func TestSplit2Chunks(t *testing.T) {
 	tests := map[int]splitResults{
 		//normal chunk size - expected splitting
 		30000: {totalReceived: numOfVulnerabilities,
-			numOfChunks:    3,
-			maxChunkSize:   29800,
-			minChunkSize:   16370,
+			numOfChunks:    4,
+			maxChunkSize:   28571,
+			minChunkSize:   2030,
 			maxChunkLength: 12,
-			minChunkLength: 9,
+			minChunkLength: 1,
 		},
 		//big chunk size - expected splitting
 		60000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    2,
-			maxChunkSize:   58098,
-			minChunkSize:   14563,
+			maxChunkSize:   59356,
+			minChunkSize:   14699,
 			maxChunkLength: 25,
 			minChunkLength: 8,
 		},
 		//big chunk size - expected splitting
 		15000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    8,
-			maxChunkSize:   14332,
-			minChunkSize:   2334,
+			maxChunkSize:   14655,
+			minChunkSize:   2368,
 			maxChunkLength: 6,
 			minChunkLength: 1,
 		},
 		//huge chunk size - no splitting expected
 		300000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    1,
-			maxChunkSize:   72659,
-			minChunkSize:   72659,
+			maxChunkSize:   74053,
+			minChunkSize:   74053,
 			maxChunkLength: 33,
 			minChunkLength: 33,
 		},
 		//tiny chunk size expect one item in each chunk
 		300: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    33,
-			maxChunkSize:   3492,
-			minChunkSize:   1803,
+			maxChunkSize:   3645,
+			minChunkSize:   1820,
 			maxChunkLength: 1,
 			minChunkLength: 1,
 		},
