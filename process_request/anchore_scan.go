@@ -238,7 +238,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 }
 
 func copyFileData(anchoreConfigPath string) error {
-	source, err := os.Open(path.Join(anchoreDirectoryPath, anchoreConfigPath, anchoreConfigFileName))
+	source, err := os.Open(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
 	if err != nil {
 		return err
 	}
@@ -259,7 +259,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 	anchoreConfigPath := path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, configFileName)
 	err := copyFileData(anchoreConfigPath)
 	if err != nil {
-		log.Printf("fail to copy default file config to %v with err %v\n", anchoreConfigPath, err)
+		log.Printf("failed to copy default file config to %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
 
