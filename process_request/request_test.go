@@ -23,18 +23,18 @@ import (
 
 //set required env vars
 var _ = (func() interface{} {
-	os.Setenv("CA_CUSTOMER_GUID", "e57ec5a0-695f-4777-8366-1c64fada00a0")
-	os.Setenv("CA_EVENT_RECEIVER_HTTP", "http://localhost:9111")
+	os.Setenv(CustomerGuidEnvironmentVariable, "aaaaaaaa-1111-bbbb-2222-cccccccccccc")
+	os.Setenv(EventReceiverUrlEnvironmentVariable, "http://localhost:9111")
 	return nil
 }())
 
-//go:embed fixtures/testCaseScanReport.json
+//go:embed testdata/testCaseScanReport.json
 var testCaseScanReportBytes []byte
 
-//go:embed fixtures/expectedScanReport.json
+//go:embed testdata/expectedScanReport.json
 var expectedScanReportBytes []byte
 
-func TestPostScanResultsToEventReciever(t *testing.T) {
+func TestPostScanResultsToEventReceiver(t *testing.T) {
 	//load scan report test case
 	scanReport := cs.ScanResultReport{}
 	if err := json.Unmarshal(testCaseScanReportBytes, &scanReport); err != nil {
@@ -82,7 +82,7 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	}
 	defer testServer.Close()
 
-	//call postScanResultsToEventReciever
+	//call postScanResultsToEventReceiver
 	dummyScanCmd := &wssc.WebsocketScanCommand{}
 	//postScanResultsToEventReciever blocks until all report chunks are sent to the event receiver
 	dummyLayers := make(map[string]cs.ESLayer)
@@ -101,11 +101,6 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 		return strings.Compare(accumulatedReport.Summary.Context[i].Attribute, accumulatedReport.Summary.Context[j].Attribute) == -1
 	})
 
-	/* uncomment to update expected results
-	file, _ := json.MarshalIndent(accumulatedReport, "", " ")
-	_ = ioutil.WriteFile("fixtures/expectedScanReport.json", file, 0644)
-	*/
-
 	//compare accumulatedReport with expected
 	diff := gcmp.Diff(accumulatedReport, &expectedScanReport,
 		cmpopts.IgnoreFields(cs.ScanResultReportV1{}, "PaginationInfo", "Timestamp", "ContainerScanID"),
@@ -115,7 +110,7 @@ func TestPostScanResultsToEventReciever(t *testing.T) {
 	assert.Empty(t, diff, "actual compare with expected should not have diffs")
 }
 
-//go:embed fixtures/testCaseVulnerabilities.json
+//go:embed testdata/testCaseVulnerabilities.json
 var testCaseVulnerabilitiesBytes []byte
 
 func TestSplit2Chunks(t *testing.T) {

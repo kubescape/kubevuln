@@ -1,8 +1,0 @@
-[submodule "jenkinstools"]
-	path = jenkinstools
-	url = git@github.com:armosec/jenkinstools.git
-	branch = master
-[submodule "grype-versioning"]
-	path = grype-versioning
-	url = git@github.com:armosec/grype-versioning.git
-	branch = master

@@ -1,0 +1,304 @@
+basePath: /
+consumes:
+- application/json
+definitions:
+  AuthConfig:
+    description: AuthConfig contains authorization information for connecting to a
+      Registry
+    properties:
+      auth:
+        type: string
+        x-go-name: Auth
+      email:
+        description: |-
+          Email is an optional value associated with the username.
+          This field is deprecated and will be removed in a later
+          version of docker.
+        type: string
+        x-go-name: Email
+      identitytoken:
+        description: |-
+          IdentityToken is used to authenticate the user and get
+          an access token for the registry.
+        type: string
+        x-go-name: IdentityToken
+      password:
+        type: string
+        x-go-name: Password
+      registrytoken:
+        description: RegistryToken is a bearer token to be sent to a registry
+        type: string
+        x-go-name: RegistryToken
+      serveraddress:
+        type: string
+        x-go-name: ServerAddress
+      username:
+        type: string
+        x-go-name: Username
+    type: object
+    x-go-package: github.com/docker/docker/api/types
+  DBCommand:
+    properties:
+      commands:
+        additionalProperties:
+          type: object
+        example:
+          updateDB: ""
+        type: object
+        x-go-name: Commands
+    title: DBCommand describes commands to run agains a database of vulnerabilities.
+    type: object
+    x-go-package: github.com/armosec/armoapi-go/apis
+  SessionChain:
+    description: |-
+      The goal is to provide context for a given job: its parent jobs, a chain of how the jobs were spawned and some metadata.
+
+      Consider a vulnerability scan, for example:
+      The Backend or cluster sends a websocket request with a Job ID, e.g. jobID_1.
+      The Websocket takes all the cluster workloads and for each workload it creates a job with ID `jobID_i`.
+      Then, for each container in `workload_i` it creates a job with ID `jobID_j`.
+
+      So when the Websocket sends the scan command, it sends the normal command object (pre Session Chain) to the Vulnerability Scanner
+
+      session: {
+      "jobIDs": ["jobID_1", "jobID_i", "jobID_j"],
+      "timestamp": "<jobID#1 timestamp>",
+      "rootJobID": "jobID_1"
+      }
+
+      This Session Chain is needed so that:
+      each scan will hold it's own unique sessionChain.
+      `rootJobID` will allow customers to find their latest scans issues by cluster/other.
+      `jobID`s will allow customers to take all specific workload related for that specific scan.
+    properties:
+      action:
+        description: Title of the current action being performed
+        example: vulnerability-scan
+        type: string
+        x-go-name: ActionTitle
+      jobIDs:
+        description: |-
+          All related job IDs in order from the most distant to the closes relative.
+
+          For instance: grandparent → parent → current.
+        example:
+        - 825f0a9e-34a9-4727-b81a-6e1bf3a63725
+        - c188de09-c6ec-4814-b36a-722dcccea64b
+        items:
+          type: string
+        type: array
+        x-go-name: JobIDs
+      rootJobID:
+        description: ID of the job that started this chain.
+        example: 825f0a9e-34a9-4727-b81a-6e1bf3a63725
+        format: uuid4
+        type: string
+        x-go-name: RootJobID
+      timestamp:
+        description: The timestamp of the earliest job
+        format: date-time
+        type: string
+        x-go-name: Timestamp
+    title: SessionChain provides the context of a given job.
+    type: object
+    x-go-package: github.com/armosec/armoapi-go/apis
+  WebsocketScanCommand:
+    properties:
+      actionIDN:
+        description: The last action received from the Websocket
+        example: 2
+        format: int64
+        type: integer
+        x-go-name: LastAction
+      args:
+        additionalProperties:
+          type: object
+        description: Arguments to pass to the scan command
+        example:
+          registryName: ""
+          repository: ""
+          skipTLSVerify: true
+          tag: ""
+          useHTTP: true
+        type: object
+        x-go-name: Args
+      containerName:
+        description: Name of the container that contains an image to be scanned
+        example: nginx
+        type: string
+        x-go-name: ContainerName
+      credentials:
+        $ref: '#/definitions/AuthConfig'
+      credentialsList:
+        description: A list of credentials for private Container Registries that store
+          images to be scanned
+        items:
+          $ref: '#/definitions/AuthConfig'
+        type: array
+        x-go-name: Credentialslist
+      imageHash:
+        description: Hash of the image to scan
+        example: bcae378eacedab83da66079d9366c8f5df542d7ed9ab23bf487e3e1a8481375d
+        type: string
+        x-go-name: ImageHash
+      imageTag:
+        description: Tag of the image to scan
+        example: nginx:latest
+        type: string
+        x-go-name: ImageTag
+      isScanned:
+        description: |-
+          Has the provided image been previously scanned or not?
+
+          An image will only be scanned if it has not been scanned previously (value is `false`).
+          If an image has been previously scanned (value is `true`), it will not be scanned again.
+        example: false
+        type: boolean
+        x-go-name: IsScanned
+      jobID:
+        description: ID of the scanning Job
+        example: 7b04592b-665a-4e47-a9c9-65b2b3cabb49
+        type: string
+        x-go-name: JobID
+      parentJobID:
+        description: ID of the Parent Job — a job that initiated the current job
+        example: 825f0a9e-34a9-4727-b81a-6e1bf3a63725
+        type: string
+        x-go-name: ParentJobID
+      session:
+        $ref: '#/definitions/SessionChain'
+      wlid:
+        description: ID of a workload that is running the image you want to scan
+        example: wlid://cluster-marina/namespace-default/deployment-nginx
+        type: string
+        x-go-name: Wlid
+    title: WebsocketScanCommand is a command that triggers a scan for vulnerabilities.
+    type: object
+    x-go-package: github.com/armosec/armoapi-go/apis
+  postDBCommandAcceptedResponseBody:
+    description: Response body of the postDBCommandAccepted
+    type: string
+    x-go-package: ca-vuln-scan/docs
+  postDBCommandBadRequestResponseBody:
+    type: string
+    x-go-package: ca-vuln-scan/docs
+  postScanImageAcceptedResponseBody:
+    description: 'Example: scan request accepted'
+    title: Response body of a response that a POST Scan Image request has been Accepted.
+    type: string
+    x-go-package: ca-vuln-scan/docs
+info:
+  description: The Kubescape vulnerability scanner allows clients to check images
+    for vulnerabilities.
+  title: Kubescape Vulnerability Scanner
+  version: 1.0.0
+paths:
+  /v1/DBCommand:
+    post:
+      description: Used to update the vulnerability database.
+      operationId: postDBCommand
+      parameters:
+      - description: The commands to run on a vulnerability database
+        in: body
+        name: Body
+        schema:
+          $ref: '#/definitions/DBCommand'
+      responses:
+        "202":
+          $ref: '#/responses/postDBCommandAccepted'
+        "400":
+          $ref: '#/responses/postDBCommandBadRequest'
+      summary: Schedules a command related to the vulnerability database to be run.
+      tags:
+      - database
+  /v1/readiness:
+    get:
+      operationId: getReadiness
+      responses:
+        "202":
+          $ref: '#/responses/readinessReady'
+        "503":
+          $ref: '#/responses/readinessServiceUnavailable'
+      summary: Checks if service is ready to check images.
+      tags:
+      - probes
+  /v1/ready:
+    head:
+      operationId: headReady
+      responses:
+        "202":
+          $ref: '#/responses/readinessReady'
+      summary: Checks if the HTTP server is ready to accept requests.
+      tags:
+      - probes
+    post:
+      consumes:
+      - text/plain
+      description: Instruct the server to report that it is ready to scan images.
+      operationId: postReady
+      parameters:
+      - in: query
+        name: Body
+        type: string
+      responses:
+        "202":
+          $ref: '#/responses/emptyResponse'
+        "400":
+          $ref: '#/responses/postReadyBadRequest'
+      summary: Sets the service’s readiness status.
+      tags:
+      - probes
+  /v1/scanImage:
+    post:
+      description: Schedules an image described in the request body to be scanned
+        for vulnerabilities.
+      operationId: postScanImage
+      parameters:
+      - in: body
+        name: Body
+        schema:
+          $ref: '#/definitions/WebsocketScanCommand'
+      responses:
+        "202":
+          $ref: '#/responses/postScanImageAccepted'
+        "400":
+          $ref: '#/responses/postScanImageBadRequest'
+      summary: Schedules an image scan.
+      tags:
+      - scanning
+produces:
+- text/plain
+responses:
+  emptyResponse:
+    description: An empty response.
+  postDBCommandAccepted:
+    description: A response signaling that a DB-related command has been accepted.
+    schema:
+      $ref: '#/definitions/postDBCommandAcceptedResponseBody'
+  postDBCommandBadRequest:
+    description: A response signaling that a request with a DB-related command was
+      malformed.
+    schema:
+      $ref: '#/definitions/postDBCommandBadRequestResponseBody'
+  postReadyBadRequest:
+    description: Malformed request.
+  postScanImageAccepted:
+    description: |-
+      A response to scan an Image has been accepted.
+
+      The request will be processed asynchronously.
+    schema:
+      $ref: '#/definitions/postScanImageAcceptedResponseBody'
+  postScanImageBadRequest:
+    description: A response that signals that an incoming POST scanImage request was
+      malformed.
+    schema:
+      $ref: '#/definitions/postScanImageAcceptedResponseBody'
+  readinessReady:
+    description: The service is ready to accept requests.
+  readinessServiceUnavailable:
+    description: The service is not ready to accept requests.
+schemes:
+- https
+- http
+swagger: "2.0"
