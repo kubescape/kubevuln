@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,16 +26,21 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 
-	// cs "github.com/armosec/capacketsgo/containerscan"
 	"github.com/anchore/grype/grype/presenter/models"
 	types "github.com/docker/docker/api/types"
 )
 
-const DEFAULT_DB_UPDATE_TIME_IN_MINUTES = 60 * 6
-const DB_IS_READY = "db is ready"
+const (
+	urlBase                      = "http://localhost:8080"
+	defaultDbUpdateTimeInMinutes = 60 * 6
+	DbIsReady                    = "db is ready"
+	anchoreBinaryName            = "grype-cmd"
+	anchoreDirectoryName         = "anchore-resources"
 
-var anchoreBinaryName = "/grype-cmd"
-var anchoreDirectoryName = "/anchore-resources"
+	anchoreConfigFileName      = "config.yaml"
+	anchoreConfigDirectoryName = ".grype"
+)
+
 var anchoreDirectoryPath string
 var mutex_edit_conf *sync.Mutex
 
@@ -110,32 +116,6 @@ type Development struct {
 	ProfileCPU bool `mapstructure:"profile-cpu"`
 }
 
-func copyFileToOtherPath(src, dst string) error {
-	if _, err := os.Stat(dst); os.IsNotExist(err) {
-		in, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-
-		out, err := os.Create(dst)
-		if err != nil {
-			return err
-		}
-		err = os.Chmod(dst, 0775)
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-
-		_, err = io.Copy(out, in)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func CreateAnchoreResourcesDirectoryAndFiles() {
 
 	dir, err := os.Getwd()
@@ -143,7 +123,7 @@ func CreateAnchoreResourcesDirectoryAndFiles() {
 		log.Fatal(err)
 	}
 
-	anchoreDirectoryPath = dir + anchoreDirectoryName
+	anchoreDirectoryPath = path.Join(dir, anchoreDirectoryName)
 }
 
 func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool) error {
@@ -159,7 +139,7 @@ func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool)
 	}
 
 	App.Registry.InsecureUseHTTP = useHTTP
-	config_yaml_data, err := yaml.Marshal(&App)
+	config_yaml_data, _ := yaml.Marshal(&App)
 	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
@@ -180,7 +160,7 @@ func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerif
 	}
 
 	App.Registry.InsecureSkipTLSVerify = skipVerify
-	config_yaml_data, err := yaml.Marshal(&App)
+	config_yaml_data, _ := yaml.Marshal(&App)
 	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
@@ -211,13 +191,10 @@ func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.
 		App.Registry.Auth = append(App.Registry.Auth, RegistryCredentials{Username: cred.Username, Password: cred.Password})
 	}
 	if len(App.Registry.Auth) == 0 {
-		/*
-			should never happend
-		*/
-		return fmt.Errorf("error: no crediantials added")
+		return fmt.Errorf("no credentials added")
 	}
 
-	config_yaml_data, err := yaml.Marshal(&App)
+	config_yaml_data, _ := yaml.Marshal(&App)
 	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
@@ -231,7 +208,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 
 	mutex_edit_conf.Lock()
 
-	bytes, err := ioutil.ReadFile(anchoreDirectoryPath + "/.grype/config.yaml")
+	bytes, err := ioutil.ReadFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -249,8 +226,8 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 		}
 		i++
 	}
-	config_yaml_data, err := yaml.Marshal(&App)
-	err = ioutil.WriteFile(anchoreDirectoryPath+"/.grype"+"/config.yaml", config_yaml_data, 0755)
+	config_yaml_data, _ := yaml.Marshal(&App)
+	err = ioutil.WriteFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName), config_yaml_data, 0755)
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -261,7 +238,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 }
 
 func copyFileData(anchoreConfigPath string) error {
-	source, err := os.Open(anchoreDirectoryPath + "/.grype" + "/config.yaml")
+	source, err := os.Open(path.Join(anchoreDirectoryPath, anchoreConfigPath, anchoreConfigFileName))
 	if err != nil {
 		return err
 	}
@@ -278,8 +255,8 @@ func copyFileData(anchoreConfigPath string) error {
 
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
-	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100))
-	anchoreConfigPath := anchoreDirectoryPath + "/.grype/" + configFileName + ".yaml"
+	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100)) + ".yaml"
+	anchoreConfigPath := path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, configFileName)
 	err := copyFileData(anchoreConfigPath)
 	if err != nil {
 		log.Printf("fail to copy default file config to %v with err %v\n", anchoreConfigPath, err)
@@ -311,7 +288,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 			if err = SetHTTPScansToAnchoreConfigurationFile(anchoreConfigPath, true); err == nil {
 				cmd, imageID, out, out_err = executeAnchoreCommand(scanCmd, anchoreConfigPath)
 				err = cmd.Run()
-				err_str, err_anchore_str, exit_code = anchoreErrorHandler(out, out_err, err)
+				_, err_anchore_str, exit_code = anchoreErrorHandler(out, out_err, err)
 				if err == nil {
 					return createAnchoreReport(anchoreConfigPath, out, out_err)
 				}
@@ -346,11 +323,13 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 func executeAnchoreCommand(scanCmd *wssc.WebsocketScanCommand, anchoreConfigPath string) (*exec.Cmd, string, *bytes.Buffer, *bytes.Buffer) {
 	var cmd *exec.Cmd
 	var imageID string
+
+	anchoreBinaryFullPath := path.Join(anchoreDirectoryPath, anchoreBinaryName)
 	if scanCmd.ImageHash != "" {
-		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageHash, "-o", "json", "-c", anchoreConfigPath)
+		cmd = exec.Command(anchoreBinaryFullPath, "-vv", scanCmd.ImageHash, "-o", "json", "-c", anchoreConfigPath)
 		imageID = scanCmd.ImageHash
 	} else {
-		cmd = exec.Command(anchoreDirectoryPath+anchoreBinaryName, "-vv", scanCmd.ImageTag, "-o", "json", "-c", anchoreConfigPath)
+		cmd = exec.Command(anchoreBinaryFullPath, "-vv", scanCmd.ImageTag, "-o", "json", "-c", anchoreConfigPath)
 		imageID = scanCmd.ImageTag
 	}
 	var out bytes.Buffer
@@ -379,82 +358,7 @@ func anchoreErrorHandler(out *bytes.Buffer, out_err *bytes.Buffer, err error) (s
 	return err_str, err_anchore_str, exit_code
 }
 
-func convertToPkgFiles(fileList *[]string) *cs.PkgFiles {
-	pkgFiles := make(cs.PkgFiles, 0)
-
-	for _, file := range *fileList {
-		filename := cs.PackageFile{Filename: file}
-		pkgFiles = append(pkgFiles, filename)
-	}
-
-	return &pkgFiles
-}
-
-func GetPackagesInLayer(layer string, anchore_vuln_struct *models.Document, packageManager PackageHandler) cs.LinuxPkgs {
-
-	packages := make(cs.LinuxPkgs, 0)
-	featureToFileList := make(map[string]*cs.PkgFiles)
-	var pkgResolved map[string][]string //holds the mapping
-	var Files *cs.PkgFiles
-	linuxPackage := cs.LinuxPackage{}
-
-	if packageManager != nil {
-
-		for _, match_data := range anchore_vuln_struct.Matches {
-			for _, match_detailes_data := range match_data.MatchDetails {
-				if match_detailes_data.SearchedBy != nil {
-
-					map_search_by_data := match_detailes_data.SearchedBy.(map[string]interface{})
-					if map_search_by_data["package"] != nil {
-						package_data := map_search_by_data["package"].(map[string]interface{})
-						if package_data["name"] != nil {
-							package_name := package_data["name"].(string)
-							if files, ok := featureToFileList[package_name]; !ok {
-								fileList, err := packageManager.readFileListForPackage(package_name)
-								if err != nil {
-									if fileList == nil {
-										fileList = &[]string{}
-										*fileList = make([]string, 0)
-									}
-
-									//see pkgResolved definition for more info
-									if realPkgNames, isOk := pkgResolved[package_name]; packageManager.GetType() == "dpkg" && isOk {
-										for _, pkgname := range realPkgNames {
-											tmpfileList, err := packageManager.readFileListForPackage(pkgname)
-											if err == nil {
-												*fileList = append(*fileList, *tmpfileList...)
-											}
-										}
-									} else {
-
-										log.Printf("warning: package '%s', files not found even after remapping", package_name)
-									}
-								}
-
-								if len(*fileList) > 0 {
-									log.Printf("package %s added files", package_name)
-									Files = convertToPkgFiles(fileList)
-									linuxPackage.Files = *Files
-									featureToFileList[package_name] = Files
-								} else {
-									log.Printf("warning: files not found")
-								}
-							} else {
-								linuxPackage.Files = *files
-							}
-							linuxPackage.PackageName = package_name
-						}
-					}
-				}
-			}
-		}
-		packages = append(packages, linuxPackage)
-	}
-
-	return packages
-}
-
-func getCVEExeceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) ([]armotypes.VulnerabilityExceptionPolicy, bool) {
+func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) ([]armotypes.VulnerabilityExceptionPolicy, bool) {
 	var l []armotypes.VulnerabilityExceptionPolicy
 
 	for i := range srcCVEList {
@@ -476,8 +380,7 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerability
 
 	if anchore_vuln_struct.Source != nil {
 		parentLayerHash := ""
-		var map_target map[string]interface{}
-		map_target = anchore_vuln_struct.Source.Target.(map[string]interface{})
+		map_target := anchore_vuln_struct.Source.Target.(map[string]interface{})
 
 		for _, l := range map_target["layers"].([]interface{}) {
 			layer := l.(map[string]interface{})
@@ -512,14 +415,14 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerability
 							Description:        description,
 							Severity:           match.Vulnerability.Severity,
 							Fixes: []cs.FixedIn{
-								cs.FixedIn{
+								{
 									Name:    match.Vulnerability.Fix.State,
 									ImgTag:  map_target["userInput"].(string),
 									Version: version,
 								},
 							},
 						}
-						if cveExceptions, ok := getCVEExeceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, vuln.Name); ok {
+						if cveExceptions, ok := getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, vuln.Name); ok {
 							vuln.ExceptionApplied = cveExceptions
 						}
 						scanRes.Vulnerabilities = append(scanRes.Vulnerabilities, vuln)
@@ -537,14 +440,14 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerability
 
 func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 
-	backendURL := os.Getenv("CA_DASHBOARD_BACKEND")
+	backendURL := os.Getenv(BackendUrlEnvironmentVariable)
 	if backendURL == "" {
 		return nil, fmt.Errorf("GetCVEExceptions: failed, you must provide the backend URL in the armor backend config map")
 	}
 	designator := armotypes.PortalDesignator{
 		DesignatorType: armotypes.DesignatorAttribute,
 		Attributes: map[string]string{
-			"customerGUID":        os.Getenv("CA_CUSTOMER_GUID"),
+			"customerGUID":        os.Getenv(CustomerGuidEnvironmentVariable),
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(scanCmd.Wlid),
 			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(scanCmd.Wlid),
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(scanCmd.Wlid)),
@@ -553,7 +456,7 @@ func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.Vulnerabi
 		},
 	}
 
-	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, os.Getenv("CA_CUSTOMER_GUID"), &designator)
+	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, os.Getenv(CustomerGuidEnvironmentVariable), &designator)
 	if err != nil {
 		return nil, err
 	}
@@ -585,14 +488,14 @@ func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 func HandleAnchoreDBUpdate(uri, serverReady string) {
 
 	DBCommands := make(map[string]interface{})
-	update_wait_time, err := strconv.Atoi(os.Getenv("DB_UPDATE_TIME_IN_MINUTES"))
+	update_wait_time, err := strconv.Atoi(os.Getenv(DbUpdateWaitTimeMinutesEnvironmentVariable))
 	if err != nil {
-		update_wait_time = DEFAULT_DB_UPDATE_TIME_IN_MINUTES
+		update_wait_time = defaultDbUpdateTimeInMinutes
 	}
 
 	for {
-		fullURL := "http://localhost:8080" + serverReady
-		req, err := http.NewRequest("HEAD", fullURL, nil)
+		fullURL := urlBase + serverReady
+		req, err := http.NewRequest(http.MethodHead, fullURL, nil)
 		if err != nil {
 			fmt.Println("fail create http request with err:", err)
 		}
@@ -622,8 +525,8 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 		}
 		buf, err := json.Marshal(commandDB)
 		if err == nil {
-			fullURL := "http://localhost:8080" + uri
-			req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(buf))
+			fullURL := urlBase + uri
+			req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(buf))
 			if err != nil {
 				fmt.Println("fail create http request with err:", err)
 			}
@@ -651,8 +554,8 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 
 func informDatabaseIsReadyToUse() {
 	ServerReadyURI := "/" + wssc.WebsocketScanCommandVersion + "/" + wssc.ServerReady
-	fullURL := "http://localhost:8080" + ServerReadyURI
-	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer([]byte(DB_IS_READY)))
+	fullURL := urlBase + ServerReadyURI
+	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer([]byte(DbIsReady)))
 	if err != nil {
 		fmt.Println("fail create http request with err:", err)
 	}
@@ -673,8 +576,10 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 	var out bytes.Buffer
 	var out_err bytes.Buffer
 
-	anchoreConfigPath := anchoreDirectoryPath + "/.grype/config.yaml"
-	cmd := exec.Command(anchoreDirectoryPath+anchoreBinaryName, "db", "update", "-vv", "-c", anchoreConfigPath)
+	anchoreConfigPath := path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName)
+	anchoreBinaryFullPath := path.Join(anchoreDirectoryPath, anchoreBinaryName)
+
+	cmd := exec.Command(anchoreBinaryFullPath, "db", "update", "-vv", "-c", anchoreConfigPath)
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
 

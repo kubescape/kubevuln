@@ -3,12 +3,10 @@
 ## Environment variables
 
 ### OCImage
-* OCIMAGE_URL : http://localhost:8080 - optional - will ignore getting bash commands and various enhanchments to it
+* OCIMAGE_URL : http://localhost:8080 - optional - will ignore getting bash commands and various enhancements to it
 
-### Clair
-* CLAIR_URL : http://localhost:6060 - mandatory
 
-### Event Reciever
+### Event Receiver
 * CA_EVENT_RECEIVER_HTTP : http://localhost:7555 - mandatory
 
 ### ca customer GUID
@@ -17,10 +15,15 @@
 ### print final post json 
 * PRINT_POST_JSON : any value - optional
 
-git config --global url."ssh://git@github.com/armosec/".insteadOf "https://github.com/armosec/"
-go env -w GOPRIVATE=github.com/armosec
-
 to test locally:
 ```
-python3 runmock.py
+curl -X POST \
+   -H 'Content-Type: application/json' \
+   -d '{
+            "imageTag": "nginx:latest",
+            "wlid": "wlid://cluster-minikube/namespace-default/deployment-nginx",
+            "isScanned": false,
+            "containerName": "nginx",
+            "jobID": "7b04592b-665a-4e47-a9c9-65b2b3cabb49"}' \
+   http://localhost:8080/v1/scanImage
 ```

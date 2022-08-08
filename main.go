@@ -55,7 +55,7 @@ func serverReadyHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		data := string(bytes)
-		if data == process_request.DB_IS_READY {
+		if data == process_request.DbIsReady {
 			isReadinessReady = true
 			w.WriteHeader(http.StatusAccepted)
 		} else {
@@ -119,7 +119,7 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 		// Backend aggregation depends on this report!!!
 		// don't change any parameter before checking with BE side first!!!!
 		report := &sysreport.BaseReport{
-			CustomerGUID: os.Getenv("CA_CUSTOMER_GUID"),
+			CustomerGUID: os.Getenv(process_request.CustomerGuidEnvironmentVariable),
 			Reporter:     "ca-vuln-scan",
 			Status:       sysreport.JobStarted,
 			Target:       fmt.Sprintf("vuln scan:: scanning wlid: %v ,containerName: %v imageTag: %v imageHash: %s", WebsocketScan.Wlid, WebsocketScan.ContainerName, WebsocketScan.ImageTag, WebsocketScan.ImageHash),
