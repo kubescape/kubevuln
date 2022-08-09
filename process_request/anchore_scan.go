@@ -316,7 +316,7 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
 
 	if err != nil {
-		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s \n", err.Error(), string(out_err.Bytes()[:]))
+		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s", err.Error(), string(out_err.Bytes()[:]))
 		return nil, err
 	}
 	return vuln_anchore_report, nil
@@ -333,7 +333,7 @@ func parseLayersPayload(target interface{}) map[string]cs.ESLayer {
 
 	for i := range jsonConfig.History {
 
-		if jsonConfig.History[i].EmptyLayer != true {
+		if !jsonConfig.History[i].EmptyLayer {
 			listLayers = append(listLayers, cs.ESLayer{LayerInfo: &cs.LayerInfo{
 				CreatedBy:   jsonConfig.History[i].CreatedBy,
 				CreatedTime: &jsonConfig.History[i].Created.Time,

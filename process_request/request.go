@@ -110,7 +110,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	flatVuln := final_report.ToFlatVulnerabilities()
 	flatVuln = fillExtraLayerData(preparedLayers, flatVuln)
 	//split vulnerabilities to chunks
-	chunksChan, totalVulnerabilities := armoUtils.SplitSlice2Chunks(flatVuln, maxBodySize, 10)
+	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(flatVuln, maxBodySize, 10)
 	//send report(s)
 	scanID := final_report.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
@@ -400,7 +400,6 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendAsRoutine(true, ReportErrorsChan)
 
-	report.SendAsRoutine([]string{}, true)
 	// NewBaseReport(cusGUID, )
 	result, bashList, preparedLayers, err := GetScanResult(scanCmd)
 	if err != nil {
