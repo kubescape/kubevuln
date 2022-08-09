@@ -155,6 +155,9 @@ func fillExtraLayerData(data map[string]cs.ESLayer, vulns []cs.CommonContainerVu
 	for i := range vulns {
 		for y := range vulns[i].Layers {
 			if l, ok := data[vulns[i].Layers[y].LayerHash]; ok {
+				if vulns[i].Layers[y].LayerInfo == nil {
+					vulns[i].Layers[y].LayerInfo = &cs.LayerInfo{}
+				}
 				vulns[i].Layers[y].CreatedBy = l.CreatedBy
 				vulns[i].Layers[y].CreatedTime = l.CreatedTime
 				vulns[i].Layers[y].LayerOrder = l.LayerOrder
