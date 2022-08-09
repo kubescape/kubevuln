@@ -162,10 +162,10 @@ github.com/armosec/armoapi-go v0.0.111 h1:yQSKz95wnlU7Zucee0+hizMyKgJGdEyiPdsIz/
 github.com/armosec/armoapi-go v0.0.111/go.mod h1:v7rUl9eo5qL3kHxiP8tFCyRYERUGPgm2rwTIqkVOouw=
 github.com/armosec/cluster-container-scanner-api v0.0.40 h1:wiPNCI/aVheVuywL70YMtYHc/NrHvoV5CwO5iryzON0=
 github.com/armosec/cluster-container-scanner-api v0.0.40/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
-github.com/armosec/logger-go v0.0.11 h1:u8rN76gAMi3fRl6I6LQdrd5jPzyiKKFcmrcDsggS1OM=
-github.com/armosec/logger-go v0.0.11/go.mod h1:YIsJOTTXblVTTN7Zh+jXx9sohBnMwIYZnymwuPgWcog=
-github.com/armosec/utils-go v0.0.7 h1:YGyIzfo7JKocx0SVrKEpQLSKLNLgm+JOEeH0XkO23yQ=
-github.com/armosec/utils-go v0.0.7/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
+github.com/armosec/logger-go v0.0.13 h1:S6KCc9Di7AWzKQyQawtKwLimmZxwIubHOhXWsTSHPhY=
+github.com/armosec/logger-go v0.0.13/go.mod h1:xEAtirJOHlqgxGlKTEtNHN2uiTzHiSL8NbmkVuCAwSw=
+github.com/armosec/utils-go v0.0.12 h1:NXkG/BhbSVAmTVXr0qqsK02CmxEiXuJyPmdTRcZ4jAo=
+github.com/armosec/utils-go v0.0.12/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.7 h1:g68GQ9Vm5LgVp/czcu2ZV1igm2azYLf9vNapyoXBfYI=
 github.com/armosec/utils-k8s-go v0.0.7/go.mod h1:YFdWi3rEQQLbN6mZO21TSdoda8kGQYRV4rs5CRp8Kjs=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=

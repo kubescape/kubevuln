@@ -117,18 +117,22 @@ func scanImageHandler(w http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(w, "scan request accepted\n")
 		// Backend aggregation depends on this report!!!
 		// don't change any parameter before checking with BE side first!!!!
-		report := &sysreport.BaseReport{
-			CustomerGUID: os.Getenv(process_request.CustomerGuidEnvironmentVariable),
-			Reporter:     "ca-vuln-scan",
-			Status:       sysreport.JobStarted,
-			Target:       fmt.Sprintf("vuln scan:: scanning wlid: %v ,containerName: %v imageTag: %v imageHash: %s", WebsocketScan.Wlid, WebsocketScan.ContainerName, WebsocketScan.ImageTag, WebsocketScan.ImageHash),
-			ActionID:     "1",
-			ActionIDN:    1,
-			ActionName:   "vuln scan",
-			JobID:        WebsocketScan.JobID,
-			ParentAction: WebsocketScan.ParentJobID,
-			Details:      "Inqueueing",
-		}
+
+		report := sysreport.NewBaseReport(
+			os.Getenv(process_request.CustomerGuidEnvironmentVariable),
+			process_request.ReporterName,
+			os.Getenv(process_request.EventReceiverUrlEnvironmentVariable),
+			process_request.ReporterHttpClient,
+		)
+
+		report.Status = sysreport.JobStarted
+		report.Target = fmt.Sprintf("vuln scan:: scanning wlid: %v ,containerName: %v imageTag: %v imageHash: %s", WebsocketScan.Wlid, WebsocketScan.ContainerName, WebsocketScan.ImageTag, WebsocketScan.ImageHash)
+		report.ActionID = "1"
+		report.ActionIDN = 1
+		report.ActionName = "vuln scan"
+		report.JobID = WebsocketScan.JobID
+		report.ParentAction = WebsocketScan.ParentJobID
+		report.Details = "Inqueueing"
 
 		report.SendAsRoutine(true, process_request.ReportErrorsChan)
 		// End of Backend must not change report

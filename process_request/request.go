@@ -30,13 +30,17 @@ import (
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 )
 
-const maxBodySize int = 30000
+const (
+	maxBodySize  int = 30000
+	ReporterName     = "ca-vuln-scan"
+)
 
 var ociClient OcimageClient
 var eventReceiverURL string
 var customerGUID string
 var printPostJSON string
 var ReportErrorsChan chan error
+var ReporterHttpClient httputils.IHttpClient
 
 func init() {
 	ociClient.endpoint = os.Getenv(OciClientUrlEnvironmentVariableV1)
@@ -51,6 +55,9 @@ func init() {
 	if len(eventReceiverURL) == 0 {
 		glog.Fatalf("Must configure either %s", EventReceiverUrlEnvironmentVariable)
 	}
+
+	// TODO: pass mock client in case of empty URL
+	ReporterHttpClient = &http.Client{}
 
 	customerGUID = os.Getenv(CustomerGuidEnvironmentVariable)
 	if len(customerGUID) == 0 {
@@ -376,19 +383,20 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 }
 
 func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
-	report := &sysreport.BaseReport{
-		CustomerGUID: os.Getenv(CustomerGuidEnvironmentVariable),
-		Reporter:     "ca-vuln-scan",
-		Status:       sysreport.JobStarted,
-		Target: fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s", scanCmd.Wlid,
-			scanCmd.ContainerName, scanCmd.ImageTag, scanCmd.ImageHash),
-		ActionID:     "2",
-		ActionIDN:    2,
-		ActionName:   "vuln scan",
-		JobID:        scanCmd.JobID,
-		ParentAction: scanCmd.ParentJobID,
-		Details:      "Dequeueing",
-	}
+	report := sysreport.NewBaseReport(
+		os.Getenv(CustomerGuidEnvironmentVariable),
+		ReporterName,
+		os.Getenv(EventReceiverUrlEnvironmentVariable),
+		ReporterHttpClient,
+	)
+	report.Status = sysreport.JobStarted
+	report.Target = fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s", scanCmd.Wlid, scanCmd.ContainerName, scanCmd.ImageTag, scanCmd.ImageHash)
+	report.ActionID = "2"
+	report.ActionIDN = 2
+	report.ActionName = "vuln scan"
+	report.JobID = scanCmd.JobID
+	report.ParentAction = scanCmd.ParentJobID
+	report.Details = "Dequeueing"
 
 	if len(scanCmd.JobID) != 0 {
 		report.SetJobID(scanCmd.JobID)
