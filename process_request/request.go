@@ -1,17 +1,11 @@
 package process_request
 
 import (
-	"archive/tar"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/fs"
-	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -35,7 +29,6 @@ const (
 	ReporterName     = "ca-vuln-scan"
 )
 
-var ociClient OcimageClient
 var eventReceiverURL string
 var customerGUID string
 var printPostJSON string
@@ -43,14 +36,6 @@ var ReportErrorsChan chan error
 var ReporterHttpClient httputils.IHttpClient
 
 func init() {
-	ociClient.endpoint = os.Getenv(OciClientUrlEnvironmentVariableV1)
-	if len(ociClient.endpoint) == 0 {
-		ociClient.endpoint = os.Getenv(OciClientUrlEnvironmentVariableV2)
-		if len(ociClient.endpoint) == 0 {
-			glog.Warningf("%s/%s is not configured- some features might not work, please install OCIMAGE to get more features", OciClientUrlEnvironmentVariableV1, OciClientUrlEnvironmentVariableV2)
-		}
-	}
-
 	eventReceiverURL = os.Getenv(EventReceiverUrlEnvironmentVariable)
 	if len(eventReceiverURL) == 0 {
 		glog.Fatalf("Must configure either %s", EventReceiverUrlEnvironmentVariable)
@@ -285,92 +270,6 @@ func RemoveFile(filename string) {
 func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, map[string]cs.ESLayer, error) {
 	filteredResultsChan := make(chan []string)
 
-	/*
-		This code get list of executables that can be dangerous
-	*/
-	if ociClient.endpoint != "" {
-		ociImage, err := ociClient.Image(scanCmd)
-		if err != nil {
-			glog.Errorf("unable to get image %s", err)
-			go func() {
-				glog.Info("skipping dangerous executables enrichment")
-				filteredResultsChan <- nil
-			}()
-		} else {
-			go func() {
-				listOfPrograms := []string{
-					"bin/sh", "bin/bash", "sbin/sh", "bin/ksh", "bin/tcsh", "bin/zsh", "usr/bin/scsh", "bin/csh", "bin/busybox", "usr/bin/kubectl", "usr/bin/curl",
-					"usr/bin/wget", "usr/bin/ssh", "usr/bin/ftp", "usr/share/gdb", "usr/bin/nmap", "usr/share/nmap", "usr/bin/tcpdump", "usr/bin/ping",
-					"usr/bin/netcat", "usr/bin/gcc", "usr/bin/busybox", "usr/bin/nslookup", "usr/bin/host", "usr/bin/dig", "usr/bin/psql", "usr/bin/swaks",
-				}
-				filteredResult := []string{}
-
-				directoryFilesInBytes, err := ociImage.GetFiles(listOfPrograms, true, true)
-				if err != nil {
-					glog.Errorf("can not get filelist from ocimage due to %s", err.Error())
-					filteredResultsChan <- nil
-					return
-				}
-				rand.Seed(time.Now().UnixNano())
-				randomNum := rand.Intn(100)
-				filename := "/tmp/file" + fmt.Sprint(randomNum) + ".tar.gz"
-				permissions := 0644
-				ioutil.WriteFile(filename, *directoryFilesInBytes, fs.FileMode(permissions))
-
-				reader, err := os.Open(filename)
-				if err != nil {
-					glog.Errorf("can not open file : %s error:%s", filename, err.Error())
-					filteredResultsChan <- nil
-					return
-				}
-				defer reader.Close()
-				defer RemoveFile(filename)
-
-				tarReader := tar.NewReader(reader)
-				buf := new(strings.Builder)
-				for {
-					currentFile, err := tarReader.Next()
-					if err == io.EOF {
-						break
-					}
-
-					if currentFile.Name == "symlinkMap.json" {
-						_, err := io.Copy(buf, tarReader)
-						if err != nil {
-							glog.Error("can not parse symlinkMap.json file")
-							filteredResultsChan <- nil
-							return
-						}
-
-					}
-				}
-				var fileInJson map[string]string
-				err = json.Unmarshal([]byte(buf.String()), &fileInJson)
-				if err != nil {
-					glog.Errorf("failed to marshal file %s. error:%s", filename, err.Error())
-					filteredResultsChan <- nil
-					return
-				}
-
-				for _, element := range listOfPrograms {
-					if element, ok := fileInJson[element]; ok {
-						filteredResult = append(filteredResult, element)
-					}
-				}
-				filteredResultsChan <- filteredResult
-			}()
-		}
-	} else {
-		go func() {
-			glog.Info("skipping dangerous executables enrichment")
-			filteredResultsChan <- nil
-		}()
-
-	}
-	/*
-		End of dangerous execuatables collect code
-	*/
-
 	scanresultlayer, preparedLayers, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
 		glog.Errorf("getAnchoreScanResults returned an error:%s", err.Error())
@@ -411,7 +310,6 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendAsRoutine(true, ReportErrorsChan)
 
-	// NewBaseReport(cusGUID, )
 	result, bashList, preparedLayers, err := GetScanResult(scanCmd)
 	if err != nil {
 		report.SendError(err, true, true, ReportErrorsChan)

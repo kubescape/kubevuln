@@ -2,10 +2,6 @@
 
 ## Environment variables
 
-### OCImage
-* OCIMAGE_URL : http://localhost:8080 - optional - will ignore getting bash commands and various enhancements to it
-
-
 ### Event Receiver
 * CA_EVENT_RECEIVER_HTTP : http://localhost:7555 - mandatory
 
