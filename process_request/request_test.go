@@ -100,7 +100,10 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	sort.Slice(accumulatedReport.Summary.Context, func(i, j int) bool {
 		return strings.Compare(accumulatedReport.Summary.Context[i].Attribute, accumulatedReport.Summary.Context[j].Attribute) == -1
 	})
-
+	/* uncomment to update expected result
+	file, _ := json.MarshalIndent(accumulatedReport, "", "")
+	_ = ioutil.WriteFile("testdata/expectedScanReport.json", file, 0644)
+	*/
 	//compare accumulatedReport with expected
 	diff := gcmp.Diff(accumulatedReport, &expectedScanReport,
 		cmpopts.IgnoreFields(cs.ScanResultReportV1{}, "PaginationInfo", "Timestamp", "ContainerScanID"),
@@ -122,41 +125,41 @@ func TestSplit2Chunks(t *testing.T) {
 	tests := map[int]splitResults{
 		//normal chunk size - expected splitting
 		30000: {totalReceived: numOfVulnerabilities,
-			numOfChunks:    4,
-			maxChunkSize:   28571,
-			minChunkSize:   2030,
+			numOfChunks:    3,
+			maxChunkSize:   29800,
+			minChunkSize:   16370,
 			maxChunkLength: 12,
-			minChunkLength: 1,
+			minChunkLength: 9,
 		},
 		//big chunk size - expected splitting
 		60000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    2,
-			maxChunkSize:   59356,
-			minChunkSize:   14699,
+			maxChunkSize:   58098,
+			minChunkSize:   14563,
 			maxChunkLength: 25,
 			minChunkLength: 8,
 		},
 		//big chunk size - expected splitting
 		15000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    8,
-			maxChunkSize:   14655,
-			minChunkSize:   2368,
+			maxChunkSize:   14332,
+			minChunkSize:   2334,
 			maxChunkLength: 6,
 			minChunkLength: 1,
 		},
 		//huge chunk size - no splitting expected
 		300000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    1,
-			maxChunkSize:   74053,
-			minChunkSize:   74053,
+			maxChunkSize:   72659,
+			minChunkSize:   72659,
 			maxChunkLength: 33,
 			minChunkLength: 33,
 		},
 		//tiny chunk size expect one item in each chunk
 		300: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    33,
-			maxChunkSize:   3645,
-			minChunkSize:   1820,
+			maxChunkSize:   3492,
+			minChunkSize:   1803,
 			maxChunkLength: 1,
 			minChunkLength: 1,
 		},
