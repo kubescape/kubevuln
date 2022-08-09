@@ -1,6 +1,7 @@
 package process_request
 
 const (
+	ReleaseBuildTagEnvironmentVariable         = "RELEASE"
 	CustomerGuidEnvironmentVariable            = "CA_CUSTOMER_GUID"
 	BackendUrlEnvironmentVariable              = "CA_DASHBOARD_BACKEND"
 	DbUpdateWaitTimeMinutesEnvironmentVariable = "DB_UPDATE_TIME_IN_MINUTES"

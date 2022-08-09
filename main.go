@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -15,7 +14,6 @@ import (
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/armosec/utils-k8s-go/probes"
-	"github.com/golang/glog"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 )
@@ -185,15 +183,5 @@ func main() {
 }
 
 func displayBuildTag() {
-	imageVersion := "local build"
-	dat, err := ioutil.ReadFile("./build_number.txt")
-	if err == nil {
-		imageVersion = string(dat)
-	} else {
-		dat, err = ioutil.ReadFile("./build_date.txt")
-		if err == nil {
-			imageVersion = fmt.Sprintf("%s, date: %s", imageVersion, string(dat))
-		}
-	}
-	glog.Infof("Image version: %s", imageVersion)
+	log.Printf("Image version: %s", os.Getenv(process_request.ReleaseBuildTagEnvironmentVariable))
 }
