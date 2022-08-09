@@ -73,7 +73,7 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 	glog.Infof("posting to event receiver image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
 
-	final_report := cs.ScanResultReport{
+	finalReport := cs.ScanResultReport{
 		CustomerGUID:             customerGUID,
 		ImgTag:                   imagetag,
 		ImgHash:                  imageHash,
@@ -88,43 +88,43 @@ func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag
 		},
 	}
 	if val, ok := scanCmd.Args[armotypes.AttributeRegistryName]; ok {
-		final_report.Designators.Attributes[armotypes.AttributeRegistryName] = val.(string)
+		finalReport.Designators.Attributes[armotypes.AttributeRegistryName] = val.(string)
 	}
 
 	if val, ok := scanCmd.Args[armotypes.AttributeRepository]; ok {
-		final_report.Designators.Attributes[armotypes.AttributeRepository] = val.(string)
+		finalReport.Designators.Attributes[armotypes.AttributeRepository] = val.(string)
 	}
 
 	if val, ok := scanCmd.Args[armotypes.AttributeTag]; ok {
-		final_report.Designators.Attributes[armotypes.AttributeTag] = val.(string)
+		finalReport.Designators.Attributes[armotypes.AttributeTag] = val.(string)
 	}
 
 	if val, ok := scanCmd.Args[armotypes.AttributeSensor]; ok {
-		final_report.Designators.Attributes[armotypes.AttributeSensor] = val.(string)
+		finalReport.Designators.Attributes[armotypes.AttributeSensor] = val.(string)
 	}
 	//complete designators info
-	finalDesignators, _ := final_report.GetDesignatorsNContext()
-	final_report.Designators = *finalDesignators
+	finalDesignators, _ := finalReport.GetDesignatorsNContext()
+	finalReport.Designators = *finalDesignators
 
-	glog.Infof("session: %v\n===\n", final_report.Session)
-	flatVuln := final_report.ToFlatVulnerabilities()
+	glog.Infof("session: %v\n===\n", finalReport.Session)
+	flatVuln := finalReport.ToFlatVulnerabilities()
 	flatVuln = fillExtraLayerData(preparedLayers, flatVuln)
 	//split vulnerabilities to chunks
 	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(flatVuln, maxBodySize, 10)
 	//send report(s)
-	scanID := final_report.AsFNVHash()
+	scanID := finalReport.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
 	errChan := make(chan error, 10)
 	//get the first chunk
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := sendSummaryAndVulnerabilities(final_report, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := sendSummaryAndVulnerabilities(finalReport, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	firstVulnerabilitiesChunk = nil
 	//if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
-		sendVulnerabilitiesRoutine(chunksChan, scanID, final_report, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+		sendVulnerabilitiesRoutine(chunksChan, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
 		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {
