@@ -68,7 +68,7 @@ func init() {
 	}()
 }
 
-func postScanResultsToEventReceiver(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string) error {
+func postScanResultsToEventReciever(scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, listOfBash []string, preparedLayers map[string]cs.ESLayer) error {
 
 	glog.Infof("posting to event receiver image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
@@ -107,8 +107,10 @@ func postScanResultsToEventReceiver(scanCmd *wssc.WebsocketScanCommand, imagetag
 	final_report.Designators = *finalDesignators
 
 	glog.Infof("session: %v\n===\n", final_report.Session)
+	flatVuln := final_report.ToFlatVulnerabilities()
+	flatVuln = fillExtraLayerData(preparedLayers, flatVuln)
 	//split vulnerabilities to chunks
-	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(final_report.ToFlatVulnerabilities(), maxBodySize, 10)
+	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(flatVuln, maxBodySize, 10)
 	//send report(s)
 	scanID := final_report.AsFNVHash()
 	sendWG := &sync.WaitGroup{}
@@ -148,6 +150,22 @@ func sendVulnerabilitiesRoutine(chunksChan <-chan []cs.CommonContainerVulnerabil
 		//no more post requests - close the error channel
 		close(errorChan)
 	}(scanID, final_report, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, nextPartNum)
+}
+func fillExtraLayerData(data map[string]cs.ESLayer, vulns []cs.CommonContainerVulnerabilityResult) []cs.CommonContainerVulnerabilityResult {
+	for i := range vulns {
+		for y := range vulns[i].Layers {
+			if l, ok := data[vulns[i].Layers[y].LayerHash]; ok {
+				if vulns[i].Layers[y].LayerInfo == nil {
+					vulns[i].Layers[y].LayerInfo = &cs.LayerInfo{}
+				}
+				vulns[i].Layers[y].CreatedBy = l.CreatedBy
+				vulns[i].Layers[y].CreatedTime = l.CreatedTime
+				vulns[i].Layers[y].LayerOrder = l.LayerOrder
+			}
+
+		}
+	}
+	return vulns
 }
 
 func sendVulnerabilities(chunksChan <-chan []cs.CommonContainerVulnerabilityResult, partNum int, expectedVulnerabilitiesSum int, scanID string, final_report cs.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
@@ -257,7 +275,7 @@ func RemoveFile(filename string) {
 	}
 }
 
-func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, error) {
+func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string, map[string]cs.ESLayer, error) {
 	filteredResultsChan := make(chan []string)
 
 	/*
@@ -346,15 +364,15 @@ func GetScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, []string
 		End of dangerous execuatables collect code
 	*/
 
-	scanresultlayer, err := GetAnchoreScanResults(scanCmd)
+	scanresultlayer, preparedLayers, err := GetAnchoreScanResults(scanCmd)
 	if err != nil {
 		glog.Errorf("getAnchoreScanResults returned an error:%s", err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	filteredResult := <-filteredResultsChan
 
-	return scanresultlayer, filteredResult, nil
+	return scanresultlayer, filteredResult, preparedLayers, nil
 }
 
 func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
@@ -385,7 +403,8 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 	}
 	report.SendAsRoutine(true, ReportErrorsChan)
 
-	result, bashList, err := GetScanResult(scanCmd)
+	// NewBaseReport(cusGUID, )
+	result, bashList, preparedLayers, err := GetScanResult(scanCmd)
 	if err != nil {
 		report.SendError(err, true, true, ReportErrorsChan)
 		return nil, err
@@ -395,8 +414,7 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, err
 
 	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, ReportErrorsChan)
 
-	//Benh - dangerous hack
-	err = postScanResultsToEventReceiver(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList)
+	err = postScanResultsToEventReciever(scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, bashList, preparedLayers)
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, ReportErrorsChan)
 	} else {

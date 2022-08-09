@@ -2,6 +2,7 @@ package process_request
 
 import (
 	"bytes"
+	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/anchore/grype/grype/presenter/models"
 	types "github.com/docker/docker/api/types"
+	containerTypes "github.com/google/go-containerregistry/pkg/v1"
 )
 
 const (
@@ -311,13 +313,44 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
-
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
+
 	if err != nil {
-		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s \n", err.Error(), string(out_err.Bytes()[:]))
+		err = fmt.Errorf("json unmarshall failed with an error: %s\n vuln scanner error: %s", err.Error(), string(out_err.Bytes()[:]))
 		return nil, err
 	}
 	return vuln_anchore_report, nil
+}
+
+func parseLayersPayload(target interface{}) map[string]cs.ESLayer {
+	jsonConfig := &containerTypes.ConfigFile{}
+	config := target.(map[string]interface{})["config"].(string)
+	valueConfig, _ := b64.StdEncoding.DecodeString(config)
+
+	json.Unmarshal([]byte(valueConfig), jsonConfig)
+	listLayers := make([]cs.ESLayer, 0)
+	layerMap := make(map[string]cs.ESLayer)
+
+	for i := range jsonConfig.History {
+
+		if !jsonConfig.History[i].EmptyLayer {
+			listLayers = append(listLayers, cs.ESLayer{LayerInfo: &cs.LayerInfo{
+				CreatedBy:   jsonConfig.History[i].CreatedBy,
+				CreatedTime: &jsonConfig.History[i].Created.Time,
+			},
+			})
+		}
+	}
+	for i := 0; i < len(listLayers) && i < len(jsonConfig.RootFS.DiffIDs); i++ {
+		listLayers[i].LayerHash = jsonConfig.RootFS.DiffIDs[i].String()
+		if i > 0 {
+			listLayers[i].ParentLayerHash = jsonConfig.RootFS.DiffIDs[i-1].String()
+			listLayers[i].LayerInfo.LayerOrder = i
+		}
+		layerMap[listLayers[i].LayerHash] = listLayers[i]
+	}
+
+	return layerMap
 }
 
 func executeAnchoreCommand(scanCmd *wssc.WebsocketScanCommand, anchoreConfigPath string) (*exec.Cmd, string, *bytes.Buffer, *bytes.Buffer) {
@@ -464,25 +497,24 @@ func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.Vulnerabi
 	return vulnExceptionList, nil
 }
 
-func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, error) {
+func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, map[string]cs.ESLayer, error) {
 
 	anchore_vuln_struct, err := GetAnchoreScanRes(scanCmd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
 	exceptions, err := GetCVEExceptions(scanCmd)
 	if err != nil {
 		log.Println(scanCmd.ImageTag + " no cve exceptions found")
 	}
-
+	preparedLayers := parseLayersPayload(anchore_vuln_struct.Source.Target)
 	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, exceptions)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.Println("after AnchoreStructConversion " + scanCmd.ImageTag)
 
-	return LayersVulnsList, nil
+	return LayersVulnsList, preparedLayers, nil
 }
 
 func HandleAnchoreDBUpdate(uri, serverReady string) {
