@@ -11,7 +11,7 @@ ADD . .
 
 RUN apk add git
 
-RUN go build -o build/vuln
+RUN go build -o build/kubevuln
 
 RUN mkdir /work/vuln-scan
 
@@ -35,7 +35,7 @@ USER ks
 WORKDIR /home/ks/
 
 COPY --from=builder /work/vuln-scan/ ./
-COPY --from=builder /work/build/vuln /usr/bin/vuln
+COPY --from=builder /work/build/kubevuln /usr/bin/kubevuln
 
 
-ENTRYPOINT ["vuln"]
+ENTRYPOINT ["kubevuln"]
