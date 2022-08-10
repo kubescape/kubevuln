@@ -1,4 +1,4 @@
-module ca-vuln-scan
+module github.com/kubescape/kubevuln
 
 go 1.18
 

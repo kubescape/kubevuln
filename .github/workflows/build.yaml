@@ -62,7 +62,7 @@ jobs:
 
       - name: Set image name
         id: image-name
-        run: echo '::set-output name=IMAGE_NAME::quay.io/${{ github.repository_owner }}/images-vulnerabilities-scan'
+        run: echo '::set-output name=IMAGE_NAME::quay.io/${{ github.repository_owner }}/kubevuln'
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2

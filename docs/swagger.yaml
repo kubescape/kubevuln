@@ -178,15 +178,15 @@ definitions:
   postDBCommandAcceptedResponseBody:
     description: Response body of the postDBCommandAccepted
     type: string
-    x-go-package: ca-vuln-scan/docs
+    x-go-package: kubevuln/docs
   postDBCommandBadRequestResponseBody:
     type: string
-    x-go-package: ca-vuln-scan/docs
+    x-go-package: kubevuln/docs
   postScanImageAcceptedResponseBody:
     description: 'Example: scan request accepted'
     title: Response body of a response that a POST Scan Image request has been Accepted.
     type: string
-    x-go-package: ca-vuln-scan/docs
+    x-go-package: kubevuln/docs
 info:
   description: The Kubescape vulnerability scanner allows clients to check images
     for vulnerabilities.

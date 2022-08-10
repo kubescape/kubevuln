@@ -1,8 +1,6 @@
 package main
 
 import (
-	"ca-vuln-scan/docs"
-	"ca-vuln-scan/process_request"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +12,8 @@ import (
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/armosec/utils-k8s-go/probes"
+	"github.com/kubescape/kubevuln/docs"
+	"github.com/kubescape/kubevuln/process_request"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 )
