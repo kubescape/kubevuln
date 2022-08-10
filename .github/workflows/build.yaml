@@ -8,7 +8,7 @@ on:
       - '**.md'
 jobs:
   test:
-    name: Create cross-platform release build, tag and upload binaries
+    name: Create cross-platform release build, tag and upload binaries 
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
