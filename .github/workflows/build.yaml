@@ -3,6 +3,9 @@ name: build
 on:
   push:
     branches: [ master ]
+    paths-ignore:
+      # Do not run the pipeline if only Markdown files changed
+      - '**.md'
 jobs:
   test:
     name: Create cross-platform release build, tag and upload binaries
@@ -76,4 +79,3 @@ jobs:
       - name: Build the Docker image
         run: docker buildx build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:latest --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }} --push --platform linux/amd64,linux/arm64
 
-       
