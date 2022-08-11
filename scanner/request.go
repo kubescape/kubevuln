@@ -232,7 +232,7 @@ func postResults(report *cs.ScanResultReportV1, eventReceiverURL, imagetag strin
 		return
 	}
 	if printPostJSON != "" {
-		glog.Info("printPostJSON: %s", payload)
+		glog.Infof("printPostJSON: %s", payload)
 	}
 	urlBase, err := url.Parse(eventReceiverURL)
 	if err != nil {
