@@ -1,13 +1,5 @@
 # Configuration
-
-## Environment variables
-
-### Event Receiver
-* CA_EVENT_RECEIVER_HTTP : http://localhost:7555 - mandatory
-
-### ca customer GUID
-* CA_CUSTOMER_GUID : customer GUID - mandatory
-
+Load config file using the `CONFIG` environment variable
 ### print final post json 
 * PRINT_POST_JSON : any value - optional
 

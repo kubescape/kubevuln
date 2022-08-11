@@ -1,4 +1,4 @@
-package process_request
+package scanner
 
 import (
 	_ "embed"
@@ -7,11 +7,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+
+	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
@@ -20,13 +21,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 )
-
-//set required env vars
-var _ = (func() interface{} {
-	os.Setenv(CustomerGuidEnvironmentVariable, "aaaaaaaa-1111-bbbb-2222-cccccccccccc")
-	os.Setenv(EventReceiverUrlEnvironmentVariable, "http://localhost:9111")
-	return nil
-}())
 
 //go:embed testdata/testCaseScanReport.json
 var testCaseScanReportBytes []byte
@@ -45,6 +39,11 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	if err := json.Unmarshal(expectedScanReportBytes, &expectedScanReport); err != nil {
 		t.Error("Could not read expectedScanReport.json", err)
 	}
+	config := pkgcautils.ClusterConfig{
+		ClusterName:          "test",
+		AccountID:            "aaaaaaaa-1111-bbbb-2222-cccccccccccc",
+		EventReceiverRestURL: "http://localhost:9111",
+	}
 	//setup dummy event receiver server to catch post reports requests
 	var accumulatedReport *cs.ScanResultReportV1
 	var reportsPartsSum, reportPartsReceived = -1, -1
@@ -57,9 +56,11 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 		bodybyte, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			t.Error("cannot read request body", err)
+			return
 		}
 		if err := json.Unmarshal(bodybyte, &report); err != nil {
 			t.Error("cannot unmarshal request body", err)
+			return
 		}
 		reportPartsReceived++
 		if report.PaginationInfo.IsLastReport {
@@ -79,6 +80,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 
 	if err != nil {
 		t.Error("cannot client test server", err)
+		return
 	}
 	defer testServer.Close()
 
@@ -86,7 +88,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	dummyScanCmd := &wssc.WebsocketScanCommand{}
 	//postScanResultsToEventReciever blocks until all report chunks are sent to the event receiver
 	dummyLayers := make(map[string]cs.ESLayer)
-	err = postScanResultsToEventReciever(dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, scanReport.ListOfDangerousArtifcats, dummyLayers)
+	err = postScanResultsToEventReceiver(&config, dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, dummyLayers)
 	assert.NoError(t, err, "postScanResultsToEventReceiver returned an error")
 	assert.Equal(t, reportsPartsSum, reportPartsReceived, "reportPartsReceived must be equal to reportsPartsSum")
 	assert.NotNil(t, accumulatedReport, "accumulated report should not be nil ")

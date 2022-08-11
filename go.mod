@@ -8,7 +8,7 @@ require (
 	github.com/armosec/cluster-container-scanner-api v0.0.40
 	github.com/armosec/logger-go v0.0.13
 	github.com/armosec/utils-go v0.0.12
-	github.com/armosec/utils-k8s-go v0.0.7
+	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/dwertent/go-logger v0.0.3
 	github.com/go-openapi/runtime v0.23.1
@@ -18,7 +18,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/stretchr/testify v1.7.1
 	github.com/xyproto/randomstring v0.0.0-20220311122621-4964ec363205
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/utils v0.0.0-20220210201930-3a6ce19ff2f9
 )
 
@@ -113,7 +113,7 @@ require (
 	go.mongodb.org/mongo-driver v1.8.3 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
-	go.uber.org/zap v1.21.0 // indirect
+	go.uber.org/zap v1.22.0 // indirect
 	golang.org/x/crypto v0.0.0-20220213190939-1e6e3497d506 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
 	golang.org/x/net v0.0.0-20220708220712-1185a9018129 // indirect
@@ -129,8 +129,8 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	k8s.io/apimachinery v0.23.3 // indirect
-	k8s.io/klog/v2 v2.40.1 // indirect
+	k8s.io/apimachinery v0.24.3 // indirect
+	k8s.io/klog/v2 v2.60.1 // indirect
 	sigs.k8s.io/json v0.0.0-20211208200746-9f7c6b3444d2 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.1 // indirect
 )

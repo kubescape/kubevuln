@@ -1,4 +1,4 @@
-package process_request
+package scanner
 
 import (
 	"bytes"
@@ -19,7 +19,9 @@ import (
 	"syscall"
 	"time"
 
+	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/golang/glog"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
 
@@ -118,14 +120,15 @@ type Development struct {
 	ProfileCPU bool `mapstructure:"profile-cpu"`
 }
 
-func CreateAnchoreResourcesDirectoryAndFiles() {
+func CreateAnchoreResourcesDirectoryAndFiles() error {
 
 	dir, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	anchoreDirectoryPath = path.Join(dir, anchoreDirectoryName)
+	return nil
 }
 
 func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool) error {
@@ -280,7 +283,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 
 	cmd, imageID, out, out_err := executeAnchoreCommand(scanCmd, anchoreConfigPath)
 
-	log.Printf("sending command to vuln scan Binary image: %s, wlid: %s", imageID, scanCmd.Wlid)
+	glog.Infof("processing image: %s, wlid: %s", imageID, scanCmd.Wlid)
 	err = cmd.Run()
 	if err != nil {
 
@@ -408,7 +411,7 @@ func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExc
 	return nil, false
 }
 
-func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
+func anchoreStructConversion(anchore_vuln_struct *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) (*cs.LayersList, error) {
 	layersList := make(cs.LayersList, 0)
 
 	if anchore_vuln_struct.Source != nil {
@@ -471,16 +474,16 @@ func AnchoreStructConversion(anchore_vuln_struct *models.Document, vulnerability
 	return &layersList, nil
 }
 
-func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+func getCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 
 	backendURL := os.Getenv(BackendUrlEnvironmentVariable)
 	if backendURL == "" {
-		return nil, fmt.Errorf("GetCVEExceptions: failed, you must provide the backend URL in the armor backend config map")
+		return nil, fmt.Errorf("getCVEExceptions: failed, you must provide the backend URL in the armor backend config map")
 	}
 	designator := armotypes.PortalDesignator{
 		DesignatorType: armotypes.DesignatorAttribute,
 		Attributes: map[string]string{
-			"customerGUID":        os.Getenv(CustomerGuidEnvironmentVariable),
+			"customerGUID":        "aaaaaaaa-1111-bbbb-2222-cccccccccccc",
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(scanCmd.Wlid),
 			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(scanCmd.Wlid),
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(scanCmd.Wlid)),
@@ -489,7 +492,7 @@ func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.Vulnerabi
 		},
 	}
 
-	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, os.Getenv(CustomerGuidEnvironmentVariable), &designator)
+	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, "aaaaaaaa-1111-bbbb-2222-cccccccccccc", &designator)
 	if err != nil {
 		return nil, err
 	}
@@ -497,24 +500,23 @@ func GetCVEExceptions(scanCmd *wssc.WebsocketScanCommand) ([]armotypes.Vulnerabi
 	return vulnExceptionList, nil
 }
 
-func GetAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, map[string]cs.ESLayer, error) {
+func getAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, map[string]cs.ESLayer, error) {
 
 	anchore_vuln_struct, err := GetAnchoreScanRes(scanCmd)
 	if err != nil {
 		return nil, nil, err
 	}
-	exceptions, err := GetCVEExceptions(scanCmd)
-	if err != nil {
-		log.Println(scanCmd.ImageTag + " no cve exceptions found")
-	}
+
+	exceptions, _ := getCVEExceptions(scanCmd)
+
 	preparedLayers := parseLayersPayload(anchore_vuln_struct.Source.Target)
-	LayersVulnsList, err := AnchoreStructConversion(anchore_vuln_struct, exceptions)
+	layersVulnsList, err := anchoreStructConversion(anchore_vuln_struct, exceptions)
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Println("after AnchoreStructConversion " + scanCmd.ImageTag)
+	glog.Infof("after anchoreStructConversion " + scanCmd.ImageTag)
 
-	return LayersVulnsList, preparedLayers, nil
+	return layersVulnsList, preparedLayers, nil
 }
 
 func HandleAnchoreDBUpdate(uri, serverReady string) {
@@ -564,14 +566,14 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			}
 			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
-			fmt.Println("start db update")
+			glog.Infoln("start db update")
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Println("response create err:", err)
 			}
 			if resp != nil {
-				fmt.Println("db update: response Status:", resp.Status)
+				glog.Infof("db update: response Status: %s", resp.Status)
 				resp.Body.Close()
 			}
 		} else {
@@ -596,15 +598,15 @@ func informDatabaseIsReadyToUse() {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("response create err:", err)
+		glog.Errorf("response create err: %s", err.Error())
 	}
 	if resp != nil {
-		fmt.Println("database of server ready: response Status:", resp.Status)
+		glog.Infof("database of server ready: response Status: %s", resp.Status)
 		resp.Body.Close()
 	}
 }
 
-func StartUpdateDB(payload interface{}) (interface{}, error) {
+func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (interface{}, error) {
 	var out bytes.Buffer
 	var out_err bytes.Buffer
 
@@ -615,7 +617,7 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
 
-	log.Printf("handle update DB command")
+	glog.Infof("handle update DB command")
 	err := cmd.Run()
 	if err != nil {
 		var err_str string
@@ -633,13 +635,13 @@ func StartUpdateDB(payload interface{}) (interface{}, error) {
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
-		log.Printf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
-		log.Printf("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:]))
+		glog.Infof("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
+		glog.Infof("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:]))
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}
 
-	log.Printf("DB updated successfully")
+	glog.Infoln("DB updated successfully")
 	informDatabaseIsReadyToUse()
 	return nil, nil
 }
