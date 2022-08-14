@@ -15,3 +15,34 @@ curl -X POST \
             "jobID": "7b04592b-665a-4e47-a9c9-65b2b3cabb49"}' \
    http://localhost:8080/v1/scanImage
 ```
+
+
+
+
+
+
+
+* Build kubevuln with its dependencies
+```
+make
+```
+
+* Build grype
+```
+make grype
+```
+
+* Build kubevuln
+```
+make build
+```
+
+* Run tests
+```
+make test
+```
+
+* Cleanup
+```
+make clean
+```

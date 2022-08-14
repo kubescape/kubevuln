@@ -4,3 +4,4 @@ go.work.*
 .idea
 .vscode
 *grype-cmd*
+kubevuln
