@@ -36,9 +36,14 @@ type httpHandler struct {
 	isReadinessReady bool
 }
 
+var RestAPIPort string = "8080" // default port
 //go:generate swagger generate spec -o ./docs/swagger.yaml
 func main() {
 	displayBuildTag()
+
+	if port := os.Getenv(scanner.PortEnvironmentVariable); port != "" {
+		RestAPIPort = port // override default port
+	}
 
 	httpHandlers, err := newHttpHandler()
 	if err != nil {
