@@ -34,6 +34,37 @@ To build kubevuln with its dependencies run: `make`
 
 Check out `scanner/environmentvariables.go`
 
+## VS code configuration samples
+
+You can use the samples files below to setup your VS code environment for building and debugging purposes.
+
+<details><summary>.vscode/launch.json</summary>
+
+```json5
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program":  "${workspaceRoot}",
+                 "env": {
+                     "PORT": "8081",
+                     "NAMESPACE": "armo-system",
+                     "CONFIG": "${workspaceRoot}/.vscode/clusterData.json",
+            },
+            "args": [
+                "-alsologtostderr", "-v=4", "2>&1"
+            ]
+        }
+    ]
+}
+```
+We configure the Kubevuln to listen to port 8081, and define the configuration in the clusterData.json file [as mentioned above](https://github.com/kubescape/kubevuln#configuration).
+</details>
+
 ## Make option
 * Build kubevuln with its dependencies
 ```
