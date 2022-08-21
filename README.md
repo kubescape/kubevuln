@@ -52,7 +52,7 @@ You can use the samples files below to setup your VS code environment for buildi
             "program":  "${workspaceRoot}",
                  "env": {
                      "PORT": "8081",
-                     "NAMESPACE": "armo-system",
+                     "NAMESPACE": "kubescape",
                      "CONFIG": "${workspaceRoot}/.vscode/clusterData.json",
             },
             "args": [
