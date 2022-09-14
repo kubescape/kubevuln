@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ const (
 
 	anchoreConfigFileName      = "config.yaml"
 	anchoreConfigDirectoryName = ".grype"
+	anchoreScanArtifactsGlob   = "/tmp/stereoscope-*"
 )
 
 var anchoreDirectoryPath string
@@ -258,6 +260,24 @@ func copyFileData(anchoreConfigPath string) error {
 	return err
 }
 
+// cleanupScanArtifacts cleans up scanning artifacts produced by Grype
+//
+// Sometimes Grype doesn’t clean up its scans’ temporary files.
+// This leaks storage, so we have to clean up the previously missed files.
+func cleanupScanArtifacts() {
+	files, _ := filepath.Glob(anchoreScanArtifactsGlob)
+	glog.Infof("remaining scan artifact files: %v", files)
+
+	for _, f := range files {
+		err := os.Remove(f)
+		if err != nil {
+			glog.Errorf("error when deleting file <%s>: %s", f, err.Error())
+		}
+
+	}
+	glog.Infof("done removing scan artifacts: %v", files)
+}
+
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100)) + ".yaml"
@@ -285,6 +305,8 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 
 	glog.Infof("processing image: %s, wlid: %s", imageID, scanCmd.Wlid)
 	err = cmd.Run()
+	defer cleanupScanArtifacts()
+
 	if err != nil {
 
 		err_str, err_anchore_str, exit_code := anchoreErrorHandler(out, out_err, err)
