@@ -76,7 +76,7 @@ func main() {
 	// Set up pprof server
 	servePprof()
 
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", RestAPIPort), nil))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", RestAPIPort), nil))
 }
 
 // newHttpHandlers creates new http handlers for the server
