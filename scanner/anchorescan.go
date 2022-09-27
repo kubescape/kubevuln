@@ -409,7 +409,7 @@ func anchoreErrorHandler(out *bytes.Buffer, out_err *bytes.Buffer, err error) (s
 	}
 	exit_code := "unknown"
 	if werr, ok := err.(*exec.ExitError); ok {
-		if s := werr.Sys().(syscall.WaitStatus); s != 0 {
+		if s := werr.Sys().(syscall.WaitStatus); s.ExitStatus() != 0 {
 			exit_code = fmt.Sprintf("%d", s)
 		}
 	}
@@ -653,7 +653,7 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 		}
 		exit_code := "unknown"
 		if werr, ok := err.(*exec.ExitError); ok {
-			if s := werr.Sys().(syscall.WaitStatus); s != 0 {
+			if s := werr.Sys().(syscall.WaitStatus); s.ExitStatus() != 0 {
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
