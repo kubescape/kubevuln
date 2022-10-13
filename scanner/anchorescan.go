@@ -44,6 +44,7 @@ const (
 
 	anchoreConfigFileName      = "config.yaml"
 	anchoreConfigDirectoryName = ".grype"
+	// A pattern for artifacts that Grype produces during its scans
 	anchoreScanArtifactsGlob   = "/tmp/stereoscope-*"
 )
 
