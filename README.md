@@ -1,6 +1,6 @@
 # Kubevuln
 The Kubevuln component is an in-cluster component of the Kubescape security platform.  
-It scans container images for vulnerabilities, using Grype as its engine.
+It [scans container images for vulnerabilities](https://www.armosec.io/blog/code-repository-container-image-registry-scanning?utm_source=github&utm_medium=repository), using Grype as its engine.
 
 ## Build Kubevuln
 To build kubevuln with its dependencies run: `make`
@@ -36,7 +36,7 @@ Check out `scanner/environmentvariables.go`
 
 ## VS code configuration samples
 
-You can use the samples files below to setup your VS code environment for building and debugging purposes.
+You can use the samples files below to setup your [VS code](https://www.armosec.io/blog/securing-ci-cd-pipelines-security-gates?utm_source=github&utm_medium=repository) environment for building and debugging purposes.
 
 <details><summary>.vscode/launch.json</summary>
 
