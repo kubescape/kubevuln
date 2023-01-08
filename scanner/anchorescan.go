@@ -282,7 +282,7 @@ func cleanupScanArtifacts() {
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
 
 	configFileName := randomstring.HumanFriendlyEnglishString(rand.Intn(100)) + ".yaml"
-	anchoreConfigPath := path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, configFileName)
+	anchoreConfigPath := path.Join(os.TempDir(), configFileName)
 	err := copyFileData(anchoreConfigPath)
 	if err != nil {
 		log.Printf("failed to copy default file config to %v with err %v\n", anchoreConfigPath, err)
