@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   pr-created:
-    uses: matanshk/workflows/.github/workflows/incluster-comp-pr-created.yaml@main
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-created.yaml@main
     with:
       GO_VERSION: "1.18"
     secrets: inherit
