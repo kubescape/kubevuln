@@ -54,4 +54,5 @@ func NewOpenAPIUIHandler() http.Handler {
 	openAPIUIHandler = middleware.SwaggerUI(opts, openAPIUIHandler)
 
 	return openAPIUIHandler
+	
 }
