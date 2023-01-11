@@ -53,5 +53,6 @@ func NewOpenAPIUIHandler() http.Handler {
 	openAPIUIHandler = middleware.RapiDoc(RapiDocOpts, openAPIUIHandler)
 	openAPIUIHandler = middleware.SwaggerUI(opts, openAPIUIHandler)
 
+	
 	return openAPIUIHandler
 }
