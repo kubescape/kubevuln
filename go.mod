@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/anchore/grype v0.35.0
 	github.com/armosec/armoapi-go v0.0.111
-	github.com/armosec/cluster-container-scanner-api v0.0.41
+	github.com/armosec/cluster-container-scanner-api v0.0.45
 	github.com/armosec/logger-go v0.0.13
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12

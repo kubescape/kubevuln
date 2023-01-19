@@ -58,14 +58,18 @@ func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *w
 	timestamp := int64(time.Now().Unix())
 
 	finalReport := cs.ScanResultReport{
-		CustomerGUID:  config.AccountID,
-		ImgTag:        imagetag,
-		ImgHash:       imageHash,
-		WLID:          wlid,
-		ContainerName: containerName,
-		Timestamp:     timestamp,
-		Layers:        *layersList,
-		Session:       scanCmd.Session,
+		CustomerGUID:                  config.AccountID,
+		ImgTag:                        imagetag,
+		ImgHash:                       imageHash,
+		WLID:                          wlid,
+		ContainerName:                 containerName,
+		Timestamp:                     timestamp,
+		Layers:                        *layersList,
+		Session:                       scanCmd.Session,
+		ImageHasSignature:             imageHasSignature,
+		ImageSignatureValid:           imageSignatureValid,
+		ImageSignatureValidationError: imageSignatureError,
+
 		Designators: armotypes.PortalDesignator{
 			Attributes: map[string]string{},
 		},
