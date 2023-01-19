@@ -52,7 +52,7 @@ func init() {
 	}()
 }
 
-func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, preparedLayers map[string]cs.ESLayer) error {
+func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, preparedLayers map[string]cs.ESLayer, imageHasSignature bool, imageSignatureValid bool, imageSignatureError string) error {
 
 	glog.Infof("posting to event receiver image %s wlid %s", imagetag, wlid)
 	timestamp := int64(time.Now().Unix())
@@ -309,6 +309,22 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand, config *pkgcautils.C
 	}
 	report.SendAsRoutine(true, ReportErrorsChan)
 
+	var imageSignatureResult bool
+	var imageHasSignature bool
+	var imageErr error
+
+	imageId := scanCmd.ImageTag
+	if scanCmd.ImageHash != "" {
+		imageId = scanCmd.ImageHash
+	}
+	imageHasSignature, _ = CheckIfImageHasSignature(imageId)
+	if imageHasSignature {
+		imageSignatureResult, imageErr = VerifyImageSignature(scanCmd.ImageTag, config.AccountID)
+	} else {
+		imageSignatureResult = false
+		imageErr = fmt.Errorf("image %s has no signature", scanCmd.ImageTag)
+	}
+
 	result, preparedLayers, err := getScanResult(scanCmd)
 	if err != nil {
 		report.SendError(err, true, true, ReportErrorsChan)
@@ -318,7 +334,9 @@ func ProcessScanRequest(scanCmd *wssc.WebsocketScanCommand, config *pkgcautils.C
 
 	report.SendAction(fmt.Sprintf("vuln scan:notifying event receiver about %v scan", scanCmd.ImageTag), true, ReportErrorsChan)
 
-	err = postScanResultsToEventReceiver(config, scanCmd, scanCmd.ImageTag, scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName, result, preparedLayers)
+	err = postScanResultsToEventReceiver(config, scanCmd, scanCmd.ImageTag,
+		scanCmd.ImageHash, scanCmd.Wlid, scanCmd.ContainerName,
+		result, preparedLayers, imageHasSignature, imageSignatureResult, imageErr.Error())
 
 	if err != nil {
 		report.SendError(fmt.Errorf("vuln scan:notifying event receiver about %v scan failed due to %v", scanCmd.ImageTag, err.Error()), true, true, ReportErrorsChan)
