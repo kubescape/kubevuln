@@ -76,9 +76,9 @@ func main() {
 	go scanner.HandleAnchoreDBUpdate(DBCommandURI, ServerReadyURI)
 
 	// Set up http listeners
-	http.Handle(scanURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.scanImageHandler), ""))
-	http.Handle(DBCommandURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.commandDBHandler), ""))
-	http.Handle(ServerReadyURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.serverReadyHandler), ""))
+	http.Handle(scanURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.scanImageHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
+	http.Handle(DBCommandURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.commandDBHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
+	http.Handle(ServerReadyURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.serverReadyHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
 
 	// Set up OpenAPI UI
 	openAPIUIHandler := docs.NewOpenAPIUIHandler()
@@ -88,6 +88,10 @@ func main() {
 	servePprof()
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", RestAPIPort), nil))
+}
+
+func spanName(_ string, req *http.Request) string {
+	return req.RequestURI
 }
 
 // newHttpHandlers creates new http handlers for the server
