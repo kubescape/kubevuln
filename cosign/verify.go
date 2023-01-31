@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"

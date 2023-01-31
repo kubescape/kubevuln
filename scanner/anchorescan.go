@@ -21,7 +21,8 @@ import (
 
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
-	"github.com/golang/glog"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
 
@@ -266,16 +267,16 @@ func copyFileData(anchoreConfigPath string) error {
 // This leaks storage, so we have to clean up the previously missed files.
 func cleanupScanArtifacts() {
 	files, _ := filepath.Glob(anchoreScanArtifactsGlob)
-	glog.Infof("remaining scan artifact files: %v", files)
+	logger.L().Info(fmt.Sprintf("remaining scan artifact files: %v", files))
 
 	for _, f := range files {
 		err := os.Remove(f)
 		if err != nil {
-			glog.Errorf("error when deleting file <%s>: %s", f, err.Error())
+			logger.L().Error(fmt.Sprintf("error when deleting file <%s>", f), helpers.Error(err))
 		}
 
 	}
-	glog.Infof("done removing scan artifacts: %v", files)
+	logger.L().Info(fmt.Sprintf("done removing scan artifacts: %v", files))
 }
 
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
@@ -303,7 +304,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 
 	cmd, imageID, out, out_err := executeAnchoreCommand(scanCmd, anchoreConfigPath)
 
-	glog.Infof("processing image: %s, wlid: %s", imageID, scanCmd.Wlid)
+	logger.L().Info(fmt.Sprintf("processing image: %s, wlid: %s", imageID, scanCmd.Wlid))
 	err = cmd.Run()
 	defer cleanupScanArtifacts()
 
@@ -536,7 +537,7 @@ func getAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 	if err != nil {
 		return nil, nil, err
 	}
-	glog.Infof("after anchoreStructConversion " + scanCmd.ImageTag)
+	logger.L().Info("after anchoreStructConversion " + scanCmd.ImageTag)
 
 	return layersVulnsList, preparedLayers, nil
 }
@@ -588,14 +589,14 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			}
 			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
-			glog.Infoln("start db update")
+			logger.L().Info("start db update")
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Println("response create err:", err)
 			}
 			if resp != nil {
-				glog.Infof("db update: response Status: %s", resp.Status)
+				logger.L().Info(fmt.Sprintf("db update: response Status: %s", resp.Status))
 				resp.Body.Close()
 			}
 		} else {
@@ -620,10 +621,10 @@ func informDatabaseIsReadyToUse() {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		glog.Errorf("response create err: %s", err.Error())
+		logger.L().Error("response create err", helpers.Error(err))
 	}
 	if resp != nil {
-		glog.Infof("database of server ready: response Status: %s", resp.Status)
+		logger.L().Info(fmt.Sprintf("database of server ready: response Status: %s", resp.Status))
 		resp.Body.Close()
 	}
 }
@@ -639,7 +640,7 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
 
-	glog.Infof("handle update DB command")
+	logger.L().Info("handle update DB command")
 	err := cmd.Run()
 	if err != nil {
 		var err_str string
@@ -657,13 +658,13 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
-		glog.Infof("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
-		glog.Infof("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:]))
+		logger.L().Info(fmt.Sprintf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str))
+		logger.L().Info(fmt.Sprintf("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:])))
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}
 
-	glog.Infoln("DB updated successfully")
+	logger.L().Info("DB updated successfully")
 	informDatabaseIsReadyToUse()
 	return nil, nil
 }

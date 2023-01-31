@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/armosec/utils-go/httputils"
-	"github.com/golang/glog"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/hashicorp/go-multierror"
 
@@ -46,7 +47,7 @@ func init() {
 	go func() {
 		for err := range ReportErrorsChan {
 			if err != nil {
-				glog.Errorf("failed to send job report due to ERROR: %s", err.Error())
+				logger.L().Error("failed to send job report", helpers.Error(err))
 			}
 		}
 	}()
@@ -54,7 +55,7 @@ func init() {
 
 func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *wssc.WebsocketScanCommand, imagetag, imageHash string, wlid string, containerName string, layersList *cs.LayersList, preparedLayers map[string]cs.ESLayer, imageHasSignature bool, imageSignatureValid bool, imageSignatureError string) error {
 
-	glog.Infof("posting to event receiver image %s wlid %s", imagetag, wlid)
+	logger.L().Info(fmt.Sprintf("posting to event receiver image %s wlid %s", imagetag, wlid))
 	timestamp := int64(time.Now().Unix())
 
 	finalReport := cs.ScanResultReport{
@@ -93,7 +94,7 @@ func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *w
 	finalDesignators, _ := finalReport.GetDesignatorsNContext()
 	finalReport.Designators = *finalDesignators
 
-	glog.Infof("session: %v\n===\n", finalReport.Session)
+	logger.L().Info(fmt.Sprintf("session: %v\n===\n", finalReport.Session))
 	flatVuln := finalReport.ToFlatVulnerabilities()
 	flatVuln = fillExtraLayerData(preparedLayers, flatVuln)
 	//split vulnerabilities to chunks
@@ -231,17 +232,17 @@ func postResultsAsGoroutine(report *cs.ScanResultReportV1, eventReceiverURL, ima
 func postResults(report *cs.ScanResultReportV1, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
-		glog.Error("fail convert to json")
+		logger.L().Error("fail convert to json", helpers.Error(err))
 		errorChan <- err
 		return
 	}
 	if printPostJSON != "" {
-		glog.Infof("printPostJSON: %s", payload)
+		logger.L().Info(fmt.Sprintf("printPostJSON: %s", payload))
 	}
 	urlBase, err := url.Parse(eventReceiverURL)
 	if err != nil {
 		err = fmt.Errorf("fail parsing URL, %s, err: %s", eventReceiverURL, err.Error())
-		glog.Error(err)
+		logger.L().Error(err.Error(), helpers.Error(err))
 		errorChan <- err
 		return
 	}
@@ -253,23 +254,23 @@ func postResults(report *cs.ScanResultReportV1, eventReceiverURL, imagetag strin
 
 	resp, err := httputils.HttpPost(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
-		glog.Errorf("fail posting to event receiver image %s wlid %s", imagetag, wlid)
+		logger.L().Error(fmt.Sprintf("fail posting to event receiver image %s wlid %s", imagetag, wlid), helpers.Error(err))
 		errorChan <- err
 		return
 	}
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
-		glog.Errorf("Vulnerabilities post to event receiver failed with error:%s response body: %s", err.Error(), body)
+		logger.L().Error("Vulnerabilities post to event receiver failed", helpers.Error(err), helpers.String("body", body))
 		errorChan <- err
 		return
 	}
-	glog.Infof("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body) // systest dependent
+	logger.L().Info(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
 }
 func RemoveFile(filename string) {
 	err := os.Remove(filename)
 	if err != nil {
-		glog.Errorf("Error removing file %s error:%s", filename, err.Error())
+		logger.L().Error("Error removing file", helpers.String("file", filename), helpers.Error(err))
 	}
 }
 
@@ -277,7 +278,7 @@ func getScanResult(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, map[stri
 
 	scanResultLayer, preparedLayers, err := getAnchoreScanResults(scanCmd)
 	if err != nil {
-		glog.Errorf("getAnchoreScanResults returned an error:%s", err.Error())
+		logger.L().Error("getAnchoreScanResults returned an error", helpers.Error(err))
 		return nil, nil, err
 	}
 
