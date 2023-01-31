@@ -3,7 +3,7 @@ package scanner
 import (
 	_ "embed"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +53,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 		defer mutex.Unlock()
 		assert.Equal(t, r.URL.Path, "/k8s/v2/containerScan", "request path must be /k8s/containerScanV1")
 		report := cs.ScanResultReportV1{}
-		bodybyte, err := ioutil.ReadAll(r.Body)
+		bodybyte, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error("cannot read request body", err)
 			return
@@ -88,7 +88,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	dummyScanCmd := &wssc.WebsocketScanCommand{}
 	//postScanResultsToEventReciever blocks until all report chunks are sent to the event receiver
 	dummyLayers := make(map[string]cs.ESLayer)
-	err = postScanResultsToEventReceiver(&config, dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, dummyLayers)
+	err = postScanResultsToEventReceiver(&config, dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, dummyLayers, true, true, "")
 	assert.NoError(t, err, "postScanResultsToEventReceiver returned an error")
 	assert.Equal(t, reportsPartsSum, reportPartsReceived, "reportPartsReceived must be equal to reportsPartsSum")
 	assert.NotNil(t, accumulatedReport, "accumulated report should not be nil ")
@@ -104,7 +104,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	})
 	/* uncomment to update expected result
 	file, _ := json.MarshalIndent(accumulatedReport, "", "")
-	_ = ioutil.WriteFile("testdata/expectedScanReport.json", file, 0644)
+	_ = os.WriteFile("testdata/expectedScanReport.json", file, 0644)
 	*/
 	//compare accumulatedReport with expected
 	diff := gcmp.Diff(accumulatedReport, &expectedScanReport,

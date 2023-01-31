@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -45,7 +44,7 @@ const (
 	anchoreConfigFileName      = "config.yaml"
 	anchoreConfigDirectoryName = ".grype"
 	// A pattern for artifacts that Grype produces during its scans
-	anchoreScanArtifactsGlob   = "/tmp/stereoscope-*"
+	anchoreScanArtifactsGlob = "/tmp/stereoscope-*"
 )
 
 var anchoreDirectoryPath string
@@ -137,7 +136,7 @@ func CreateAnchoreResourcesDirectoryAndFiles() error {
 func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -148,7 +147,7 @@ func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool)
 
 	App.Registry.InsecureUseHTTP = useHTTP
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -158,7 +157,7 @@ func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool)
 func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerify bool) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -169,7 +168,7 @@ func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerif
 
 	App.Registry.InsecureSkipTLSVerify = skipVerify
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -180,7 +179,7 @@ func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerif
 func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.AuthConfig) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -203,7 +202,7 @@ func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.
 	}
 
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -216,7 +215,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 
 	mutex_edit_conf.Lock()
 
-	bytes, err := ioutil.ReadFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
+	bytes, err := os.ReadFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -235,7 +234,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 		i++
 	}
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName), config_yaml_data, 0755)
+	err = os.WriteFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName), config_yaml_data, 0755)
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err

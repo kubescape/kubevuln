@@ -12,9 +12,9 @@ import (
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/armosec/utils-k8s-go/probes"
-	"github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
 	"github.com/golang/glog"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/docs"
 	"github.com/kubescape/kubevuln/scanner"
 

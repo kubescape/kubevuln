@@ -6,8 +6,8 @@ import (
 
 	_ "embed"
 
-	logger "github.com/dwertent/go-logger"
 	"github.com/go-openapi/runtime/middleware"
+	logger "github.com/kubescape/go-logger"
 )
 
 const (
@@ -53,6 +53,5 @@ func NewOpenAPIUIHandler() http.Handler {
 	openAPIUIHandler = middleware.RapiDoc(RapiDocOpts, openAPIUIHandler)
 	openAPIUIHandler = middleware.SwaggerUI(opts, openAPIUIHandler)
 
-	
 	return openAPIUIHandler
 }
