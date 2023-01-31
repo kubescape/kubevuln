@@ -336,7 +336,7 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 	vuln_anchore_report := &models.Document{}
 	err := os.Remove(anchoreConfigPath)
 	if err != nil {
-		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
+		log.Printf("failed to remove %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
@@ -554,7 +554,7 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 		fullURL := urlBase + serverReady
 		req, err := http.NewRequest(http.MethodHead, fullURL, nil)
 		if err != nil {
-			fmt.Println("fail create http request with err:", err)
+			fmt.Println("failed to create http request with err:", err)
 		}
 		fmt.Println("check if vuln scan server ready")
 		client := &http.Client{}
@@ -585,7 +585,7 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			fullURL := urlBase + uri
 			req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(buf))
 			if err != nil {
-				fmt.Println("fail create http request with err:", err)
+				fmt.Println("failed to create http request with err:", err)
 			}
 			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
@@ -614,7 +614,7 @@ func informDatabaseIsReadyToUse() {
 	fullURL := urlBase + ServerReadyURI
 	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer([]byte(DbIsReady)))
 	if err != nil {
-		fmt.Println("fail create http request with err:", err)
+		fmt.Println("failed to create http request with err:", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 

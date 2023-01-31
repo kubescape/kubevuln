@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/docs"
 	"github.com/kubescape/kubevuln/scanner"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type task func(payload interface{}, config *pkgcautils.ClusterConfig) (interface{}, error)
@@ -81,6 +82,7 @@ func main() {
 
 	// Set up OpenAPI UI
 	openAPIUIHandler := docs.NewOpenAPIUIHandler()
+	openAPIUIHandler = otelhttp.NewHandler(openAPIUIHandler, "")
 	http.Handle(docs.OpenAPIV2Prefix, openAPIUIHandler)
 
 	// Set up pprof server
@@ -94,7 +96,7 @@ func newHttpHandler() (*httpHandler, error) {
 	pathToConfig := os.Getenv(scanner.ConfigEnvironmentVariable) // if empty, will load config from default path
 	config, err := pkgcautils.LoadConfig(pathToConfig)
 	if err != nil {
-		return nil, fmt.Errorf("fail load config, error %v", err)
+		return nil, fmt.Errorf("failed to load config, error %v", err)
 	}
 	return &httpHandler{
 		config:           config,
@@ -103,13 +105,14 @@ func newHttpHandler() (*httpHandler, error) {
 }
 
 func (handler *httpHandler) serverReadyHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	if req.Method == http.MethodHead {
 		w.WriteHeader(http.StatusAccepted)
 	} else if req.Method == http.MethodPost {
 		bytes, err := io.ReadAll(req.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			logger.L().Error("serverReadyHandler: fail decode post req", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("serverReadyHandler: failed to decode post req", helpers.Error(err))
 			return
 		}
 		data := string(bytes)
@@ -123,7 +126,7 @@ func (handler *httpHandler) serverReadyHandler(w http.ResponseWriter, req *http.
 }
 
 func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Request) {
-
+	ctx := req.Context()
 	var err error
 	var innerDBCommand wssc.DBCommand
 
@@ -131,7 +134,7 @@ func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Re
 		err = json.NewDecoder(req.Body).Decode(&innerDBCommand)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			logger.L().Error("commandDBHandler: fail decode json", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("commandDBHandler: failed to decode json", helpers.Error(err))
 			return
 		}
 		for op, data := range innerDBCommand.Commands {
@@ -155,22 +158,22 @@ func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Re
 
 func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Request) {
 	var WebsocketScan wssc.WebsocketScanCommand
-
+	ctx := req.Context()
 	if req.Method == http.MethodPost {
 		err := json.NewDecoder(req.Body).Decode(&WebsocketScan)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			logger.L().Error("fail decode json from web socket", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to decode json from web socket", helpers.Error(err))
 			return
 		}
 		if WebsocketScan.ImageTag == "" && WebsocketScan.ImageHash == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			logger.L().Error("image tag and image hash are missing")
+			logger.L().Ctx(ctx).Error("image tag and image hash are missing")
 			return
 		}
 		if WebsocketScan.IsScanned {
 			w.WriteHeader(http.StatusAccepted)
-			logger.L().Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)

@@ -232,7 +232,7 @@ func postResultsAsGoroutine(report *cs.ScanResultReportV1, eventReceiverURL, ima
 func postResults(report *cs.ScanResultReportV1, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
-		logger.L().Error("fail convert to json", helpers.Error(err))
+		logger.L().Error("failed to convert to json", helpers.Error(err))
 		errorChan <- err
 		return
 	}

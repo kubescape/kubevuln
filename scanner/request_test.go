@@ -88,7 +88,7 @@ func TestPostScanResultsToEventReceiver(t *testing.T) {
 	dummyScanCmd := &wssc.WebsocketScanCommand{}
 	//postScanResultsToEventReciever blocks until all report chunks are sent to the event receiver
 	dummyLayers := make(map[string]cs.ESLayer)
-	err = postScanResultsToEventReceiver(&config, dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, dummyLayers, true, true, "")
+	err = postScanResultsToEventReceiver(&config, dummyScanCmd, scanReport.ImgTag, scanReport.ImgHash, scanReport.WLID, scanReport.ContainerName, &scanReport.Layers, dummyLayers, false, false, "")
 	assert.NoError(t, err, "postScanResultsToEventReceiver returned an error")
 	assert.Equal(t, reportsPartsSum, reportPartsReceived, "reportPartsReceived must be equal to reportsPartsSum")
 	assert.NotNil(t, accumulatedReport, "accumulated report should not be nil ")
