@@ -127,41 +127,41 @@ func TestSplit2Chunks(t *testing.T) {
 	tests := map[int]splitResults{
 		//normal chunk size - expected splitting
 		30000: {totalReceived: numOfVulnerabilities,
-			numOfChunks:    3,
-			maxChunkSize:   29800,
-			minChunkSize:   16370,
+			numOfChunks:    4,
+			maxChunkSize:   28009,
+			minChunkSize:   2033,
 			maxChunkLength: 12,
-			minChunkLength: 9,
+			minChunkLength: 1,
 		},
 		//big chunk size - expected splitting
 		60000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    2,
-			maxChunkSize:   58098,
-			minChunkSize:   14563,
+			maxChunkSize:   58598,
+			minChunkSize:   14723,
 			maxChunkLength: 25,
 			minChunkLength: 8,
 		},
 		//big chunk size - expected splitting
 		15000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    8,
-			maxChunkSize:   14332,
-			minChunkSize:   2334,
+			maxChunkSize:   14452,
+			minChunkSize:   2354,
 			maxChunkLength: 6,
 			minChunkLength: 1,
 		},
 		//huge chunk size - no splitting expected
 		300000: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    1,
-			maxChunkSize:   72659,
-			minChunkSize:   72659,
+			maxChunkSize:   73319,
+			minChunkSize:   73319,
 			maxChunkLength: 33,
 			minChunkLength: 33,
 		},
 		//tiny chunk size expect one item in each chunk
 		300: {totalReceived: numOfVulnerabilities,
 			numOfChunks:    33,
-			maxChunkSize:   3492,
-			minChunkSize:   1803,
+			maxChunkSize:   3512,
+			minChunkSize:   1823,
 			maxChunkLength: 1,
 			minChunkLength: 1,
 		},
@@ -170,10 +170,10 @@ func TestSplit2Chunks(t *testing.T) {
 		results := testSplit(chunkSize, vulnerabilitiesTestCase)
 		assert.Equal(t, expectedResults.totalReceived, results.totalReceived, "number of received must be the same as number of item sent")
 		assert.Equal(t, expectedResults.numOfChunks, results.numOfChunks, "numOfChunks must be same as expected numOfChunks")
-		assert.Equal(t, expectedResults.maxChunkSize, results.maxChunkSize, "numOfChunks must be same as expected maxChunkSize")
-		assert.Equal(t, expectedResults.minChunkSize, results.minChunkSize, "numOfChunks must be same as expected minChunkSize")
-		assert.Equal(t, expectedResults.maxChunkLength, results.maxChunkLength, "numOfChunks must be same as expected maxChunkLength")
-		assert.Equal(t, expectedResults.minChunkLength, results.minChunkLength, "numOfChunks must be same as expected maxChunkLength")
+		assert.Equal(t, expectedResults.maxChunkSize, results.maxChunkSize, "maxChunkSize must be same as expected maxChunkSize")
+		assert.Equal(t, expectedResults.minChunkSize, results.minChunkSize, "minChunkSize must be same as expected minChunkSize")
+		assert.Equal(t, expectedResults.maxChunkLength, results.maxChunkLength, "maxChunkLength must be same as expected maxChunkLength")
+		assert.Equal(t, expectedResults.minChunkLength, results.minChunkLength, "minChunkLength must be same as expected minChunkLength")
 
 	}
 
