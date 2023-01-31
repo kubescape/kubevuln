@@ -76,13 +76,12 @@ func main() {
 	go scanner.HandleAnchoreDBUpdate(DBCommandURI, ServerReadyURI)
 
 	// Set up http listeners
-	http.HandleFunc(scanURI, httpHandlers.scanImageHandler)
-	http.HandleFunc(DBCommandURI, httpHandlers.commandDBHandler)
-	http.HandleFunc(ServerReadyURI, httpHandlers.serverReadyHandler)
+	http.Handle(scanURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.scanImageHandler), ""))
+	http.Handle(DBCommandURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.commandDBHandler), ""))
+	http.Handle(ServerReadyURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.serverReadyHandler), ""))
 
 	// Set up OpenAPI UI
 	openAPIUIHandler := docs.NewOpenAPIUIHandler()
-	openAPIUIHandler = otelhttp.NewHandler(openAPIUIHandler, "")
 	http.Handle(docs.OpenAPIV2Prefix, openAPIUIHandler)
 
 	// Set up pprof server
