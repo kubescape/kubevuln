@@ -1,0 +1,7 @@
+clair*.html
+go.work
+go.work.*
+.idea
+.vscode
+*grype-cmd*
+kubevuln
