@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -22,7 +21,8 @@ import (
 
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
-	"github.com/golang/glog"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/xyproto/randomstring"
 	yaml "gopkg.in/yaml.v3"
 
@@ -45,7 +45,7 @@ const (
 	anchoreConfigFileName      = "config.yaml"
 	anchoreConfigDirectoryName = ".grype"
 	// A pattern for artifacts that Grype produces during its scans
-	anchoreScanArtifactsGlob   = "/tmp/stereoscope-*"
+	anchoreScanArtifactsGlob = "/tmp/stereoscope-*"
 )
 
 var anchoreDirectoryPath string
@@ -137,7 +137,7 @@ func CreateAnchoreResourcesDirectoryAndFiles() error {
 func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool)
 
 	App.Registry.InsecureUseHTTP = useHTTP
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func SetHTTPScansToAnchoreConfigurationFile(configFilePath string, useHTTP bool)
 func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerify bool) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerif
 
 	App.Registry.InsecureSkipTLSVerify = skipVerify
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func SetSkipTLSVerifyToAnchoreConfigurationFile(configFilePath string, skipVerif
 func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.AuthConfig) error {
 	var App Application
 
-	bytes, err := ioutil.ReadFile(configFilePath)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func AddCredentialsToAnchoreConfigurationFile(configFilePath string, cred types.
 	}
 
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(configFilePath, config_yaml_data, 0755)
+	err = os.WriteFile(configFilePath, config_yaml_data, 0755)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 
 	mutex_edit_conf.Lock()
 
-	bytes, err := ioutil.ReadFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
+	bytes, err := os.ReadFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName))
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -235,7 +235,7 @@ func RemoveCredentialsFromAnchoreConfiguratioFile(cred types.AuthConfig) error {
 		i++
 	}
 	config_yaml_data, _ := yaml.Marshal(&App)
-	err = ioutil.WriteFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName), config_yaml_data, 0755)
+	err = os.WriteFile(path.Join(anchoreDirectoryPath, anchoreConfigDirectoryName, anchoreConfigFileName), config_yaml_data, 0755)
 	if err != nil {
 		mutex_edit_conf.Unlock()
 		return err
@@ -267,16 +267,16 @@ func copyFileData(anchoreConfigPath string) error {
 // This leaks storage, so we have to clean up the previously missed files.
 func cleanupScanArtifacts() {
 	files, _ := filepath.Glob(anchoreScanArtifactsGlob)
-	glog.Infof("remaining scan artifact files: %v", files)
+	logger.L().Info(fmt.Sprintf("remaining scan artifact files: %v", files))
 
 	for _, f := range files {
 		err := os.Remove(f)
 		if err != nil {
-			glog.Errorf("error when deleting file <%s>: %s", f, err.Error())
+			logger.L().Error(fmt.Sprintf("error when deleting file <%s>", f), helpers.Error(err))
 		}
 
 	}
-	glog.Infof("done removing scan artifacts: %v", files)
+	logger.L().Info(fmt.Sprintf("done removing scan artifacts: %v", files))
 }
 
 func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, error) {
@@ -304,7 +304,7 @@ func GetAnchoreScanRes(scanCmd *wssc.WebsocketScanCommand) (*models.Document, er
 
 	cmd, imageID, out, out_err := executeAnchoreCommand(scanCmd, anchoreConfigPath)
 
-	glog.Infof("processing image: %s, wlid: %s", imageID, scanCmd.Wlid)
+	logger.L().Info(fmt.Sprintf("processing image: %s, wlid: %s", imageID, scanCmd.Wlid))
 	err = cmd.Run()
 	defer cleanupScanArtifacts()
 
@@ -336,7 +336,7 @@ func createAnchoreReport(anchoreConfigPath string, out *bytes.Buffer, out_err *b
 	vuln_anchore_report := &models.Document{}
 	err := os.Remove(anchoreConfigPath)
 	if err != nil {
-		log.Printf("fail to remove %v with err %v\n", anchoreConfigPath, err)
+		log.Printf("failed to remove %v with err %v\n", anchoreConfigPath, err)
 		return nil, err
 	}
 	err = json.Unmarshal(out.Bytes(), vuln_anchore_report)
@@ -537,7 +537,7 @@ func getAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 	if err != nil {
 		return nil, nil, err
 	}
-	glog.Infof("after anchoreStructConversion " + scanCmd.ImageTag)
+	logger.L().Info("after anchoreStructConversion " + scanCmd.ImageTag)
 
 	return layersVulnsList, preparedLayers, nil
 }
@@ -554,7 +554,7 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 		fullURL := urlBase + serverReady
 		req, err := http.NewRequest(http.MethodHead, fullURL, nil)
 		if err != nil {
-			fmt.Println("fail create http request with err:", err)
+			fmt.Println("failed to create http request with err:", err)
 		}
 		fmt.Println("check if vuln scan server ready")
 		client := &http.Client{}
@@ -585,18 +585,18 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			fullURL := urlBase + uri
 			req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(buf))
 			if err != nil {
-				fmt.Println("fail create http request with err:", err)
+				fmt.Println("failed to create http request with err:", err)
 			}
 			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
-			glog.Infoln("start db update")
+			logger.L().Info("start db update")
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Println("response create err:", err)
 			}
 			if resp != nil {
-				glog.Infof("db update: response Status: %s", resp.Status)
+				logger.L().Info(fmt.Sprintf("db update: response Status: %s", resp.Status))
 				resp.Body.Close()
 			}
 		} else {
@@ -614,17 +614,17 @@ func informDatabaseIsReadyToUse() {
 	fullURL := urlBase + ServerReadyURI
 	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer([]byte(DbIsReady)))
 	if err != nil {
-		fmt.Println("fail create http request with err:", err)
+		fmt.Println("failed to create http request with err:", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		glog.Errorf("response create err: %s", err.Error())
+		logger.L().Error("response create err", helpers.Error(err))
 	}
 	if resp != nil {
-		glog.Infof("database of server ready: response Status: %s", resp.Status)
+		logger.L().Info(fmt.Sprintf("database of server ready: response Status: %s", resp.Status))
 		resp.Body.Close()
 	}
 }
@@ -640,7 +640,7 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 	cmd.Stdout = &out
 	cmd.Stderr = &out_err
 
-	glog.Infof("handle update DB command")
+	logger.L().Info("handle update DB command")
 	err := cmd.Run()
 	if err != nil {
 		var err_str string
@@ -658,13 +658,13 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 				exit_code = fmt.Sprintf("%d", s)
 			}
 		}
-		glog.Infof("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str)
-		glog.Infof("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:]))
+		logger.L().Info(fmt.Sprintf("failed update CVE DB exit code %s :original error:: %v\n%v\n", exit_code, err, err_anchore_str))
+		logger.L().Info(fmt.Sprintf("DB update: string(out.Bytes()[:]) %v\nstring(out_err.Bytes()[:]) %v", string(out.Bytes()[:]), string(out_err.Bytes()[:])))
 		err = fmt.Errorf(err_str)
 		return nil, err
 	}
 
-	glog.Infoln("DB updated successfully")
+	logger.L().Info("DB updated successfully")
 	informDatabaseIsReadyToUse()
 	return nil, nil
 }

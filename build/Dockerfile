@@ -15,7 +15,7 @@ RUN go build -o build/kubevuln
 
 RUN mkdir /work/vuln-scan
 
-RUN git clone https://github.com/anchore/grype.git --branch v0.39.0 --depth 1
+RUN git clone https://github.com/anchore/grype.git --branch v0.56.0 --depth 1
 RUN cd grype && go build -o /work/vuln-scan/anchore-resources/grype-cmd
 
 WORKDIR /work/vuln-scan

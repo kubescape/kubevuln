@@ -1,6 +1,6 @@
 .PHONY: test all build clean grype
 
-GRYPE_VERSION = "v0.39.0"
+GRYPE_VERSION = "v0.56.0"
 
 all: grype build
 

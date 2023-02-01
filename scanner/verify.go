@@ -5,7 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -95,7 +95,7 @@ func GetKubescapeControlConfig(customerGUID string) ([]string, error) {
 	}
 
 	// Read response body
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

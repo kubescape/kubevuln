@@ -1,24 +1,25 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
+	wssc "github.com/armosec/armoapi-go/apis"
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/armosec/utils-k8s-go/probes"
-	"github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
-	"github.com/golang/glog"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/docs"
 	"github.com/kubescape/kubevuln/scanner"
-
-	wssc "github.com/armosec/armoapi-go/apis"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type task func(payload interface{}, config *pkgcautils.ClusterConfig) (interface{}, error)
@@ -39,6 +40,16 @@ type httpHandler struct {
 var RestAPIPort string = "8080" // default port
 //go:generate swagger generate spec -o ./docs/swagger.yaml
 func main() {
+	ctx := context.Background()
+	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
+	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		ctx = logger.InitOtel("kubevuln",
+			os.Getenv(scanner.ReleaseBuildTagEnvironmentVariable),
+			os.Getenv("ACCOUNT_ID"),
+			url.URL{Host: otelHost})
+		defer logger.ShutdownOtel(ctx)
+	}
+
 	displayBuildTag()
 
 	if port := os.Getenv(scanner.PortEnvironmentVariable); port != "" {
@@ -47,11 +58,11 @@ func main() {
 
 	httpHandlers, err := newHttpHandler()
 	if err != nil {
-		glog.Fatalf("fail load config, error %v", err)
+		logger.L().Ctx(ctx).Fatal("failed to load config", helpers.Error(err))
 	}
 
 	if err := scanner.CreateAnchoreResourcesDirectoryAndFiles(); err != nil {
-		glog.Fatalf("failed to create anchore resources directory and files, error %v", err)
+		logger.L().Ctx(ctx).Fatal("failed to create anchore resources directory and files", helpers.Error(err))
 	}
 
 	go probes.InitReadinessV1(&httpHandlers.isReadinessReady)
@@ -65,9 +76,9 @@ func main() {
 	go scanner.HandleAnchoreDBUpdate(DBCommandURI, ServerReadyURI)
 
 	// Set up http listeners
-	http.HandleFunc(scanURI, httpHandlers.scanImageHandler)
-	http.HandleFunc(DBCommandURI, httpHandlers.commandDBHandler)
-	http.HandleFunc(ServerReadyURI, httpHandlers.serverReadyHandler)
+	http.Handle(scanURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.scanImageHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
+	http.Handle(DBCommandURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.commandDBHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
+	http.Handle(ServerReadyURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.serverReadyHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
 
 	// Set up OpenAPI UI
 	openAPIUIHandler := docs.NewOpenAPIUIHandler()
@@ -79,12 +90,16 @@ func main() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", RestAPIPort), nil))
 }
 
+func spanName(_ string, req *http.Request) string {
+	return req.RequestURI
+}
+
 // newHttpHandlers creates new http handlers for the server
 func newHttpHandler() (*httpHandler, error) {
 	pathToConfig := os.Getenv(scanner.ConfigEnvironmentVariable) // if empty, will load config from default path
 	config, err := pkgcautils.LoadConfig(pathToConfig)
 	if err != nil {
-		return nil, fmt.Errorf("fail load config, error %v", err)
+		return nil, fmt.Errorf("failed to load config, error %v", err)
 	}
 	return &httpHandler{
 		config:           config,
@@ -93,13 +108,14 @@ func newHttpHandler() (*httpHandler, error) {
 }
 
 func (handler *httpHandler) serverReadyHandler(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	if req.Method == http.MethodHead {
 		w.WriteHeader(http.StatusAccepted)
 	} else if req.Method == http.MethodPost {
 		bytes, err := io.ReadAll(req.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			glog.Errorf("serverReadyHandler: fail decode post req, error %v", err)
+			logger.L().Ctx(ctx).Error("serverReadyHandler: failed to decode post req", helpers.Error(err))
 			return
 		}
 		data := string(bytes)
@@ -113,7 +129,7 @@ func (handler *httpHandler) serverReadyHandler(w http.ResponseWriter, req *http.
 }
 
 func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Request) {
-
+	ctx := req.Context()
 	var err error
 	var innerDBCommand wssc.DBCommand
 
@@ -121,7 +137,7 @@ func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Re
 		err = json.NewDecoder(req.Body).Decode(&innerDBCommand)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			glog.Errorf("commandDBHandler: fail decode json, error %v", err)
+			logger.L().Ctx(ctx).Error("commandDBHandler: failed to decode json", helpers.Error(err))
 			return
 		}
 		for op, data := range innerDBCommand.Commands {
@@ -145,22 +161,22 @@ func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Re
 
 func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Request) {
 	var WebsocketScan wssc.WebsocketScanCommand
-
+	ctx := req.Context()
 	if req.Method == http.MethodPost {
 		err := json.NewDecoder(req.Body).Decode(&WebsocketScan)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			glog.Errorf("fail decode json from web socket, error %v", err)
+			logger.L().Ctx(ctx).Error("failed to decode json from web socket", helpers.Error(err))
 			return
 		}
 		if WebsocketScan.ImageTag == "" && WebsocketScan.ImageHash == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			glog.Errorf("image tag and image hash are missing")
+			logger.L().Ctx(ctx).Error("image tag and image hash are missing")
 			return
 		}
 		if WebsocketScan.IsScanned {
 			w.WriteHeader(http.StatusAccepted)
-			glog.Errorf("the image %s already scanned", WebsocketScan.ImageTag)
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -193,7 +209,7 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 			payload: &WebsocketScan,
 		}
 
-		glog.Infof("Scan request to image %s is put on processing queue", WebsocketScan.ImageTag)
+		logger.L().Info(fmt.Sprintf("Scan request to image %s is put on processing queue", WebsocketScan.ImageTag))
 		taskChan <- td
 
 	} else {
@@ -210,7 +226,7 @@ func taskChannelHandler(taskChan <-chan taskData) {
 
 func displayBuildTag() {
 	flag.Parse()
-	glog.Infof("Image version: %s", os.Getenv(scanner.ReleaseBuildTagEnvironmentVariable))
+	logger.L().Info(fmt.Sprintf("Image version: %s", os.Getenv(scanner.ReleaseBuildTagEnvironmentVariable)))
 }
 
 func servePprof() {
@@ -226,11 +242,11 @@ func servePprof() {
 func startScanImage(scanCmdInterface interface{}, config *pkgcautils.ClusterConfig) (interface{}, error) {
 	scanCmd := scanCmdInterface.(*wssc.WebsocketScanCommand)
 
-	glog.Infof("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag)
+	logger.L().Info(fmt.Sprintf("ProcessScanRequest for jobid %v/%v %s image: %s starting", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag))
 
 	_, err := scanner.ProcessScanRequest(scanCmd, config)
 	if err != nil {
-		glog.Errorf("ProcessScanRequest for jobid %v/%v %s image: %s failed due to: %s", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag, err.Error())
+		logger.L().Error(fmt.Sprintf("ProcessScanRequest for jobid %v/%v %s image: %s failed", scanCmd.ParentJobID, scanCmd.JobID, scanCmd.Wlid, scanCmd.ImageTag), helpers.Error(err))
 	}
 
 	return nil, nil
