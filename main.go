@@ -179,6 +179,7 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 			logger.L().Ctx(ctx).Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
 			return
 		}
+		
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 		// Backend aggregation depends on this report!!!
