@@ -66,6 +66,11 @@ func (s *ScanService) Ready() bool {
 func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID string, workload domain.ScanCommand) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanCVE")
 	defer span.End()
+	// report to platform
+	err := s.platform.SendStatus(workload, domain.Started)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+	}
 	// check if CVE scans are already available
 	cve, err := s.cveRepository.GetCVE(ctx, imageID, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion())
 	if err != nil {
@@ -107,9 +112,23 @@ func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID st
 			return err
 		}
 	}
-	// TODO add telemetry to Platform
+	// report to platform
+	err = s.platform.SendStatus(workload, domain.Success)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+	}
+	// submit to storage
+	err = s.cveRepository.StoreCVE(ctx, cve)
+	if err != nil {
+		return err
+	}
 	// TODO add submit to Platform
-	return s.cveRepository.StoreCVE(ctx, cve)
+	// report to platform
+	err = s.platform.SendStatus(workload, domain.Done)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+	}
+	return nil
 }
 
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, imageID string, workload domain.ScanCommand) error {
@@ -127,6 +146,11 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, instanceID string, im
 	}
 	if imageID == "" {
 		return errors.New("missing imageID")
+	}
+	// report to platform
+	err := s.platform.SendStatus(workload, domain.Accepted)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
 	return nil
 }

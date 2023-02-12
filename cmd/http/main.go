@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,8 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubevuln/adapters"
-	v1 "github.com/kubescape/kubevuln/adapters/v1"
+	"github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/repositories"
@@ -38,16 +36,20 @@ func main() {
 	repository := repositories.NewMemoryStorage() // TODO add real storage
 	sbomAdapter := v1.NewSyftAdapter()
 	cveAdapter, _ := v1.NewGrypeAdapter(ctx)
-	platform := adapters.NewMockPlatform() // TODO add real platform
+	platform := v1.NewArmoAdapter("", "") // TODO set with config file
 	service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
 	controller := controllers.NewHTTPController(service, 1) // TODO set with config file
 
-	router := gin.Default() // TODO set release mode: gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.Default()
 	router.Use(otelgin.Middleware("kubevuln-svc"))
 
-	router.GET("/v1/ready", controller.Ready)
-	router.POST(fmt.Sprintf("%s/%s", apis.WebsocketScanCommandVersion, apis.SBOMCalculationCommandPath), controller.GenerateSBOM)
-	router.POST(fmt.Sprintf("%s/%s", apis.WebsocketScanCommandVersion, apis.WebsocketScanCommandPath), controller.ScanCVE)
+	group := router.Group(apis.WebsocketScanCommandVersion)
+	{
+		group.GET("/ready", controller.Ready)
+		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
+		group.POST("/"+apis.WebsocketScanCommandPath, controller.ScanCVE)
+	}
 
 	srv := &http.Server{
 		Addr:    ":8080",
