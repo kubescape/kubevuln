@@ -24,5 +24,6 @@ type SBOMCreator interface {
 
 // Platform is the port implemented by adapters to be used in ScanService to report scan results and send telemetry data
 type Platform interface {
+	SendStatus(workload domain.ScanCommand, step int) error
 	SubmitCVE(cve domain.CVEManifest) error
 }
