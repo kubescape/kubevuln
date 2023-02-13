@@ -16,27 +16,31 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+// SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
 	mu sync.Mutex
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
+// NewSyftAdapter initializes the SyftAdapter struct
 func NewSyftAdapter() *SyftAdapter {
 	return &SyftAdapter{}
 }
 
+// CreateSBOM creates an SBOM for a given imageID, only one scan happens at a time to prevent disk space issues
+// format is SPDX JSON and the resulting SBOM is tagged with the Syft version
 func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "CreateSBOM")
 	defer span.End()
 	// ensure only one SBOM is created at a time
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// translate business models in syft models
+	// translate business models into Syft models
 	userInput := "registry:" + imageID
 	sourceInput, err := source.ParseInput(userInput, "", true)
 	if err != nil {
-		panic(err)
+		return domain.SBOM{}, err
 	}
 	credentials := make([]image.RegistryCredentials, len(options.Credentials))
 	for i, v := range options.Credentials {
@@ -57,7 +61,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	src, cleanup, err := source.New(*sourceInput, registryOptions, []string{})
 	defer cleanup()
 	if err != nil {
-		panic(err)
+		return domain.SBOM{}, err
 	}
 	// extract packages
 	catalogOptions := cataloger.Config{
@@ -65,7 +69,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	pkgCatalog, relationships, actualDistro, err := syft.CatalogPackages(src, catalogOptions)
 	if err != nil {
-		panic(err)
+		return domain.SBOM{}, err
 	}
 	// generate SBOM
 	syftSbom := sbom.SBOM{
@@ -89,6 +93,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}, nil
 }
 
+// Version returns Syft's version which is used to tag SBOMs
+// it should be filled-in at build time as Go no longer reflects on its packages at runtime
 func (s *SyftAdapter) Version() string {
 	// TODO implement me
 	return "TODO"

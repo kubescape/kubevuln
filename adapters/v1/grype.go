@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+// GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
 	dbCloser *db.Closer
 	dbConfig db.Config
@@ -35,6 +36,9 @@ type GrypeAdapter struct {
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 
+// NewGrypeAdapter initializes the GrypeAdapter structure and loads the vulnerability DB
+// by calling UpdateDB which will eventually update its definitions
+// it can fail if the DB isn't initialized properly
 func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 	dbConfig := db.Config{
 		DBRootDir:  "grypedb",
@@ -43,22 +47,25 @@ func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 	g := &GrypeAdapter{
 		dbConfig: dbConfig,
 	}
-	err := g.UpdateDB(ctx)
+	err := g.UpdateDB(ctx) // TODO make it injectable
 	if err != nil {
 		return nil, err
 	}
 	return g, nil
 }
 
-func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVE) (domain.CVE, error) {
+// CreateRelevantCVE creates a relevant CVE combining CVE and CVE' vulnerabilities
+func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVEManifest) (domain.CVEManifest, error) {
 	// TODO implement me
 	panic("implement me")
 }
 
+// DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion() string {
 	return g.dbStatus.Checksum
 }
 
+// Ready returns the status of the vulnerabilities DB
 func (g *GrypeAdapter) Ready() bool {
 	return g.dbStatus.Err != nil
 }
@@ -80,18 +87,22 @@ func getMatchers() []matcher.Matcher {
 	)
 }
 
-func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVE, error) {
+// ScanSBOM generates a CVE manifest by scanning an SBOM
+func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
 	ctx, span := otel.Tracer("").Start(ctx, "ScanSBOM")
 	defer span.End()
+
 	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
 	if err != nil {
-		return domain.CVE{}, err
+		return domain.CVEManifest{}, err
 	}
+
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
-		return domain.CVE{}, err
+		return domain.CVEManifest{}, err
 	}
 	pkgContext := pkg.Context{
 		Source: &s.Source,
@@ -101,10 +112,12 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Store:    *g.store,
 		Matchers: getMatchers(),
 	}
+
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
-		return domain.CVE{}, err
+		return domain.CVEManifest{}, err
 	}
+
 	// generate JSON
 	presenterConfig := models.PresenterConfig{
 		Matches:          *remainingMatches,
@@ -120,9 +133,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	var buf bytes.Buffer
 	err = presenter.Present(&buf)
 	if err != nil {
-		return domain.CVE{}, err
+		return domain.CVEManifest{}, err
 	}
-	return domain.CVE{
+	return domain.CVEManifest{
 		ImageID:            sbom.ImageID,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
@@ -131,16 +144,21 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	}, nil
 }
 
+// UpdateDB updates the vulnerabilities DB, a RWMutex ensures this process doesn't interfere with scans
 func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
 	ctx, span := otel.Tracer("").Start(ctx, "UpdateDB")
 	defer span.End()
+
 	var err error
 	g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
 	return err
 }
 
+// Version returns Grype's version which is used to tag CVE manifests
+// it should be filled-in at build time as Go no longer reflects on its packages at runtime
 func (g *GrypeAdapter) Version() string {
 	// TODO implement me
 	return "TODO"

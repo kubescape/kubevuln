@@ -10,8 +10,9 @@ import (
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
-	"github.com/stretchr/testify/assert"
+	"gotest.tools/v3/assert"
 )
 
 func TestScan(t *testing.T) {
@@ -22,10 +23,10 @@ func TestScan(t *testing.T) {
 		expectedBody string
 	}{
 		{
-			"good",
+			"valid scan command succeeds and reports CVE",
 			"../../api/v1/testdata/scan.yaml",
 			200,
-			"{\"data\":\"new CVEs created\",\"status\":\"success\"}",
+			"{\"data\":\"new CVE manifest created\",\"status\":\"success\"}",
 		},
 		{
 			"missing fields",
@@ -49,19 +50,19 @@ func TestScan(t *testing.T) {
 			router.POST("/v1/scanImage", controller.ScanCVE)
 
 			file, err := os.Open(test.yamlFile)
-			assert.NoError(t, err)
+			tools.EnsureSetup(t, err == nil)
 			req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
 			file, err = os.Open(test.yamlFile)
-			assert.NoError(t, err)
+			tools.EnsureSetup(t, err == nil)
 			req, _ = http.NewRequest("POST", "/v1/scanImage", file)
 			w = httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			assert.Equal(t, test.expectedCode, w.Code)
-			assert.Equal(t, test.expectedBody, w.Body.String())
+			assert.Assert(t, test.expectedCode == w.Code)
+			assert.Assert(t, test.expectedBody == w.Body.String())
 		})
 	}
 }
