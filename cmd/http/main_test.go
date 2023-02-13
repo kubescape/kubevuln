@@ -26,13 +26,13 @@ func TestScan(t *testing.T) {
 			"valid scan command succeeds and reports CVE",
 			"../../api/v1/testdata/scan.yaml",
 			200,
-			"{\"data\":\"new CVE manifest created\",\"status\":\"success\"}",
+			"{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":200,\"title\":\"OK\"}",
 		},
 		{
 			"missing fields",
 			"../../api/v1/testdata/scan-incomplete.yaml",
 			500,
-			"null",
+			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=\",\"status\":500,\"title\":\"Internal Server Error\"}",
 		},
 	}
 	for _, test := range tests {
@@ -62,7 +62,7 @@ func TestScan(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			assert.Assert(t, test.expectedCode == w.Code)
-			assert.Assert(t, test.expectedBody == w.Body.String())
+			assert.Assert(t, test.expectedBody == w.Body.String(), w.Body.String())
 		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"schneider.vip/problem"
 )
 
 // HTTPController maps ScanService ports to gin handlers that can be mapped to paths and methods
@@ -26,70 +27,56 @@ func NewHTTPController(scanService ports.ScanService) *HTTPController {
 
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
 func (h HTTPController) GenerateSBOM(c *gin.Context) {
-	c.Header("Content-Type", "application/json")
-
 	var newScan wssc.WebsocketScanCommand
 	err := c.ShouldBindJSON(&newScan)
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("handler error", helpers.Error(err))
-		c.JSON(http.StatusBadRequest, nil)
+		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
 
 	err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
-		c.JSON(http.StatusInternalServerError, nil)
+		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data":   "new SBOMs created",
-	})
+	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 }
 
 // Ready calls scanService.Ready
 func (h HTTPController) Ready(c *gin.Context) {
-	c.Header("Content-Type", "application/json")
-
 	if !h.scanService.Ready() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "Scanner not ready",
-		})
+		problem.Of(http.StatusServiceUnavailable).WriteTo(c.Writer)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "UP",
-	})
+	problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
 func (h HTTPController) ScanCVE(c *gin.Context) {
-	c.Header("Content-Type", "application/json")
-
 	var newScan wssc.WebsocketScanCommand
 	err := c.ShouldBindJSON(&newScan)
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("handler error", helpers.Error(err))
-		c.JSON(http.StatusBadRequest, nil)
+		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
 
 	err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
-		c.JSON(http.StatusInternalServerError, nil)
+		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data":   "new CVE manifest created",
-	})
+	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 }
