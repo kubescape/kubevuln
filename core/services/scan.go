@@ -93,7 +93,7 @@ func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID st
 			// this is not supposed to happen, problem with Operator?
 			txt := "missing SBOM"
 			logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", imageID), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version()))
-			return errors.New(txt)
+			return errors.New(txt) // TODO do proper error reporting https://go.dev/blog/go1.13-errors
 		}
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
