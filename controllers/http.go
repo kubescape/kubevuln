@@ -11,16 +11,20 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 )
 
+// HTTPController maps ScanService ports to gin handlers that can be mapped to paths and methods
+// this mapping is usually done in main()
 type HTTPController struct {
 	scanService ports.ScanService
 }
 
+// NewHTTPController initializes the HTTPController struct with the injected scanService
 func NewHTTPController(scanService ports.ScanService) *HTTPController {
 	return &HTTPController{
 		scanService: scanService,
 	}
 }
 
+// GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
 func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 
@@ -32,7 +36,9 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 		return
 	}
 
-	err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.Workload(newScan))
+	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+
+	err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
 		c.JSON(http.StatusInternalServerError, nil)
@@ -45,6 +51,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	})
 }
 
+// Ready calls scanService.Ready
 func (h HTTPController) Ready(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 
@@ -60,6 +67,7 @@ func (h HTTPController) Ready(c *gin.Context) {
 	})
 }
 
+// ScanCVE unmarshalls the payload and calls scanService.ScanCVE
 func (h HTTPController) ScanCVE(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 
@@ -71,7 +79,9 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 		return
 	}
 
-	err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.Workload(newScan))
+	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+
+	err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
 		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
 		c.JSON(http.StatusInternalServerError, nil)
@@ -80,6 +90,6 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "success",
-		"data":   "new CVEs created",
+		"data":   "new CVE manifest created",
 	})
 }

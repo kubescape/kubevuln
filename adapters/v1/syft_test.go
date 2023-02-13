@@ -24,7 +24,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "hello-world",
+			name:    "valid image produces well-formed SBOM",
 			imageID: "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
 			format:  string(fileContent("testdata/hello-world-sbom.format.json")),
 		},
