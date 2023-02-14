@@ -1,0 +1,29 @@
+{
+  "session": {
+    "jobIDs": [
+      "80fc5ba7-e6df-4d8f-ae94-475242cd7345",
+      "b56211c7-716a-4f9f-b27f-b4942195fa5e"
+    ],
+    "timestamp": "2023-02-02T13:18:50.316451657+02:00",
+    "rootJobID": "80fc5ba7-e6df-4d8f-ae94-475242cd7345",
+    "action": "vulnerability-scan"
+  },
+  "imageTag": "k8s.gcr.io/kube-proxy:v1.24.3",
+  "wlid": "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+  "isScanned": false,
+  "containerName": "kube-proxy",
+  "jobID": "b56211c7-716a-4f9f-b27f-b4942195fa5e",
+  "parentJobID": "80fc5ba7-e6df-4d8f-ae94-475242cd7345",
+  "actionIDN": 3,
+  "imageHash": "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+  "credentials": {
+    "username": "oauth2accesstoken",
+    "password": "very secret"
+  },
+  "credentialsList": [
+    {
+      "username": "oauth2accesstoken",
+      "password": "very secret"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "session": {
+    "jobIDs": [
+      "c0c32dae-bcc2-46c1-90e2-ff30af8d53fc",
+      "0c4fa147-e9cc-4f91-a67d-4bf8b57dfe93",
+      "22529878-6917-4541-a1d1-e92fcba77987"
+    ],
+    "timestamp": "2023-02-01T10:38:49.778132757+02:00",
+    "rootJobID": "c0c32dae-bcc2-46c1-90e2-ff30af8d53fc",
+    "action": "vulnerability-scan"
+  },
+  "imageTag": "k8s.gcr.io/coredns/coredns:v1.8.6",
+  "wlid": "wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns",
+  "isScanned": false,
+  "containerName": "coredns",
+  "jobID": "22529878-6917-4541-a1d1-e92fcba77987",
+  "parentJobID": "0c4fa147-e9cc-4f91-a67d-4bf8b57dfe93",
+  "actionIDN": 3,
+  "imageHash": "",
+  "credentials": {
+    "username": "oauth2accesstoken",
+    "password": ""
+  },
+  "credentialsList": [
+    {
+      "username": "oauth2accesstoken",
+      "password": ""
+    }
+  ]
+}
