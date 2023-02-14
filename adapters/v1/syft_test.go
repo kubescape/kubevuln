@@ -24,9 +24,14 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "valid image produces well-formed SBOM",
+			name:    "empty image produces empty SBOM",
 			imageID: "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
 			format:  string(fileContent("testdata/hello-world-sbom.format.json")),
+		},
+		{
+			name:    "valid image produces well-formed SBOM",
+			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:  string(fileContent("testdata/alpine-sbom.format.json")),
 		},
 	}
 	for _, tt := range tests {

@@ -3,7 +3,6 @@ package v1
 import (
 	"bytes"
 	"context"
-	"sync"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
@@ -18,7 +17,6 @@ import (
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
-	mu sync.Mutex
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
@@ -33,9 +31,6 @@ func NewSyftAdapter() *SyftAdapter {
 func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "CreateSBOM")
 	defer span.End()
-	// ensure only one SBOM is created at a time
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	// translate business models into Syft models
 	userInput := "registry:" + imageID
 	sourceInput, err := source.ParseInput(userInput, "", true)

@@ -38,10 +38,6 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 func (s *ScanService) GenerateSBOM(ctx context.Context, imageID string, workload domain.ScanCommand) error {
 	ctx, span := otel.Tracer("").Start(ctx, "GenerateSBOM")
 	defer span.End()
-	// validate inputs
-	if imageID == "" {
-		return errors.New("missing imageID")
-	}
 	// check if SBOM is already available
 	sbom, err := s.sbomRepository.GetSBOM(ctx, imageID, s.sbomCreator.Version())
 	if err != nil {
@@ -70,13 +66,6 @@ func (s *ScanService) Ready() bool {
 func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID string, workload domain.ScanCommand) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanCVE")
 	defer span.End()
-	// validate inputs
-	if instanceID == "" {
-		return errors.New("missing instanceID")
-	}
-	if imageID == "" {
-		return errors.New("missing imageID")
-	}
 	// check if CVE scans are already available
 	cve, err := s.cveRepository.GetCVE(ctx, imageID, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion())
 	if err != nil {
@@ -121,4 +110,23 @@ func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID st
 	// TODO add telemetry to Platform
 	// TODO add submit to Platform
 	return s.cveRepository.StoreCVE(ctx, cve)
+}
+
+func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, imageID string, workload domain.ScanCommand) error {
+	// validate inputs
+	if imageID == "" {
+		return errors.New("missing imageID")
+	}
+	return nil
+}
+
+func (s *ScanService) ValidateScanCVE(ctx context.Context, instanceID string, imageID string, workload domain.ScanCommand) error {
+	// validate inputs
+	if instanceID == "" {
+		return errors.New("missing instanceID")
+	}
+	if imageID == "" {
+		return errors.New("missing imageID")
+	}
+	return nil
 }
