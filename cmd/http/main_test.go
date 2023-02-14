@@ -42,7 +42,7 @@ func TestScan(t *testing.T) {
 			cveAdapter := adapters.NewMockCVEAdapter()
 			platform := adapters.NewMockPlatform()
 			service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
-			controller := controllers.NewHTTPController(service)
+			controller := controllers.NewHTTPController(service, 2)
 
 			router := gin.Default()
 

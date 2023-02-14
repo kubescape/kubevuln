@@ -25,13 +25,22 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid SBOM produces well-formed vulnerability list",
+			name: "empty SBOM produces empty vulnerability list",
 			sbom: domain.SBOM{
 				ImageID:            "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
 				SBOMCreatorVersion: "TODO",
 				Content:            fileContent("testdata/hello-world-sbom.json"),
 			},
 			format: string(fileContent("testdata/hello-world-cve.format.json")),
+		},
+		{
+			name: "valid SBOM produces well-formed vulnerability list",
+			sbom: domain.SBOM{
+				ImageID:            "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+				SBOMCreatorVersion: "TODO",
+				Content:            fileContent("testdata/alpine-sbom.json"),
+			},
+			format: string(fileContent("testdata/alpine-cve.format.json")),
 		},
 	}
 	for _, tt := range tests {
