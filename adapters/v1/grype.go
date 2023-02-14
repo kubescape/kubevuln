@@ -3,8 +3,10 @@ package v1
 import (
 	"bytes"
 	"context"
+	"path"
 	"sync"
 
+	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/matcher"
@@ -41,7 +43,7 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 // it can fail if the DB isn't initialized properly
 func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 	dbConfig := db.Config{
-		DBRootDir:  "grypedb",
+		DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
 		ListingURL: "https://toolbox-data.anchore.io/grype/databases/listing.json",
 	}
 	g := &GrypeAdapter{

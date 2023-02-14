@@ -3,6 +3,7 @@ module github.com/kubescape/kubevuln
 go 1.19
 
 require (
+	github.com/adrg/xdg v0.4.0
 	github.com/anchore/grype v0.56.0
 	github.com/anchore/stereoscope v0.0.0-20221208011002-c5ff155d72f1
 	github.com/anchore/syft v0.70.0
@@ -13,6 +14,7 @@ require (
 	github.com/kubescape/go-logger v0.0.8
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.38.0
 	go.opentelemetry.io/otel v1.12.0
+	golang.org/x/sync v0.1.0
 	gotest.tools/v3 v3.3.0
 	schneider.vip/problem v1.8.1
 )
@@ -278,7 +280,6 @@ require (
 	golang.org/x/mod v0.7.0 // indirect
 	golang.org/x/net v0.5.0 // indirect
 	golang.org/x/oauth2 v0.4.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.4.0 // indirect
 	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
