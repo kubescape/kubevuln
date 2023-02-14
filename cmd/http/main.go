@@ -34,7 +34,7 @@ func main() {
 	service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
 	controller := controllers.NewHTTPController(service)
 
-	router := gin.Default()
+	router := gin.Default() // TODO set release mode: gin.SetMode(gin.ReleaseMode)
 	router.Use(otelgin.Middleware("kubevuln-svc"))
 
 	router.GET("/v1/ready", controller.Ready)

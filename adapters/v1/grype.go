@@ -67,7 +67,7 @@ func (g *GrypeAdapter) DBVersion() string {
 
 // Ready returns the status of the vulnerabilities DB
 func (g *GrypeAdapter) Ready() bool {
-	return g.dbStatus.Err != nil
+	return g.dbStatus.Err == nil
 }
 
 func getMatchers() []matcher.Matcher {
