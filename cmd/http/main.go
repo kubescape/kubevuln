@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -9,11 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/adapters"
-	"github.com/kubescape/kubevuln/adapters/v1"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/repositories"
@@ -44,8 +46,8 @@ func main() {
 	router.Use(otelgin.Middleware("kubevuln-svc"))
 
 	router.GET("/v1/ready", controller.Ready)
-	router.POST("/v1/generateSBOM", controller.GenerateSBOM)
-	router.POST("/v1/scanImage", controller.ScanCVE)
+	router.POST(fmt.Sprintf("%s/%s", apis.WebsocketScanCommandVersion, apis.SBOMCalculationCommandPath), controller.GenerateSBOM)
+	router.POST(fmt.Sprintf("%s/%s", apis.WebsocketScanCommandVersion, apis.WebsocketScanCommandPath), controller.ScanCVE)
 
 	srv := &http.Server{
 		Addr:    ":8080",
