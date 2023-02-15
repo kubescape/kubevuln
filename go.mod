@@ -6,7 +6,7 @@ require (
 	github.com/anchore/grype v0.56.0
 	github.com/anchore/stereoscope v0.0.0-20221208011002-c5ff155d72f1
 	github.com/anchore/syft v0.70.0
-	github.com/armosec/armoapi-go v0.0.162
+	github.com/armosec/armoapi-go v0.0.165
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.8.2
 	github.com/kinbiko/jsonassert v1.1.1
