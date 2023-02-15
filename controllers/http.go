@@ -2,8 +2,10 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -16,12 +18,14 @@ import (
 // this mapping is usually done in main()
 type HTTPController struct {
 	scanService ports.ScanService
+	workerPool  *workerpool.WorkerPool
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
-func NewHTTPController(scanService ports.ScanService) *HTTPController {
+func NewHTTPController(scanService ports.ScanService, concurrency int) *HTTPController {
 	return &HTTPController{
 		scanService: scanService,
+		workerPool:  workerpool.New(concurrency),
 	}
 }
 
@@ -38,14 +42,21 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
 	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
 
-	err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
+	err = h.scanService.ValidateGenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+		logger.L().Ctx(c.Request.Context()).Error("validation error", helpers.Error(err))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
 	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+
+	h.workerPool.Submit(func() {
+		err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
+		if err != nil {
+			logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+		}
+	})
 }
 
 // Ready calls scanService.Ready
@@ -71,12 +82,24 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
 	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
 
-	err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
+	err = h.scanService.ValidateScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+		logger.L().Ctx(c.Request.Context()).Error("validation error", helpers.Error(err))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
 	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+
+	h.workerPool.Submit(func() {
+		err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
+		if err != nil {
+			logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+		}
+	})
+}
+
+func (h HTTPController) Shutdown() {
+	logger.L().Info("purging SBOM creation queue", helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())))
+	h.workerPool.StopWait()
 }
