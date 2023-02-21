@@ -1,4 +1,6 @@
 # Kubevuln
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln?ref=badge_shield)
+
 The Kubevuln component is an in-cluster component of the Kubescape security platform.  
 It [scans container images for vulnerabilities](https://www.armosec.io/blog/code-repository-container-image-registry-scanning/?utm_source=github&utm_medium=repository), using Grype as its engine.
 
@@ -90,3 +92,7 @@ make test
 ```
 make clean
 ```
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln?ref=badge_large)
