@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/kinbiko/jsonassert"
@@ -52,8 +53,10 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 				t.Errorf("ScanSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			content, err := json.Marshal(got.Content)
+			tools.EnsureSetup(t, err == nil)
 			ja := jsonassert.New(t)
-			ja.Assertf(string(got.Content), tt.format)
+			ja.Assertf(string(content), tt.format)
 		})
 	}
 }

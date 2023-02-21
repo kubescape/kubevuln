@@ -22,6 +22,10 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/syft/syft"
+	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/cluster-container-scanner-api/containerscan"
+	v2 "github.com/armosec/cluster-container-scanner-api/containerscan/v2"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -90,6 +94,112 @@ func getMatchers() []matcher.Matcher {
 	)
 }
 
+func scanResultReport() *v2.ScanResultReport {
+	return &v2.ScanResultReport{
+		Designators: armotypes.PortalDesignator{
+			DesignatorType: "",
+			WLID:           "",
+			WildWLID:       "",
+			SID:            "",
+			Attributes:     map[string]string{},
+		},
+		Timestamp:       0,
+		ContainerScanID: "",
+		Vulnerabilities: []v2.CommonContainerVulnerabilityResult{
+			{
+				Designators: armotypes.PortalDesignator{
+					DesignatorType: "",
+					WLID:           "",
+					WildWLID:       "",
+					SID:            "",
+					Attributes:     map[string]string{},
+				},
+				Context: []armotypes.ArmoContext{
+					{
+						Attribute: "",
+						Value:     "",
+						Source:    "",
+					},
+				},
+				WLID:              "",
+				ContainerScanID:   "",
+				Layers:            []containerscan.ESLayer{},
+				LayersNested:      []containerscan.ESLayer{},
+				Timestamp:         0,
+				IsLastScan:        0,
+				IsFixed:           0,
+				IntroducedInLayer: "",
+				RelevantLinks:     []string{},
+				RelatedExceptions: []armotypes.VulnerabilityExceptionPolicy{
+					{
+						PortalBase: armotypes.PortalBase{
+							GUID:        "",
+							Name:        "",
+							Attributes:  map[string]interface{}{},
+							UpdatedTime: "",
+						},
+						PolicyType:            "",
+						CreationTime:          "",
+						Actions:               nil,
+						Designatores:          nil,
+						VulnerabilityPolicies: nil,
+					},
+				},
+				Vulnerability: v2.Vulnerability{},
+			},
+		},
+		Summary: &v2.CommonContainerScanSummaryResult{
+			SeverityStats: containerscan.SeverityStats{
+				Severity:                     "",
+				TotalCount:                   0,
+				RCEFixCount:                  0,
+				FixAvailableOfTotalCount:     0,
+				RelevantCount:                0,
+				FixAvailableForRelevantCount: 0,
+				RCECount:                     0,
+				UrgentCount:                  0,
+				NeglectedCount:               0,
+				HealthStatus:                 "",
+			},
+			Designators: armotypes.PortalDesignator{
+				DesignatorType: "",
+				WLID:           "",
+				WildWLID:       "",
+				SID:            "",
+				Attributes:     nil,
+			},
+			Context:                       []armotypes.ArmoContext{},
+			JobIDs:                        []string{},
+			CustomerGUID:                  "",
+			ContainerScanID:               "",
+			Timestamp:                     0,
+			WLID:                          "",
+			ImageID:                       "",
+			ImageTag:                      "",
+			ClusterName:                   "",
+			Namespace:                     "",
+			ContainerName:                 "",
+			PackagesName:                  []string{},
+			ListOfDangerousArtifcats:      []string{},
+			Status:                        "",
+			Registry:                      "",
+			VersionImage:                  "",
+			SeveritiesStats:               []containerscan.SeverityStats{},
+			ExcludedSeveritiesStats:       []containerscan.SeverityStats{},
+			Version:                       "",
+			Vulnerabilities:               []containerscan.ShortVulnerabilityResult{},
+			ImageSignatureValid:           false,
+			ImageHasSignature:             false,
+			ImageSignatureValidationError: "",
+		},
+		PaginationInfo: wssc.PaginationMarks{
+			ReportNumber: 0,
+			IsLastReport: false,
+		},
+		IsRelevancy: false,
+	}
+}
+
 // ScanSBOM generates a CVE manifest by scanning an SBOM
 func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	g.mu.RLock()
@@ -121,6 +231,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
+	// TODO get CVE exceptions from platform
+	//var exceptions []armotypes.VulnerabilityExceptionPolicy
+
 	// generate JSON
 	presenterConfig := models.PresenterConfig{
 		Matches:          *remainingMatches,
@@ -143,7 +256,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
 		CVEDBVersion:       g.DBVersion(),
-		Content:            buf.Bytes(),
+		Content:            scanResultReport(),
 	}, nil
 }
 

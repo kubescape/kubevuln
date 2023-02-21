@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
+	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/armotypes"
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
+	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 )
@@ -40,6 +44,28 @@ var statuses = []string{
 	"Dequeueing",
 	"Dequeueing",
 	"Dequeueing",
+}
+
+func (a *ArmoAdapter) GetCVEExceptions(workload domain.ScanCommand, accountID string) (domain.CVEExceptions, error) {
+	backendURL := "https://api.armosec.io/api"
+
+	designator := armotypes.PortalDesignator{
+		DesignatorType: armotypes.DesignatorAttribute,
+		Attributes: map[string]string{
+			"customerGUID":        accountID,
+			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
+			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
+			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
+			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
+			"scope.containerName": workload.ContainerName,
+		},
+	}
+
+	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, accountID, &designator)
+	if err != nil {
+		return nil, err
+	}
+	return vulnExceptionList, nil
 }
 
 // SendStatus sends the given status and details to the platform
