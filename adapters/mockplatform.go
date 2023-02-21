@@ -18,6 +18,11 @@ func NewMockPlatform() *MockPlatform {
 	return &MockPlatform{}
 }
 
+func (m MockPlatform) GetCVEExceptions(workload domain.ScanCommand, accountID string) (domain.CVEExceptions, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // SendStatus logs the given status and details
 func (m MockPlatform) SendStatus(workload domain.ScanCommand, step int) error {
 	logger.L().Info(

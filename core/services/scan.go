@@ -96,7 +96,7 @@ func (s *ScanService) ScanCVE(ctx context.Context, instanceID string, imageID st
 		}
 	}
 	// check if SBOM' is available
-	sbomp, err := s.sbomRepository.GetSBOMp(ctx, imageID, s.sbomCreator.Version())
+	sbomp, err := s.sbomRepository.GetSBOMp(ctx, instanceID, s.sbomCreator.Version())
 	if err != nil {
 		return err
 	}
