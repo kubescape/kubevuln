@@ -3,10 +3,13 @@ module github.com/kubescape/kubevuln
 go 1.19
 
 require (
+	github.com/adrg/xdg v0.4.0
 	github.com/anchore/grype v0.56.0
 	github.com/anchore/stereoscope v0.0.0-20221208011002-c5ff155d72f1
 	github.com/anchore/syft v0.70.0
 	github.com/armosec/armoapi-go v0.0.165
+	github.com/armosec/logger-go v0.0.13
+	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.8.2
 	github.com/kinbiko/jsonassert v1.1.1
@@ -46,7 +49,6 @@ require (
 	github.com/anchore/sqlite v1.4.6-0.20220607210448-bcc6ee5c4963 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/armosec/utils-go v0.0.12 // indirect
-	github.com/armosec/utils-k8s-go v0.0.12 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aws/aws-sdk-go v1.44.180 // indirect
 	github.com/benbjohnson/clock v1.1.0 // indirect
