@@ -3,6 +3,9 @@ package v1
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"path"
 	"sync"
 
@@ -18,14 +21,13 @@ import (
 	"github.com/anchore/grype/grype/matcher/ruby"
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
-	"github.com/anchore/grype/grype/presenter/json"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/syft/syft"
-	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	v2 "github.com/armosec/cluster-container-scanner-api/containerscan/v2"
+	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
+	containerTypes "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -94,114 +96,191 @@ func getMatchers() []matcher.Matcher {
 	)
 }
 
-func scanResultReport() *v2.ScanResultReport {
-	return &v2.ScanResultReport{
-		Designators: armotypes.PortalDesignator{
-			DesignatorType: "",
-			WLID:           "",
-			WildWLID:       "",
-			SID:            "",
-			Attributes:     map[string]string{},
-		},
-		Timestamp:       0,
-		ContainerScanID: "",
-		Vulnerabilities: []v2.CommonContainerVulnerabilityResult{
-			{
-				Designators: armotypes.PortalDesignator{
-					DesignatorType: "",
-					WLID:           "",
-					WildWLID:       "",
-					SID:            "",
-					Attributes:     map[string]string{},
-				},
-				Context: []armotypes.ArmoContext{
-					{
-						Attribute: "",
-						Value:     "",
-						Source:    "",
-					},
-				},
-				WLID:              "",
-				ContainerScanID:   "",
-				Layers:            []containerscan.ESLayer{},
-				LayersNested:      []containerscan.ESLayer{},
-				Timestamp:         0,
-				IsLastScan:        0,
-				IsFixed:           0,
-				IntroducedInLayer: "",
-				RelevantLinks:     []string{},
-				RelatedExceptions: []armotypes.VulnerabilityExceptionPolicy{
-					{
-						PortalBase: armotypes.PortalBase{
-							GUID:        "",
-							Name:        "",
-							Attributes:  map[string]interface{}{},
-							UpdatedTime: "",
-						},
-						PolicyType:            "",
-						CreationTime:          "",
-						Actions:               nil,
-						Designatores:          nil,
-						VulnerabilityPolicies: nil,
-					},
-				},
-				Vulnerability: v2.Vulnerability{},
-			},
-		},
-		Summary: &v2.CommonContainerScanSummaryResult{
-			SeverityStats: containerscan.SeverityStats{
-				Severity:                     "",
-				TotalCount:                   0,
-				RCEFixCount:                  0,
-				FixAvailableOfTotalCount:     0,
-				RelevantCount:                0,
-				FixAvailableForRelevantCount: 0,
-				RCECount:                     0,
-				UrgentCount:                  0,
-				NeglectedCount:               0,
-				HealthStatus:                 "",
-			},
-			Designators: armotypes.PortalDesignator{
-				DesignatorType: "",
-				WLID:           "",
-				WildWLID:       "",
-				SID:            "",
-				Attributes:     nil,
-			},
-			Context:                       []armotypes.ArmoContext{},
-			JobIDs:                        []string{},
-			CustomerGUID:                  "",
-			ContainerScanID:               "",
-			Timestamp:                     0,
-			WLID:                          "",
-			ImageID:                       "",
-			ImageTag:                      "",
-			ClusterName:                   "",
-			Namespace:                     "",
-			ContainerName:                 "",
-			PackagesName:                  []string{},
-			ListOfDangerousArtifcats:      []string{},
-			Status:                        "",
-			Registry:                      "",
-			VersionImage:                  "",
-			SeveritiesStats:               []containerscan.SeverityStats{},
-			ExcludedSeveritiesStats:       []containerscan.SeverityStats{},
-			Version:                       "",
-			Vulnerabilities:               []containerscan.ShortVulnerabilityResult{},
-			ImageSignatureValid:           false,
-			ImageHasSignature:             false,
-			ImageSignatureValidationError: "",
-		},
-		PaginationInfo: wssc.PaginationMarks{
-			ReportNumber: 0,
-			IsLastReport: false,
-		},
-		IsRelevancy: false,
+func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) []armotypes.VulnerabilityExceptionPolicy {
+	var l []armotypes.VulnerabilityExceptionPolicy
+
+	for i := range srcCVEList {
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
+				l = append(l, srcCVEList[i])
+			}
+		}
 	}
+
+	if len(l) > 0 {
+		return l
+	}
+	return nil
+}
+
+func parseLayersPayload(target source.ImageMetadata) (map[string]cs.ESLayer, error) {
+	layerMap := make(map[string]cs.ESLayer)
+	if target.RawConfig == nil {
+		return layerMap, nil
+	}
+
+	jsonConfig := &containerTypes.ConfigFile{}
+	valueConfig, _ := base64.StdEncoding.DecodeString(string(target.RawConfig))
+	err := json.Unmarshal(valueConfig, jsonConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	listLayers := make([]cs.ESLayer, 0)
+	for i := range jsonConfig.History {
+
+		if !jsonConfig.History[i].EmptyLayer {
+			listLayers = append(listLayers, cs.ESLayer{LayerInfo: &cs.LayerInfo{
+				CreatedBy:   jsonConfig.History[i].CreatedBy,
+				CreatedTime: &jsonConfig.History[i].Created.Time,
+			},
+			})
+		}
+	}
+	for i := 0; i < len(listLayers) && i < len(jsonConfig.RootFS.DiffIDs); i++ {
+		listLayers[i].LayerHash = jsonConfig.RootFS.DiffIDs[i].String()
+		if i > 0 {
+			listLayers[i].ParentLayerHash = jsonConfig.RootFS.DiffIDs[i-1].String()
+			listLayers[i].LayerInfo.LayerOrder = i
+		}
+		layerMap[listLayers[i].LayerHash] = listLayers[i]
+	}
+
+	return layerMap, nil
+}
+
+const dummyLayer = "generatedlayer"
+
+func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocument *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]cs.CommonContainerVulnerabilityResult, error) {
+	var vulnerabilityResults []cs.CommonContainerVulnerabilityResult
+
+	// retrieve timestamp from context
+	timestamp, ok := ctx.Value(domain.TimestampKey).(int64)
+	if !ok {
+		return vulnerabilityResults, errors.New("no timestamp found in context")
+	}
+	// retrieve scanID from context
+	scanID, ok := ctx.Value(domain.ScanIDKey).(string)
+	if !ok {
+		return vulnerabilityResults, errors.New("no scanID found in context")
+	}
+	// retrieve workload from context
+	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	if !ok {
+		return vulnerabilityResults, errors.New("no workload found in context")
+	}
+
+	if grypeDocument.Source != nil {
+		// generate a map of child to parent
+		parentLayerHash := ""
+		parentLayer := map[string]string{
+			dummyLayer: parentLayerHash,
+		}
+		target := grypeDocument.Source.Target.(source.ImageMetadata)
+		for _, layer := range target.Layers {
+			parentLayer[layer.Digest] = parentLayerHash
+			parentLayerHash = layer.Digest
+		}
+		// iterate over all vulnerabilities
+		for _, match := range grypeDocument.Matches {
+			var isFixed int
+			var version string
+			var description string
+			link := "https://nvd.nist.gov/vuln/detail/" + match.Vulnerability.ID
+			if len(match.Vulnerability.Fix.Versions) != 0 {
+				isFixed = 1
+				version = match.Vulnerability.Fix.Versions[0]
+			}
+			if len(match.RelatedVulnerabilities) != 0 {
+				description = match.RelatedVulnerabilities[0].Description
+			}
+			// create a vulnerability result for this vulnerability
+			vulnerabilityResult := cs.CommonContainerVulnerabilityResult{
+				IsLastScan:      1,
+				WLID:            workload.Wlid,
+				ContainerScanID: scanID,
+				Layers:          []cs.ESLayer{},
+				Timestamp:       timestamp,
+				IsFixed:         isFixed,
+				RelevantLinks: []string{
+					link,
+					match.Vulnerability.DataSource,
+				},
+				Vulnerability: cs.Vulnerability{
+					Name:               match.Vulnerability.ID,
+					ImageID:            workload.ImageHash,
+					ImageTag:           workload.ImageTag,
+					RelatedPackageName: match.Artifact.Name,
+					PackageVersion:     match.Artifact.Version,
+					Link:               link,
+					Description:        description,
+					Severity:           match.Vulnerability.Severity,
+					SeverityScore:      cs.SeverityStr2Score[match.Vulnerability.Severity],
+					Fixes: []cs.FixedIn{
+						{
+							Name:    match.Vulnerability.Fix.State,
+							ImgTag:  workload.ImageTag,
+							Version: version,
+						},
+					},
+					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, match.Vulnerability.ID),
+					IsRelevant:       nil, // TODO add relevancy here?
+				},
+			}
+			// add RCE information
+			vulnerabilityResult.Categories.IsRCE = vulnerabilityResult.IsRCE()
+			// add layer information
+			// make sure we have at least one location
+			if match.Artifact.Locations == nil || len(match.Artifact.Locations) < 1 {
+				match.Artifact.Locations = []source.Coordinates{
+					{
+						FileSystemID: dummyLayer,
+					},
+				}
+			}
+			// iterate over locations
+			for _, location := range match.Artifact.Locations {
+				// create a layer
+				layer := cs.ESLayer{
+					LayerHash:       location.FileSystemID,
+					ParentLayerHash: parentLayer[location.FileSystemID],
+				}
+				// add layer to vulnerability result
+				vulnerabilityResult.Layers = append(vulnerabilityResult.Layers, layer)
+			}
+
+			vulnerabilityResults = append(vulnerabilityResults, vulnerabilityResult)
+		}
+		// parse layers from payload
+		data, err := parseLayersPayload(target)
+		if err != nil {
+			return vulnerabilityResults, err
+		}
+		// fill extra layer information
+		for i, v := range vulnerabilityResults {
+			earlyLayer := ""
+			for j, layer := range v.Layers {
+				if layer.ParentLayerHash == earlyLayer {
+					earlyLayer = layer.LayerHash
+				}
+				if l, ok := data[layer.LayerHash]; ok {
+					if layer.LayerInfo == nil {
+						vulnerabilityResults[i].Layers[j].LayerInfo = &cs.LayerInfo{}
+					}
+					vulnerabilityResults[i].Layers[j].CreatedBy = l.CreatedBy
+					vulnerabilityResults[i].Layers[j].CreatedTime = l.CreatedTime
+					vulnerabilityResults[i].Layers[j].LayerOrder = l.LayerOrder
+				}
+			}
+			vulnerabilityResults[i].IntroducedInLayer = earlyLayer
+		}
+	}
+
+	return vulnerabilityResults, nil
 }
 
 // ScanSBOM generates a CVE manifest by scanning an SBOM
-func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
@@ -231,33 +310,23 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
-	// TODO get CVE exceptions from platform
-	//var exceptions []armotypes.VulnerabilityExceptionPolicy
-
-	// generate JSON
-	presenterConfig := models.PresenterConfig{
-		Matches:          *remainingMatches,
-		IgnoredMatches:   ignoredMatches,
-		Packages:         packages,
-		Context:          pkgContext,
-		MetadataProvider: g.store,
-		SBOM:             s,
-		AppConfig:        nil,
-		DBStatus:         g.dbStatus,
-	}
-	presenter := json.NewPresenter(presenterConfig)
-	var buf bytes.Buffer
-	err = presenter.Present(&buf)
+	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
-	return domain.CVEManifest{
-		ImageID:            sbom.ImageID,
-		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
-		CVEScannerVersion:  g.Version(),
-		CVEDBVersion:       g.DBVersion(),
-		Content:            scanResultReport(),
-	}, nil
+
+	vulnerabilityResults, err := convertToCommonContainerVulnerabilityResult(ctx, &doc, exceptions)
+	if err != nil {
+		return domain.CVEManifest{}, err
+	}
+
+	return *domain.NewCVEManifest(
+		sbom.ImageID,
+		sbom.SBOMCreatorVersion,
+		g.Version(),
+		g.DBVersion(),
+		vulnerabilityResults,
+	), nil
 }
 
 // UpdateDB updates the vulnerabilities DB, a RWMutex ensures this process doesn't interfere with scans

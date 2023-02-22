@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 
+	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -35,16 +36,16 @@ func (m MockCVEAdapter) Ready() bool {
 }
 
 // ScanSBOM returns a dummy CVE manifest tagged with the given SBOM metadata
-func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain.CVEExceptions) (domain.CVEManifest, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanSBOM")
 	defer span.End()
-	return domain.CVEManifest{
-		ImageID:            sbom.ImageID,
-		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
-		CVEScannerVersion:  m.Version(),
-		CVEDBVersion:       m.DBVersion(),
-		Content:            []byte("CVEManifest content"),
-	}, nil
+	return *domain.NewCVEManifest(
+		sbom.ImageID,
+		sbom.SBOMCreatorVersion,
+		m.Version(),
+		m.DBVersion(),
+		[]cs.CommonContainerVulnerabilityResult{},
+	), nil
 }
 
 // UpdateDB does nothing (only otel span)
