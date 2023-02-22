@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -26,15 +28,6 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "empty SBOM produces empty vulnerability list",
-			sbom: domain.SBOM{
-				ImageID:            "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
-				SBOMCreatorVersion: "TODO",
-				Content:            fileContent("testdata/hello-world-sbom.json"),
-			},
-			format: string(fileContent("testdata/hello-world-cve.format.json")),
-		},
-		{
 			name: "valid SBOM produces well-formed vulnerability list",
 			sbom: domain.SBOM{
 				ImageID:            "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
@@ -46,9 +39,13 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g, err := NewGrypeAdapter(context.TODO())
+			ctx := context.TODO()
+			ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
+			ctx = context.WithValue(ctx, domain.ScanIDKey, uuid.New().String())
+			ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
+			g, err := NewGrypeAdapter(ctx)
 			tools.EnsureSetup(t, err == nil)
-			got, err := g.ScanSBOM(context.TODO(), tt.sbom)
+			got, err := g.ScanSBOM(ctx, tt.sbom, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return

@@ -31,10 +31,12 @@ func NewHTTPController(scanService ports.ScanService, concurrency int) *HTTPCont
 
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
 func (h HTTPController) GenerateSBOM(c *gin.Context) {
+	ctx := c.Request.Context()
+
 	var newScan wssc.WebsocketScanCommand
 	err := c.ShouldBindJSON(&newScan)
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("handler error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
 		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
@@ -42,9 +44,9 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
 	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
 
-	err = h.scanService.ValidateGenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
+	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("validation error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -52,9 +54,9 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
-		err = h.scanService.GenerateSBOM(c.Request.Context(), newScan.ImageHash, domain.ScanCommand(newScan))
+		err = h.scanService.GenerateSBOM(ctx)
 		if err != nil {
-			logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("service error", helpers.Error(err))
 		}
 	})
 }
@@ -71,10 +73,12 @@ func (h HTTPController) Ready(c *gin.Context) {
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
 func (h HTTPController) ScanCVE(c *gin.Context) {
+	ctx := c.Request.Context()
+
 	var newScan wssc.WebsocketScanCommand
 	err := c.ShouldBindJSON(&newScan)
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("handler error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
 		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
@@ -82,9 +86,9 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
 	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
 
-	err = h.scanService.ValidateScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
+	ctx, err = h.scanService.ValidateScanCVE(ctx, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(c.Request.Context()).Error("validation error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -92,9 +96,9 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
-		err = h.scanService.ScanCVE(c.Request.Context(), newScan.Wlid, newScan.ImageHash, domain.ScanCommand(newScan))
+		err = h.scanService.ScanCVE(ctx)
 		if err != nil {
-			logger.L().Ctx(c.Request.Context()).Error("service error", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("service error", helpers.Error(err))
 		}
 	})
 }
