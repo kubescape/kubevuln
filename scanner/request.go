@@ -94,7 +94,7 @@ func postScanResultsToEventReceiver(config *pkgcautils.ClusterConfig, scanCmd *w
 	finalDesignators, _ := finalReport.GetDesignatorsNContext()
 	finalReport.Designators = *finalDesignators
 
-	logger.L().Info(fmt.Sprintf("session: %v\n===\n", finalReport.Session))
+	logger.L().Info(fmt.Sprintf("session: %v", finalReport.Session))
 	flatVuln := finalReport.ToFlatVulnerabilities()
 	flatVuln = fillExtraLayerData(preparedLayers, flatVuln)
 	//split vulnerabilities to chunks

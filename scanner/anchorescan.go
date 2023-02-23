@@ -554,24 +554,21 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 		fullURL := urlBase + serverReady
 		req, err := http.NewRequest(http.MethodHead, fullURL, nil)
 		if err != nil {
-			fmt.Println("failed to create http request with err:", err)
+			logger.L().Error(err.Error())
 		}
-		fmt.Println("check if vuln scan server ready")
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			fmt.Println("server ready: response create err:", err)
+			logger.L().Error(err.Error())
 		}
 		if resp != nil {
-			fmt.Println("server ready: response Status:", resp.Status)
+			logger.L().Error(err.Error())
 			resp.Body.Close()
 		}
 		if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			fmt.Println("server is ready")
 			break
 		} else {
-			fmt.Println("server is not yet ready, wait 5 secs before check again")
-			time.Sleep(time.Second * 5)
+			time.Sleep(time.Second * 1)
 		}
 	}
 
