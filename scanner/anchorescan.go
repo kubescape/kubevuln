@@ -37,7 +37,7 @@ import (
 
 const (
 	urlBase                      = "http://localhost:8080"
-	defaultDbUpdateTimeInMinutes = 60 * 6
+	defaultDbUpdateTimeInMinutes = 360
 	DbIsReady                    = "db is ready"
 	anchoreBinaryName            = "grype-cmd"
 	anchoreDirectoryName         = "anchore-resources"
@@ -545,10 +545,8 @@ func getAnchoreScanResults(scanCmd *wssc.WebsocketScanCommand) (*cs.LayersList, 
 func HandleAnchoreDBUpdate(uri, serverReady string) {
 
 	DBCommands := make(map[string]interface{})
-	update_wait_time, err := strconv.Atoi(os.Getenv(DbUpdateWaitTimeMinutesEnvironmentVariable))
-	if err != nil {
-		update_wait_time = defaultDbUpdateTimeInMinutes
-	}
+
+	updateWaitTime := getDBUpdateWaitTime()
 
 	for {
 		fullURL := urlBase + serverReady
@@ -562,7 +560,6 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			logger.L().Error(err.Error())
 		}
 		if resp != nil {
-			logger.L().Error(err.Error())
 			resp.Body.Close()
 		}
 		if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -582,7 +579,7 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			fullURL := urlBase + uri
 			req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(buf))
 			if err != nil {
-				fmt.Println("failed to create http request with err:", err)
+				logger.L().Error("failed to create http request", helpers.Error(err))
 			}
 			req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
@@ -590,17 +587,17 @@ func HandleAnchoreDBUpdate(uri, serverReady string) {
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
-				fmt.Println("response create err:", err)
+				logger.L().Error("response create", helpers.Error(err))
 			}
 			if resp != nil {
 				logger.L().Info(fmt.Sprintf("db update: response Status: %s", resp.Status))
 				resp.Body.Close()
 			}
 		} else {
-			fmt.Println("HandleAnchoreDBUpdate: fail marshal ", err)
+			logger.L().Error("response HandleAnchoreDBUpdate, failed to marshal", helpers.Error(err))
 		}
 
-		timer := time.NewTimer(time.Duration(update_wait_time) * time.Minute)
+		timer := time.NewTimer(time.Duration(updateWaitTime) * time.Minute)
 		<-timer.C
 	}
 
@@ -664,4 +661,16 @@ func StartUpdateDB(payload interface{}, config *pkgcautils.ClusterConfig) (inter
 	logger.L().Info("DB updated successfully")
 	informDatabaseIsReadyToUse()
 	return nil, nil
+}
+
+func getDBUpdateWaitTime() int {
+	t := os.Getenv(DbUpdateWaitTimeMinutesEnvironmentVariable)
+	if t == "" {
+		return defaultDbUpdateTimeInMinutes
+	}
+	updateWaitTime, err := strconv.Atoi(t)
+	if err != nil {
+		return defaultDbUpdateTimeInMinutes
+	}
+	return updateWaitTime
 }
