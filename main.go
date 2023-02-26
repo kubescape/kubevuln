@@ -40,12 +40,20 @@ type httpHandler struct {
 var RestAPIPort string = "8080" // default port
 //go:generate swagger generate spec -o ./docs/swagger.yaml
 func main() {
+	pathToConfig := os.Getenv(scanner.ConfigEnvironmentVariable) // if empty, will load config from default path
+	config, err := pkgcautils.LoadConfig(pathToConfig)
+	if err != nil {
+		logger.L().Fatal("failed to load config", helpers.Error(err))
+	}
+
 	ctx := context.Background()
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv(scanner.ReleaseBuildTagEnvironmentVariable),
-			os.Getenv("ACCOUNT_ID"),
+			config.AccountID,
+			config.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -56,10 +64,7 @@ func main() {
 		RestAPIPort = port // override default port
 	}
 
-	httpHandlers, err := newHttpHandler()
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to load config", helpers.Error(err))
-	}
+	httpHandlers := newHttpHandler(config)
 
 	if err := scanner.CreateAnchoreResourcesDirectoryAndFiles(); err != nil {
 		logger.L().Ctx(ctx).Fatal("failed to create anchore resources directory and files", helpers.Error(err))
@@ -95,16 +100,11 @@ func spanName(_ string, req *http.Request) string {
 }
 
 // newHttpHandlers creates new http handlers for the server
-func newHttpHandler() (*httpHandler, error) {
-	pathToConfig := os.Getenv(scanner.ConfigEnvironmentVariable) // if empty, will load config from default path
-	config, err := pkgcautils.LoadConfig(pathToConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config, error %v", err)
-	}
+func newHttpHandler(config *pkgcautils.ClusterConfig) *httpHandler {
 	return &httpHandler{
 		config:           config,
 		isReadinessReady: false,
-	}, nil
+	}
 }
 
 func (handler *httpHandler) serverReadyHandler(w http.ResponseWriter, req *http.Request) {
@@ -179,7 +179,7 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 			logger.L().Ctx(ctx).Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
 			return
 		}
-		
+
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, "scan request accepted\n")
 		// Backend aggregation depends on this report!!!
