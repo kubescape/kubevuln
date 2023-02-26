@@ -14,7 +14,7 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/google/go-containerregistry v0.13.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/kubescape/go-logger v0.0.9
+	github.com/kubescape/go-logger v0.0.10
 	github.com/sigstore/cosign v1.13.1
 	github.com/stretchr/testify v1.8.1
 	github.com/xyproto/randomstring v0.0.0-20220311122621-4964ec363205
