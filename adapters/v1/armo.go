@@ -55,7 +55,7 @@ var statuses = []string{
 }
 
 func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
-	backendURL := "https://api.armosec.io/api"
+	backendURL := "https://api.armosec.io/api" // TODO: move to config
 
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
