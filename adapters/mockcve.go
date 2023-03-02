@@ -4,9 +4,9 @@ import (
 	"context"
 
 	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	"go.opentelemetry.io/otel"
 )
 
 // MockCVEAdapter implements a mocked CVEScanner to be used for tests
@@ -17,28 +17,31 @@ var _ ports.CVEScanner = (*MockCVEAdapter)(nil)
 
 // NewMockCVEAdapter initializes the MockCVEAdapter struct
 func NewMockCVEAdapter() *MockCVEAdapter {
+	logger.L().Info("NewMockCVEAdapter")
 	return &MockCVEAdapter{}
 }
 
 // CreateRelevantCVE returns the first CVE manifest (no combination performed)
 func (m MockCVEAdapter) CreateRelevantCVE(_ context.Context, cve, _ domain.CVEManifest) (domain.CVEManifest, error) {
+	logger.L().Info("CreateRelevantCVE")
 	return cve, nil
 }
 
 // DBVersion returns a static version
 func (m MockCVEAdapter) DBVersion() string {
+	logger.L().Info("MockCVEAdapter.DBVersion")
 	return "v1.0.0"
 }
 
 // Ready always returns true
 func (m MockCVEAdapter) Ready() bool {
+	logger.L().Info("MockCVEAdapter.Ready")
 	return true
 }
 
 // ScanSBOM returns a dummy CVE manifest tagged with the given SBOM metadata
 func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain.CVEExceptions) (domain.CVEManifest, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "ScanSBOM")
-	defer span.End()
+	logger.L().Info("ScanSBOM")
 	return *domain.NewCVEManifest(
 		sbom.ImageID,
 		sbom.SBOMCreatorVersion,
@@ -50,12 +53,12 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain
 
 // UpdateDB does nothing (only otel span)
 func (m MockCVEAdapter) UpdateDB(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "UpdateDB")
-	defer span.End()
+	logger.L().Info("UpdateDB")
 	return nil
 }
 
 // Version returns a static version
 func (m MockCVEAdapter) Version() string {
+	logger.L().Info("MockCVEAdapter.Version")
 	return "Mock CVE 1.0"
 }

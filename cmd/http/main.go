@@ -43,11 +43,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	repository := repositories.NewMemoryStorage() // TODO add real storage
+	brokenStorage := repositories.NewBrokenStorage() // TODO add real storage
+	memoryStorage := repositories.NewMemoryStorage() // TODO add real storage
 	sbomAdapter := v1.NewSyftAdapter()
 	cveAdapter, _ := v1.NewGrypeAdapter(ctx)
 	platform := v1.NewArmoAdapter(config.AccountID, config.EventReceiverURL)
-	service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
+	service := services.NewScanService(sbomAdapter, brokenStorage, cveAdapter, memoryStorage, platform)
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)

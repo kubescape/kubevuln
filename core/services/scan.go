@@ -83,23 +83,36 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
+	// check storage statuses
+	cveStorageOK := true
+	sbomStorageOK := true
 	// check if CVE scans are already available
 	cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion())
 	if err != nil {
-		return err
+		cveStorageOK = false
+		cve = domain.CVEManifest{}
 	}
 	if cve.Content == nil {
 		// need to scan for CVE
 		// check if SBOM is available
 		sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
 		if err != nil {
-			return err
+			sbomStorageOK = false
+			sbom = domain.SBOM{}
 		}
 		if sbom.Content == nil {
-			// this is not supposed to happen, problem with Operator?
-			txt := "missing SBOM"
-			logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", workload.ImageHash), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version()))
-			return errors.New(txt) // TODO do proper error reporting https://go.dev/blog/go1.13-errors
+			if sbomStorageOK {
+				// this is not supposed to happen, problem with Operator?
+				txt := "missing SBOM"
+				logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", workload.ImageHash), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version()))
+				return errors.New(txt) // TODO do proper error reporting https://go.dev/blog/go1.13-errors
+			} else {
+				// create SBOM
+				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
+				if err != nil {
+					return err
+				}
+			}
 		}
 		// get exceptions
 		exceptions, err := s.platform.GetCVEExceptions(ctx)
@@ -113,22 +126,24 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 	// check if SBOM' is available
-	sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version())
-	if err != nil {
-		return err
-	}
 	hasRelevancy := false
-	if sbomp.Content != nil {
-		hasRelevancy = true
-		// scan for CVE'
-		cvep, err := s.cveScanner.ScanSBOM(ctx, sbomp, nil)
+	if sbomStorageOK {
+		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version())
 		if err != nil {
 			return err
 		}
-		// merge CVE and CVE' to create relevant CVE
-		cve, err = s.cveScanner.CreateRelevantCVE(ctx, cve, cvep)
-		if err != nil {
-			return err
+		if sbomp.Content != nil {
+			hasRelevancy = true
+			// scan for CVE'
+			cvep, err := s.cveScanner.ScanSBOM(ctx, sbomp, nil)
+			if err != nil {
+				return err
+			}
+			// merge CVE and CVE' to create relevant CVE
+			cve, err = s.cveScanner.CreateRelevantCVE(ctx, cve, cvep)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	// report to platform
@@ -137,9 +152,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
 	// submit to storage
-	err = s.cveRepository.StoreCVE(ctx, cve)
-	if err != nil {
-		return err
+	if cveStorageOK {
+		err = s.cveRepository.StoreCVE(ctx, cve)
+		if err != nil {
+			return err
+		}
 	}
 	// submit to platform
 	err = s.platform.SubmitCVE(ctx, cve, hasRelevancy)

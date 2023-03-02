@@ -18,6 +18,7 @@ var _ ports.Platform = (*MockPlatform)(nil)
 
 // NewMockPlatform initializes the MockPlatform struct
 func NewMockPlatform() *MockPlatform {
+	logger.L().Info("NewMockPlatform")
 	return &MockPlatform{}
 }
 
