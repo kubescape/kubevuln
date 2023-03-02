@@ -14,6 +14,10 @@ var _ ports.CVERepository = (*BrokenStore)(nil)
 
 var _ ports.SBOMRepository = (*BrokenStore)(nil)
 
+func NewBrokenStorage() *BrokenStore {
+	return &BrokenStore{}
+}
+
 func (b BrokenStore) GetSBOM(context.Context, string, string) (sbom domain.SBOM, err error) {
 	return domain.SBOM{}, errors.New("expected error")
 }
