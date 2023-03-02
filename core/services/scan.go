@@ -143,6 +143,9 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	}
 	// submit to platform
 	err = s.platform.SubmitCVE(ctx, cve, hasRelevancy)
+	if err != nil {
+		return err
+	}
 	// report to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
 	if err != nil {
