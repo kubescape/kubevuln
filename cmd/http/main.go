@@ -22,9 +22,7 @@ import (
 )
 
 func main() {
-	// Create context that listens for the interrupt signal from the OS.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	ctx := context.Background()
 
 	config, err := config.LoadConfig(".")
 	if err != nil {
@@ -39,6 +37,10 @@ func main() {
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
+
+	// modify context to listen to interrupt signals from the OS.
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	repository := repositories.NewMemoryStorage() // TODO add real storage
 	sbomAdapter := v1.NewSyftAdapter()
@@ -78,9 +80,9 @@ func main() {
 	stop()
 	logger.L().Info("shutting down gracefully")
 
-	// The context is used to inform the server it has 5 seconds to finish
+	// modify context to inform the server it has 5 seconds to finish
 	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
