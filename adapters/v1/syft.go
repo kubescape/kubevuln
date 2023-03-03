@@ -30,7 +30,7 @@ func NewSyftAdapter() *SyftAdapter {
 // CreateSBOM creates an SBOM for a given imageID, only one scan happens at a time to prevent disk space issues
 // format is SPDX JSON and the resulting SBOM is tagged with the Syft version
 func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "CreateSBOM")
+	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.CreateSBOM")
 	defer span.End()
 	// translate business models into Syft models
 	userInput := "registry:" + imageID
@@ -84,12 +84,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	return domain.SBOM{
 		ImageID:            imageID,
-		SBOMCreatorVersion: s.Version(),
+		SBOMCreatorVersion: s.Version(ctx),
 		Content:            buf.Bytes(),
 	}, nil
 }
 
 // Version returns Syft's version which is used to tag SBOMs
-func (s *SyftAdapter) Version() string {
+func (s *SyftAdapter) Version(ctx context.Context) string {
+	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.Version")
+	defer span.End()
 	return tools.PackageVersion("github.com/anchore/syft")
 }

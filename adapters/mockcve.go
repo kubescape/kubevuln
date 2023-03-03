@@ -28,13 +28,13 @@ func (m MockCVEAdapter) CreateRelevantCVE(_ context.Context, cve, _ domain.CVEMa
 }
 
 // DBVersion returns a static version
-func (m MockCVEAdapter) DBVersion() string {
+func (m MockCVEAdapter) DBVersion(context.Context) string {
 	logger.L().Info("MockCVEAdapter.DBVersion")
 	return "v1.0.0"
 }
 
 // Ready always returns true
-func (m MockCVEAdapter) Ready() bool {
+func (m MockCVEAdapter) Ready(context.Context) bool {
 	logger.L().Info("MockCVEAdapter.Ready")
 	return true
 }
@@ -45,20 +45,20 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain
 	return *domain.NewCVEManifest(
 		sbom.ImageID,
 		sbom.SBOMCreatorVersion,
-		m.Version(),
-		m.DBVersion(),
+		m.Version(ctx),
+		m.DBVersion(ctx),
 		[]cs.CommonContainerVulnerabilityResult{},
 	), nil
 }
 
 // UpdateDB does nothing (only otel span)
-func (m MockCVEAdapter) UpdateDB(ctx context.Context) error {
+func (m MockCVEAdapter) UpdateDB(_ context.Context) error {
 	logger.L().Info("UpdateDB")
 	return nil
 }
 
 // Version returns a static version
-func (m MockCVEAdapter) Version() string {
+func (m MockCVEAdapter) Version(_ context.Context) string {
 	logger.L().Info("MockCVEAdapter.Version")
 	return "Mock CVE 1.0"
 }

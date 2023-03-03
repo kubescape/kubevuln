@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"go.opentelemetry.io/otel"
 )
 
 type ArmoAdapter struct {
@@ -55,6 +56,9 @@ var statuses = []string{
 }
 
 func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.GetCVEExceptions")
+	defer span.End()
+
 	backendURL := "https://api.armosec.io/api" // TODO: move to config
 
 	// retrieve workload from context
@@ -84,6 +88,8 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 
 // SendStatus sends the given status and details to the platform
 func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
+	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SendStatus")
+	defer span.End()
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
 	if !ok {
@@ -115,6 +121,8 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 
 // SubmitCVE submits the given CVE to the platform
 func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, hasRelevancy bool) error {
+	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SubmitCVE")
+	defer span.End()
 	// retrieve timestamp from context
 	timestamp, ok := ctx.Value(domain.TimestampKey).(int64)
 	if !ok {
