@@ -24,6 +24,7 @@ import (
 	"github.com/anchore/syft/syft"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"go.opentelemetry.io/otel"
 )
 
@@ -160,8 +161,6 @@ func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
 }
 
 // Version returns Grype's version which is used to tag CVE manifests
-// it should be filled-in at build time as Go no longer reflects on its packages at runtime
 func (g *GrypeAdapter) Version() string {
-	// TODO implement me
-	return "TODO"
+	return tools.PackageVersion("github.com/anchore/grype")
 }
