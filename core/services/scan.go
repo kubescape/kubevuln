@@ -38,7 +38,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 
 // GenerateSBOM implements the "Generate SBOM flow"
 func (s *ScanService) GenerateSBOM(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "GenerateSBOM")
+	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
@@ -46,7 +46,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		return errors.New("no workload found in context")
 	}
 	// check if SBOM is already available
-	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
+	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 	if err != nil {
 		return err
 	}
@@ -65,13 +65,15 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 }
 
 // Ready proxies the cveScanner's readiness
-func (s *ScanService) Ready() bool {
-	return s.cveScanner.Ready()
+func (s *ScanService) Ready(ctx context.Context) bool {
+	ctx, span := otel.Tracer("").Start(ctx, "ScanService.Ready")
+	defer span.End()
+	return s.cveScanner.Ready(ctx)
 }
 
 // ScanCVE implements the "Scanning for CVEs flow"
 func (s *ScanService) ScanCVE(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "ScanCVE")
+	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanCVE")
 	defer span.End()
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
@@ -87,7 +89,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	cveStorageOK := true
 	sbomStorageOK := true
 	// check if CVE scans are already available
-	cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion())
+	cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
 	if err != nil {
 		cveStorageOK = false
 		cve = domain.CVEManifest{}
@@ -95,7 +97,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if cve.Content == nil {
 		// need to scan for CVE
 		// check if SBOM is available
-		sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
+		sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 		if err != nil {
 			sbomStorageOK = false
 			sbom = domain.SBOM{}
@@ -104,7 +106,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if sbomStorageOK {
 				// this is not supposed to happen, problem with Operator?
 				txt := "missing SBOM"
-				logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", workload.ImageHash), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version()))
+				logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", workload.ImageHash), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version(ctx)))
 				return errors.New(txt) // TODO do proper error reporting https://go.dev/blog/go1.13-errors
 			} else {
 				// create SBOM
@@ -128,7 +130,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// check if SBOM' is available
 	hasRelevancy := false
 	if sbomStorageOK {
-		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version())
+		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
 		if err != nil {
 			return err
 		}
@@ -172,6 +174,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 }
 
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
+	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
+	defer span.End()
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey, workload)
 	// validate inputs
@@ -182,6 +186,8 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 }
 
 func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
+	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
+	defer span.End()
 	// record start time
 	ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
 	// generate unique scanID and add to context

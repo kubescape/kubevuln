@@ -63,7 +63,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 
 // Ready calls scanService.Ready
 func (h HTTPController) Ready(c *gin.Context) {
-	if !h.scanService.Ready() {
+	if !h.scanService.Ready(c.Request.Context()) {
 		problem.Of(http.StatusServiceUnavailable).WriteTo(c.Writer)
 		return
 	}

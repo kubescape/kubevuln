@@ -55,12 +55,16 @@ func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.C
 }
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
-func (g *GrypeAdapter) DBVersion() string {
+func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
+	defer span.End()
 	return g.dbStatus.Checksum
 }
 
 // Ready returns the status of the vulnerabilities DB
-func (g *GrypeAdapter) Ready() bool {
+func (g *GrypeAdapter) Ready(ctx context.Context) bool {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
+	defer span.End()
 	return g.dbStatus.Err == nil
 }
 
@@ -68,11 +72,11 @@ const dummyLayer = "generatedlayer"
 
 // ScanSBOM generates a CVE manifest by scanning an SBOM
 func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error) {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.ScanSBOM")
+	defer span.End()
+
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-
-	ctx, span := otel.Tracer("").Start(ctx, "ScanSBOM")
-	defer span.End()
 
 	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
 	if err != nil {
@@ -110,19 +114,19 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 	return *domain.NewCVEManifest(
 		sbom.ImageID,
 		sbom.SBOMCreatorVersion,
-		g.Version(),
-		g.DBVersion(),
+		g.Version(ctx),
+		g.DBVersion(ctx),
 		vulnerabilityResults,
 	), nil
 }
 
 // UpdateDB updates the vulnerabilities DB, a RWMutex ensures this process doesn't interfere with scans
 func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
+	defer span.End()
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
-	ctx, span := otel.Tracer("").Start(ctx, "UpdateDB")
-	defer span.End()
 
 	var err error
 	g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
@@ -130,6 +134,8 @@ func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
 }
 
 // Version returns Grype's version which is used to tag CVE manifests
-func (g *GrypeAdapter) Version() string {
+func (g *GrypeAdapter) Version(ctx context.Context) string {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
+	defer span.End()
 	return tools.PackageVersion("github.com/anchore/grype")
 }

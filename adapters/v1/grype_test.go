@@ -14,9 +14,10 @@ import (
 )
 
 func Test_grypeAdapter_DBVersion(t *testing.T) {
-	g, err := NewGrypeAdapter(context.TODO())
+	ctx := context.TODO()
+	g, err := NewGrypeAdapter(ctx)
 	tools.EnsureSetup(t, err == nil)
-	version := g.DBVersion()
+	version := g.DBVersion(ctx)
 	assert.Assert(t, version != "")
 }
 
