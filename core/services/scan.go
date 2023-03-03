@@ -48,7 +48,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// check if SBOM is already available
 	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 	if err != nil {
-		return err
+		sbom = domain.SBOM{}
 	}
 	if sbom.Content != nil {
 		// this is not supposed to happen, problem with Operator?
@@ -132,7 +132,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if sbomStorageOK {
 		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
 		if err != nil {
-			return err
+			sbomStorageOK = false
+			sbomp = domain.SBOM{}
 		}
 		if sbomp.Content != nil {
 			hasRelevancy = true
