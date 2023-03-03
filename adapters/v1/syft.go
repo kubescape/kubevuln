@@ -12,6 +12,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"go.opentelemetry.io/otel"
 )
 
@@ -89,8 +90,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 }
 
 // Version returns Syft's version which is used to tag SBOMs
-// it should be filled-in at build time as Go no longer reflects on its packages at runtime
 func (s *SyftAdapter) Version() string {
-	// TODO implement me
-	return "TODO"
+	return tools.PackageVersion("github.com/anchore/syft")
 }
