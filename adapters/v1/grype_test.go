@@ -60,8 +60,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 }
 
 func Test_grypeAdapter_Version(t *testing.T) {
-	g, err := NewGrypeAdapter(context.TODO())
+	ctx := context.TODO()
+	g, err := NewGrypeAdapter(ctx)
 	tools.EnsureSetup(t, err == nil)
-	version := g.Version()
+	version := g.Version(ctx)
 	assert.Assert(t, version != "")
 }

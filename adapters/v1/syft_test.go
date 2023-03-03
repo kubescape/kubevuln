@@ -50,6 +50,6 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 
 func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter()
-	version := s.Version()
+	version := s.Version(context.TODO())
 	assert.Assert(t, version != "")
 }
