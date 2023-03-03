@@ -45,9 +45,11 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if !ok {
 		return errors.New("no workload found in context")
 	}
+	sbomStorageOK := true
 	// check if SBOM is already available
 	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 	if err != nil {
+		sbomStorageOK = false
 		sbom = domain.SBOM{}
 	}
 	if sbom.Content != nil {
@@ -61,7 +63,13 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		return err
 	}
 	// TODO add telemetry to Platform
-	return s.sbomRepository.StoreSBOM(ctx, sbom)
+	if sbomStorageOK {
+		err = s.sbomRepository.StoreSBOM(ctx, sbom)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Ready proxies the cveScanner's readiness
