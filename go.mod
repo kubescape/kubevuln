@@ -18,7 +18,7 @@ require (
 	github.com/sigstore/cosign v1.13.1
 	github.com/stretchr/testify v1.8.1
 	github.com/xyproto/randomstring v0.0.0-20220311122621-4964ec363205
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.38.0
+	go.opentelemetry.io/otel v1.12.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029
 )
@@ -104,7 +104,6 @@ require (
 	github.com/emicklei/go-restful/v3 v3.10.1 // indirect
 	github.com/facebookincubator/nvdtools v0.1.5 // indirect
 	github.com/fatih/color v1.14.1 // indirect
-	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.1 // indirect
@@ -245,7 +244,6 @@ require (
 	go.mongodb.org/mongo-driver v1.11.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.38.0 // indirect
-	go.opentelemetry.io/otel v1.12.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.12.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric v0.35.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v0.35.0 // indirect
