@@ -19,7 +19,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/docs"
 	"github.com/kubescape/kubevuln/scanner"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 )
 
 type task func(payload interface{}, config *pkgcautils.ClusterConfig) (interface{}, error)
@@ -80,10 +80,10 @@ func main() {
 	go taskChannelHandler(taskChan)
 	go scanner.HandleAnchoreDBUpdate(DBCommandURI, ServerReadyURI)
 
-	// Set up http listeners
-	http.Handle(scanURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.scanImageHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
-	http.Handle(DBCommandURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.commandDBHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
-	http.Handle(ServerReadyURI, otelhttp.NewHandler(http.HandlerFunc(httpHandlers.serverReadyHandler), "", otelhttp.WithSpanNameFormatter(spanName)))
+	// setup http listener
+	http.HandleFunc(scanURI, httpHandlers.scanImageHandler)
+	http.HandleFunc(ServerReadyURI, httpHandlers.serverReadyHandler)
+	http.HandleFunc(DBCommandURI, httpHandlers.commandDBHandler)
 
 	// Set up OpenAPI UI
 	openAPIUIHandler := docs.NewOpenAPIUIHandler()
@@ -93,10 +93,6 @@ func main() {
 	servePprof()
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", RestAPIPort), nil))
-}
-
-func spanName(_ string, req *http.Request) string {
-	return req.RequestURI
 }
 
 // newHttpHandlers creates new http handlers for the server
@@ -136,6 +132,8 @@ func (handler *httpHandler) commandDBHandler(w http.ResponseWriter, req *http.Re
 	if req.Method == http.MethodPost {
 		err = json.NewDecoder(req.Body).Decode(&innerDBCommand)
 		if err != nil {
+			ctx, span := otel.Tracer("").Start(ctx, req.RequestURI)
+			defer span.End()
 			w.WriteHeader(http.StatusBadRequest)
 			logger.L().Ctx(ctx).Error("commandDBHandler: failed to decode json", helpers.Error(err))
 			return
@@ -163,6 +161,8 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 	var WebsocketScan wssc.WebsocketScanCommand
 	ctx := req.Context()
 	if req.Method == http.MethodPost {
+		ctx, span := otel.Tracer("").Start(ctx, req.RequestURI)
+		defer span.End()
 		err := json.NewDecoder(req.Body).Decode(&WebsocketScan)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -176,7 +176,7 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 		}
 		if WebsocketScan.IsScanned {
 			w.WriteHeader(http.StatusAccepted)
-			logger.L().Ctx(ctx).Error(fmt.Sprintf("the image %s already scanned", WebsocketScan.ImageTag))
+			logger.L().Ctx(ctx).Error("image already scanned", helpers.String("imageTag", WebsocketScan.ImageTag))
 			return
 		}
 
@@ -210,7 +210,13 @@ func (handler *httpHandler) scanImageHandler(w http.ResponseWriter, req *http.Re
 			payload: &WebsocketScan,
 		}
 
-		logger.L().Info(fmt.Sprintf("Scan request to image %s is put on processing queue", WebsocketScan.ImageTag))
+		logger.L().Ctx(ctx).Info("Image scan request is put on processing queue",
+			helpers.String("ImageTag", WebsocketScan.ImageTag),
+			helpers.String("ImageHash", WebsocketScan.ImageHash),
+			helpers.String("Wlid", WebsocketScan.Wlid),
+			helpers.String("ContainerName", WebsocketScan.ContainerName),
+			helpers.String("JobID", WebsocketScan.JobID),
+		)
 		taskChan <- td
 
 	} else {
