@@ -13,7 +13,7 @@ require (
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.8.2
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/go-logger v0.0.8
+	github.com/kubescape/go-logger v0.0.10
 	github.com/spf13/viper v1.15.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.38.0
 	go.opentelemetry.io/otel v1.12.0
