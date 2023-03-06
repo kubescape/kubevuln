@@ -34,6 +34,7 @@ func main() {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv("RELEASE"),
 			os.Getenv(config.AccountID),
+			os.Getenv(config.ClusterName),
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -51,11 +52,12 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
-	router.Use(otelgin.Middleware("kubevuln-svc"))
+
+	router.GET("/v1/ready", controller.Ready)
 
 	group := router.Group(apis.WebsocketScanCommandVersion)
 	{
-		group.GET("/ready", controller.Ready)
+		group.Use(otelgin.Middleware("kubevuln-svc"))
 		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
 		group.POST("/"+apis.WebsocketScanCommandPath, controller.ScanCVE)
 	}
