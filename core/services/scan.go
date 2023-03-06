@@ -45,6 +45,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if !ok {
 		return errors.New("no workload found in context")
 	}
+	// remember storage statuses
+	cveStorageOK := true
 	sbomStorageOK := true
 	// check if SBOM is already available
 	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
@@ -67,6 +69,48 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		err = s.sbomRepository.StoreSBOM(ctx, sbom)
 		if err != nil {
 			return err
+		}
+	} else {
+		// in that case we need to scan for CVE (phase 1)
+		// check if CVE scans are already available
+		cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
+		if err != nil {
+			cveStorageOK = false
+			cve = domain.CVEManifest{}
+		}
+		if cve.Content == nil {
+			// get exceptions
+			exceptions, err := s.platform.GetCVEExceptions(ctx)
+			if err != nil {
+				return err
+			}
+			// scan for CVE
+			cve, err = s.cveScanner.ScanSBOM(ctx, sbom, exceptions)
+			if err != nil {
+				return err
+			}
+		}
+		// report to platform
+		err = s.platform.SendStatus(ctx, domain.Success)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+		}
+		// submit to storage
+		if cveStorageOK {
+			err = s.cveRepository.StoreCVE(ctx, cve)
+			if err != nil {
+				return err
+			}
+		}
+		// submit to platform
+		err = s.platform.SubmitCVE(ctx, cve, false)
+		if err != nil {
+			return err
+		}
+		// report to platform
+		err = s.platform.SendStatus(ctx, domain.Done)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 		}
 	}
 	return nil
@@ -93,7 +137,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
-	// check storage statuses
+	// remember storage statuses
 	cveStorageOK := true
 	sbomStorageOK := true
 	// check if CVE scans are already available
@@ -182,21 +226,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	return nil
 }
 
-func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
-	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
-	defer span.End()
-	// add workload to context
-	ctx = context.WithValue(ctx, domain.WorkloadKey, workload)
-	// validate inputs
-	if workload.ImageHash == "" {
-		return ctx, errors.New("missing imageID")
-	}
-	return ctx, nil
-}
-
-func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
-	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
-	defer span.End()
+func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Context {
 	// record start time
 	ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
 	// generate unique scanID and add to context
@@ -207,6 +237,26 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	ctx = context.WithValue(ctx, domain.ScanIDKey, scanID.String())
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey, workload)
+	return ctx
+}
+
+func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
+	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
+	defer span.End()
+
+	ctx = enrichContext(ctx, workload)
+	// validate inputs
+	if workload.ImageHash == "" {
+		return ctx, errors.New("missing imageID")
+	}
+	return ctx, nil
+}
+
+func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
+	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
+	defer span.End()
+
+	ctx = enrichContext(ctx, workload)
 	// validate inputs
 	if workload.Wlid == "" {
 		return ctx, errors.New("missing instanceID")
@@ -215,7 +265,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 		return ctx, errors.New("missing imageID")
 	}
 	// report to platform
-	err = s.platform.SendStatus(ctx, domain.Accepted)
+	err := s.platform.SendStatus(ctx, domain.Accepted)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
