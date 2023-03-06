@@ -146,20 +146,21 @@ func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
 	*counter++
 }
 
-func summarize(report v1.ScanResultReport, workload domain.ScanCommand) *containerscan.CommonContainerScanSummaryResult {
+func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelevancy bool) *containerscan.CommonContainerScanSummaryResult {
 	summary := containerscan.CommonContainerScanSummaryResult{
-		Designators:     report.Designators,
-		SeverityStats:   containerscan.SeverityStats{},
-		CustomerGUID:    report.Designators.Attributes[armotypes.AttributeCustomerGUID],
-		ContainerScanID: report.ContainerScanID,
-		WLID:            workload.Wlid,
-		ImageID:         workload.ImageHash,
-		ImageTag:        workload.ImageTag,
-		ClusterName:     report.Designators.Attributes[armotypes.AttributeCluster],
-		Namespace:       report.Designators.Attributes[armotypes.AttributeNamespace],
-		ContainerName:   report.Designators.Attributes[armotypes.AttributeContainerName],
-		JobIDs:          workload.Session.JobIDs,
-		Timestamp:       report.Timestamp,
+		Designators:      report.Designators,
+		SeverityStats:    containerscan.SeverityStats{},
+		CustomerGUID:     report.Designators.Attributes[armotypes.AttributeCustomerGUID],
+		ContainerScanID:  report.ContainerScanID,
+		WLID:             workload.Wlid,
+		ImageID:          workload.ImageHash,
+		ImageTag:         workload.ImageTag,
+		ClusterName:      report.Designators.Attributes[armotypes.AttributeCluster],
+		Namespace:        report.Designators.Attributes[armotypes.AttributeNamespace],
+		ContainerName:    report.Designators.Attributes[armotypes.AttributeContainerName],
+		JobIDs:           workload.Session.JobIDs,
+		Timestamp:        report.Timestamp,
+		HasRelevancyData: hasRelevancy,
 	}
 
 	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTag)

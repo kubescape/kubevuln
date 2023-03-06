@@ -8,7 +8,7 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20221208011002-c5ff155d72f1
 	github.com/anchore/syft v0.70.0
 	github.com/armosec/armoapi-go v0.0.165
-	github.com/armosec/cluster-container-scanner-api v0.0.47
+	github.com/armosec/cluster-container-scanner-api v0.0.49-0.20230306094343-4a4f8ceeffee
 	github.com/armosec/logger-go v0.0.13
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12

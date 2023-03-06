@@ -140,17 +140,16 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 	}
 
 	finalReport := v1.ScanResultReport{
-		Designators:      *armotypes.AttributesDesignatorsFromWLID(workload.Wlid),
-		Summary:          nil,
-		ContainerScanID:  scanID,
-		Vulnerabilities:  cve.Content,
-		Timestamp:        timestamp,
-		HasRelevancyData: hasRelevancy,
+		Designators:     *armotypes.AttributesDesignatorsFromWLID(workload.Wlid),
+		Summary:         nil,
+		ContainerScanID: scanID,
+		Vulnerabilities: cve.Content,
+		Timestamp:       timestamp,
 	}
 
 	// fill designators
 	finalReport.Designators.Attributes[armotypes.AttributeContainerName] = workload.ContainerName
-	finalReport.Designators.Attributes[armotypes.AttributeWorkloadHash] = cs.GenerateWorkloadHash(workload.Wlid)
+	finalReport.Designators.Attributes[armotypes.AttributeWorkloadHash] = cs.GenerateWorkloadHash(finalReport.Designators.Attributes)
 	finalReport.Designators.Attributes[armotypes.AttributeCustomerGUID] = a.clusterConfig.AccountID
 	if val, ok := workload.Args[armotypes.AttributeRegistryName]; ok {
 		finalReport.Designators.Attributes[armotypes.AttributeRegistryName] = val.(string)
@@ -173,7 +172,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 	}
 
 	// add summary
-	finalReport.Summary = summarize(finalReport, workload)
+	finalReport.Summary = summarize(finalReport, workload, hasRelevancy)
 	finalReport.Summary.Context = armoContext
 
 	// split vulnerabilities to chunks
