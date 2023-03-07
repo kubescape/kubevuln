@@ -13,6 +13,7 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/syft/syft"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -78,11 +79,13 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
+	logger.L().Debug("decoding SBOM")
 	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
+	logger.L().Debug("reading packages from SBOM")
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
@@ -96,21 +99,25 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 		Matchers: getMatchers(),
 	}
 
+	logger.L().Debug("finding vulnerabilities")
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
+	logger.L().Debug("compiling results")
 	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
+	logger.L().Debug("converting results to common format")
 	vulnerabilityResults, err := convertToCommonContainerVulnerabilityResult(ctx, &doc, exceptions)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
+	logger.L().Debug("returning CVE manifest")
 	return *domain.NewCVEManifest(
 		sbom.ImageID,
 		sbom.SBOMCreatorVersion,

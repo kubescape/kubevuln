@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -36,7 +37,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewSyftAdapter()
+			s := NewSyftAdapter(5 * time.Minute)
 			got, err := s.CreateSBOM(context.TODO(), tt.imageID, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -49,7 +50,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 }
 
 func Test_syftAdapter_Version(t *testing.T) {
-	s := NewSyftAdapter()
+	s := NewSyftAdapter(5 * time.Minute)
 	version := s.Version(context.TODO())
 	assert.Assert(t, version != "")
 }

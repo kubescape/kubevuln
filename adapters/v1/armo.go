@@ -29,11 +29,12 @@ type ArmoAdapter struct {
 
 var _ ports.Platform = (*ArmoAdapter)(nil)
 
-func NewArmoAdapter(accountID, eventReceiverURL string) *ArmoAdapter {
+func NewArmoAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *ArmoAdapter {
 	return &ArmoAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID:            accountID,
-			EventReceiverRestURL: eventReceiverURL,
+			EventReceiverRestURL: eventReceiverRestURL,
+			GatewayRestURL:       gatewayRestURL,
 		},
 	}
 }
@@ -59,8 +60,6 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.GetCVEExceptions")
 	defer span.End()
 
-	backendURL := "https://api.armosec.io/api" // TODO: move to config
-
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
 	if !ok {
@@ -79,7 +78,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 		},
 	}
 
-	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(backendURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}
