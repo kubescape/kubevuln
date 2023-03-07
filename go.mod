@@ -12,6 +12,7 @@ require (
 	github.com/armosec/logger-go v0.0.13
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12
+	github.com/eapache/go-resiliency v1.1.0
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.8.2
 	github.com/google/go-containerregistry v0.13.0
