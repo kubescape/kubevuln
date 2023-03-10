@@ -1,9 +1,14 @@
 package domain
 
+const (
+	SBOMStatusTimedOut = "timed out"
+)
+
 // SBOM contains an SPDX SBOM in JSON format with some metadata
 type SBOM struct {
 	ImageID            string
 	SBOMCreatorVersion string
+	Status             string
 	Content            []byte
 }
 

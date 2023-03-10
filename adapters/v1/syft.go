@@ -96,7 +96,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	switch err {
 	case deadline.ErrTimedOut:
 		logger.L().Ctx(ctx).Warning("Syft timed out", helpers.String("imageID", imageID))
-		// TODO add a special SBOM attribute to indicate timeout
+		domainSBOM.Status = domain.SBOMStatusTimedOut
 	case nil:
 		// continue
 	default:

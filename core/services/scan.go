@@ -64,6 +64,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// TODO react on timeout status ?
 	// TODO add telemetry to Platform
 	if sbomStorageOK {
 		err = s.sbomRepository.StoreSBOM(ctx, sbom)
@@ -168,6 +169,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				}
 			}
 		}
+		// TODO react on timeout status ?
 		// get exceptions
 		exceptions, err := s.platform.GetCVEExceptions(ctx)
 		if err != nil {
