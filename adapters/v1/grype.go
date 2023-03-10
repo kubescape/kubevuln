@@ -51,8 +51,21 @@ func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 
 // CreateRelevantCVE creates a relevant CVE combining CVE and CVE' vulnerabilities
 func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVEManifest) (domain.CVEManifest, error) {
-	// TODO implement me
-	panic("implement me")
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.CreateRelevantCVE")
+	defer span.End()
+
+	cvepIndices := map[string]struct{}{}
+	for _, vuln := range cvep.Content {
+		cvepIndices[vuln.Name] = struct{}{}
+	}
+
+	for i, vuln := range cve.Content {
+		if _, ok := cvepIndices[vuln.Name]; ok {
+			cve.Content[i].IsRelevant = &ok
+		}
+	}
+
+	return cve, nil
 }
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
