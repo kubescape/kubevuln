@@ -8,9 +8,9 @@ import (
 
 // ScanService is the port implemented by the business component ScanService
 type ScanService interface {
-	GenerateSBOM(ctx context.Context, imageID string, workload domain.ScanCommand) error
-	Ready() bool
-	ScanCVE(ctx context.Context, instanceID string, imageID string, workload domain.ScanCommand) error
-	ValidateGenerateSBOM(ctx context.Context, imageID string, workload domain.ScanCommand) error
-	ValidateScanCVE(ctx context.Context, instanceID string, imageID string, workload domain.ScanCommand) error
+	GenerateSBOM(ctx context.Context) error
+	Ready(ctx context.Context) bool
+	ScanCVE(ctx context.Context) error
+	ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error)
+	ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error)
 }

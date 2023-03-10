@@ -9,19 +9,11 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
-	"github.com/anchore/grype/grype/matcher"
-	"github.com/anchore/grype/grype/matcher/dotnet"
-	"github.com/anchore/grype/grype/matcher/golang"
-	"github.com/anchore/grype/grype/matcher/java"
-	"github.com/anchore/grype/grype/matcher/javascript"
-	"github.com/anchore/grype/grype/matcher/python"
-	"github.com/anchore/grype/grype/matcher/ruby"
-	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
-	"github.com/anchore/grype/grype/presenter/json"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/syft/syft"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -59,50 +51,54 @@ func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 
 // CreateRelevantCVE creates a relevant CVE combining CVE and CVE' vulnerabilities
 func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVEManifest) (domain.CVEManifest, error) {
-	// TODO implement me
-	panic("implement me")
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.CreateRelevantCVE")
+	defer span.End()
+
+	cvepIndices := map[string]struct{}{}
+	for _, vuln := range cvep.Content {
+		cvepIndices[vuln.Name] = struct{}{}
+	}
+
+	for i, vuln := range cve.Content {
+		if _, ok := cvepIndices[vuln.Name]; ok {
+			cve.Content[i].IsRelevant = &ok
+		}
+	}
+
+	return cve, nil
 }
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
-func (g *GrypeAdapter) DBVersion() string {
+func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
+	defer span.End()
 	return g.dbStatus.Checksum
 }
 
 // Ready returns the status of the vulnerabilities DB
-func (g *GrypeAdapter) Ready() bool {
+func (g *GrypeAdapter) Ready(ctx context.Context) bool {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
+	defer span.End()
 	return g.dbStatus.Err == nil
 }
 
-func getMatchers() []matcher.Matcher {
-	return matcher.NewDefaultMatchers(
-		matcher.Config{
-			Java: java.MatcherConfig{
-				ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
-				UseCPEs:              true,
-			},
-			Ruby:       ruby.MatcherConfig{UseCPEs: true},
-			Python:     python.MatcherConfig{UseCPEs: true},
-			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
-			Javascript: javascript.MatcherConfig{UseCPEs: true},
-			Golang:     golang.MatcherConfig{UseCPEs: true},
-			Stock:      stock.MatcherConfig{UseCPEs: true},
-		},
-	)
-}
+const dummyLayer = "generatedlayer"
 
 // ScanSBOM generates a CVE manifest by scanning an SBOM
-func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error) {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.ScanSBOM")
+	defer span.End()
+
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	ctx, span := otel.Tracer("").Start(ctx, "ScanSBOM")
-	defer span.End()
-
+	logger.L().Debug("decoding SBOM")
 	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
+	logger.L().Debug("reading packages from SBOM")
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
@@ -116,44 +112,41 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Matchers: getMatchers(),
 	}
 
+	logger.L().Debug("finding vulnerabilities")
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	// generate JSON
-	presenterConfig := models.PresenterConfig{
-		Matches:          *remainingMatches,
-		IgnoredMatches:   ignoredMatches,
-		Packages:         packages,
-		Context:          pkgContext,
-		MetadataProvider: g.store,
-		SBOM:             s,
-		AppConfig:        nil,
-		DBStatus:         g.dbStatus,
-	}
-	presenter := json.NewPresenter(presenterConfig)
-	var buf bytes.Buffer
-	err = presenter.Present(&buf)
+	logger.L().Debug("compiling results")
+	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
-	return domain.CVEManifest{
-		ImageID:            sbom.ImageID,
-		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
-		CVEScannerVersion:  g.Version(),
-		CVEDBVersion:       g.DBVersion(),
-		Content:            buf.Bytes(),
-	}, nil
+
+	logger.L().Debug("converting results to common format")
+	vulnerabilityResults, err := convertToCommonContainerVulnerabilityResult(ctx, &doc, exceptions)
+	if err != nil {
+		return domain.CVEManifest{}, err
+	}
+
+	logger.L().Debug("returning CVE manifest")
+	return *domain.NewCVEManifest(
+		sbom.ImageID,
+		sbom.SBOMCreatorVersion,
+		g.Version(ctx),
+		g.DBVersion(ctx),
+		vulnerabilityResults,
+	), nil
 }
 
 // UpdateDB updates the vulnerabilities DB, a RWMutex ensures this process doesn't interfere with scans
 func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
+	defer span.End()
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
-	ctx, span := otel.Tracer("").Start(ctx, "UpdateDB")
-	defer span.End()
 
 	var err error
 	g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
@@ -161,6 +154,8 @@ func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
 }
 
 // Version returns Grype's version which is used to tag CVE manifests
-func (g *GrypeAdapter) Version() string {
+func (g *GrypeAdapter) Version(ctx context.Context) string {
+	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
+	defer span.End()
 	return tools.PackageVersion("github.com/anchore/grype")
 }

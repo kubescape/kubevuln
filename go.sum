@@ -266,6 +266,8 @@ github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgI
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
 github.com/armosec/armoapi-go v0.0.165 h1:rzPsZUAO1T2zlj7PcRvKw+X3VxAZxVwSJepQ4oXJCAk=
 github.com/armosec/armoapi-go v0.0.165/go.mod h1:5MQAHYUFm1JrTSgb4+EglR5vNsrqUD0krh/5xWm2RdI=
+github.com/armosec/cluster-container-scanner-api v0.0.49-0.20230306094343-4a4f8ceeffee h1:vsYToC7EdVC7Yvfc66jWMPM58aAVJUJw3++xexXnDCI=
+github.com/armosec/cluster-container-scanner-api v0.0.49-0.20230306094343-4a4f8ceeffee/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
 github.com/armosec/logger-go v0.0.13 h1:S6KCc9Di7AWzKQyQawtKwLimmZxwIubHOhXWsTSHPhY=
 github.com/armosec/logger-go v0.0.13/go.mod h1:xEAtirJOHlqgxGlKTEtNHN2uiTzHiSL8NbmkVuCAwSw=
 github.com/armosec/utils-go v0.0.12 h1:NXkG/BhbSVAmTVXr0qqsK02CmxEiXuJyPmdTRcZ4jAo=
@@ -617,6 +619,7 @@ github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4/go.mod h1:Htrtb
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/eapache/go-resiliency v1.1.0 h1:1NtRmCAqadE2FN4ZcN6g90TP3uk8cg9rn9eNK2197aU=
 github.com/eapache/go-resiliency v1.1.0/go.mod h1:kFI+JgMyC7bLPUVY133qvEBtVayf5mFgVsvEsIPBvNs=
 github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21/go.mod h1:+020luEh2TKB4/GOp8oxxtq0Daoen/Cii55CzbTV6DU=
 github.com/eapache/queue v1.1.0/go.mod h1:6eCeP0CKFpHLu8blIFXhExK/dRa7WDZfr6jVFPTqq+I=

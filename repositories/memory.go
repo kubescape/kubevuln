@@ -39,7 +39,10 @@ func NewMemoryStorage() *MemoryStore {
 }
 
 // GetCVE returns a CVE manifest from an in-memory map
-func (m *MemoryStore) GetCVE(_ context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+	ctx, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVE")
+	defer span.End()
+
 	id := cveID{
 		Name:               imageID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
@@ -54,7 +57,7 @@ func (m *MemoryStore) GetCVE(_ context.Context, imageID, SBOMCreatorVersion, CVE
 
 // StoreCVE stores a CVE manifest to an in-memory map
 func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest) error {
-	ctx, span := otel.Tracer("").Start(ctx, "StoreCVE")
+	ctx, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreCVE")
 	defer span.End()
 
 	id := cveID{
@@ -69,7 +72,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest) erro
 
 // GetSBOM returns a SBOM from an in-memory map
 func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
-	ctx, span := otel.Tracer("").Start(ctx, "GetSBOM")
+	ctx, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOM")
 	defer span.End()
 
 	id := sbomID{
@@ -84,7 +87,7 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion s
 
 // GetSBOMp returns a SBOM' from an in-memory map
 func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
-	ctx, span := otel.Tracer("").Start(ctx, "GetSBOMp")
+	ctx, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOMp")
 	defer span.End()
 
 	id := sbomID{
@@ -99,7 +102,7 @@ func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersi
 
 // StoreSBOM stores an SBOM to an in-memory map
 func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
-	ctx, span := otel.Tracer("").Start(ctx, "StoreSBOM")
+	ctx, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
 
 	id := sbomID{
