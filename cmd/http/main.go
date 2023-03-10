@@ -24,7 +24,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	config, err := config.LoadConfig(".")
+	config, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -33,8 +33,8 @@ func main() {
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv("RELEASE"),
-			os.Getenv(config.AccountID),
-			os.Getenv(config.ClusterName),
+			config.AccountID,
+			config.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -43,17 +43,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	repository := repositories.NewMemoryStorage() // TODO add real storage
-	sbomAdapter := v1.NewSyftAdapter()
-	cveAdapter, _ := v1.NewGrypeAdapter(ctx)
-	platform := v1.NewArmoAdapter(config.AccountID, config.EventReceiverURL)
-	service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
+	brokenStorage := repositories.NewBrokenStorage() // TODO add real storage
+	memoryStorage := repositories.NewMemoryStorage() // TODO add real storage
+	sbomAdapter := v1.NewSyftAdapter(config.ScanTimeout)
+	cveAdapter, err := v1.NewGrypeAdapter(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("grype adapter error", helpers.Error(err))
+	}
+	platform := v1.NewArmoAdapter(config.AccountID, config.BackendOpenAPI, config.EventReceiverRestURL)
+	service := services.NewScanService(sbomAdapter, brokenStorage, cveAdapter, memoryStorage, platform)
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	router.GET("/v1/ready", controller.Ready)
+	router.GET("/v1/liveness", controller.Alive)
+	router.GET("/v1/readiness", controller.Ready)
 
 	group := router.Group(apis.WebsocketScanCommandVersion)
 	{
@@ -70,6 +75,7 @@ func main() {
 	// Initializing the server in a goroutine so that
 	// it won't block the graceful shutdown handling below
 	go func() {
+		logger.L().Info("starting server")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.L().Ctx(ctx).Fatal("router error", helpers.Error(err))
 		}

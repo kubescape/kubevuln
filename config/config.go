@@ -1,19 +1,28 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"time"
+
+	"github.com/spf13/viper"
+)
 
 type Config struct {
-	AccountID        string `mapstructure:"ACCOUNT_ID"`
-	ClusterName      string `mapstructure:"CLUSTER_NAME"`
-	EventReceiverURL string `mapstructure:"EVENT_RECEIVER_URL"`
-	ScanConcurrency  int    `mapstructure:"SCAN_CONCURRENCY"`
+	AccountID            string        `mapstructure:"accountID"`
+	BackendOpenAPI       string        `mapstructure:"backendOpenAPI"`
+	ClusterName          string        `mapstructure:"clusterName"`
+	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
+	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
+	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (config Config, err error) {
 	viper.AddConfigPath(path)
-	viper.SetConfigName("app")
-	viper.SetConfigType("env")
+	viper.SetConfigName("clusterData")
+	viper.SetConfigType("json")
+
+	viper.SetDefault("scanConcurrency", 1)
+	viper.SetDefault("scanTimeout", 5*time.Minute)
 
 	viper.AutomaticEnv()
 
