@@ -57,7 +57,8 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	router.GET("/v1/ready", controller.Ready)
+	router.GET("/v1/liveness", controller.Alive)
+	router.GET("/v1/readiness", controller.Ready)
 
 	group := router.Group(apis.WebsocketScanCommandVersion)
 	{

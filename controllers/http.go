@@ -61,6 +61,11 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	})
 }
 
+// Alive returns 200 OK
+func (h HTTPController) Alive(c *gin.Context) {
+	problem.Of(http.StatusOK).WriteTo(c.Writer)
+}
+
 // Ready calls scanService.Ready
 func (h HTTPController) Ready(c *gin.Context) {
 	if !h.scanService.Ready(c.Request.Context()) {
