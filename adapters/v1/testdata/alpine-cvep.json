@@ -1,0 +1,194 @@
+{
+ "matches": [
+  {
+   "vulnerability": {
+    "id": "CVE-2022-30065",
+    "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
+    "namespace": "nvd:cpe",
+    "severity": "High",
+    "urls": [
+     "https://bugs.busybox.net/show_bug.cgi?id=14781",
+     "https://cert-portal.siemens.com/productcert/pdf/ssa-333517.pdf"
+    ],
+    "description": "A use-after-free in Busybox 1.35-x's awk applet leads to denial of service and possibly code execution when processing a crafted awk pattern in the copyvar function.",
+    "cvss": [
+     {
+      "version": "2.0",
+      "vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+      "metrics": {
+       "baseScore": 6.8,
+       "exploitabilityScore": 8.6,
+       "impactScore": 6.4
+      },
+      "vendorMetadata": {}
+     },
+     {
+      "version": "3.1",
+      "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+      "metrics": {
+       "baseScore": 7.8,
+       "exploitabilityScore": 1.8,
+       "impactScore": 5.9
+      },
+      "vendorMetadata": {}
+     }
+    ],
+    "fix": {
+     "versions": [],
+     "state": "unknown"
+    },
+    "advisories": []
+   },
+   "relatedVulnerabilities": [],
+   "matchDetails": [
+    {
+     "type": "cpe-match",
+     "matcher": "stock-matcher",
+     "searchedBy": {
+      "namespace": "nvd:cpe",
+      "cpes": [
+       "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+      ]
+     },
+     "found": {
+      "vulnerabilityID": "CVE-2022-30065",
+      "versionConstraint": "= 1.35.0 (unknown)",
+      "cpes": [
+       "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+      ]
+     }
+    }
+   ],
+   "artifact": {
+    "name": "busybox",
+    "version": "1.35.0",
+    "type": "",
+    "locations": [],
+    "language": "",
+    "licenses": [],
+    "cpes": [
+     "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
+     "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+    ],
+    "purl": "pkg:/",
+    "upstreams": []
+   }
+  }
+ ],
+ "source": {
+  "type": "image",
+  "target": {
+   "userInput": "",
+   "imageID": "",
+   "manifestDigest": "",
+   "mediaType": "",
+   "tags": [],
+   "imageSize": 0,
+   "layers": null,
+   "manifest": null,
+   "config": null,
+   "repoDigests": [],
+   "architecture": "",
+   "os": ""
+  }
+ },
+ "distro": {
+  "name": "alpine",
+  "version": "3.17.2",
+  "idLike": [
+   "alpine"
+  ]
+ },
+ "descriptor": {
+  "name": "grype",
+  "version": "0.56.0",
+  "configuration": {
+   "configPath": "",
+   "verbosity": 0,
+   "output": "json",
+   "file": "adapters/v1/testdata/alpine-cve.json",
+   "distro": "",
+   "add-cpes-if-none": false,
+   "output-template-file": "",
+   "quiet": false,
+   "check-for-app-update": true,
+   "only-fixed": false,
+   "only-notfixed": false,
+   "platform": "",
+   "search": {
+    "scope": "Squashed",
+    "unindexed-archives": false,
+    "indexed-archives": true
+   },
+   "ignore": null,
+   "exclude": [],
+   "db": {
+    "cache-dir": "/home/matthiasbertschy/.cache/grype/db",
+    "update-url": "https://toolbox-data.anchore.io/grype/databases/listing.json",
+    "ca-cert": "",
+    "auto-update": true,
+    "validate-by-hash-on-start": false,
+    "validate-age": true,
+    "max-allowed-built-age": 432000000000000
+   },
+   "externalSources": {
+    "enable": false,
+    "maven": {
+     "searchUpstreamBySha1": true,
+     "baseUrl": "https://search.maven.org/solrsearch/select"
+    }
+   },
+   "match": {
+    "java": {
+     "using-cpes": true
+    },
+    "dotnet": {
+     "using-cpes": true
+    },
+    "golang": {
+     "using-cpes": true
+    },
+    "javascript": {
+     "using-cpes": true
+    },
+    "python": {
+     "using-cpes": true
+    },
+    "ruby": {
+     "using-cpes": true
+    },
+    "stock": {
+     "using-cpes": true
+    }
+   },
+   "dev": {
+    "profile-cpu": false,
+    "profile-mem": false
+   },
+   "fail-on-severity": "",
+   "registry": {
+    "insecure-skip-tls-verify": false,
+    "insecure-use-http": false,
+    "auth": []
+   },
+   "log": {
+    "structured": false,
+    "level": "warn",
+    "file": ""
+   },
+   "attestation": {
+    "public-key": "",
+    "skip-verification": false
+   },
+   "show-suppressed": false,
+   "by-cve": false
+  },
+  "db": {
+   "built": "2023-03-10T08:15:17Z",
+   "schemaVersion": 5,
+   "location": "/home/matthiasbertschy/.cache/grype/db/5",
+   "checksum": "sha256:99acdb1e4fbfa8605325c197328c79793a8bfb15f68b422415aba6c07975b85b",
+   "error": null
+  }
+ }
+}

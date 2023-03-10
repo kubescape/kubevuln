@@ -1,0 +1,101 @@
+{
+  "ImageID": "",
+  "SBOMCreatorVersion": "",
+  "CVEScannerVersion": "",
+  "CVEDBVersion": "",
+  "Content": [
+    {
+      "designators": {
+        "designatorType": "",
+        "attributes": null
+      },
+      "layerHash": "generatedlayer",
+      "wlid": "",
+      "containersScanID": "<<PRESENCE>>",
+      "healthStatus": "",
+      "imageHash": "",
+      "imageTag": "",
+      "packageName": "busybox",
+      "packageVersion": "1.35.0",
+      "link": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
+      "description": "",
+      "severity": "High",
+      "name": "CVE-2022-28391",
+      "fixedIn": [
+        {
+          "name": "unknown",
+          "imageTag": "",
+          "version": ""
+        }
+      ],
+      "severityScore": 400,
+      "neglected": 0,
+      "urgent": 0,
+      "categories": {
+        "isRce": false
+      },
+      "layers": [
+        {
+          "layerHash": "generatedlayer",
+          "parentLayerHash": ""
+        }
+      ],
+      "layersNested": null,
+      "context": null,
+      "links": [
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-28391"
+      ],
+      "timestamp": "<<PRESENCE>>",
+      "isLastScan": 1,
+      "isFixed": 0
+    },
+    {
+      "designators": {
+        "designatorType": "",
+        "attributes": null
+      },
+      "layerHash": "generatedlayer",
+      "wlid": "",
+      "containersScanID": "<<PRESENCE>>",
+      "isRelevant": true,
+      "healthStatus": "",
+      "imageHash": "",
+      "imageTag": "",
+      "packageName": "busybox",
+      "packageVersion": "1.35.0",
+      "link": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
+      "description": "",
+      "severity": "High",
+      "name": "CVE-2022-30065",
+      "fixedIn": [
+        {
+          "name": "unknown",
+          "imageTag": "",
+          "version": ""
+        }
+      ],
+      "severityScore": 400,
+      "neglected": 0,
+      "urgent": 0,
+      "categories": {
+        "isRce": false
+      },
+      "layers": [
+        {
+          "layerHash": "generatedlayer",
+          "parentLayerHash": ""
+        }
+      ],
+      "layersNested": null,
+      "context": null,
+      "links": [
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-30065"
+      ],
+      "timestamp": "<<PRESENCE>>",
+      "isLastScan": 1,
+      "isFixed": 0
+    }
+  ]
+}
