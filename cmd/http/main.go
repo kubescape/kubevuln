@@ -24,7 +24,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	config, err := config.LoadConfig(".")
+	config, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("grype adapter error", helpers.Error(err))
 	}
-	platform := v1.NewArmoAdapter(config.AccountID, config.GatewayRestURL, config.EventReceiverRestURL)
+	platform := v1.NewArmoAdapter(config.AccountID, config.BackendOpenAPI, config.EventReceiverRestURL)
 	service := services.NewScanService(sbomAdapter, brokenStorage, cveAdapter, memoryStorage, platform)
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
 
