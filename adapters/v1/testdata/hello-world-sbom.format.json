@@ -1,22 +1,33 @@
 {
- "spdxVersion": "SPDX-2.3",
- "dataLicense": "CC0-1.0",
- "SPDXID": "SPDXRef-DOCUMENT",
- "name": "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
- "documentNamespace": "<<PRESENCE>>",
- "creationInfo": {
-  "licenseListVersion": "3.19",
-  "creators": [
+ "DocumentDescribes": null,
+ "SPDXVersion": "SPDX-2.3",
+ "DataLicense": "CC0-1.0",
+ "SPDXIdentifier": "SPDXRef-DOCUMENT",
+ "DocumentName": "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
+ "DocumentNamespace": "<<PRESENCE>>",
+ "ExternalDocumentReferences": null,
+ "DocumentComment": "",
+ "CreationInfo": {
+  "LicenseListVersion": "3.19",
+  "Creators": [
    "Organization: Anchore, Inc",
    "Tool: syft-"
   ],
-  "created": "<<PRESENCE>>"
+  "Created": "<<PRESENCE>>",
+  "CreatorComment": ""
  },
- "relationships": [
+ "Packages": null,
+ "Files": null,
+ "OtherLicenses": null,
+ "Relationships": [
   {
-   "spdxElementId": "SPDXRef-DOCUMENT",
-   "relatedSpdxElement": "SPDXRef-DOCUMENT",
-   "relationshipType": "DESCRIBES"
+   "RefA": "SPDXRef-DOCUMENT",
+   "RefB": "SPDXRef-DOCUMENT",
+   "Relationship": "DESCRIBES",
+   "RelationshipComment": ""
   }
- ]
+ ],
+ "Annotations": null,
+ "Snippets": null,
+ "Reviews": null
 }

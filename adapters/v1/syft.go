@@ -1,14 +1,12 @@
 package v1
 
 import (
-	"bytes"
 	"context"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/artifact"
-	"github.com/anchore/syft/syft/formats/spdxjson"
 	"github.com/anchore/syft/syft/linux"
 	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/pkg/cataloger"
@@ -104,7 +102,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	// generate SBOM
 	logger.L().Debug("generating SBOM", helpers.String("imageID", imageID))
-	syftSbom := sbom.SBOM{
+	syftSBOM := sbom.SBOM{
 		Source:        src.Metadata,
 		Relationships: relationships,
 		Artifacts: sbom.Artifacts{
@@ -112,15 +110,12 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 			LinuxDistribution: actualDistro,
 		},
 	}
-	var buf bytes.Buffer
-	err = spdxjson.Format().Encode(&buf, syftSbom)
-	if err != nil {
-		return domainSBOM, err
-	}
-	domainSBOM.Content = buf.Bytes()
+	// convert SBOM
+	logger.L().Debug("converting SBOM", helpers.String("imageID", imageID))
+	domainSBOM.Content, err = syftToDomain(syftSBOM)
 	// return SBOM
 	logger.L().Debug("returning SBOM", helpers.String("imageID", imageID))
-	return domainSBOM, nil
+	return domainSBOM, err
 }
 
 // Version returns Syft's version which is used to tag SBOMs

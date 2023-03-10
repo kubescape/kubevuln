@@ -2,12 +2,14 @@ package v1
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"gotest.tools/v3/assert"
 )
 
@@ -43,8 +45,10 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			content, err := json.Marshal(got.Content)
+			tools.EnsureSetup(t, err == nil)
 			ja := jsonassert.New(t)
-			ja.Assertf(string(got.Content), tt.format)
+			ja.Assertf(string(content), tt.format)
 		})
 	}
 }
@@ -53,4 +57,15 @@ func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter(5 * time.Minute)
 	version := s.Version(context.TODO())
 	assert.Assert(t, version != "")
+}
+
+func Test_syftAdapter_transformations(t *testing.T) {
+	sbom := domain.SBOM{}
+	err := json.Unmarshal(fileContent("testdata/alpine-sbom.json"), &sbom.Content)
+	tools.EnsureSetup(t, err == nil)
+	spdxSBOM, err := domainToSpdx(*sbom.Content)
+	tools.EnsureSetup(t, err == nil)
+	domainSBOM, err := spdxToDomain(spdxSBOM)
+	tools.EnsureSetup(t, err == nil)
+	assert.DeepEqual(t, sbom.Content, domainSBOM)
 }

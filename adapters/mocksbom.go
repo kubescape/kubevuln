@@ -6,6 +6,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 )
 
 // MockSBOMAdapter implements a mocked SBOMCreator to be used for tests
@@ -26,7 +27,7 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 	return domain.SBOM{
 		ImageID:            imageID,
 		SBOMCreatorVersion: m.Version(ctx),
-		Content:            []byte("SBOM content"),
+		Content:            &softwarecomposition.Document{},
 	}, nil
 }
 

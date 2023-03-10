@@ -1,5 +1,7 @@
 package domain
 
+import "github.com/kubescape/storage/pkg/apis/softwarecomposition"
+
 const (
 	SBOMStatusTimedOut = "timed out"
 )
@@ -9,7 +11,7 @@ type SBOM struct {
 	ImageID            string
 	SBOMCreatorVersion string
 	Status             string
-	Content            []byte
+	Content            *softwarecomposition.Document
 }
 
 // RegistryCredentials contains OCI registry credentials required for connection

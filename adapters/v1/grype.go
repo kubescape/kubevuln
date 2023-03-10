@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"bytes"
 	"context"
 	"path"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
-	"github.com/anchore/syft/syft"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -116,7 +114,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 	defer g.mu.RUnlock()
 
 	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ImageID))
-	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
+	s, err := domainToSyft(*sbom.Content)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}

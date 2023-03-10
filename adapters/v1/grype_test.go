@@ -14,6 +14,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"gotest.tools/v3/assert"
 )
 
@@ -23,6 +24,12 @@ func Test_grypeAdapter_DBVersion(t *testing.T) {
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
 	assert.Assert(t, version != "")
+}
+
+func fileToSBOM(path string) *softwarecomposition.Document {
+	sbom := softwarecomposition.Document{}
+	_ = json.Unmarshal(fileContent(path), &sbom)
+	return &sbom
 }
 
 func Test_grypeAdapter_ScanSBOM(t *testing.T) {
@@ -37,7 +44,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			sbom: domain.SBOM{
 				ImageID:            "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 				SBOMCreatorVersion: "TODO",
-				Content:            fileContent("testdata/alpine-sbom.json"),
+				Content:            fileToSBOM("testdata/alpine-sbom.json"),
 			},
 			format: string(fileContent("testdata/alpine-cve.format.json")),
 		},

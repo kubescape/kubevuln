@@ -19,11 +19,14 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/go-logger v0.0.11
+	github.com/kubescape/go-logger v0.0.10
+	github.com/kubescape/storage v0.0.0-00010101000000-000000000000
 	github.com/spf13/viper v1.15.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.38.0
 	go.opentelemetry.io/otel v1.12.0
 	gotest.tools/v3 v3.3.0
+	k8s.io/apimachinery v0.26.2
+	k8s.io/client-go v0.26.2
 	schneider.vip/problem v1.8.1
 )
 
