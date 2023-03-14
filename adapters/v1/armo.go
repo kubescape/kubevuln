@@ -150,7 +150,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	if cvep.Content != nil {
 		hasRelevancy = true
 		// convert to relevantVulnerabilities
-		relevantVulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
+		relevantVulnerabilities, err := domainToArmo(ctx, *cvep.Content, exceptions)
 		if err != nil {
 			return err
 		}
@@ -161,9 +161,8 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 		}
 		// mark common vulnerabilities as relevant
 		for i, v := range vulnerabilities {
-			if _, ok := cvepIndices[v.Name]; ok {
-				vulnerabilities[i].IsRelevant = &ok
-			}
+			_, isRelevant := cvepIndices[v.Name]
+			vulnerabilities[i].IsRelevant = &isRelevant
 		}
 	}
 
