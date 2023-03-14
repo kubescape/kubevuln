@@ -11,7 +11,7 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	"github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/go-logger"
@@ -163,6 +163,12 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 		HasRelevancyData: hasRelevancy,
 	}
 
+	if hasRelevancy {
+		summary.SetRelevantLabel(containerscan.RelevantLabelYes)
+	} else {
+		summary.SetRelevantLabel(containerscan.RelevantLabelNo)
+	}
+
 	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTag)
 	if err == nil {
 		summary.Registry = imageInfo.Registry
@@ -209,18 +215,27 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 			vulnSeverityStats.RCECount++
 			incrementCounter(&summary.RCECount, true, isIgnored)
 			if isFixed {
-				summary.RCEFixCount++
+				incrementCounter(&summary.RCEFixCount, true, isIgnored)
 				vulnSeverityStats.RCEFixCount++
 			}
 		}
-		if vul.IsRelevant != nil && *vul.IsRelevant {
-			vulnSeverityStats.RelevantCount++
-			incrementCounter(&summary.RelevantCount, true, isIgnored)
-			if isFixed {
-				vulnSeverityStats.FixAvailableForRelevantCount++
-				incrementCounter(&summary.FixAvailableForRelevantCount, true, isIgnored)
-			}
 
+		isRelevant := vul.GetIsRelevant()
+		if isRelevant != nil {
+			// if IsRelevant is not nil, we have relevancy data
+			if *isRelevant {
+				// vulnerability is relevant
+				vul.SetRelevantLabel(containerscan.RelevantLabelYes)
+				vulnSeverityStats.RelevantCount++
+				incrementCounter(&summary.RelevantCount, true, isIgnored)
+				if isFixed {
+					vulnSeverityStats.RelevantFixCount++
+					incrementCounter(&summary.RelevantFixCount, true, isIgnored)
+				}
+			} else {
+				// vulnerability is not relevant
+				vul.SetRelevantLabel(containerscan.RelevantLabelNo)
+			}
 		}
 		severitiesStats[vul.Severity] = vulnSeverityStats
 	}
