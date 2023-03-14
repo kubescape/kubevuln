@@ -119,7 +119,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 }
 
 // SubmitCVE submits the given CVE to the platform
-func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, hasRelevancy bool) error {
+func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SubmitCVE")
 	defer span.End()
 	// retrieve timestamp from context
@@ -138,11 +138,40 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 		return errors.New("no workload found in context")
 	}
 
+	// get exceptions
+	exceptions, err := a.GetCVEExceptions(ctx)
+	// convert to vulnerabilities
+	vulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
+	if err != nil {
+		return err
+	}
+	// merge cve and cvep
+	var hasRelevancy bool
+	if cvep.Content != nil {
+		hasRelevancy = true
+		// convert to relevantVulnerabilities
+		relevantVulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
+		if err != nil {
+			return err
+		}
+		// index relevantVulnerabilities
+		cvepIndices := map[string]struct{}{}
+		for _, v := range relevantVulnerabilities {
+			cvepIndices[v.Name] = struct{}{}
+		}
+		// mark common vulnerabilities as relevant
+		for i, v := range vulnerabilities {
+			if _, ok := cvepIndices[v.Name]; ok {
+				vulnerabilities[i].IsRelevant = &ok
+			}
+		}
+	}
+
 	finalReport := v1.ScanResultReport{
 		Designators:     *armotypes.AttributesDesignatorsFromWLID(workload.Wlid),
 		Summary:         nil,
 		ContainerScanID: scanID,
-		Vulnerabilities: cve.Content,
+		Vulnerabilities: vulnerabilities,
 		Timestamp:       timestamp,
 	}
 
@@ -175,7 +204,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 	finalReport.Summary.Context = armoContext
 
 	// split vulnerabilities to chunks
-	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(cve.Content, maxBodySize, 10)
+	chunksChan, totalVulnerabilities := httputils.SplitSlice2Chunks(vulnerabilities, maxBodySize, 10)
 
 	// send report(s)
 	sendWG := &sync.WaitGroup{}
@@ -201,7 +230,6 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 	}
 
 	// collect post report errors if occurred
-	var err error
 	for e := range errChan {
 		err = multierror.Append(err, e)
 	}

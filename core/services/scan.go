@@ -82,13 +82,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 			cve = domain.CVEManifest{}
 		}
 		if cve.Content == nil {
-			// get exceptions
-			exceptions, err := s.platform.GetCVEExceptions(ctx)
-			if err != nil {
-				return err
-			}
 			// scan for CVE
-			cve, err = s.cveScanner.ScanSBOM(ctx, sbom, exceptions)
+			cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 			if err != nil {
 				return err
 			}
@@ -106,7 +101,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 			}
 		}
 		// submit to platform
-		err = s.platform.SubmitCVE(ctx, cve, false)
+		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 		if err != nil {
 			return err
 		}
@@ -172,19 +167,21 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			}
 		}
 		// TODO react on timeout status ?
-		// get exceptions
-		exceptions, err := s.platform.GetCVEExceptions(ctx)
+		// scan for CVE
+		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			return err
 		}
-		// scan for CVE
-		cve, err = s.cveScanner.ScanSBOM(ctx, sbom, exceptions)
-		if err != nil {
-			return err
+		// submit to storage
+		if cveStorageOK {
+			err = s.cveRepository.StoreCVE(ctx, cve)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	// check if SBOM' is available
-	hasRelevancy := false
+	cvep := domain.CVEManifest{}
 	if sbomStorageOK {
 		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
 		if err != nil {
@@ -192,16 +189,17 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			sbomp = domain.SBOM{}
 		}
 		if sbomp.Content != nil {
-			hasRelevancy = true
 			// scan for CVE'
-			cvep, err := s.cveScanner.ScanSBOM(ctx, sbomp, nil)
+			cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
 			if err != nil {
 				return err
 			}
-			// merge CVE and CVE' to create relevant CVE
-			cve, err = s.cveScanner.CreateRelevantCVE(ctx, cve, cvep)
-			if err != nil {
-				return err
+			// submit to storage
+			if cveStorageOK {
+				err = s.cveRepository.StoreCVE(ctx, cvep)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -210,15 +208,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
 	}
-	// submit to storage
-	if cveStorageOK {
-		err = s.cveRepository.StoreCVE(ctx, cve)
-		if err != nil {
-			return err
-		}
-	}
 	// submit to platform
-	err = s.platform.SubmitCVE(ctx, cve, hasRelevancy)
+	err = s.platform.SubmitCVE(ctx, cve, cvep)
 	if err != nil {
 		return err
 	}

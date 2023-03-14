@@ -9,6 +9,14 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
+	"github.com/anchore/grype/grype/matcher"
+	"github.com/anchore/grype/grype/matcher/dotnet"
+	"github.com/anchore/grype/grype/matcher/golang"
+	"github.com/anchore/grype/grype/matcher/java"
+	"github.com/anchore/grype/grype/matcher/javascript"
+	"github.com/anchore/grype/grype/matcher/python"
+	"github.com/anchore/grype/grype/matcher/ruby"
+	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/store"
@@ -42,25 +50,6 @@ func NewGrypeAdapter() *GrypeAdapter {
 		dbConfig: dbConfig,
 	}
 	return g
-}
-
-// CreateRelevantCVE creates a relevant CVE combining CVE and CVE' vulnerabilities
-func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVEManifest) (domain.CVEManifest, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.CreateRelevantCVE")
-	defer span.End()
-
-	cvepIndices := map[string]struct{}{}
-	for _, vuln := range cvep.Content {
-		cvepIndices[vuln.Name] = struct{}{}
-	}
-
-	for i, vuln := range cve.Content {
-		if _, ok := cvepIndices[vuln.Name]; ok {
-			cve.Content[i].IsRelevant = &ok
-		}
-	}
-
-	return cve, nil
 }
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
@@ -106,7 +95,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 const dummyLayer = "generatedlayer"
 
 // ScanSBOM generates a CVE manifest by scanning an SBOM
-func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error) {
+func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.ScanSBOM")
 	defer span.End()
 
@@ -146,19 +135,36 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 	}
 
 	logger.L().Debug("converting results to common format", helpers.String("imageID", sbom.ImageID))
-	vulnerabilityResults, err := convertToCommonContainerVulnerabilityResult(ctx, &doc, exceptions)
+	vulnerabilityResults, err := grypeToDomain(doc)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
 	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ImageID))
-	return *domain.NewCVEManifest(
-		sbom.ImageID,
-		sbom.SBOMCreatorVersion,
-		g.Version(ctx),
-		g.DBVersion(ctx),
-		vulnerabilityResults,
-	), nil
+	return domain.CVEManifest{
+		ImageID:            sbom.ImageID,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		CVEScannerVersion:  g.Version(ctx),
+		CVEDBVersion:       g.DBVersion(ctx),
+		Content:            vulnerabilityResults,
+	}, nil
+}
+
+func getMatchers() []matcher.Matcher {
+	return matcher.NewDefaultMatchers(
+		matcher.Config{
+			Java: java.MatcherConfig{
+				ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
+				UseCPEs:              true,
+			},
+			Ruby:       ruby.MatcherConfig{UseCPEs: true},
+			Python:     python.MatcherConfig{UseCPEs: true},
+			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
+			Javascript: javascript.MatcherConfig{UseCPEs: true},
+			Golang:     golang.MatcherConfig{UseCPEs: true},
+			Stock:      stock.MatcherConfig{UseCPEs: true},
+		},
+	)
 }
 
 // Version returns Grype's version which is used to tag CVE manifests

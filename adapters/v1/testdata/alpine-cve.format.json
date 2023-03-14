@@ -1,96 +1,194 @@
-[
-  {
-    "designators": {
-      "designatorType": "",
-      "attributes": null
-    },
-    "layerHash": "generatedlayer",
-    "wlid": "",
-    "containersScanID": "<<PRESENCE>>",
-    "healthStatus": "",
-    "imageHash": "",
-    "imageTag": "",
-    "packageName": "busybox",
-    "packageVersion": "1.35.0",
-    "link": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
-    "description": "",
-    "severity": "High",
-    "name": "CVE-2022-28391",
-    "fixedIn": [
-      {
-        "name": "unknown",
-        "imageTag": "",
-        "version": ""
+{
+  "Matches": [
+    {
+      "Vulnerability": {
+        "ID": "CVE-2022-28391",
+        "DataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
+        "Namespace": "nvd:cpe",
+        "Severity": "High",
+        "URLs": [
+          "https://git.alpinelinux.org/aports/plain/main/busybox/0001-libbb-sockaddr2str-ensure-only-printable-characters-.patch",
+          "https://git.alpinelinux.org/aports/plain/main/busybox/0002-nslookup-sanitize-all-printed-strings-with-printable.patch",
+          "https://gitlab.alpinelinux.org/alpine/aports/-/issues/13661"
+        ],
+        "Description": "BusyBox through 1.35.0 allows remote attackers to execute arbitrary code if netstat is used to print a DNS PTR record's value to a VT compatible terminal. Alternatively, the attacker could choose to change the terminal's colors.",
+        "Cvss": [
+          {
+            "Version": "2.0",
+            "Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+            "Metrics": {
+              "BaseScore": 6.8,
+              "ExploitabilityScore": 8.6,
+              "ImpactScore": 6.4
+            },
+            "VendorMetadata": {}
+          },
+          {
+            "Version": "3.1",
+            "Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "Metrics": {
+              "BaseScore": 8.8,
+              "ExploitabilityScore": 2.8,
+              "ImpactScore": 5.9
+            },
+            "VendorMetadata": {}
+          }
+        ],
+        "Fix": {
+          "Versions": [],
+          "State": "unknown"
+        },
+        "Advisories": null
+      },
+      "RelatedVulnerabilities": null,
+      "MatchDetails": [
+        {
+          "Type": "cpe-match",
+          "Matcher": "stock-matcher",
+          "SearchedBy": {
+            "namespace": "nvd:cpe",
+            "cpes": [
+              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+            ]
+          },
+          "Found": {
+            "vulnerabilityID": "CVE-2022-28391",
+            "versionConstraint": "<= 1.35.0 (unknown)",
+            "cpes": [
+              "cpe:2.3:a:busybox:busybox:*:*:*:*:*:*:*:*"
+            ]
+          }
+        }
+      ],
+      "Artifact": {
+        "Name": "busybox",
+        "Version": "1.35.0",
+        "Type": "",
+        "Locations": null,
+        "Language": "",
+        "Licenses": [],
+        "CPEs": [
+          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+        ],
+        "PURL": "pkg:/",
+        "Upstreams": null,
+        "MetadataType": "",
+        "Metadata": null
       }
-    ],
-    "severityScore": 400,
-    "neglected": 0,
-    "urgent": 0,
-    "categories": {
-      "isRce": false
     },
-    "layers": [
-      {
-        "layerHash": "generatedlayer",
-        "parentLayerHash": ""
+    {
+      "Vulnerability": {
+        "ID": "CVE-2022-30065",
+        "DataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
+        "Namespace": "nvd:cpe",
+        "Severity": "High",
+        "URLs": [
+          "https://bugs.busybox.net/show_bug.cgi?id=14781",
+          "https://cert-portal.siemens.com/productcert/pdf/ssa-333517.pdf"
+        ],
+        "Description": "A use-after-free in Busybox 1.35-x's awk applet leads to denial of service and possibly code execution when processing a crafted awk pattern in the copyvar function.",
+        "Cvss": [
+          {
+            "Version": "2.0",
+            "Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+            "Metrics": {
+              "BaseScore": 6.8,
+              "ExploitabilityScore": 8.6,
+              "ImpactScore": 6.4
+            },
+            "VendorMetadata": {}
+          },
+          {
+            "Version": "3.1",
+            "Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "Metrics": {
+              "BaseScore": 7.8,
+              "ExploitabilityScore": 1.8,
+              "ImpactScore": 5.9
+            },
+            "VendorMetadata": {}
+          }
+        ],
+        "Fix": {
+          "Versions": [],
+          "State": "unknown"
+        },
+        "Advisories": null
+      },
+      "RelatedVulnerabilities": null,
+      "MatchDetails": [
+        {
+          "Type": "cpe-match",
+          "Matcher": "stock-matcher",
+          "SearchedBy": {
+            "namespace": "nvd:cpe",
+            "cpes": [
+              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+            ]
+          },
+          "Found": {
+            "vulnerabilityID": "CVE-2022-30065",
+            "versionConstraint": "= 1.35.0 (unknown)",
+            "cpes": [
+              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+            ]
+          }
+        }
+      ],
+      "Artifact": {
+        "Name": "busybox",
+        "Version": "1.35.0",
+        "Type": "",
+        "Locations": null,
+        "Language": "",
+        "Licenses": [],
+        "CPEs": [
+          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+        ],
+        "PURL": "pkg:/",
+        "Upstreams": null,
+        "MetadataType": "",
+        "Metadata": null
       }
-    ],
-    "layersNested": null,
-    "context": null,
-    "links": [
-      "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
-      "https://nvd.nist.gov/vuln/detail/CVE-2022-28391"
-    ],
-    "timestamp": "<<PRESENCE>>",
-    "isLastScan": 1,
-    "isFixed": 0,
-    "relevantLabel": ""
+    }
+  ],
+  "IgnoredMatches": null,
+  "Source": {
+    "Type": "image",
+    "Target": {
+      "userInput": "",
+      "imageID": "",
+      "manifestDigest": "",
+      "mediaType": "",
+      "tags": [],
+      "imageSize": 0,
+      "layers": null,
+      "manifest": null,
+      "config": null,
+      "repoDigests": [],
+      "architecture": "",
+      "os": ""
+    }
   },
-  {
-    "designators": {
-      "designatorType": "",
-      "attributes": null
-    },
-    "layerHash": "generatedlayer",
-    "wlid": "",
-    "containersScanID": "<<PRESENCE>>",
-    "healthStatus": "",
-    "imageHash": "",
-    "imageTag": "",
-    "packageName": "busybox",
-    "packageVersion": "1.35.0",
-    "link": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
-    "description": "",
-    "severity": "High",
-    "name": "CVE-2022-30065",
-    "fixedIn": [
-      {
-        "name": "unknown",
-        "imageTag": "",
-        "version": ""
-      }
-    ],
-    "severityScore": 400,
-    "neglected": 0,
-    "urgent": 0,
-    "categories": {
-      "isRce": false
-    },
-    "layers": [
-      {
-        "layerHash": "generatedlayer",
-        "parentLayerHash": ""
-      }
-    ],
-    "layersNested": null,
-    "context": null,
-    "links": [
-      "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
-      "https://nvd.nist.gov/vuln/detail/CVE-2022-30065"
-    ],
-    "timestamp": "<<PRESENCE>>",
-    "isLastScan": 1,
-    "isFixed": 0,
-    "relevantLabel": ""
+  "Distro": {
+    "Name": "alpine",
+    "Version": "3.17.2",
+    "IDLike": [
+      "alpine"
+    ]
+  },
+  "Descriptor": {
+    "Name": "grype",
+    "Version": "[not provided]",
+    "Configuration": null,
+    "VulnerabilityDBStatus": {
+      "built": "<<PRESENCE>>",
+      "schemaVersion": 5,
+      "location": "<<PRESENCE>>",
+      "checksum": "<<PRESENCE>>",
+      "error": null
+    }
   }
-]
+}

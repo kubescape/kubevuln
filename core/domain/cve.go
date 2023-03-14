@@ -2,7 +2,7 @@ package domain
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 )
 
 type CVEExceptions []armotypes.VulnerabilityExceptionPolicy
@@ -13,15 +13,5 @@ type CVEManifest struct {
 	SBOMCreatorVersion string
 	CVEScannerVersion  string
 	CVEDBVersion       string
-	Content            []cs.CommonContainerVulnerabilityResult
-}
-
-func NewCVEManifest(ImageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string, content []cs.CommonContainerVulnerabilityResult) *CVEManifest {
-	return &CVEManifest{
-		ImageID:            ImageID,
-		SBOMCreatorVersion: SBOMCreatorVersion,
-		CVEScannerVersion:  CVEScannerVersion,
-		CVEDBVersion:       CVEDBVersion,
-		Content:            content,
-	}
+	Content            *softwarecomposition.GrypeDocument
 }
