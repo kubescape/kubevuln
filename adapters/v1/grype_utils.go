@@ -18,7 +18,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	"github.com/google/go-containerregistry/pkg/v1"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
@@ -188,6 +188,15 @@ func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocum
 				}
 				// add layer to vulnerability result
 				vulnerabilityResult.Layers = append(vulnerabilityResult.Layers, layer)
+			}
+
+			isRelevant := vulnerabilityResult.GetIsRelevant()
+			if isRelevant != nil {
+				if *isRelevant {
+					vulnerabilityResult.SetRelevantLabel(containerscan.RelevantLabelYes)
+				} else {
+					vulnerabilityResult.SetRelevantLabel(containerscan.RelevantLabelNo)
+				}
 			}
 
 			vulnerabilityResults = append(vulnerabilityResults, vulnerabilityResult)
