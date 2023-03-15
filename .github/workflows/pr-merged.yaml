@@ -3,37 +3,56 @@ on:
   pull_request:
     types: [closed]
     branches: 
-    - 'master'
     - 'main'
     paths-ignore:
-      - '**.md' ### Ignore running when README.MD changed.
-      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
-
-  # push:
-  #   tags:
-  #     - 'v*'    
+      - '*.md' 
+      - '*.yaml'
+      - '.github/workflows/*'
 
 jobs:
-  pr-merged:
-    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged to master
-    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
-    with:
-      IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
-      IMAGE_TAG: v0.1.${{ github.run_number }}
-      COMPONENT_NAME: kubevuln
-      CGO_ENABLED: 0
-      GO111MODULE: ""
-      BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.18"
-      REQUIRED_TESTS: '[
-                        "vulnerability_scanning", 
-                        "vulnerability_scanning_trigger_scan_on_new_image", 
-                        "vulnerability_scanning_trigger_scan_public_registry", 
-                        "vulnerability_scanning_trigger_scan_public_registry_excluded", 
-                        "vulnerability_scanning_trigger_scan_private_quay_registry", 
-                        "vulnerability_scanning_triggering_with_cron_job", 
-                        "registry_scanning_triggering_with_cron_job"
-                      ]'   
-      HELM_E2E_TEST: true  
-      COSIGN: true       
-    secrets: inherit
+  docker-build:
+    if: ${{ github.repository_owner == 'kubescape' }}  
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read    
+      pull-requests: read  
+
+    steps:
+ 
+      - uses: actions/checkout@v3
+        name: Checkout
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v3
+        name: Installing go
+        with:
+          go-version: "1.19"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+ 
+      - name: Login to Quay
+        uses: docker/login-action@v2
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+          password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: build/Dockerfile
+          tags: quay.io/${{ github.repository_owner }}/kubevuln:v0.2.${{ github.run_number }}-relevancy
+          build-args: image_version=v0.2.${{ github.run_number }}-relevancy
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+        
