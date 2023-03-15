@@ -12,7 +12,6 @@ type CVEScanner interface {
 	DBVersion(ctx context.Context) string
 	Ready(ctx context.Context) bool
 	ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error)
-	UpdateDB(ctx context.Context) error
 	Version(ctx context.Context) string
 }
 

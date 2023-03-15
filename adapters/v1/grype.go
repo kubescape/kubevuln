@@ -5,6 +5,7 @@ import (
 	"context"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
@@ -31,10 +32,9 @@ type GrypeAdapter struct {
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 
-// NewGrypeAdapter initializes the GrypeAdapter structure and loads the vulnerability DB
-// by calling UpdateDB which will eventually update its definitions
-// it can fail if the DB isn't initialized properly
-func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
+// NewGrypeAdapter initializes the GrypeAdapter structure
+// DB loading is done via readiness probes
+func NewGrypeAdapter() *GrypeAdapter {
 	dbConfig := db.Config{
 		DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
 		ListingURL: "https://toolbox-data.anchore.io/grype/databases/listing.json",
@@ -42,11 +42,7 @@ func NewGrypeAdapter(ctx context.Context) (*GrypeAdapter, error) {
 	g := &GrypeAdapter{
 		dbConfig: dbConfig,
 	}
-	err := g.UpdateDB(ctx) // TODO make it injectable
-	if err != nil {
-		return nil, err
-	}
-	return g, nil
+	return g
 }
 
 // CreateRelevantCVE creates a relevant CVE combining CVE and CVE' vulnerabilities
@@ -72,6 +68,10 @@ func (g *GrypeAdapter) CreateRelevantCVE(ctx context.Context, cve, cvep domain.C
 func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
 	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
 	defer span.End()
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
 	return g.dbStatus.Checksum
 }
 
@@ -79,6 +79,24 @@ func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
 	defer span.End()
+
+	// DB update is in progress
+	if !g.mu.TryRLock() {
+		return false
+	}
+	g.mu.RUnlock() // because TryRLock doesn't unlock
+	// DB is not initialized or needs to be updated
+	now := time.Now()
+	if g.dbStatus == nil || now.Sub(g.dbStatus.Built) > 24*time.Hour {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		logger.L().Info("updating grype DB")
+		var err error
+		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
+		logger.L().Info("grype DB updated")
+		return err == nil
+	}
+
 	return g.dbStatus.Err == nil
 }
 
@@ -138,19 +156,6 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 		g.DBVersion(ctx),
 		vulnerabilityResults,
 	), nil
-}
-
-// UpdateDB updates the vulnerabilities DB, a RWMutex ensures this process doesn't interfere with scans
-func (g *GrypeAdapter) UpdateDB(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
-	defer span.End()
-
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	var err error
-	g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
-	return err
 }
 
 // Version returns Grype's version which is used to tag CVE manifests
