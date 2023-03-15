@@ -1,0 +1,14 @@
+{
+  "gatewayWebsocketURL": "gateway:8001",
+  "gatewayRestURL": "gateway:8002",
+  "vulnScanURL": "kubevuln:8080",
+  "kubevulnURL": "kubevuln:8080",
+  "kubescapeURL": "kubescape:8080",
+  "triggerNewImageScan": "false",
+  "accountID": "12345",
+  "clusterName": "clusterName",
+  "backendOpenAPI": "https://api.armosec.io/api",
+  "eventReceiverRestURL": "https://report.armo.cloud",
+  "eventReceiverWebsocketURL": "wss://report.armo.cloud",
+  "rootGatewayURL": "wss://ens.euprod1.cyberarmorsoft.com/v1/waitfornotification"       
+}
