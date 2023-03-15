@@ -2,12 +2,10 @@ name: pull_request_created
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: 
-    - 'master'
-    - 'main'
     paths-ignore:
-      - '**/README.md' ### Ignore running when README.MD changed.
-      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
+      - '*.md' 
+      - '*.yaml'
+      - '.github/workflows/*'
 
 concurrency:
   group: ${{ github.head_ref }}
@@ -17,5 +15,6 @@ jobs:
   pr-created:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-created.yaml@main
     with:
-      GO_VERSION: "1.18"
+      CGO_ENABLED: 0
+      GO_VERSION: "1.19"
     secrets: inherit
