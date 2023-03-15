@@ -19,8 +19,8 @@ import (
 
 func Test_grypeAdapter_DBVersion(t *testing.T) {
 	ctx := context.TODO()
-	g, err := NewGrypeAdapter(ctx)
-	tools.EnsureSetup(t, err == nil)
+	g := NewGrypeAdapter()
+	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
 	assert.Assert(t, version != "")
 }
@@ -48,8 +48,8 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
-			g, err := NewGrypeAdapter(ctx)
-			tools.EnsureSetup(t, err == nil)
+			g := NewGrypeAdapter()
+			g.Ready(ctx) // need to call ready to load the DB
 			got, err := g.ScanSBOM(ctx, tt.sbom, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -65,8 +65,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 
 func Test_grypeAdapter_Version(t *testing.T) {
 	ctx := context.TODO()
-	g, err := NewGrypeAdapter(ctx)
-	tools.EnsureSetup(t, err == nil)
+	g := NewGrypeAdapter()
 	version := g.Version(ctx)
 	assert.Assert(t, version != "")
 }
@@ -122,8 +121,7 @@ func TestGrypeAdapter_CreateRelevantCVE(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
-			g, err := NewGrypeAdapter(ctx)
-			tools.EnsureSetup(t, err == nil)
+			g := NewGrypeAdapter()
 			cve, err := fileToCVE(ctx, tt.cve)
 			tools.EnsureSetup(t, err == nil)
 			cvep, err := fileToCVE(ctx, tt.cvep)

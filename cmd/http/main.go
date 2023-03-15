@@ -46,10 +46,7 @@ func main() {
 	brokenStorage := repositories.NewBrokenStorage() // TODO add real storage
 	memoryStorage := repositories.NewMemoryStorage() // TODO add real storage
 	sbomAdapter := v1.NewSyftAdapter(config.ScanTimeout)
-	cveAdapter, err := v1.NewGrypeAdapter(ctx)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("grype adapter error", helpers.Error(err))
-	}
+	cveAdapter := v1.NewGrypeAdapter()
 	platform := v1.NewArmoAdapter(config.AccountID, config.BackendOpenAPI, config.EventReceiverRestURL)
 	service := services.NewScanService(sbomAdapter, brokenStorage, cveAdapter, memoryStorage, platform)
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)

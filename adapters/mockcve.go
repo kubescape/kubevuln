@@ -51,12 +51,6 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain
 	), nil
 }
 
-// UpdateDB does nothing (only otel span)
-func (m MockCVEAdapter) UpdateDB(_ context.Context) error {
-	logger.L().Info("UpdateDB")
-	return nil
-}
-
 // Version returns a static version
 func (m MockCVEAdapter) Version(_ context.Context) string {
 	logger.L().Info("MockCVEAdapter.Version")

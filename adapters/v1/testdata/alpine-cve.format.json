@@ -43,7 +43,8 @@
     ],
     "timestamp": "<<PRESENCE>>",
     "isLastScan": 1,
-    "isFixed": 0
+    "isFixed": 0,
+    "relevantLabel": ""
   },
   {
     "designators": {
@@ -89,6 +90,7 @@
     ],
     "timestamp": "<<PRESENCE>>",
     "isLastScan": 1,
-    "isFixed": 0
+    "isFixed": 0,
+    "relevantLabel": ""
   }
 ]
