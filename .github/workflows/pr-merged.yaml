@@ -6,12 +6,9 @@ on:
     - 'master'
     - 'main'
     paths-ignore:
-      - '**.md' ### Ignore running when README.MD changed.
-      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
-
-  # push:
-  #   tags:
-  #     - 'v*'    
+      - '*.md' 
+      - '*.yaml'
+      - '.github/workflows/*'
 
 jobs:
   pr-merged:
@@ -19,12 +16,12 @@ jobs:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
-      IMAGE_TAG: v0.1.${{ github.run_number }}
+      IMAGE_TAG: v0.2.${{ github.run_number }}-relevancy
       COMPONENT_NAME: kubevuln
       CGO_ENABLED: 0
       GO111MODULE: ""
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.18"
+      GO_VERSION: "1.19"
       REQUIRED_TESTS: '[
                         "vulnerability_scanning", 
                         "vulnerability_scanning_trigger_scan_on_new_image", 
