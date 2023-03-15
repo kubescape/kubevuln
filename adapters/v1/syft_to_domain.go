@@ -3,21 +3,21 @@ package v1
 import (
 	"github.com/anchore/syft/syft/formats/common/spdxhelpers"
 	"github.com/anchore/syft/syft/sbom"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spdx/tools-golang/spdx/v2/v2_3"
 )
 
-func syftToDomain(syftSBOM sbom.SBOM) (*softwarecomposition.Document, error) {
+func syftToDomain(syftSBOM sbom.SBOM) (*v1beta1.Document, error) {
 	spdxDoc := spdxhelpers.ToFormatModel(syftSBOM)
 	return spdxToDomain(spdxDoc)
 }
 
-func spdxToDomain(spdxDoc *v2_3.Document) (*softwarecomposition.Document, error) {
-	doc := softwarecomposition.Document{
+func spdxToDomain(spdxDoc *v2_3.Document) (*v1beta1.Document, error) {
+	doc := v1beta1.Document{
 		SPDXVersion:                spdxDoc.SPDXVersion,
 		DataLicense:                spdxDoc.DataLicense,
-		SPDXIdentifier:             softwarecomposition.ElementID(spdxDoc.SPDXIdentifier),
+		SPDXIdentifier:             v1beta1.ElementID(spdxDoc.SPDXIdentifier),
 		DocumentName:               spdxDoc.DocumentName,
 		DocumentNamespace:          spdxDoc.DocumentNamespace,
 		ExternalDocumentReferences: syftToDomainExternalDocumentReferences(spdxDoc.ExternalDocumentReferences),
@@ -31,7 +31,7 @@ func spdxToDomain(spdxDoc *v2_3.Document) (*softwarecomposition.Document, error)
 		Reviews:                    syftToDomainReviews(spdxDoc.Reviews),
 	}
 	if spdxDoc.CreationInfo != nil {
-		doc.CreationInfo = &softwarecomposition.CreationInfo{
+		doc.CreationInfo = &v1beta1.CreationInfo{
 			LicenseListVersion: spdxDoc.CreationInfo.LicenseListVersion,
 			Creators:           syftToDomainCreators(spdxDoc.CreationInfo.Creators),
 			Created:            spdxDoc.CreationInfo.Created,
@@ -41,14 +41,14 @@ func spdxToDomain(spdxDoc *v2_3.Document) (*softwarecomposition.Document, error)
 	return &doc, nil
 }
 
-func syftToDomainExternalDocumentReferences(externalDocumentReferences []v2_3.ExternalDocumentRef) []softwarecomposition.ExternalDocumentRef {
-	var result []softwarecomposition.ExternalDocumentRef
+func syftToDomainExternalDocumentReferences(externalDocumentReferences []v2_3.ExternalDocumentRef) []v1beta1.ExternalDocumentRef {
+	var result []v1beta1.ExternalDocumentRef
 	for _, e := range externalDocumentReferences {
-		result = append(result, softwarecomposition.ExternalDocumentRef{
+		result = append(result, v1beta1.ExternalDocumentRef{
 			DocumentRefID: e.DocumentRefID,
 			URI:           e.URI,
-			Checksum: softwarecomposition.Checksum{
-				Algorithm: softwarecomposition.ChecksumAlgorithm(e.Checksum.Algorithm),
+			Checksum: v1beta1.Checksum{
+				Algorithm: v1beta1.ChecksumAlgorithm(e.Checksum.Algorithm),
 				Value:     e.Checksum.Value,
 			},
 		})
@@ -56,10 +56,10 @@ func syftToDomainExternalDocumentReferences(externalDocumentReferences []v2_3.Ex
 	return result
 }
 
-func syftToDomainCreators(creators []common.Creator) []softwarecomposition.Creator {
-	var result []softwarecomposition.Creator
+func syftToDomainCreators(creators []common.Creator) []v1beta1.Creator {
+	var result []v1beta1.Creator
 	for _, c := range creators {
-		result = append(result, softwarecomposition.Creator{
+		result = append(result, v1beta1.Creator{
 			Creator:     c.Creator,
 			CreatorType: c.CreatorType,
 		})
@@ -67,14 +67,14 @@ func syftToDomainCreators(creators []common.Creator) []softwarecomposition.Creat
 	return result
 }
 
-func syftToDomainPackages(packages []*v2_3.Package) []*softwarecomposition.Package {
-	var result []*softwarecomposition.Package
+func syftToDomainPackages(packages []*v2_3.Package) []*v1beta1.Package {
+	var result []*v1beta1.Package
 	for _, p := range packages {
-		newP := softwarecomposition.Package{
+		newP := v1beta1.Package{
 			HasFiles:                    nil, // TODO check with Vlad
 			IsUnpackaged:                p.IsUnpackaged,
 			PackageName:                 p.PackageName,
-			PackageSPDXIdentifier:       softwarecomposition.ElementID(p.PackageSPDXIdentifier),
+			PackageSPDXIdentifier:       v1beta1.ElementID(p.PackageSPDXIdentifier),
 			PackageVersion:              p.PackageVersion,
 			PackageFileName:             p.PackageFileName,
 			PackageDownloadLocation:     p.PackageDownloadLocation,
@@ -101,19 +101,19 @@ func syftToDomainPackages(packages []*v2_3.Package) []*softwarecomposition.Packa
 			Annotations:                 syftToDomainPackagesAnnotations(p.Annotations),
 		}
 		if p.PackageSupplier != nil {
-			newP.PackageSupplier = &softwarecomposition.Supplier{
+			newP.PackageSupplier = &v1beta1.Supplier{
 				Supplier:     p.PackageSupplier.Supplier,
 				SupplierType: p.PackageSupplier.SupplierType,
 			}
 		}
 		if p.PackageOriginator != nil {
-			newP.PackageOriginator = &softwarecomposition.Originator{
+			newP.PackageOriginator = &v1beta1.Originator{
 				Originator:     p.PackageOriginator.Originator,
 				OriginatorType: p.PackageOriginator.OriginatorType,
 			}
 		}
 		if p.PackageVerificationCode != nil {
-			newP.PackageVerificationCode = &softwarecomposition.PackageVerificationCode{
+			newP.PackageVerificationCode = &v1beta1.PackageVerificationCode{
 				Value:         p.PackageVerificationCode.Value,
 				ExcludedFiles: p.PackageVerificationCode.ExcludedFiles,
 			}
@@ -123,21 +123,21 @@ func syftToDomainPackages(packages []*v2_3.Package) []*softwarecomposition.Packa
 	return result
 }
 
-func syftToDomainPackagesPackageChecksums(packageChecksums []common.Checksum) []softwarecomposition.Checksum {
-	var result []softwarecomposition.Checksum
+func syftToDomainPackagesPackageChecksums(packageChecksums []common.Checksum) []v1beta1.Checksum {
+	var result []v1beta1.Checksum
 	for _, p := range packageChecksums {
-		result = append(result, softwarecomposition.Checksum{
-			Algorithm: softwarecomposition.ChecksumAlgorithm(p.Algorithm),
+		result = append(result, v1beta1.Checksum{
+			Algorithm: v1beta1.ChecksumAlgorithm(p.Algorithm),
 			Value:     p.Value,
 		})
 	}
 	return result
 }
 
-func syftToDomainPackagesPackageExternalReferences(packageExternalReferences []*v2_3.PackageExternalReference) []*softwarecomposition.PackageExternalReference {
-	var result []*softwarecomposition.PackageExternalReference
+func syftToDomainPackagesPackageExternalReferences(packageExternalReferences []*v2_3.PackageExternalReference) []*v1beta1.PackageExternalReference {
+	var result []*v1beta1.PackageExternalReference
 	for _, p := range packageExternalReferences {
-		result = append(result, &softwarecomposition.PackageExternalReference{
+		result = append(result, &v1beta1.PackageExternalReference{
 			Category:           p.Category,
 			RefType:            p.RefType,
 			Locator:            p.Locator,
@@ -147,19 +147,19 @@ func syftToDomainPackagesPackageExternalReferences(packageExternalReferences []*
 	return result
 }
 
-func syftToDomainPackagesAnnotations(annotations []v2_3.Annotation) []softwarecomposition.Annotation {
-	var result []softwarecomposition.Annotation
+func syftToDomainPackagesAnnotations(annotations []v2_3.Annotation) []v1beta1.Annotation {
+	var result []v1beta1.Annotation
 	for _, a := range annotations {
-		result = append(result, softwarecomposition.Annotation{
-			Annotator: softwarecomposition.Annotator{
+		result = append(result, v1beta1.Annotation{
+			Annotator: v1beta1.Annotator{
 				Annotator:     a.Annotator.Annotator,
 				AnnotatorType: a.Annotator.AnnotatorType,
 			},
 			AnnotationDate: a.AnnotationDate,
 			AnnotationType: a.AnnotationType,
-			AnnotationSPDXIdentifier: softwarecomposition.DocElementID{
+			AnnotationSPDXIdentifier: v1beta1.DocElementID{
 				DocumentRefID: a.AnnotationSPDXIdentifier.DocumentRefID,
-				ElementRefID:  softwarecomposition.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
+				ElementRefID:  v1beta1.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
 				SpecialID:     a.AnnotationSPDXIdentifier.SpecialID,
 			},
 			AnnotationComment: a.AnnotationComment,
@@ -168,10 +168,10 @@ func syftToDomainPackagesAnnotations(annotations []v2_3.Annotation) []softwareco
 	return result
 }
 
-func syftToDomainPackagesFilesArtifactOfProjects(artifactOfProjects []*v2_3.ArtifactOfProject) []*softwarecomposition.ArtifactOfProject {
-	var result []*softwarecomposition.ArtifactOfProject
+func syftToDomainPackagesFilesArtifactOfProjects(artifactOfProjects []*v2_3.ArtifactOfProject) []*v1beta1.ArtifactOfProject {
+	var result []*v1beta1.ArtifactOfProject
 	for _, a := range artifactOfProjects {
-		result = append(result, &softwarecomposition.ArtifactOfProject{
+		result = append(result, &v1beta1.ArtifactOfProject{
 			Name:     a.Name,
 			HomePage: a.HomePage,
 			URI:      a.URI,
@@ -180,12 +180,15 @@ func syftToDomainPackagesFilesArtifactOfProjects(artifactOfProjects []*v2_3.Arti
 	return result
 }
 
-func syftToDomainPackagesFilesSnippets(snippets map[common.ElementID]*v2_3.Snippet) map[softwarecomposition.ElementID]*softwarecomposition.Snippet {
-	result := make(map[softwarecomposition.ElementID]*softwarecomposition.Snippet)
+func syftToDomainPackagesFilesSnippets(snippets map[common.ElementID]*v2_3.Snippet) map[v1beta1.ElementID]*v1beta1.Snippet {
+	if len(snippets) == 0 {
+		return nil
+	}
+	result := make(map[v1beta1.ElementID]*v1beta1.Snippet)
 	for k, s := range snippets {
-		result[softwarecomposition.ElementID(k)] = &softwarecomposition.Snippet{
-			SnippetSPDXIdentifier:         softwarecomposition.ElementID(s.SnippetSPDXIdentifier),
-			SnippetFromFileSPDXIdentifier: softwarecomposition.ElementID(s.SnippetFromFileSPDXIdentifier),
+		result[v1beta1.ElementID(k)] = &v1beta1.Snippet{
+			SnippetSPDXIdentifier:         v1beta1.ElementID(s.SnippetSPDXIdentifier),
+			SnippetFromFileSPDXIdentifier: v1beta1.ElementID(s.SnippetFromFileSPDXIdentifier),
 			Ranges:                        syftToDomainPackagesFilesSnippetsRanges(s.Ranges),
 			SnippetLicenseConcluded:       s.SnippetLicenseConcluded,
 			LicenseInfoInSnippet:          s.LicenseInfoInSnippet,
@@ -199,31 +202,31 @@ func syftToDomainPackagesFilesSnippets(snippets map[common.ElementID]*v2_3.Snipp
 	return result
 }
 
-func syftToDomainPackagesFilesSnippetsRanges(ranges []common.SnippetRange) []softwarecomposition.SnippetRange {
-	var result []softwarecomposition.SnippetRange
+func syftToDomainPackagesFilesSnippetsRanges(ranges []common.SnippetRange) []v1beta1.SnippetRange {
+	var result []v1beta1.SnippetRange
 	for _, r := range ranges {
-		result = append(result, softwarecomposition.SnippetRange{
-			StartPointer: softwarecomposition.SnippetRangePointer{
+		result = append(result, v1beta1.SnippetRange{
+			StartPointer: v1beta1.SnippetRangePointer{
 				Offset:             r.StartPointer.Offset,
 				LineNumber:         r.StartPointer.LineNumber,
-				FileSPDXIdentifier: softwarecomposition.ElementID(r.StartPointer.FileSPDXIdentifier),
+				FileSPDXIdentifier: v1beta1.ElementID(r.StartPointer.FileSPDXIdentifier),
 			},
-			EndPointer: softwarecomposition.SnippetRangePointer{
+			EndPointer: v1beta1.SnippetRangePointer{
 				Offset:             r.EndPointer.Offset,
 				LineNumber:         r.EndPointer.LineNumber,
-				FileSPDXIdentifier: softwarecomposition.ElementID(r.EndPointer.FileSPDXIdentifier),
+				FileSPDXIdentifier: v1beta1.ElementID(r.EndPointer.FileSPDXIdentifier),
 			},
 		})
 	}
 	return result
 }
 
-func syftToDomainFiles(files []*v2_3.File) []*softwarecomposition.File {
-	var result []*softwarecomposition.File
+func syftToDomainFiles(files []*v2_3.File) []*v1beta1.File {
+	var result []*v1beta1.File
 	for _, f := range files {
-		result = append(result, &softwarecomposition.File{
+		result = append(result, &v1beta1.File{
 			FileName:             f.FileName,
-			FileSPDXIdentifier:   softwarecomposition.ElementID(f.FileSPDXIdentifier),
+			FileSPDXIdentifier:   v1beta1.ElementID(f.FileSPDXIdentifier),
 			FileTypes:            f.FileTypes,
 			Checksums:            syftToDomainPackagesPackageChecksums(f.Checksums),
 			LicenseConcluded:     f.LicenseConcluded,
@@ -243,10 +246,10 @@ func syftToDomainFiles(files []*v2_3.File) []*softwarecomposition.File {
 	return result
 }
 
-func syftToDomainOtherLicenses(otherLicenses []*v2_3.OtherLicense) []*softwarecomposition.OtherLicense {
-	var result []*softwarecomposition.OtherLicense
+func syftToDomainOtherLicenses(otherLicenses []*v2_3.OtherLicense) []*v1beta1.OtherLicense {
+	var result []*v1beta1.OtherLicense
 	for _, o := range otherLicenses {
-		result = append(result, &softwarecomposition.OtherLicense{
+		result = append(result, &v1beta1.OtherLicense{
 			LicenseIdentifier:      o.LicenseIdentifier,
 			ExtractedText:          o.ExtractedText,
 			LicenseName:            o.LicenseName,
@@ -257,18 +260,18 @@ func syftToDomainOtherLicenses(otherLicenses []*v2_3.OtherLicense) []*softwareco
 	return result
 }
 
-func syftToDomainRelationships(relationships []*v2_3.Relationship) []*softwarecomposition.Relationship {
-	var result []*softwarecomposition.Relationship
+func syftToDomainRelationships(relationships []*v2_3.Relationship) []*v1beta1.Relationship {
+	var result []*v1beta1.Relationship
 	for _, r := range relationships {
-		result = append(result, &softwarecomposition.Relationship{
-			RefA: softwarecomposition.DocElementID{
+		result = append(result, &v1beta1.Relationship{
+			RefA: v1beta1.DocElementID{
 				DocumentRefID: r.RefA.DocumentRefID,
-				ElementRefID:  softwarecomposition.ElementID(r.RefA.ElementRefID),
+				ElementRefID:  v1beta1.ElementID(r.RefA.ElementRefID),
 				SpecialID:     r.RefA.SpecialID,
 			},
-			RefB: softwarecomposition.DocElementID{
+			RefB: v1beta1.DocElementID{
 				DocumentRefID: r.RefB.DocumentRefID,
-				ElementRefID:  softwarecomposition.ElementID(r.RefB.ElementRefID),
+				ElementRefID:  v1beta1.ElementID(r.RefB.ElementRefID),
 				SpecialID:     r.RefB.SpecialID,
 			},
 			Relationship:        r.Relationship,
@@ -278,19 +281,19 @@ func syftToDomainRelationships(relationships []*v2_3.Relationship) []*softwareco
 	return result
 }
 
-func syftToDomainAnnotations(annotations []*v2_3.Annotation) []softwarecomposition.Annotation {
-	var result []softwarecomposition.Annotation
+func syftToDomainAnnotations(annotations []*v2_3.Annotation) []v1beta1.Annotation {
+	var result []v1beta1.Annotation
 	for _, a := range annotations {
-		result = append(result, softwarecomposition.Annotation{
-			Annotator: softwarecomposition.Annotator{
+		result = append(result, v1beta1.Annotation{
+			Annotator: v1beta1.Annotator{
 				Annotator:     a.Annotator.Annotator,
 				AnnotatorType: a.Annotator.AnnotatorType,
 			},
 			AnnotationDate: a.AnnotationDate,
 			AnnotationType: a.AnnotationType,
-			AnnotationSPDXIdentifier: softwarecomposition.DocElementID{
+			AnnotationSPDXIdentifier: v1beta1.DocElementID{
 				DocumentRefID: a.AnnotationSPDXIdentifier.DocumentRefID,
-				ElementRefID:  softwarecomposition.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
+				ElementRefID:  v1beta1.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
 				SpecialID:     a.AnnotationSPDXIdentifier.SpecialID,
 			},
 			AnnotationComment: a.AnnotationComment,
@@ -299,12 +302,12 @@ func syftToDomainAnnotations(annotations []*v2_3.Annotation) []softwarecompositi
 	return result
 }
 
-func syftToDomainSnippets(snippets []v2_3.Snippet) []softwarecomposition.Snippet {
-	var result []softwarecomposition.Snippet
+func syftToDomainSnippets(snippets []v2_3.Snippet) []v1beta1.Snippet {
+	var result []v1beta1.Snippet
 	for _, s := range snippets {
-		result = append(result, softwarecomposition.Snippet{
-			SnippetSPDXIdentifier:         softwarecomposition.ElementID(s.SnippetSPDXIdentifier),
-			SnippetFromFileSPDXIdentifier: softwarecomposition.ElementID(s.SnippetFromFileSPDXIdentifier),
+		result = append(result, v1beta1.Snippet{
+			SnippetSPDXIdentifier:         v1beta1.ElementID(s.SnippetSPDXIdentifier),
+			SnippetFromFileSPDXIdentifier: v1beta1.ElementID(s.SnippetFromFileSPDXIdentifier),
 			Ranges:                        syftToDomainPackagesFilesSnippetsRanges(s.Ranges),
 			SnippetLicenseConcluded:       s.SnippetLicenseConcluded,
 			LicenseInfoInSnippet:          s.LicenseInfoInSnippet,
@@ -318,10 +321,10 @@ func syftToDomainSnippets(snippets []v2_3.Snippet) []softwarecomposition.Snippet
 	return result
 }
 
-func syftToDomainReviews(reviews []*v2_3.Review) []*softwarecomposition.Review {
-	var result []*softwarecomposition.Review
+func syftToDomainReviews(reviews []*v2_3.Review) []*v1beta1.Review {
+	var result []*v1beta1.Review
 	for _, r := range reviews {
-		result = append(result, &softwarecomposition.Review{
+		result = append(result, &v1beta1.Review{
 			Reviewer:      r.Reviewer,
 			ReviewerType:  r.ReviewerType,
 			ReviewDate:    r.ReviewDate,

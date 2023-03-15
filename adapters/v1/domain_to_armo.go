@@ -11,10 +11,10 @@ import (
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func domainToArmo(ctx context.Context, grypeDocument softwarecomposition.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
+func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
 	var vulnerabilityResults []containerscan.CommonContainerVulnerabilityResult
 
 	// retrieve timestamp from context
@@ -99,7 +99,7 @@ func domainToArmo(ctx context.Context, grypeDocument softwarecomposition.GrypeDo
 			// add layer information
 			// make sure we have at least one location
 			if match.Artifact.Locations == nil || len(match.Artifact.Locations) < 1 {
-				match.Artifact.Locations = []softwarecomposition.SyftCoordinates{
+				match.Artifact.Locations = []v1beta1.SyftCoordinates{
 					{
 						FileSystemID: dummyLayer,
 					},

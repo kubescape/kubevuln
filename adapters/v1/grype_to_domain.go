@@ -5,19 +5,19 @@ import (
 
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/syft/syft/source"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func grypeToDomain(grypeDoc models.Document) (*softwarecomposition.GrypeDocument, error) {
-	doc := softwarecomposition.GrypeDocument{
+func grypeToDomain(grypeDoc models.Document) (*v1beta1.GrypeDocument, error) {
+	doc := v1beta1.GrypeDocument{
 		Matches:        grypeToDomainMatches(grypeDoc.Matches),
 		IgnoredMatches: grypeToDomainIgnoredMatches(grypeDoc.IgnoredMatches),
-		Distro: softwarecomposition.Distribution{
+		Distro: v1beta1.Distribution{
 			Name:    grypeDoc.Distro.Name,
 			Version: grypeDoc.Distro.Version,
 			IDLike:  grypeDoc.Distro.IDLike,
 		},
-		Descriptor: softwarecomposition.Descriptor{
+		Descriptor: v1beta1.Descriptor{
 			Name:                  grypeDoc.Descriptor.Name,
 			Version:               grypeDoc.Descriptor.Version,
 			Configuration:         toRawMessage(grypeDoc.Descriptor.Configuration),
@@ -25,7 +25,7 @@ func grypeToDomain(grypeDoc models.Document) (*softwarecomposition.GrypeDocument
 		},
 	}
 	if grypeDoc.Source != nil {
-		doc.Source = &softwarecomposition.Source{
+		doc.Source = &v1beta1.Source{
 			Type:   grypeDoc.Source.Type,
 			Target: toRawMessage(grypeDoc.Source.Target),
 		}
@@ -38,12 +38,12 @@ func toRawMessage(v interface{}) json.RawMessage {
 	return b
 }
 
-func grypeToDomainMatches(matches []models.Match) []softwarecomposition.Match {
-	var result []softwarecomposition.Match
+func grypeToDomainMatches(matches []models.Match) []v1beta1.Match {
+	var result []v1beta1.Match
 	for _, m := range matches {
-		result = append(result, softwarecomposition.Match{
-			Vulnerability: softwarecomposition.Vulnerability{
-				VulnerabilityMetadata: softwarecomposition.VulnerabilityMetadata{
+		result = append(result, v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
 					ID:          m.Vulnerability.VulnerabilityMetadata.ID,
 					DataSource:  m.Vulnerability.VulnerabilityMetadata.DataSource,
 					Namespace:   m.Vulnerability.VulnerabilityMetadata.Namespace,
@@ -52,7 +52,7 @@ func grypeToDomainMatches(matches []models.Match) []softwarecomposition.Match {
 					Description: m.Vulnerability.VulnerabilityMetadata.Description,
 					Cvss:        grypeToDomainMatchesCvss(m.Vulnerability.VulnerabilityMetadata.Cvss),
 				},
-				Fix: softwarecomposition.Fix{
+				Fix: v1beta1.Fix{
 					Versions: m.Vulnerability.Fix.Versions,
 					State:    m.Vulnerability.Fix.State,
 				},
@@ -60,17 +60,17 @@ func grypeToDomainMatches(matches []models.Match) []softwarecomposition.Match {
 			},
 			RelatedVulnerabilities: grypeToDomainMatchesRelatedVulnerabilities(m.RelatedVulnerabilities),
 			MatchDetails:           grypeToDomainMatchesMatchDetails(m.MatchDetails),
-			Artifact: softwarecomposition.GrypePackage{
+			Artifact: v1beta1.GrypePackage{
 				Name:         m.Artifact.Name,
 				Version:      m.Artifact.Version,
-				Type:         softwarecomposition.SyftType(m.Artifact.Type),
+				Type:         v1beta1.SyftType(m.Artifact.Type),
 				Locations:    grypeToDomainMatchesLocations(m.Artifact.Locations),
-				Language:     softwarecomposition.SyftLanguage(m.Artifact.Language),
+				Language:     v1beta1.SyftLanguage(m.Artifact.Language),
 				Licenses:     m.Artifact.Licenses,
 				CPEs:         m.Artifact.CPEs,
 				PURL:         m.Artifact.PURL,
 				Upstreams:    grypeToDomainMatchesUpstreams(m.Artifact.Upstreams),
-				MetadataType: softwarecomposition.MetadataType(m.Artifact.MetadataType),
+				MetadataType: v1beta1.MetadataType(m.Artifact.MetadataType),
 				Metadata:     toRawMessage(m.Artifact.Metadata),
 			},
 		})
@@ -78,13 +78,13 @@ func grypeToDomainMatches(matches []models.Match) []softwarecomposition.Match {
 	return result
 }
 
-func grypeToDomainMatchesCvss(cvss []models.Cvss) []softwarecomposition.Cvss {
-	var result []softwarecomposition.Cvss
+func grypeToDomainMatchesCvss(cvss []models.Cvss) []v1beta1.Cvss {
+	var result []v1beta1.Cvss
 	for _, c := range cvss {
-		result = append(result, softwarecomposition.Cvss{
+		result = append(result, v1beta1.Cvss{
 			Version: c.Version,
 			Vector:  c.Vector,
-			Metrics: softwarecomposition.CvssMetrics{
+			Metrics: v1beta1.CvssMetrics{
 				BaseScore:           c.Metrics.BaseScore,
 				ExploitabilityScore: c.Metrics.ExploitabilityScore,
 				ImpactScore:         c.Metrics.ImpactScore,
@@ -95,10 +95,10 @@ func grypeToDomainMatchesCvss(cvss []models.Cvss) []softwarecomposition.Cvss {
 	return result
 }
 
-func grypeToDomainMatchesAdvisories(advisories []models.Advisory) []softwarecomposition.Advisory {
-	var result []softwarecomposition.Advisory
+func grypeToDomainMatchesAdvisories(advisories []models.Advisory) []v1beta1.Advisory {
+	var result []v1beta1.Advisory
 	for _, a := range advisories {
-		result = append(result, softwarecomposition.Advisory{
+		result = append(result, v1beta1.Advisory{
 			ID:   a.ID,
 			Link: a.Link,
 		})
@@ -106,10 +106,10 @@ func grypeToDomainMatchesAdvisories(advisories []models.Advisory) []softwarecomp
 	return result
 }
 
-func grypeToDomainMatchesRelatedVulnerabilities(relatedVulnerabilities []models.VulnerabilityMetadata) []softwarecomposition.VulnerabilityMetadata {
-	var result []softwarecomposition.VulnerabilityMetadata
+func grypeToDomainMatchesRelatedVulnerabilities(relatedVulnerabilities []models.VulnerabilityMetadata) []v1beta1.VulnerabilityMetadata {
+	var result []v1beta1.VulnerabilityMetadata
 	for _, v := range relatedVulnerabilities {
-		result = append(result, softwarecomposition.VulnerabilityMetadata{
+		result = append(result, v1beta1.VulnerabilityMetadata{
 			ID:          v.ID,
 			DataSource:  v.DataSource,
 			Namespace:   v.Namespace,
@@ -122,10 +122,10 @@ func grypeToDomainMatchesRelatedVulnerabilities(relatedVulnerabilities []models.
 	return result
 }
 
-func grypeToDomainMatchesMatchDetails(matchDetails []models.MatchDetails) []softwarecomposition.MatchDetails {
-	var result []softwarecomposition.MatchDetails
+func grypeToDomainMatchesMatchDetails(matchDetails []models.MatchDetails) []v1beta1.MatchDetails {
+	var result []v1beta1.MatchDetails
 	for _, m := range matchDetails {
-		result = append(result, softwarecomposition.MatchDetails{
+		result = append(result, v1beta1.MatchDetails{
 			Type:       m.Type,
 			Matcher:    m.Matcher,
 			SearchedBy: toRawMessage(m.SearchedBy),
@@ -135,10 +135,10 @@ func grypeToDomainMatchesMatchDetails(matchDetails []models.MatchDetails) []soft
 	return result
 }
 
-func grypeToDomainMatchesLocations(locations []source.Coordinates) []softwarecomposition.SyftCoordinates {
-	var result []softwarecomposition.SyftCoordinates
+func grypeToDomainMatchesLocations(locations []source.Coordinates) []v1beta1.SyftCoordinates {
+	var result []v1beta1.SyftCoordinates
 	for _, l := range locations {
-		result = append(result, softwarecomposition.SyftCoordinates{
+		result = append(result, v1beta1.SyftCoordinates{
 			RealPath:     l.RealPath,
 			FileSystemID: l.FileSystemID,
 		})
@@ -146,10 +146,10 @@ func grypeToDomainMatchesLocations(locations []source.Coordinates) []softwarecom
 	return result
 }
 
-func grypeToDomainMatchesUpstreams(upstreams []models.UpstreamPackage) []softwarecomposition.UpstreamPackage {
-	var result []softwarecomposition.UpstreamPackage
+func grypeToDomainMatchesUpstreams(upstreams []models.UpstreamPackage) []v1beta1.UpstreamPackage {
+	var result []v1beta1.UpstreamPackage
 	for _, u := range upstreams {
-		result = append(result, softwarecomposition.UpstreamPackage{
+		result = append(result, v1beta1.UpstreamPackage{
 			Name:    u.Name,
 			Version: u.Version,
 		})
@@ -157,13 +157,13 @@ func grypeToDomainMatchesUpstreams(upstreams []models.UpstreamPackage) []softwar
 	return result
 }
 
-func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []softwarecomposition.IgnoredMatch {
-	var result []softwarecomposition.IgnoredMatch
+func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []v1beta1.IgnoredMatch {
+	var result []v1beta1.IgnoredMatch
 	for _, m := range ignoredMatches {
-		result = append(result, softwarecomposition.IgnoredMatch{
-			Match: softwarecomposition.Match{
-				Vulnerability: softwarecomposition.Vulnerability{
-					VulnerabilityMetadata: softwarecomposition.VulnerabilityMetadata{
+		result = append(result, v1beta1.IgnoredMatch{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
 						ID:          m.Vulnerability.VulnerabilityMetadata.ID,
 						DataSource:  m.Vulnerability.VulnerabilityMetadata.DataSource,
 						Namespace:   m.Vulnerability.VulnerabilityMetadata.Namespace,
@@ -172,7 +172,7 @@ func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []softwar
 						Description: m.Vulnerability.VulnerabilityMetadata.Description,
 						Cvss:        grypeToDomainMatchesCvss(m.Vulnerability.VulnerabilityMetadata.Cvss),
 					},
-					Fix: softwarecomposition.Fix{
+					Fix: v1beta1.Fix{
 						Versions: m.Vulnerability.Fix.Versions,
 						State:    m.Vulnerability.Fix.State,
 					},
@@ -180,17 +180,17 @@ func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []softwar
 				},
 				RelatedVulnerabilities: grypeToDomainMatchesRelatedVulnerabilities(m.RelatedVulnerabilities),
 				MatchDetails:           grypeToDomainMatchesMatchDetails(m.MatchDetails),
-				Artifact: softwarecomposition.GrypePackage{
+				Artifact: v1beta1.GrypePackage{
 					Name:         m.Artifact.Name,
 					Version:      m.Artifact.Version,
-					Type:         softwarecomposition.SyftType(m.Artifact.Type),
+					Type:         v1beta1.SyftType(m.Artifact.Type),
 					Locations:    grypeToDomainMatchesLocations(m.Artifact.Locations),
-					Language:     softwarecomposition.SyftLanguage(m.Artifact.Language),
+					Language:     v1beta1.SyftLanguage(m.Artifact.Language),
 					Licenses:     m.Artifact.Licenses,
 					CPEs:         m.Artifact.CPEs,
 					PURL:         m.Artifact.PURL,
 					Upstreams:    grypeToDomainMatchesUpstreams(m.Artifact.Upstreams),
-					MetadataType: softwarecomposition.MetadataType(m.Artifact.MetadataType),
+					MetadataType: v1beta1.MetadataType(m.Artifact.MetadataType),
 					Metadata:     toRawMessage(m.Artifact.Metadata),
 				},
 			},
@@ -200,13 +200,13 @@ func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []softwar
 	return result
 }
 
-func grypeToDomainIgnoredMatchesAppliedIgnoreRules(appliedIgnoreRules []models.IgnoreRule) []softwarecomposition.IgnoreRule {
-	var result []softwarecomposition.IgnoreRule
+func grypeToDomainIgnoredMatchesAppliedIgnoreRules(appliedIgnoreRules []models.IgnoreRule) []v1beta1.IgnoreRule {
+	var result []v1beta1.IgnoreRule
 	for _, r := range appliedIgnoreRules {
-		result = append(result, softwarecomposition.IgnoreRule{
+		result = append(result, v1beta1.IgnoreRule{
 			Vulnerability: r.Vulnerability,
 			FixState:      r.FixState,
-			Package:       (*softwarecomposition.IgnoreRulePackage)(r.Package),
+			Package:       (*v1beta1.IgnoreRulePackage)(r.Package),
 		})
 	}
 	return result

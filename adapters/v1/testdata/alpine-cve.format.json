@@ -1,57 +1,57 @@
 {
-  "Matches": [
+  "matches": [
     {
-      "Vulnerability": {
-        "ID": "CVE-2022-28391",
-        "DataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
-        "Namespace": "nvd:cpe",
-        "Severity": "High",
-        "URLs": [
+      "vulnerability": {
+        "id": "CVE-2022-28391",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
+        "namespace": "nvd:cpe",
+        "severity": "High",
+        "urls": [
           "https://git.alpinelinux.org/aports/plain/main/busybox/0001-libbb-sockaddr2str-ensure-only-printable-characters-.patch",
           "https://git.alpinelinux.org/aports/plain/main/busybox/0002-nslookup-sanitize-all-printed-strings-with-printable.patch",
           "https://gitlab.alpinelinux.org/alpine/aports/-/issues/13661"
         ],
-        "Description": "BusyBox through 1.35.0 allows remote attackers to execute arbitrary code if netstat is used to print a DNS PTR record's value to a VT compatible terminal. Alternatively, the attacker could choose to change the terminal's colors.",
-        "Cvss": [
+        "description": "BusyBox through 1.35.0 allows remote attackers to execute arbitrary code if netstat is used to print a DNS PTR record's value to a VT compatible terminal. Alternatively, the attacker could choose to change the terminal's colors.",
+        "cvss": [
           {
-            "Version": "2.0",
-            "Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
-            "Metrics": {
-              "BaseScore": 6.8,
-              "ExploitabilityScore": 8.6,
-              "ImpactScore": 6.4
+            "version": "2.0",
+            "vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+            "metrics": {
+              "baseScore": 6.8,
+              "exploitabilityScore": 8.6,
+              "impactScore": 6.4
             },
-            "VendorMetadata": {}
+            "vendorMetadata": {}
           },
           {
-            "Version": "3.1",
-            "Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-            "Metrics": {
-              "BaseScore": 8.8,
-              "ExploitabilityScore": 2.8,
-              "ImpactScore": 5.9
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "metrics": {
+              "baseScore": 8.8,
+              "exploitabilityScore": 2.8,
+              "impactScore": 5.9
             },
-            "VendorMetadata": {}
+            "vendorMetadata": {}
           }
         ],
-        "Fix": {
-          "Versions": [],
-          "State": "unknown"
+        "fix": {
+          "versions": [],
+          "state": "unknown"
         },
-        "Advisories": null
+        "advisories": null
       },
-      "RelatedVulnerabilities": null,
-      "MatchDetails": [
+      "relatedVulnerabilities": null,
+      "matchDetails": [
         {
-          "Type": "cpe-match",
-          "Matcher": "stock-matcher",
-          "SearchedBy": {
+          "type": "cpe-match",
+          "matcher": "stock-matcher",
+          "searchedBy": {
             "namespace": "nvd:cpe",
             "cpes": [
               "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
             ]
           },
-          "Found": {
+          "found": {
             "vulnerabilityID": "CVE-2022-28391",
             "versionConstraint": "<= 1.35.0 (unknown)",
             "cpes": [
@@ -60,74 +60,73 @@
           }
         }
       ],
-      "Artifact": {
-        "Name": "busybox",
-        "Version": "1.35.0",
-        "Type": "",
-        "Locations": null,
-        "Language": "",
-        "Licenses": [],
-        "CPEs": [
+      "artifact": {
+        "name": "busybox",
+        "version": "1.35.0",
+        "type": "",
+        "locations": null,
+        "language": "",
+        "licenses": [],
+        "cpes": [
           "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
           "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
         ],
-        "PURL": "pkg:/",
-        "Upstreams": null,
-        "MetadataType": "",
-        "Metadata": null
+        "purl": "pkg:/",
+        "upstreams": null,
+        "metadata": null
       }
     },
     {
-      "Vulnerability": {
-        "ID": "CVE-2022-30065",
-        "DataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
-        "Namespace": "nvd:cpe",
-        "Severity": "High",
-        "URLs": [
+      "vulnerability": {
+        "id": "CVE-2022-30065",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
+        "namespace": "nvd:cpe",
+        "severity": "High",
+        "urls": [
           "https://bugs.busybox.net/show_bug.cgi?id=14781",
           "https://cert-portal.siemens.com/productcert/pdf/ssa-333517.pdf"
         ],
-        "Description": "A use-after-free in Busybox 1.35-x's awk applet leads to denial of service and possibly code execution when processing a crafted awk pattern in the copyvar function.",
-        "Cvss": [
+        "description": "A use-after-free in Busybox 1.35-x's awk applet leads to denial of service and possibly code execution when processing a crafted awk pattern in the copyvar function.",
+        "cvss": [
           {
-            "Version": "2.0",
-            "Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
-            "Metrics": {
-              "BaseScore": 6.8,
-              "ExploitabilityScore": 8.6,
-              "ImpactScore": 6.4
+            "version": "2.0",
+            "vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+            "metrics": {
+              "baseScore": 6.8,
+              "exploitabilityScore": 8.6,
+              "impactScore": 6.4
             },
-            "VendorMetadata": {}
+            "vendorMetadata": {}
           },
           {
-            "Version": "3.1",
-            "Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-            "Metrics": {
-              "BaseScore": 7.8,
-              "ExploitabilityScore": 1.8,
-              "ImpactScore": 5.9
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "metrics": {
+              "baseScore": 7.8,
+              "exploitabilityScore": 1.8,
+              "impactScore": 5.9
             },
-            "VendorMetadata": {}
+            "vendorMetadata": {}
           }
         ],
-        "Fix": {
-          "Versions": [],
-          "State": "unknown"
+        "fix": {
+          "versions": [],
+          "state": "unknown"
         },
-        "Advisories": null
+        "advisories": null
       },
-      "RelatedVulnerabilities": null,
-      "MatchDetails": [
+      "relatedVulnerabilities": null,
+      "matchDetails": [
         {
-          "Type": "cpe-match",
-          "Matcher": "stock-matcher",
-          "SearchedBy": {
+          "type": "cpe-match",
+          "matcher": "stock-matcher",
+          "searchedBy": {
             "namespace": "nvd:cpe",
             "cpes": [
               "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
             ]
           },
-          "Found": {
+          "found": {
             "vulnerabilityID": "CVE-2022-30065",
             "versionConstraint": "= 1.35.0 (unknown)",
             "cpes": [
@@ -136,28 +135,26 @@
           }
         }
       ],
-      "Artifact": {
-        "Name": "busybox",
-        "Version": "1.35.0",
-        "Type": "",
-        "Locations": null,
-        "Language": "",
-        "Licenses": [],
-        "CPEs": [
+      "artifact": {
+        "name": "busybox",
+        "version": "1.35.0",
+        "type": "",
+        "locations": null,
+        "language": "",
+        "licenses": [],
+        "cpes": [
           "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
           "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
         ],
-        "PURL": "pkg:/",
-        "Upstreams": null,
-        "MetadataType": "",
-        "Metadata": null
+        "purl": "pkg:/",
+        "upstreams": null,
+        "metadata": null
       }
     }
   ],
-  "IgnoredMatches": null,
-  "Source": {
-    "Type": "image",
-    "Target": {
+  "source": {
+    "type": "image",
+    "target": {
       "userInput": "",
       "imageID": "",
       "manifestDigest": "",
@@ -172,18 +169,18 @@
       "os": ""
     }
   },
-  "Distro": {
-    "Name": "alpine",
-    "Version": "3.17.2",
-    "IDLike": [
+  "distro": {
+    "name": "alpine",
+    "version": "3.17.2",
+    "idLike": [
       "alpine"
     ]
   },
-  "Descriptor": {
-    "Name": "grype",
-    "Version": "[not provided]",
-    "Configuration": null,
-    "VulnerabilityDBStatus": {
+  "descriptor": {
+    "name": "grype",
+    "version": "[not provided]",
+    "configuration": null,
+    "db": {
       "built": "<<PRESENCE>>",
       "schemaVersion": 5,
       "location": "<<PRESENCE>>",

@@ -6,7 +6,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // MockCVEAdapter implements a mocked CVEScanner to be used for tests
@@ -41,7 +41,7 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  m.Version(ctx),
 		CVEDBVersion:       m.DBVersion(ctx),
-		Content:            &softwarecomposition.GrypeDocument{},
+		Content:            &v1beta1.GrypeDocument{},
 	}, nil
 }
 

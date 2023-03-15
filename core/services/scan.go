@@ -95,7 +95,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		}
 		// submit to storage
 		if cveStorageOK {
-			err = s.cveRepository.StoreCVE(ctx, cve)
+			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
 				return err
 			}
@@ -174,7 +174,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 		// submit to storage
 		if cveStorageOK {
-			err = s.cveRepository.StoreCVE(ctx, cve)
+			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
 				return err
 			}
@@ -196,7 +196,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			}
 			// submit to storage
 			if cveStorageOK {
-				err = s.cveRepository.StoreCVE(ctx, cvep)
+				err = s.cveRepository.StoreCVE(ctx, cvep, true)
 				if err != nil {
 					return err
 				}

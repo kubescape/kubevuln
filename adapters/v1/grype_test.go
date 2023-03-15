@@ -14,7 +14,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"gotest.tools/v3/assert"
 )
 
@@ -26,8 +26,8 @@ func Test_grypeAdapter_DBVersion(t *testing.T) {
 	assert.Assert(t, version != "")
 }
 
-func fileToSBOM(path string) *softwarecomposition.Document {
-	sbom := softwarecomposition.Document{}
+func fileToSBOM(path string) *v1beta1.Document {
+	sbom := v1beta1.Document{}
 	_ = json.Unmarshal(fileContent(path), &sbom)
 	return &sbom
 }

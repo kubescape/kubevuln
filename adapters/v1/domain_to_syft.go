@@ -3,12 +3,12 @@ package v1
 import (
 	"github.com/anchore/syft/syft/formats/common/spdxhelpers"
 	"github.com/anchore/syft/syft/sbom"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spdx/tools-golang/spdx/v2/v2_3"
 )
 
-func domainToSyft(doc softwarecomposition.Document) (*sbom.SBOM, error) {
+func domainToSyft(doc v1beta1.Document) (*sbom.SBOM, error) {
 	spdxDoc, err := domainToSpdx(doc)
 	if err != nil {
 		return nil, err
@@ -16,7 +16,7 @@ func domainToSyft(doc softwarecomposition.Document) (*sbom.SBOM, error) {
 	return spdxhelpers.ToSyftModel(spdxDoc)
 }
 
-func domainToSpdx(doc softwarecomposition.Document) (*v2_3.Document, error) {
+func domainToSpdx(doc v1beta1.Document) (*v2_3.Document, error) {
 	spdxDoc := v2_3.Document{
 		SPDXVersion:                doc.SPDXVersion,
 		DataLicense:                doc.DataLicense,
@@ -44,7 +44,7 @@ func domainToSpdx(doc softwarecomposition.Document) (*v2_3.Document, error) {
 	return &spdxDoc, nil
 }
 
-func domainToSyftExternalDocumentReferences(externalDocumentReferences []softwarecomposition.ExternalDocumentRef) []v2_3.ExternalDocumentRef {
+func domainToSyftExternalDocumentReferences(externalDocumentReferences []v1beta1.ExternalDocumentRef) []v2_3.ExternalDocumentRef {
 	var result []v2_3.ExternalDocumentRef
 	for _, e := range externalDocumentReferences {
 		result = append(result, v2_3.ExternalDocumentRef{
@@ -59,7 +59,7 @@ func domainToSyftExternalDocumentReferences(externalDocumentReferences []softwar
 	return result
 }
 
-func domainToSyftCreators(creators []softwarecomposition.Creator) []common.Creator {
+func domainToSyftCreators(creators []v1beta1.Creator) []common.Creator {
 	var result []common.Creator
 	for _, c := range creators {
 		result = append(result, common.Creator{
@@ -70,7 +70,7 @@ func domainToSyftCreators(creators []softwarecomposition.Creator) []common.Creat
 	return result
 }
 
-func domainToSyftPackages(packages []*softwarecomposition.Package) []*v2_3.Package {
+func domainToSyftPackages(packages []*v1beta1.Package) []*v2_3.Package {
 	var result []*v2_3.Package
 	for _, p := range packages {
 		newP := v2_3.Package{
@@ -125,7 +125,7 @@ func domainToSyftPackages(packages []*softwarecomposition.Package) []*v2_3.Packa
 	return result
 }
 
-func domainToSyftPackagesPackageChecksums(packageChecksums []softwarecomposition.Checksum) []common.Checksum {
+func domainToSyftPackagesPackageChecksums(packageChecksums []v1beta1.Checksum) []common.Checksum {
 	var result []common.Checksum
 	for _, p := range packageChecksums {
 		result = append(result, common.Checksum{
@@ -136,7 +136,7 @@ func domainToSyftPackagesPackageChecksums(packageChecksums []softwarecomposition
 	return result
 }
 
-func domainToSyftPackagesPackageExternalReferences(packageExternalReferences []*softwarecomposition.PackageExternalReference) []*v2_3.PackageExternalReference {
+func domainToSyftPackagesPackageExternalReferences(packageExternalReferences []*v1beta1.PackageExternalReference) []*v2_3.PackageExternalReference {
 	var result []*v2_3.PackageExternalReference
 	for _, p := range packageExternalReferences {
 		result = append(result, &v2_3.PackageExternalReference{
@@ -149,7 +149,7 @@ func domainToSyftPackagesPackageExternalReferences(packageExternalReferences []*
 	return result
 }
 
-func domainToSyftPackagesAnnotations(annotations []softwarecomposition.Annotation) []v2_3.Annotation {
+func domainToSyftPackagesAnnotations(annotations []v1beta1.Annotation) []v2_3.Annotation {
 	var result []v2_3.Annotation
 	for _, a := range annotations {
 		result = append(result, v2_3.Annotation{
@@ -170,7 +170,7 @@ func domainToSyftPackagesAnnotations(annotations []softwarecomposition.Annotatio
 	return result
 }
 
-func domainToSyftPackagesFilesArtifactOfProjects(artifactOfProjects []*softwarecomposition.ArtifactOfProject) []*v2_3.ArtifactOfProject {
+func domainToSyftPackagesFilesArtifactOfProjects(artifactOfProjects []*v1beta1.ArtifactOfProject) []*v2_3.ArtifactOfProject {
 	var result []*v2_3.ArtifactOfProject
 	for _, a := range artifactOfProjects {
 		result = append(result, &v2_3.ArtifactOfProject{
@@ -182,7 +182,10 @@ func domainToSyftPackagesFilesArtifactOfProjects(artifactOfProjects []*softwarec
 	return result
 }
 
-func domainToSyftPackagesFilesSnippets(snippets map[softwarecomposition.ElementID]*softwarecomposition.Snippet) map[common.ElementID]*v2_3.Snippet {
+func domainToSyftPackagesFilesSnippets(snippets map[v1beta1.ElementID]*v1beta1.Snippet) map[common.ElementID]*v2_3.Snippet {
+	if len(snippets) == 0 {
+		return nil
+	}
 	result := make(map[common.ElementID]*v2_3.Snippet)
 	for k, s := range snippets {
 		result[common.ElementID(k)] = &v2_3.Snippet{
@@ -201,7 +204,7 @@ func domainToSyftPackagesFilesSnippets(snippets map[softwarecomposition.ElementI
 	return result
 }
 
-func domainToSyftPackagesFilesSnippetsRanges(ranges []softwarecomposition.SnippetRange) []common.SnippetRange {
+func domainToSyftPackagesFilesSnippetsRanges(ranges []v1beta1.SnippetRange) []common.SnippetRange {
 	var result []common.SnippetRange
 	for _, r := range ranges {
 		result = append(result, common.SnippetRange{
@@ -220,7 +223,7 @@ func domainToSyftPackagesFilesSnippetsRanges(ranges []softwarecomposition.Snippe
 	return result
 }
 
-func domainToSyftFiles(files []*softwarecomposition.File) []*v2_3.File {
+func domainToSyftFiles(files []*v1beta1.File) []*v2_3.File {
 	var result []*v2_3.File
 	for _, f := range files {
 		result = append(result, &v2_3.File{
@@ -245,7 +248,7 @@ func domainToSyftFiles(files []*softwarecomposition.File) []*v2_3.File {
 	return result
 }
 
-func domainToSyftOtherLicenses(otherLicenses []*softwarecomposition.OtherLicense) []*v2_3.OtherLicense {
+func domainToSyftOtherLicenses(otherLicenses []*v1beta1.OtherLicense) []*v2_3.OtherLicense {
 	var result []*v2_3.OtherLicense
 	for _, o := range otherLicenses {
 		result = append(result, &v2_3.OtherLicense{
@@ -259,7 +262,7 @@ func domainToSyftOtherLicenses(otherLicenses []*softwarecomposition.OtherLicense
 	return result
 }
 
-func domainToSyftRelationships(relationships []*softwarecomposition.Relationship) []*v2_3.Relationship {
+func domainToSyftRelationships(relationships []*v1beta1.Relationship) []*v2_3.Relationship {
 	var result []*v2_3.Relationship
 	for _, r := range relationships {
 		result = append(result, &v2_3.Relationship{
@@ -280,7 +283,7 @@ func domainToSyftRelationships(relationships []*softwarecomposition.Relationship
 	return result
 }
 
-func domainToSyftAnnotations(annotations []softwarecomposition.Annotation) []*v2_3.Annotation {
+func domainToSyftAnnotations(annotations []v1beta1.Annotation) []*v2_3.Annotation {
 	var result []*v2_3.Annotation
 	for _, a := range annotations {
 		result = append(result, &v2_3.Annotation{
@@ -301,7 +304,7 @@ func domainToSyftAnnotations(annotations []softwarecomposition.Annotation) []*v2
 	return result
 }
 
-func domainToSyftSnippets(snippets []softwarecomposition.Snippet) []v2_3.Snippet {
+func domainToSyftSnippets(snippets []v1beta1.Snippet) []v2_3.Snippet {
 	var result []v2_3.Snippet
 	for _, s := range snippets {
 		result = append(result, v2_3.Snippet{
@@ -320,7 +323,7 @@ func domainToSyftSnippets(snippets []softwarecomposition.Snippet) []v2_3.Snippet
 	return result
 }
 
-func domainToSyftReviews(reviews []*softwarecomposition.Review) []*v2_3.Review {
+func domainToSyftReviews(reviews []*v1beta1.Review) []*v2_3.Review {
 	var result []*v2_3.Review
 	for _, r := range reviews {
 		result = append(result, &v2_3.Review{
