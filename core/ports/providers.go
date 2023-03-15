@@ -8,10 +8,9 @@ import (
 
 // CVEScanner is the port implemented by adapters to be used in ScanService to generate CVE manifests
 type CVEScanner interface {
-	CreateRelevantCVE(ctx context.Context, cve, cvep domain.CVEManifest) (domain.CVEManifest, error)
 	DBVersion(ctx context.Context) string
 	Ready(ctx context.Context) bool
-	ScanSBOM(ctx context.Context, sbom domain.SBOM, exceptions domain.CVEExceptions) (domain.CVEManifest, error)
+	ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error)
 	Version(ctx context.Context) string
 }
 
@@ -25,5 +24,5 @@ type SBOMCreator interface {
 type Platform interface {
 	GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error)
 	SendStatus(ctx context.Context, step int) error
-	SubmitCVE(ctx context.Context, cve domain.CVEManifest, hasRelevancy bool) error
+	SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error
 }

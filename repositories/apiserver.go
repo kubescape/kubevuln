@@ -2,7 +2,9 @@ package repositories
 
 import (
 	"context"
+	"strings"
 
+	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -69,10 +71,15 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	return err
 }
 
+// we're guaranteed to have a digest in the imageID by the operator
+func hashFromImageID(imageID string) string {
+	return strings.Split(reference.ReferenceRegexp.FindStringSubmatch(imageID)[3], ":")[1]
+}
+
 func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
-	manifest, err := a.Clientset.SpdxV1beta1().SBOMSPDXv2p3s(a.Namespace).Get(ctx, imageID, metav1.GetOptions{})
+	manifest, err := a.Clientset.SpdxV1beta1().SBOMSPDXv2p3s(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
 	return domain.SBOM{
-		ImageID:            manifest.Name,
+		ImageID:            manifest.Annotations[domain.ImageIDKey],
 		SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
 		Content:            &manifest.Spec.SPDX,
 	}, err
@@ -90,7 +97,10 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: sbom.ImageID,
+			Name: hashFromImageID(sbom.ImageID),
+			Annotations: map[string]string{
+				domain.ImageIDKey: sbom.ImageID,
+			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
 			Metadata: v1beta1.SPDXMeta{
@@ -105,26 +115,5 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO add timeout information here
 	}
 	_, err := a.Clientset.SpdxV1beta1().SBOMSPDXv2p3s(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	return err
-}
-
-func (a *APIServerStore) StoreSBOMp(ctx context.Context, sbom domain.SBOM) error {
-	manifest := v1beta1.SBOMSPDXv2p3Filtered{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: sbom.ImageID,
-		},
-		Spec: v1beta1.SBOMSPDXv2p3Spec{
-			Metadata: v1beta1.SPDXMeta{
-				Tool: v1beta1.ToolMeta{
-					Name:    sbom.SBOMCreatorName,
-					Version: sbom.SBOMCreatorVersion,
-				},
-				Report: v1beta1.ReportMeta{},
-			},
-			SPDX: *sbom.Content,
-		},
-		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO add timeout information here
-	}
-	_, err := a.Clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
 }

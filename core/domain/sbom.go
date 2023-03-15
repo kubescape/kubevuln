@@ -5,6 +5,7 @@ import (
 )
 
 const (
+	ImageIDKey         = "imageID"
 	SBOMStatusTimedOut = "timed out"
 )
 

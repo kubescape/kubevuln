@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"gotest.tools/v3/assert"
 )
 
@@ -19,9 +19,9 @@ func TestMemoryStore_GetCVE(t *testing.T) {
 		SBOMCreatorVersion: "",
 		CVEScannerVersion:  "",
 		CVEDBVersion:       "",
-		Content:            []containerscan.CommonContainerVulnerabilityResult{},
+		Content:            &v1beta1.GrypeDocument{},
 	}
-	m.StoreCVE(ctx, cve)
+	m.StoreCVE(ctx, cve, false)
 	got, _ = m.GetCVE(ctx, "imageID", "", "", "")
 	assert.Assert(t, got.Content != nil)
 }
@@ -37,7 +37,7 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 		ImageID:            "imageID",
 		SBOMCreatorVersion: "",
 		Status:             "",
-		Content:            []byte("content"),
+		Content:            &v1beta1.Document{},
 	}
 	m.StoreSBOM(ctx, sbom)
 	got, _ = m.GetSBOM(ctx, "imageID", "")
