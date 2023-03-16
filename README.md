@@ -16,7 +16,7 @@ To build kubevuln with its dependencies run: `make`
    {
        "gatewayWebsocketURL": "127.0.0.1:8001",
        "gatewayRestURL": "127.0.0.1:8002",
-       "kubevulnURL": "127.0.0.1:8081",
+       "kubevulnURL": "127.0.0.1:8080",
        "kubescapeURL": "127.0.0.1:8080",
        "eventReceiverRestURL": "https://report.armo.cloud",
        "eventReceiverWebsocketURL": "wss://report.armo.cloud",
@@ -28,7 +28,7 @@ To build kubevuln with its dependencies run: `make`
    </details>
    
 2. Set the `PORT` environment variable to 8081  
-   `export PORT=8081`  
+   `export PORT=8080`  
 
 ## Environment Variables
 
@@ -51,7 +51,7 @@ You can use the samples files below to setup your [VS code](https://www.armosec.
             "mode": "auto",
             "program":  "${workspaceRoot}",
                  "env": {
-                     "PORT": "8081",
+                     "PORT": "8080",
                      "NAMESPACE": "kubescape",
                      "CONFIG": "${workspaceRoot}/.vscode/clusterData.json",
             },
@@ -62,31 +62,6 @@ You can use the samples files below to setup your [VS code](https://www.armosec.
     ]
 }
 ```
-We configure the Kubevuln to listen to port 8081, and define the configuration in the clusterData.json file [as mentioned above](https://github.com/kubescape/kubevuln#configuration).
+We configure the Kubevuln to listen to port 8080, and define the configuration in the clusterData.json file [as mentioned above](https://github.com/kubescape/kubevuln#configuration).
 </details>
-
-## Make option
-* Build kubevuln with its dependencies
-```
-make
-```
-
-* Build grype
-```
-make grype
-```
-
-* Build kubevuln
-```
-make build
-```
-
-* Run tests
-```
-make test
-```
-
-* Cleanup
-```
-make clean
-```
+ 
