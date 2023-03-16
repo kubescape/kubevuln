@@ -43,7 +43,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	defer span.End()
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
-		ImageID:            imageID,
+		ID:                 imageID,
 		SBOMCreatorVersion: s.Version(ctx),
 	}
 	// translate business models into Syft models

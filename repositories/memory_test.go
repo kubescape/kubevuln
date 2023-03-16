@@ -34,7 +34,7 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 	got, _ = m.GetSBOMp(ctx, "imageID", "")
 	assert.Assert(t, got.Content == nil)
 	sbom := domain.SBOM{
-		ImageID:            "imageID",
+		ID:                 "imageID",
 		SBOMCreatorVersion: "",
 		Status:             "",
 		Content:            &v1beta1.Document{},

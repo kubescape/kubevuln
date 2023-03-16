@@ -25,7 +25,7 @@ func NewMockSBOMAdapter() *MockSBOMAdapter {
 func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domain.RegistryOptions) (domain.SBOM, error) {
 	logger.L().Info("CreateSBOM")
 	return domain.SBOM{
-		ImageID:            imageID,
+		ID:                 imageID,
 		SBOMCreatorVersion: m.Version(ctx),
 		Content:            &v1beta1.Document{},
 	}, nil

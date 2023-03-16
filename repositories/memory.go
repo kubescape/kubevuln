@@ -106,7 +106,7 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	defer span.End()
 
 	id := sbomID{
-		Name:               sbom.ImageID,
+		Name:               sbom.ID,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 	}
 	m.sboms[id] = sbom

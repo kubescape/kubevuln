@@ -37,7 +37,7 @@ func (m MockCVEAdapter) Ready(context.Context) bool {
 func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	logger.L().Info("ScanSBOM")
 	return domain.CVEManifest{
-		ImageID:            sbom.ImageID,
+		ImageID:            sbom.ID,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  m.Version(ctx),
 		CVEDBVersion:       m.DBVersion(ctx),
