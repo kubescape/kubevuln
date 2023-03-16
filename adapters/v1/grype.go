@@ -15,6 +15,7 @@ import (
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/syft/syft"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -93,8 +94,12 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		logger.L().Info("updating grype DB")
 		var err error
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
+			return false
+		}
 		logger.L().Info("grype DB updated")
-		return err == nil
+		return true
 	}
 
 	return g.dbStatus.Err == nil
