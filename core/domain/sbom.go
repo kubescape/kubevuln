@@ -24,8 +24,8 @@ type RegistryCredentials struct {
 // RegistryOptions contains OCI registry configuration parameters required for connection
 // it is closely related to the Stereoscope image.RegistryOptions struct used by Grype
 type RegistryOptions struct {
+	Platform              string
+	Credentials           []RegistryCredentials
 	InsecureSkipTLSVerify bool
 	InsecureUseHTTP       bool
-	Credentials           []RegistryCredentials
-	Platform              string
 }
