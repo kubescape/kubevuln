@@ -23,11 +23,11 @@ import (
 
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	dbCloser *db.Closer
-	dbConfig db.Config
-	dbStatus *db.Status
 	mu       sync.RWMutex
+	dbCloser *db.Closer
+	dbStatus *db.Status
 	store    *store.Store
+	dbConfig db.Config
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
