@@ -115,13 +115,13 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	logger.L().Debug("decoding SBOM")
+	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ImageID))
 	s, _, err := syft.Decode(bytes.NewReader(sbom.Content))
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("reading packages from SBOM")
+	logger.L().Debug("reading packages from SBOM", helpers.String("imageID", sbom.ImageID))
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
@@ -135,25 +135,25 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, exception
 		Matchers: getMatchers(),
 	}
 
-	logger.L().Debug("finding vulnerabilities")
+	logger.L().Debug("finding vulnerabilities", helpers.String("imageID", sbom.ImageID))
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("compiling results")
+	logger.L().Debug("compiling results", helpers.String("imageID", sbom.ImageID))
 	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("converting results to common format")
+	logger.L().Debug("converting results to common format", helpers.String("imageID", sbom.ImageID))
 	vulnerabilityResults, err := convertToCommonContainerVulnerabilityResult(ctx, &doc, exceptions)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("returning CVE manifest")
+	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ImageID))
 	return *domain.NewCVEManifest(
 		sbom.ImageID,
 		sbom.SBOMCreatorVersion,
