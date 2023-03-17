@@ -11,6 +11,8 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ScanService implements ScanService from ports, this is the business component
@@ -251,6 +253,11 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	if workload.ImageHash == "" {
 		return ctx, errors.New("missing imageID")
 	}
+	// add imageID to parent span
+	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
+		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		ctx = trace.ContextWithSpan(ctx, parentSpan)
+	}
 	return ctx, nil
 }
 
@@ -265,6 +272,12 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	}
 	if workload.ImageHash == "" {
 		return ctx, errors.New("missing imageID")
+	}
+	// add instanceID and imageID to parent span
+	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
+		parentSpan.SetAttributes(attribute.String("instanceID", workload.Wlid))
+		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Accepted)

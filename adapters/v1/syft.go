@@ -71,7 +71,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	// download image
 	// TODO check ephemeral storage usage and see if we can kill the goroutine
-	logger.L().Debug("downloading image")
+	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 	src, cleanup, err := source.New(*sourceInput, registryOptions, []string{})
 	defer cleanup()
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	var actualDistro *linux.Release
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
-		logger.L().Debug("extracting packages")
+		logger.L().Debug("extracting packages", helpers.String("imageID", imageID))
 		catalogOptions := cataloger.Config{
 			Search:      cataloger.DefaultSearchConfig(),
 			Parallelism: 4, // TODO assess this value
@@ -103,7 +103,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 		return domainSBOM, err
 	}
 	// generate SBOM
-	logger.L().Debug("generating SBOM")
+	logger.L().Debug("generating SBOM", helpers.String("imageID", imageID))
 	syftSbom := sbom.SBOM{
 		Source:        src.Metadata,
 		Relationships: relationships,
@@ -119,7 +119,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	domainSBOM.Content = buf.Bytes()
 	// return SBOM
-	logger.L().Debug("returning SBOM")
+	logger.L().Debug("returning SBOM", helpers.String("imageID", imageID))
 	return domainSBOM, nil
 }
 

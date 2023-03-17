@@ -184,12 +184,12 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, has
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := sendSummaryAndVulnerabilities(&finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	firstVulnerabilitiesChunk = nil
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
-		sendVulnerabilitiesRoutine(chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+		sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
 		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {
