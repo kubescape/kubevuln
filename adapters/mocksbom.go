@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -27,7 +28,11 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 	return domain.SBOM{
 		ID:                 imageID,
 		SBOMCreatorVersion: m.Version(ctx),
-		Content:            &v1beta1.Document{},
+		Content: &v1beta1.Document{
+			CreationInfo: &v1beta1.CreationInfo{
+				Created: time.Now().Format(time.RFC3339),
+			},
+		},
 	}, nil
 }
 

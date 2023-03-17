@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"errors"
 	"path"
 	"sync"
 	"time"
@@ -101,6 +102,10 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if g.dbStatus == nil {
+		return domain.CVEManifest{}, errors.New("grype DB is initialized, run readiness probe first")
+	}
 
 	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ID))
 	s, err := domainToSyft(*sbom.Content)

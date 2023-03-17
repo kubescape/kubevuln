@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
+	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -49,6 +50,13 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 		StorageClient: clientset.SpdxV1beta1(),
 		Namespace:     namespace,
 	}, nil
+}
+
+func NewFakeAPIServerStorage(namespace string) *APIServerStore {
+	return &APIServerStore{
+		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		Namespace:     namespace,
+	}
 }
 
 // we're guaranteed to have a digest in the imageID by the operator

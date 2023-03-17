@@ -7,20 +7,12 @@ import (
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const imageID = "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
 const instanceID = "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx"
-
-func newFakeAPIServerStorage(namespace string) (*APIServerStore, error) {
-	return &APIServerStore{
-		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
-		Namespace:     namespace,
-	}, nil
-}
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
@@ -37,7 +29,7 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 }
 
 func TestAPIServerStore_GetCVE(t *testing.T) {
-	m, _ := newFakeAPIServerStorage("kubescape")
+	m := NewFakeAPIServerStorage("kubescape")
 	ctx := context.TODO()
 	got, _ := m.GetCVE(ctx, imageID, "", "", "")
 	assert.Assert(t, got.Content == nil)
@@ -54,7 +46,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 }
 
 func TestAPIServerStore_GetSBOM(t *testing.T) {
-	m, _ := newFakeAPIServerStorage("kubescape")
+	m := NewFakeAPIServerStorage("kubescape")
 	ctx := context.TODO()
 	got, _ := m.GetSBOM(ctx, imageID, "")
 	assert.Assert(t, got.Content == nil)

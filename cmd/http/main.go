@@ -29,8 +29,6 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	// TODO: check why it is not working
-	// TODO: remove gin logs
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
@@ -45,12 +43,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	brokenStorage := repositories.NewBrokenStorage() // TODO add real storage
-	memoryStorage := repositories.NewMemoryStorage() // TODO add real storage
+	var storage *repositories.APIServerStore
+	if config.Storage {
+		storage, err = repositories.NewAPIServerStorage("kubescape")
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
+		}
+	}
 	sbomAdapter := v1.NewSyftAdapter(config.ScanTimeout)
 	cveAdapter := v1.NewGrypeAdapter()
 	platform := v1.NewArmoAdapter(config.AccountID, config.BackendOpenAPI, config.EventReceiverRestURL)
-	service := services.NewScanService(sbomAdapter, brokenStorage, cveAdapter, memoryStorage, platform)
+	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, config.Storage)
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)

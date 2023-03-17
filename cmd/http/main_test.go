@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/controllers"
-	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
@@ -23,49 +22,44 @@ func TestScan(t *testing.T) {
 		yamlFile     string
 		expectedCode int
 		expectedBody string
-		sbomRepo     ports.SBOMRepository
-		cveRepo      ports.CVERepository
+		storage      bool
 	}{
 		{
 			"phase 1: valid scan command succeeds and reports CVE",
 			"../../api/v1/testdata/scan.yaml",
 			200,
 			"{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":200,\"title\":\"OK\"}",
-			repositories.NewBrokenStorage(),
-			repositories.NewBrokenStorage(),
+			false,
 		},
 		{
 			"phase 1: missing fields",
 			"../../api/v1/testdata/scan-incomplete.yaml",
 			500,
 			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=\",\"status\":500,\"title\":\"Internal Server Error\"}",
-			repositories.NewBrokenStorage(),
-			repositories.NewBrokenStorage(),
+			false,
 		},
 		{
 			"phase 1: invalid yaml",
 			"../../api/v1/testdata/scan-invalid.yaml",
 			400,
 			"{\"status\":400,\"title\":\"Bad Request\"}",
-			repositories.NewBrokenStorage(),
-			repositories.NewBrokenStorage(),
+			false,
 		},
 		{
 			"phase 2: valid scan command succeeds and reports CVE",
 			"../../api/v1/testdata/scan.yaml",
 			200,
 			"{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":200,\"title\":\"OK\"}",
-			repositories.NewMemoryStorage(),
-			repositories.NewMemoryStorage(),
+			true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			repository := repositories.NewBrokenStorage()
+			repository := repositories.NewFakeAPIServerStorage("kubescape")
 			sbomAdapter := adapters.NewMockSBOMAdapter()
 			cveAdapter := adapters.NewMockCVEAdapter()
 			platform := adapters.NewMockPlatform()
-			service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform)
+			service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform, test.storage)
 			controller := controllers.NewHTTPController(service, 2)
 
 			router := gin.Default()

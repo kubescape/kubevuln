@@ -13,6 +13,7 @@ type Config struct {
 	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
 	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
 	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
+	Storage              bool          `mapstructure:"storage"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
