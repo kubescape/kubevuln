@@ -59,6 +59,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if sbom.Content != nil {
 		// this is not supposed to happen, problem with Operator?
 		logger.L().Ctx(ctx).Warning("SBOM already generated", helpers.String("imageID", workload.ImageHash))
+		// TODO scan for CVE (phase 1) also here
 		return nil
 	}
 	// create SBOM

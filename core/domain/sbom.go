@@ -6,6 +6,7 @@ import (
 
 const (
 	ImageIDKey         = "imageID"
+	StatusKey          = "status"
 	SBOMStatusTimedOut = "timed out"
 )
 
