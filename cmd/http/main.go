@@ -52,7 +52,8 @@ func main() {
 	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.Recovery())
 
 	router.GET("/v1/liveness", controller.Alive)
 	router.GET("/v1/readiness", controller.Ready)
