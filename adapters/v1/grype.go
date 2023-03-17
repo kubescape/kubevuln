@@ -102,13 +102,13 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ID))
 	s, err := domainToSyft(*sbom.Content)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("reading packages from SBOM", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("reading packages from SBOM", helpers.String("imageID", sbom.ID))
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
@@ -122,25 +122,25 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Matchers: getMatchers(),
 	}
 
-	logger.L().Debug("finding vulnerabilities", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("finding vulnerabilities", helpers.String("imageID", sbom.ID))
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("compiling results", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("compiling results", helpers.String("imageID", sbom.ID))
 	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("converting results to common format", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("converting results to common format", helpers.String("imageID", sbom.ID))
 	vulnerabilityResults, err := grypeToDomain(doc)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ImageID))
+	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ID))
 	return domain.CVEManifest{
 		ImageID:            sbom.ID,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
