@@ -36,6 +36,21 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  string(fileContent("testdata/alpine-sbom.format.json")),
 		},
+		{
+			name:    "valid image with registry credentials produces well-formed SBOM",
+			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:  string(fileContent("testdata/alpine-sbom.format.json")),
+			options: domain.RegistryOptions{
+				Credentials: []domain.RegistryCredentials{
+					{
+						"docker.io",
+						"username",
+						"password",
+						"token",
+					},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

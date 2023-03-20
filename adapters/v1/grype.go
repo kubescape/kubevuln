@@ -104,7 +104,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	defer g.mu.RUnlock()
 
 	if g.dbStatus == nil {
-		return domain.CVEManifest{}, errors.New("grype DB is initialized, run readiness probe first")
+		return domain.CVEManifest{}, errors.New("grype DB is not initialized, run readiness probe first")
 	}
 
 	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ID))

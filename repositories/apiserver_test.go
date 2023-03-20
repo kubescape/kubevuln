@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,6 +19,9 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   hashFromInstanceID(sbom.ID),
 			Labels: labelsFromInstanceID(sbom.ID),
+			Annotations: map[string]string{
+				domain.StatusKey: sbom.Status,
+			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
 			SPDX: *sbom.Content,
@@ -29,55 +32,232 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 }
 
 func TestAPIServerStore_GetCVE(t *testing.T) {
-	m := NewFakeAPIServerStorage("kubescape")
-	ctx := context.TODO()
-	got, _ := m.GetCVE(ctx, imageID, "", "", "")
-	assert.Assert(t, got.Content == nil)
-	cve := domain.CVEManifest{
-		ImageID:            imageID,
-		SBOMCreatorVersion: "",
-		CVEScannerVersion:  "",
-		CVEDBVersion:       "",
-		Content:            &v1beta1.GrypeDocument{},
+	type args struct {
+		ctx                context.Context
+		imageID            string
+		SBOMCreatorVersion string
+		CVEScannerVersion  string
+		CVEDBVersion       string
 	}
-	_ = m.StoreCVE(ctx, cve, false)
-	got, _ = m.GetCVE(ctx, imageID, "", "", "")
-	assert.Assert(t, got.Content != nil)
+	tests := []struct {
+		name         string
+		args         args
+		cve          domain.CVEManifest
+		wantEmptyCVE bool
+	}{
+		{
+			"valid CVE is retrieved",
+			args{
+				ctx:     context.TODO(),
+				imageID: imageID,
+			},
+			domain.CVEManifest{
+				ImageID: imageID,
+				Content: &v1beta1.GrypeDocument{},
+			},
+			false,
+		},
+		{
+			"CVEScannerVersion mismatch",
+			args{
+				ctx:               context.TODO(),
+				imageID:           imageID,
+				CVEScannerVersion: "v1.1.0",
+			},
+			domain.CVEManifest{
+				ImageID:           imageID,
+				CVEScannerVersion: "v1.0.0",
+				Content:           &v1beta1.GrypeDocument{},
+			},
+			true,
+		},
+		{
+			"CVEDBVersion mismatch",
+			args{
+				ctx:          context.TODO(),
+				imageID:      imageID,
+				CVEDBVersion: "v1.1.0",
+			},
+			domain.CVEManifest{
+				ImageID:      imageID,
+				CVEDBVersion: "v1.0.0",
+				Content:      &v1beta1.GrypeDocument{},
+			},
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			_, err := a.GetCVE(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
+			tools.EnsureSetup(t, err != nil)
+			err = a.StoreCVE(tt.args.ctx, tt.cve, false)
+			tools.EnsureSetup(t, err == nil)
+			gotCve, err := a.GetCVE(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
+			if (gotCve.Content == nil) != tt.wantEmptyCVE {
+				t.Errorf("GetCVE() gotCve.Content = %v, wantEmptyCVE %v", gotCve.Content, tt.wantEmptyCVE)
+				return
+			}
+		})
+	}
 }
 
 func TestAPIServerStore_GetSBOM(t *testing.T) {
-	m := NewFakeAPIServerStorage("kubescape")
-	ctx := context.TODO()
-	got, _ := m.GetSBOM(ctx, imageID, "")
-	assert.Assert(t, got.Content == nil)
-	got, _ = m.GetSBOMp(ctx, imageID, "")
-	assert.Assert(t, got.Content == nil)
-	sbom := domain.SBOM{
-		ID:                 imageID,
-		SBOMCreatorVersion: "",
-		Status:             "",
-		Content: &v1beta1.Document{
-			CreationInfo: &v1beta1.CreationInfo{
-				Created: time.Now().Format(time.RFC3339),
+	type args struct {
+		ctx                context.Context
+		imageID            string
+		SBOMCreatorVersion string
+	}
+	tests := []struct {
+		name          string
+		args          args
+		sbom          domain.SBOM
+		wantEmptySBOM bool
+	}{
+		{
+			"valid SBOM is retrieved",
+			args{
+				ctx:     context.TODO(),
+				imageID: imageID,
 			},
+			domain.SBOM{
+				ID: imageID,
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: time.Now().Format(time.RFC3339),
+					},
+				},
+			},
+			false,
+		},
+		{
+			"invalid timestamp, SBOM is still retrieved",
+			args{
+				ctx:     context.TODO(),
+				imageID: imageID,
+			},
+			domain.SBOM{
+				ID: imageID,
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: "invalid timestamp",
+					},
+				},
+			},
+			false,
+		},
+		{
+			"SBOMCreatorVersion mismatch",
+			args{
+				ctx:                context.TODO(),
+				imageID:            imageID,
+				SBOMCreatorVersion: "v1.1.0",
+			},
+			domain.SBOM{
+				ID:                 imageID,
+				SBOMCreatorVersion: "v1.0.0",
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: time.Now().Format(time.RFC3339),
+					},
+				},
+			},
+			true,
 		},
 	}
-	_ = m.StoreSBOM(ctx, sbom)
-	sbomp := domain.SBOM{
-		ID:                 instanceID,
-		SBOMCreatorVersion: "",
-		Status:             "",
-		Content: &v1beta1.Document{
-			CreationInfo: &v1beta1.CreationInfo{
-				Created: time.Now().Format(time.RFC3339),
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			_, err := a.GetSBOM(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
+			tools.EnsureSetup(t, err != nil)
+			err = a.StoreSBOM(tt.args.ctx, tt.sbom)
+			tools.EnsureSetup(t, err == nil)
+			gotSbom, err := a.GetSBOM(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
+			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
+				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
+				return
+			}
+		})
+	}
+}
+
+func TestAPIServerStore_GetSBOMp(t *testing.T) {
+	type args struct {
+		ctx                context.Context
+		imageID            string
+		SBOMCreatorVersion string
+	}
+	tests := []struct {
+		name          string
+		args          args
+		sbom          domain.SBOM
+		wantEmptySBOM bool
+	}{
+		{
+			"valid SBOMp is retrieved",
+			args{
+				ctx:     context.TODO(),
+				imageID: imageID,
 			},
+			domain.SBOM{
+				ID: imageID,
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: time.Now().Format(time.RFC3339),
+					},
+				},
+			},
+			false,
+		},
+		{
+			"invalid timestamp, SBOMp is still retrieved",
+			args{
+				ctx:     context.TODO(),
+				imageID: imageID,
+			},
+			domain.SBOM{
+				ID: imageID,
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: "invalid timestamp",
+					},
+				},
+			},
+			false,
+		},
+		{
+			"SBOMCreatorVersion mismatch",
+			args{
+				ctx:                context.TODO(),
+				imageID:            imageID,
+				SBOMCreatorVersion: "v1.1.0",
+			},
+			domain.SBOM{
+				ID:                 imageID,
+				SBOMCreatorVersion: "v1.0.0",
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: time.Now().Format(time.RFC3339),
+					},
+				},
+			},
+			true,
 		},
 	}
-	_ = m.storeSBOMp(ctx, sbomp)
-	got, _ = m.GetSBOM(ctx, imageID, "")
-	assert.Assert(t, got.Content != nil)
-	got, _ = m.GetSBOMp(ctx, instanceID, "")
-	assert.Assert(t, got.Content != nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			_, err := a.GetSBOMp(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
+			tools.EnsureSetup(t, err != nil)
+			err = a.storeSBOMp(tt.args.ctx, tt.sbom)
+			tools.EnsureSetup(t, err == nil)
+			gotSbom, err := a.GetSBOMp(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
+			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
+				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
+				return
+			}
+		})
+	}
 }
 
 func Test_extractHashFromImageID(t *testing.T) {

@@ -8,7 +8,7 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20221208011002-c5ff155d72f1
 	github.com/anchore/syft v0.70.0
 	github.com/armosec/armoapi-go v0.0.165
-	github.com/armosec/cluster-container-scanner-api v0.0.51
+	github.com/armosec/cluster-container-scanner-api v0.0.52
 	github.com/armosec/logger-go v0.0.13
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12
@@ -26,6 +26,7 @@ require (
 	github.com/spf13/viper v1.15.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.38.0
 	go.opentelemetry.io/otel v1.12.0
+	go.opentelemetry.io/otel/trace v1.12.0
 	gotest.tools/v3 v3.3.0
 	k8s.io/apimachinery v0.26.2
 	k8s.io/client-go v0.26.2
@@ -271,7 +272,6 @@ require (
 	go.opentelemetry.io/otel/metric v0.34.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.11.2 // indirect
 	go.opentelemetry.io/otel/sdk/metric v0.34.0 // indirect
-	go.opentelemetry.io/otel/trace v1.12.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
