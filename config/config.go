@@ -13,10 +13,11 @@ type Config struct {
 	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
 	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
 	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
+	Storage              bool          `mapstructure:"storage"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
-func LoadConfig(path string) (config Config, err error) {
+func LoadConfig(path string) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("clusterData")
 	viper.SetConfigType("json")
@@ -26,11 +27,12 @@ func LoadConfig(path string) (config Config, err error) {
 
 	viper.AutomaticEnv()
 
-	err = viper.ReadInConfig()
+	err := viper.ReadInConfig()
 	if err != nil {
-		return
+		return Config{}, err
 	}
 
+	var config Config
 	err = viper.Unmarshal(&config)
-	return
+	return config, err
 }

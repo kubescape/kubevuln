@@ -3,10 +3,10 @@ package adapters
 import (
 	"context"
 
-	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // MockCVEAdapter implements a mocked CVEScanner to be used for tests
@@ -19,12 +19,6 @@ var _ ports.CVEScanner = (*MockCVEAdapter)(nil)
 func NewMockCVEAdapter() *MockCVEAdapter {
 	logger.L().Info("NewMockCVEAdapter")
 	return &MockCVEAdapter{}
-}
-
-// CreateRelevantCVE returns the first CVE manifest (no combination performed)
-func (m MockCVEAdapter) CreateRelevantCVE(_ context.Context, cve, _ domain.CVEManifest) (domain.CVEManifest, error) {
-	logger.L().Info("CreateRelevantCVE")
-	return cve, nil
 }
 
 // DBVersion returns a static version
@@ -40,15 +34,15 @@ func (m MockCVEAdapter) Ready(context.Context) bool {
 }
 
 // ScanSBOM returns a dummy CVE manifest tagged with the given SBOM metadata
-func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM, _ domain.CVEExceptions) (domain.CVEManifest, error) {
+func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	logger.L().Info("ScanSBOM")
-	return *domain.NewCVEManifest(
-		sbom.ImageID,
-		sbom.SBOMCreatorVersion,
-		m.Version(ctx),
-		m.DBVersion(ctx),
-		[]cs.CommonContainerVulnerabilityResult{},
-	), nil
+	return domain.CVEManifest{
+		ImageID:            sbom.ID,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		CVEScannerVersion:  m.Version(ctx),
+		CVEDBVersion:       m.DBVersion(ctx),
+		Content:            &v1beta1.GrypeDocument{},
+	}, nil
 }
 
 // Version returns a static version

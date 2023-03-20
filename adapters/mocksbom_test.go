@@ -9,12 +9,24 @@ import (
 )
 
 func TestMockSBOMAdapter_CreateSBOM(t *testing.T) {
-	m := NewMockSBOMAdapter()
+	m := NewMockSBOMAdapter(false, false)
 	sbom, _ := m.CreateSBOM(context.TODO(), "imageID", domain.RegistryOptions{})
 	assert.Assert(t, sbom.Content != nil)
 }
 
+func TestMockSBOMAdapter_CreateSBOM_Error(t *testing.T) {
+	m := NewMockSBOMAdapter(true, false)
+	_, err := m.CreateSBOM(context.TODO(), "imageID", domain.RegistryOptions{})
+	assert.Assert(t, err != nil)
+}
+
+func TestMockSBOMAdapter_CreateSBOM_Timeout(t *testing.T) {
+	m := NewMockSBOMAdapter(false, true)
+	sbom, _ := m.CreateSBOM(context.TODO(), "imageID", domain.RegistryOptions{})
+	assert.Assert(t, sbom.Status == domain.SBOMStatusTimedOut)
+}
+
 func TestMockSBOMAdapter_Version(t *testing.T) {
-	m := NewMockSBOMAdapter()
+	m := NewMockSBOMAdapter(false, false)
 	assert.Assert(t, m.Version(context.TODO()) == "Mock SBOM 1.0")
 }
