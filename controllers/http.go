@@ -46,7 +46,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 
 	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("imageID", newScan.ImageHash))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -56,7 +56,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.GenerateSBOM(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("service error", helpers.Error(err), helpers.String("imageID", newScan.ImageHash))
 		}
 	})
 }
@@ -93,7 +93,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 
 	ctx, err = h.scanService.ValidateScanCVE(ctx, domain.ScanCommand(newScan))
 	if err != nil {
-		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("wlid", newScan.Wlid), helpers.String("imageID", newScan.ImageHash))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -103,7 +103,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCVE(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("service error", helpers.Error(err), helpers.String("wlid", newScan.Wlid), helpers.String("imageID", newScan.ImageHash))
 		}
 	})
 }
