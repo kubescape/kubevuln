@@ -23,18 +23,20 @@ type ScanService struct {
 	cveScanner     ports.CVEScanner
 	cveRepository  ports.CVERepository
 	platform       ports.Platform
+	storage        bool
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool) *ScanService {
 	return &ScanService{
 		sbomCreator:    sbomCreator,
 		sbomRepository: sbomRepository,
 		cveScanner:     cveScanner,
 		cveRepository:  cveRepository,
 		platform:       platform,
+		storage:        storage,
 	}
 }
 
@@ -47,75 +49,59 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if !ok {
 		return errors.New("no workload found in context")
 	}
-	// remember storage statuses
-	cveStorageOK := true
-	sbomStorageOK := true
-	// check if SBOM is already available
-	sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
-	if err != nil {
-		sbomStorageOK = false
-		sbom = domain.SBOM{}
+
+	sbom := domain.SBOM{}
+	var err error
+	if s.storage {
+		// check if SBOM is already available
+		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+		}
 	}
-	if sbom.Content != nil {
-		// this is not supposed to happen, problem with Operator?
-		logger.L().Ctx(ctx).Warning("SBOM already generated", helpers.String("imageID", workload.ImageHash))
-		return nil
+	if sbom.Content == nil {
+		// create SBOM
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
+		if err != nil {
+			return err
+		}
 	}
-	// create SBOM
-	sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
-	if err != nil {
-		return err
-	}
-	// TODO react on timeout status ?
-	// TODO add telemetry to Platform
-	if sbomStorageOK {
+
+	if s.storage {
+		// store SBOM
 		err = s.sbomRepository.StoreSBOM(ctx, sbom)
 		if err != nil {
 			return err
 		}
+		return nil
 	} else {
-		// in that case we need to scan for CVE (phase 1)
-		// check if CVE scans are already available
-		cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
-		if err != nil {
-			cveStorageOK = false
-			cve = domain.CVEManifest{}
+		// here we need to scan for CVE (phase 1)
+		// do not process timed out SBOM
+		if sbom.Status == domain.SBOMStatusTimedOut {
+			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 		}
-		if cve.Content == nil {
-			// get exceptions
-			exceptions, err := s.platform.GetCVEExceptions(ctx)
-			if err != nil {
-				return err
-			}
-			// scan for CVE
-			cve, err = s.cveScanner.ScanSBOM(ctx, sbom, exceptions)
-			if err != nil {
-				return err
-			}
+		// scan for CVE
+		cve, err := s.cveScanner.ScanSBOM(ctx, sbom)
+		if err != nil {
+			return err
 		}
 		// report to platform
 		err = s.platform.SendStatus(ctx, domain.Success)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
-		}
-		// submit to storage
-		if cveStorageOK {
-			err = s.cveRepository.StoreCVE(ctx, cve)
-			if err != nil {
-				return err
-			}
+			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
 		// submit to platform
-		err = s.platform.SubmitCVE(ctx, cve, false)
+		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 		if err != nil {
 			return err
 		}
 		// report to platform
 		err = s.platform.SendStatus(ctx, domain.Done)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
 	}
+
 	return nil
 }
 
@@ -138,94 +124,71 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
-	// remember storage statuses
-	cveStorageOK := true
-	sbomStorageOK := true
+
 	// check if CVE scans are already available
 	cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
 	if err != nil {
-		cveStorageOK = false
-		cve = domain.CVEManifest{}
+		logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 	if cve.Content == nil {
 		// need to scan for CVE
 		// check if SBOM is available
 		sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 		if err != nil {
-			sbomStorageOK = false
-			sbom = domain.SBOM{}
+			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
 		if sbom.Content == nil {
-			if sbomStorageOK {
-				// this is not supposed to happen, problem with Operator?
-				txt := "missing SBOM"
-				logger.L().Ctx(ctx).Error(txt, helpers.String("imageID", workload.ImageHash), helpers.String("SBOMCreatorVersion", s.sbomCreator.Version(ctx)))
-				return errors.New(txt) // TODO do proper error reporting https://go.dev/blog/go1.13-errors
-			} else {
-				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
-				if err != nil {
-					return err
-				}
-			}
+			return errors.New("missing SBOM, skipping CVE scan")
 		}
-		// TODO react on timeout status ?
-		// get exceptions
-		exceptions, err := s.platform.GetCVEExceptions(ctx)
+		// do not process timed out SBOM
+		if sbom.Status == domain.SBOMStatusTimedOut {
+			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
+		}
+		// scan for CVE
+		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			return err
 		}
-		// scan for CVE
-		cve, err = s.cveScanner.ScanSBOM(ctx, sbom, exceptions)
+		// submit to storage
+		err = s.cveRepository.StoreCVE(ctx, cve, false)
 		if err != nil {
 			return err
 		}
 	}
 	// check if SBOM' is available
-	hasRelevancy := false
-	if sbomStorageOK {
-		sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
+	cvep := domain.CVEManifest{}
+	sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("error getting SBOMp", helpers.Error(err), helpers.String("wlid", workload.Wlid))
+	}
+	if sbomp.Content != nil {
+		// scan for CVE'
+		cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
 		if err != nil {
-			sbomStorageOK = false
-			sbomp = domain.SBOM{}
+			return err
 		}
-		if sbomp.Content != nil {
-			hasRelevancy = true
-			// scan for CVE'
-			cvep, err := s.cveScanner.ScanSBOM(ctx, sbomp, nil)
-			if err != nil {
-				return err
-			}
-			// merge CVE and CVE' to create relevant CVE
-			cve, err = s.cveScanner.CreateRelevantCVE(ctx, cve, cvep)
-			if err != nil {
-				return err
-			}
+		// submit to storage
+		err = s.cveRepository.StoreCVE(ctx, cvep, true)
+		if err != nil {
+			return err
 		}
 	}
 	// report to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
-	}
-	// submit to storage
-	if cveStorageOK {
-		err = s.cveRepository.StoreCVE(ctx, cve)
-		if err != nil {
-			return err
-		}
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 	// submit to platform
-	err = s.platform.SubmitCVE(ctx, cve, hasRelevancy)
+	err = s.platform.SubmitCVE(ctx, cve, cvep)
 	if err != nil {
 		return err
 	}
 	// report to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("telemetry error", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 	return nil
 }

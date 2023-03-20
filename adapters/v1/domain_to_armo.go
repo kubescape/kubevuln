@@ -6,93 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/anchore/grype/grype/matcher"
-	"github.com/anchore/grype/grype/matcher/dotnet"
-	"github.com/anchore/grype/grype/matcher/golang"
-	"github.com/anchore/grype/grype/matcher/java"
-	"github.com/anchore/grype/grype/matcher/javascript"
-	"github.com/anchore/grype/grype/matcher/python"
-	"github.com/anchore/grype/grype/matcher/ruby"
-	"github.com/anchore/grype/grype/matcher/stock"
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func getMatchers() []matcher.Matcher {
-	return matcher.NewDefaultMatchers(
-		matcher.Config{
-			Java: java.MatcherConfig{
-				ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
-				UseCPEs:              true,
-			},
-			Ruby:       ruby.MatcherConfig{UseCPEs: true},
-			Python:     python.MatcherConfig{UseCPEs: true},
-			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
-			Javascript: javascript.MatcherConfig{UseCPEs: true},
-			Golang:     golang.MatcherConfig{UseCPEs: true},
-			Stock:      stock.MatcherConfig{UseCPEs: true},
-		},
-	)
-}
-
-func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) []armotypes.VulnerabilityExceptionPolicy {
-	var l []armotypes.VulnerabilityExceptionPolicy
-
-	for i := range srcCVEList {
-		for j := range srcCVEList[i].VulnerabilityPolicies {
-			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
-				l = append(l, srcCVEList[i])
-			}
-		}
-	}
-
-	if len(l) > 0 {
-		return l
-	}
-	return nil
-}
-
-func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {
-	layerMap := make(map[string]containerscan.ESLayer)
-	if target.RawConfig == nil {
-		return layerMap, nil
-	}
-
-	jsonConfig := &v1.ConfigFile{}
-	valueConfig, _ := base64.StdEncoding.DecodeString(string(target.RawConfig))
-	err := json.Unmarshal(valueConfig, jsonConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	listLayers := make([]containerscan.ESLayer, 0)
-	for i := range jsonConfig.History {
-
-		if !jsonConfig.History[i].EmptyLayer {
-			listLayers = append(listLayers, containerscan.ESLayer{LayerInfo: &containerscan.LayerInfo{
-				CreatedBy:   jsonConfig.History[i].CreatedBy,
-				CreatedTime: &jsonConfig.History[i].Created.Time,
-			},
-			})
-		}
-	}
-	for i := 0; i < len(listLayers) && i < len(jsonConfig.RootFS.DiffIDs); i++ {
-		listLayers[i].LayerHash = jsonConfig.RootFS.DiffIDs[i].String()
-		if i > 0 {
-			listLayers[i].ParentLayerHash = jsonConfig.RootFS.DiffIDs[i-1].String()
-			listLayers[i].LayerInfo.LayerOrder = i
-		}
-		layerMap[listLayers[i].LayerHash] = listLayers[i]
-	}
-
-	return layerMap, nil
-}
-
-func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocument *models.Document, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
+func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
 	var vulnerabilityResults []containerscan.CommonContainerVulnerabilityResult
 
 	// retrieve timestamp from context
@@ -117,7 +39,11 @@ func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocum
 		parentLayer := map[string]string{
 			dummyLayer: parentLayerHash,
 		}
-		target := grypeDocument.Source.Target.(source.ImageMetadata)
+		var target source.ImageMetadata
+		err := json.Unmarshal(grypeDocument.Source.Target, &target)
+		if err != nil {
+			return vulnerabilityResults, err
+		}
 		for _, layer := range target.Layers {
 			parentLayer[layer.Digest] = parentLayerHash
 			parentLayerHash = layer.Digest
@@ -173,7 +99,7 @@ func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocum
 			// add layer information
 			// make sure we have at least one location
 			if match.Artifact.Locations == nil || len(match.Artifact.Locations) < 1 {
-				match.Artifact.Locations = []source.Coordinates{
+				match.Artifact.Locations = []v1beta1.SyftCoordinates{
 					{
 						FileSystemID: dummyLayer,
 					},
@@ -227,4 +153,40 @@ func convertToCommonContainerVulnerabilityResult(ctx context.Context, grypeDocum
 	}
 
 	return vulnerabilityResults, nil
+}
+
+func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {
+	layerMap := make(map[string]containerscan.ESLayer)
+	if target.RawConfig == nil {
+		return layerMap, nil
+	}
+
+	jsonConfig := &v1.ConfigFile{}
+	valueConfig, _ := base64.StdEncoding.DecodeString(string(target.RawConfig))
+	err := json.Unmarshal(valueConfig, jsonConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	listLayers := make([]containerscan.ESLayer, 0)
+	for i := range jsonConfig.History {
+
+		if !jsonConfig.History[i].EmptyLayer {
+			listLayers = append(listLayers, containerscan.ESLayer{LayerInfo: &containerscan.LayerInfo{
+				CreatedBy:   jsonConfig.History[i].CreatedBy,
+				CreatedTime: &jsonConfig.History[i].Created.Time,
+			},
+			})
+		}
+	}
+	for i := 0; i < len(listLayers) && i < len(jsonConfig.RootFS.DiffIDs); i++ {
+		listLayers[i].LayerHash = jsonConfig.RootFS.DiffIDs[i].String()
+		if i > 0 {
+			listLayers[i].ParentLayerHash = jsonConfig.RootFS.DiffIDs[i-1].String()
+			listLayers[i].LayerInfo.LayerOrder = i
+		}
+		layerMap[listLayers[i].LayerHash] = listLayers[i]
+	}
+
+	return layerMap, nil
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	"github.com/armosec/cluster-container-scanner-api/containerscan/v1"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/go-logger"
@@ -206,8 +206,8 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 			vulnSeverityStats.RCECount++
 			incrementCounter(&summary.RCECount, true, isIgnored)
 			if isFixed {
-				incrementCounter(&summary.RCEFixCount, true, isIgnored)
 				vulnSeverityStats.RCEFixCount++
+				incrementCounter(&summary.RCEFixCount, true, isIgnored)
 			}
 		}
 
@@ -242,4 +242,21 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 	}
 
 	return &summary
+}
+
+func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) []armotypes.VulnerabilityExceptionPolicy {
+	var l []armotypes.VulnerabilityExceptionPolicy
+
+	for i := range srcCVEList {
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
+				l = append(l, srcCVEList[i])
+			}
+		}
+	}
+
+	if len(l) > 0 {
+		return l
+	}
+	return nil
 }

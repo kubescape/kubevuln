@@ -2,32 +2,51 @@ package adapters
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // MockSBOMAdapter implements a mocked SBOMCreator to be used for tests
 type MockSBOMAdapter struct {
+	error   bool
+	timeout bool
 }
 
 var _ ports.SBOMCreator = (*MockSBOMAdapter)(nil)
 
 // NewMockSBOMAdapter initializes the MockSBOMAdapter struct
-func NewMockSBOMAdapter() *MockSBOMAdapter {
+func NewMockSBOMAdapter(error, timeout bool) *MockSBOMAdapter {
 	logger.L().Info("NewMockSBOMAdapter")
-	return &MockSBOMAdapter{}
+	return &MockSBOMAdapter{
+		error:   error,
+		timeout: timeout,
+	}
 }
 
 // CreateSBOM returns a dummy SBOM for the given imageID
 func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domain.RegistryOptions) (domain.SBOM, error) {
 	logger.L().Info("CreateSBOM")
-	return domain.SBOM{
-		ImageID:            imageID,
+	if m.error {
+		return domain.SBOM{}, errors.New("mock error")
+	}
+	sbom := domain.SBOM{
+		ID:                 imageID,
 		SBOMCreatorVersion: m.Version(ctx),
-		Content:            []byte("SBOM content"),
-	}, nil
+		Content: &v1beta1.Document{
+			CreationInfo: &v1beta1.CreationInfo{
+				Created: time.Now().Format(time.RFC3339),
+			},
+		},
+	}
+	if m.timeout {
+		sbom.Status = domain.SBOMStatusTimedOut
+	}
+	return sbom, nil
 }
 
 // Version returns a static version

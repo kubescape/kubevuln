@@ -109,7 +109,7 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 			tools.EnsureSetup(t, err == nil)
 			grype, err := NewGrypeAdapter(ctx)
 			tools.EnsureSetup(t, err == nil)
-			cve, err := grype.ScanSBOM(ctx, sbom, domain.CVEExceptions{})
+			cve, err := grype.ScanSBOM(ctx, sbom)
 			tools.EnsureSetup(t, err == nil)
 			if err := a.SubmitCVE(ctx, cve, false); (err != nil) != tt.wantErr {
 				t.Errorf("SubmitCVE() error = %v, wantErr %v", err, tt.wantErr)

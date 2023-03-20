@@ -1,15 +1,22 @@
 package domain
 
+import (
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
+
 const (
+	ImageIDKey         = "imageID"
+	StatusKey          = "status"
 	SBOMStatusTimedOut = "timed out"
 )
 
 // SBOM contains an SPDX SBOM in JSON format with some metadata
 type SBOM struct {
-	ImageID            string
+	ID                 string
+	SBOMCreatorName    string
 	SBOMCreatorVersion string
 	Status             string
-	Content            []byte
+	Content            *v1beta1.Document
 }
 
 // RegistryCredentials contains OCI registry credentials required for connection

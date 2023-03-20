@@ -8,12 +8,6 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func TestMockCVEAdapter_CreateRelevantCVE(t *testing.T) {
-	m := NewMockCVEAdapter()
-	_, err := m.CreateRelevantCVE(context.TODO(), domain.CVEManifest{}, domain.CVEManifest{})
-	assert.Assert(t, err == nil)
-}
-
 func TestMockCVEAdapter_DBVersion(t *testing.T) {
 	m := NewMockCVEAdapter()
 	assert.Assert(t, m.DBVersion(context.TODO()) == "v1.0.0")
@@ -26,7 +20,7 @@ func TestMockCVEAdapter_Ready(t *testing.T) {
 
 func TestMockCVEAdapter_ScanSBOM(t *testing.T) {
 	m := NewMockCVEAdapter()
-	_, err := m.ScanSBOM(context.TODO(), domain.SBOM{}, domain.CVEExceptions{})
+	_, err := m.ScanSBOM(context.TODO(), domain.SBOM{})
 	assert.Assert(t, err == nil)
 }
 
