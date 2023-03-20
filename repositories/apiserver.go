@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"strings"
 	"time"
 
@@ -69,12 +68,6 @@ func hashFromInstanceID(instanceID string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx
-func instanceIDFromLabels(labels map[string]string) string {
-	return fmt.Sprintf("apiVersion-%s/namespace-%s/kind-%s/name-%s/resourceVersion-%s/containerName-%s",
-		"v1", labels[labelNamespace], labels[labelKind], labels[labelName], labels["TODO resourceVersion"], labels["TODO containerName"])
-}
-
 func labelsFromInstanceID(instanceID string) map[string]string {
 	return map[string]string{
 		labelKind:      wlid.GetKindFromWlid(instanceID),
@@ -88,11 +81,16 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
+	// discard the manifest if it was created by an older version of the scanner
+	// TODO: also check SBOMCreatorVersion ?
+	if manifest.Spec.Metadata.Tool.Version != CVEScannerVersion || manifest.Spec.Metadata.Tool.DatabaseVersion != CVEDBVersion {
+		return domain.CVEManifest{}, nil
+	}
 	return domain.CVEManifest{
-		ImageID:            manifest.Annotations[domain.ImageIDKey],
-		SBOMCreatorVersion: "",
-		CVEScannerVersion:  manifest.Spec.Metadata.Tool.Version,
-		CVEDBVersion:       manifest.Spec.Metadata.Tool.DatabaseVersion,
+		ImageID:            imageID,
+		SBOMCreatorVersion: SBOMCreatorVersion,
+		CVEScannerVersion:  CVEScannerVersion,
+		CVEDBVersion:       CVEDBVersion,
 		Content:            &manifest.Spec.Payload,
 	}, nil
 }
@@ -126,9 +124,13 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 	if err != nil {
 		return domain.SBOM{}, err
 	}
+	// discard the manifest if it was created by an older version of the scanner
+	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
+		return domain.SBOM{}, nil
+	}
 	result := domain.SBOM{
-		ID:                 manifest.Annotations[domain.ImageIDKey],
-		SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+		ID:                 imageID,
+		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
@@ -142,9 +144,13 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 	if err != nil {
 		return domain.SBOM{}, err
 	}
+	// discard the manifest if it was created by an older version of the scanner
+	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
+		return domain.SBOM{}, nil
+	}
 	result := domain.SBOM{
-		ID:                 instanceIDFromLabels(manifest.Labels),
-		SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+		ID:                 instanceID,
+		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
