@@ -24,7 +24,9 @@ import (
 )
 
 type ArmoAdapter struct {
-	clusterConfig pkgcautils.ClusterConfig
+	clusterConfig        pkgcautils.ClusterConfig
+	getCVEExceptionsFunc func(string, string, *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	httpPostFunc         func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error)
 }
 
 var _ ports.Platform = (*ArmoAdapter)(nil)
@@ -36,6 +38,8 @@ func NewArmoAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *Arm
 			EventReceiverRestURL: eventReceiverRestURL,
 			GatewayRestURL:       gatewayRestURL,
 		},
+		getCVEExceptionsFunc: wssc.BackendGetCVEExceptionByDEsignator,
+		httpPostFunc:         httputils.HttpPost,
 	}
 }
 
@@ -78,7 +82,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 		},
 	}
 
-	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}
@@ -212,12 +216,12 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	firstVulnerabilitiesChunk = nil
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
-		sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+		a.sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
 		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {
