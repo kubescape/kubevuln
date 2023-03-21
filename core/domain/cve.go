@@ -9,7 +9,7 @@ type CVEExceptions []armotypes.VulnerabilityExceptionPolicy
 
 // CVEManifest contains a JSON CVE report manifest with some metadata
 type CVEManifest struct {
-	ImageID            string
+	ID                 string
 	SBOMCreatorName    string
 	SBOMCreatorVersion string
 	CVEScannerName     string
