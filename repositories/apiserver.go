@@ -9,6 +9,8 @@ import (
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/distribution/distribution/reference"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -77,9 +79,13 @@ func labelsFromInstanceID(instanceID string) map[string]string {
 }
 
 func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+	if imageID == "" {
+		return domain.CVEManifest{}, nil
+	}
 	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
 	if err != nil {
-		return domain.CVEManifest{}, err
+		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err), helpers.String("ID", imageID))
+		return domain.CVEManifest{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	// TODO: also check SBOMCreatorVersion ?
@@ -96,6 +102,9 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 }
 
 func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	if cve.ImageID == "" {
+		return nil
+	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hashFromImageID(cve.ImageID),
@@ -116,13 +125,20 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		},
 	}
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	return err
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ImageID))
+	}
+	return nil
 }
 
 func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+	if imageID == "" {
+		return domain.SBOM{}, nil
+	}
 	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
 	if err != nil {
-		return domain.SBOM{}, err
+		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err), helpers.String("ID", imageID))
+		return domain.SBOM{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
@@ -140,9 +156,13 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 }
 
 func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+	if instanceID == "" {
+		return domain.SBOM{}, nil
+	}
 	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(ctx, hashFromInstanceID(instanceID), metav1.GetOptions{})
 	if err != nil {
-		return domain.SBOM{}, err
+		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err), helpers.String("ID", instanceID))
+		return domain.SBOM{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
@@ -160,6 +180,9 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 }
 
 func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
+	if sbom.ID == "" {
+		return nil
+	}
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hashFromImageID(sbom.ID),
@@ -184,5 +207,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
 	}
 	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	return err
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err), helpers.String("ID", sbom.ID))
+	}
+	return nil
 }

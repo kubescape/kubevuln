@@ -75,17 +75,24 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 
 func TestScanService_ScanCVE(t *testing.T) {
 	tests := []struct {
-		name     string
-		sbom     bool
-		sbomp    bool
-		timeout  bool
-		workload bool
-		wantErr  bool
+		name      string
+		emptyWlid bool
+		sbom      bool
+		sbomp     bool
+		timeout   bool
+		workload  bool
+		wantErr   bool
 	}{
 		{
 			name:     "no workload",
 			workload: false,
 			wantErr:  true,
+		},
+		{
+			name:      "empty wlid",
+			emptyWlid: true,
+			workload:  false,
+			wantErr:   true,
 		},
 		{
 			name:     "missing SBOM",
@@ -117,6 +124,9 @@ func TestScanService_ScanCVE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
 			wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+			if tt.emptyWlid {
+				wlid = ""
+			}
 			sbomAdapter := adapters.NewMockSBOMAdapter(false, tt.timeout)
 			storage := repositories.NewMemoryStorage()
 			s := NewScanService(sbomAdapter,
