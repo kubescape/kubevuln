@@ -65,7 +65,7 @@ func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, C
 }
 
 // StoreCVE stores a CVE manifest to an in-memory map
-func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreCVE")
 	defer span.End()
 
