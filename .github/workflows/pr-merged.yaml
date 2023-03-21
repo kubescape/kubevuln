@@ -1,6 +1,6 @@
 name: pr-merged
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: 
     - 'main'
@@ -9,9 +9,13 @@ on:
       - '*.yaml'
       - '.github/workflows/*'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docker-build:
-    if: ${{ github.repository_owner == 'kubescape' }}  
+    if: ${{ (github.event.pull_request.merged == true) && (github.repository_owner == 'kubescape') }} ## Skip if not merged and the repository owner is not kubescape
     runs-on: ubuntu-latest
     permissions:
       id-token: write
