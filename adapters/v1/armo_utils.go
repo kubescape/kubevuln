@@ -20,7 +20,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
-func sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
+func (a *ArmoAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//if size of summary + first chunk does not exceed max size
@@ -36,11 +36,11 @@ func sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultRep
 		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount != 0
 	}
 	//send the summary report
-	postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
+	a.postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
 	nextPartNum++
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
-		postResultsAsGoroutine(ctx,
+		a.postResultsAsGoroutine(ctx,
 			&v1.ScanResultReport{
 				PaginationInfo:  apis.PaginationMarks{ReportNumber: nextPartNum, IsLastReport: totalVulnerabilities == firstChunkVulnerabilitiesCount},
 				Vulnerabilities: firstVulnerabilitiesChunk,
@@ -53,15 +53,15 @@ func sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultRep
 	return nextPartNum
 }
 
-func postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+func (a *ArmoAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func(report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
-		postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
+		a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
 	}(report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
-func postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
+func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err), helpers.String("wlid", wlid))
@@ -81,7 +81,7 @@ func postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiver
 	q.Add(armotypes.CustomerGuidQuery, report.Designators.Attributes[armotypes.AttributeCustomerGUID])
 	urlBase.RawQuery = q.Encode()
 
-	resp, err := httputils.HttpPost(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
+	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.String("image", imagetag), helpers.String("wlid", wlid), helpers.Error(err))
 		errorChan <- err
@@ -97,9 +97,9 @@ func postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiver
 	logger.L().Info(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
 }
 
-func sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, scanID string, finalReport v1.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
+func (a *ArmoAdapter) sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, scanID string, finalReport v1.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
 	go func(scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int, partNum int) {
-		sendVulnerabilities(ctx, chunksChan, eventReceiverURL, partNum, expectedVulnerabilitiesSum, scanID, finalReport, errorChan, sendWG)
+		a.sendVulnerabilities(ctx, chunksChan, eventReceiverURL, partNum, expectedVulnerabilitiesSum, scanID, finalReport, errorChan, sendWG)
 		//wait for all post request to end (including summary report)
 		sendWG.Wait()
 		//no more post requests - close the error channel
@@ -107,12 +107,12 @@ func sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []contain
 	}(scanID, finalReport, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, nextPartNum)
 }
 
-func sendVulnerabilities(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, partNum int, expectedVulnerabilitiesSum int, scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
+func (a *ArmoAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, partNum int, expectedVulnerabilitiesSum int, scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
 	//post each vulnerability chunk in a different report
 	chunksVulnerabilitiesCount := 0
 	for vulnerabilities := range chunksChan {
 		chunksVulnerabilitiesCount += len(vulnerabilities)
-		postResultsAsGoroutine(ctx,
+		a.postResultsAsGoroutine(ctx,
 			&v1.ScanResultReport{
 				PaginationInfo:  apis.PaginationMarks{ReportNumber: partNum, IsLastReport: chunksVulnerabilitiesCount == expectedVulnerabilitiesSum},
 				Vulnerabilities: vulnerabilities,
