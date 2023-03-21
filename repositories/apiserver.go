@@ -106,15 +106,18 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		return nil
 	}
 	name := hashFromImageID(cve.ID)
+	annotations := map[string]string{domain.ImageTagKey: cve.ID}
 	if withRelevancy {
-		hashFromInstanceID(cve.ID)
+		name = hashFromInstanceID(cve.ID)
+		annotations = map[string]string{
+			domain.InstanceIDKey: cve.ID,
+			domain.WlidKey:       cve.Wlid,
+		}
 	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Annotations: map[string]string{
-				domain.ImageIDKey: cve.ID,
-			},
+			Name:        name,
+			Annotations: annotations,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
 			Metadata: v1beta1.VulnerabilityManifestMeta{
@@ -191,8 +194,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hashFromImageID(sbom.ID),
 			Annotations: map[string]string{
-				domain.ImageIDKey: sbom.ID,
-				domain.StatusKey:  sbom.Status,
+				domain.ImageTagKey: sbom.ID,
+				domain.StatusKey:   sbom.Status,
 			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
