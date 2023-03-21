@@ -93,7 +93,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		return domain.CVEManifest{}, nil
 	}
 	return domain.CVEManifest{
-		ImageID:            imageID,
+		ID:                 imageID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
@@ -102,14 +102,18 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 }
 
 func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
-	if cve.ImageID == "" {
+	if cve.ID == "" {
 		return nil
+	}
+	name := hashFromImageID(cve.ID)
+	if withRelevancy {
+		hashFromInstanceID(cve.ID)
 	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: hashFromImageID(cve.ImageID),
+			Name: name,
 			Annotations: map[string]string{
-				domain.ImageIDKey: cve.ImageID,
+				domain.ImageIDKey: cve.ID,
 			},
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
@@ -126,7 +130,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ImageID))
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID))
 	}
 	return nil
 }

@@ -10,12 +10,12 @@ import (
 )
 
 func TestMemoryStore_GetCVE(t *testing.T) {
-	m := NewMemoryStorage()
+	m := NewMemoryStorage(false, false)
 	ctx := context.TODO()
 	got, _ := m.GetCVE(ctx, "imageID", "", "", "")
 	assert.Assert(t, got.Content == nil)
 	cve := domain.CVEManifest{
-		ImageID:            "imageID",
+		ID:                 "imageID",
 		SBOMCreatorVersion: "",
 		CVEScannerVersion:  "",
 		CVEDBVersion:       "",
@@ -27,7 +27,7 @@ func TestMemoryStore_GetCVE(t *testing.T) {
 }
 
 func TestMemoryStore_GetSBOM(t *testing.T) {
-	m := NewMemoryStorage()
+	m := NewMemoryStorage(false, false)
 	ctx := context.TODO()
 	got, _ := m.GetSBOM(ctx, "imageID", "")
 	assert.Assert(t, got.Content == nil)
