@@ -230,9 +230,6 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
-	if workload.Wlid == "" {
-		return ctx, errors.New("missing instanceID")
-	}
 	if workload.ImageHash == "" {
 		return ctx, errors.New("missing imageID")
 	}
