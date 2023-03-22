@@ -98,6 +98,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if !ok {
 		return errors.New("no workload found in context")
 	}
+	logger.L().Info("scan started", helpers.String("imageID", workload.ImageHash), helpers.String("jobID", workload.JobID))
 
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
@@ -187,7 +188,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 	// submit CVE manifest to platform
-	err = s.platform.SubmitCVE(ctx, cve, cvep) // check name to use instanceID
+	err = s.platform.SubmitCVE(ctx, cve, cvep)
 	if err != nil {
 		return err
 	}
@@ -197,6 +198,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 
+	logger.L().Info("scan complete", helpers.String("imageID", workload.ImageHash), helpers.String("jobID", workload.JobID))
 	return nil
 }
 
