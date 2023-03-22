@@ -24,7 +24,9 @@ import (
 )
 
 type ArmoAdapter struct {
-	clusterConfig pkgcautils.ClusterConfig
+	clusterConfig        pkgcautils.ClusterConfig
+	getCVEExceptionsFunc func(string, string, *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	httpPostFunc         func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error)
 }
 
 var _ ports.Platform = (*ArmoAdapter)(nil)
@@ -36,6 +38,8 @@ func NewArmoAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *Arm
 			EventReceiverRestURL: eventReceiverRestURL,
 			GatewayRestURL:       gatewayRestURL,
 		},
+		getCVEExceptionsFunc: wssc.BackendGetCVEExceptionByDEsignator,
+		httpPostFunc:         httputils.HttpPost,
 	}
 }
 
@@ -61,7 +65,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	defer span.End()
 
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return nil, errors.New("no workload found in context")
 	}
@@ -78,7 +82,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 		},
 	}
 
-	vulnExceptionList, err := wssc.BackendGetCVEExceptionByDEsignator(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +94,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SendStatus")
 	defer span.End()
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
@@ -123,23 +127,26 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SubmitCVE")
 	defer span.End()
 	// retrieve timestamp from context
-	timestamp, ok := ctx.Value(domain.TimestampKey).(int64)
+	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
 	if !ok {
 		return errors.New("no timestamp found in context")
 	}
 	// retrieve scanID from context
-	scanID, ok := ctx.Value(domain.ScanIDKey).(string)
+	scanID, ok := ctx.Value(domain.ScanIDKey{}).(string)
 	if !ok {
 		return errors.New("no scanID found in context")
 	}
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
 
 	// get exceptions
 	exceptions, err := a.GetCVEExceptions(ctx)
+	if err != nil {
+		return err
+	}
 	// convert to vulnerabilities
 	vulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
 	if err != nil {
@@ -212,12 +219,12 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	firstVulnerabilitiesChunk = nil
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
-		sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+		a.sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
 		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {

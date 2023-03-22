@@ -45,7 +45,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
@@ -117,7 +117,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanCVE")
 	defer span.End()
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
@@ -195,15 +195,15 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Context {
 	// record start time
-	ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 	// generate unique scanID and add to context
 	scanID, err := uuid.NewRandom()
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error generating scanID", helpers.Error(err))
 	}
-	ctx = context.WithValue(ctx, domain.ScanIDKey, scanID.String())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID.String())
 	// add workload to context
-	ctx = context.WithValue(ctx, domain.WorkloadKey, workload)
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	return ctx
 }
 

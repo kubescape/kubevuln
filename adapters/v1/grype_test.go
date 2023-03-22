@@ -48,9 +48,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
-			ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
-			ctx = context.WithValue(ctx, domain.ScanIDKey, uuid.New().String())
-			ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			g := NewGrypeAdapter()
 			g.Ready(ctx) // need to call ready to load the DB
 			got, err := g.ScanSBOM(ctx, tt.sbom)
