@@ -55,7 +55,7 @@ func NewGrypeAdapter() *GrypeAdapter {
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
-	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
+	_, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
 	defer span.End()
 
 	g.mu.RLock()
@@ -174,7 +174,7 @@ func getMatchers() []matcher.Matcher {
 
 // Version returns Grype's version which is used to tag CVE manifests
 func (g *GrypeAdapter) Version(ctx context.Context) string {
-	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
+	_, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
 	defer span.End()
 	return tools.PackageVersion("github.com/anchore/grype")
 }

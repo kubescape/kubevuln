@@ -2,9 +2,9 @@ package domain
 
 import wssc "github.com/armosec/armoapi-go/apis"
 
-const ScanIDKey = "scanID"
-const TimestampKey = "timestamp"
-const WorkloadKey = "scanCommand"
+type ScanIDKey struct{}
+type TimestampKey struct{}
+type WorkloadKey struct{}
 
 // ScanCommand is a proxy type for wssc.WebsocketScanCommand used to decouple business logic from implementation
 // it might evolve into its own struct at a later time

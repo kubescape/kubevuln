@@ -67,7 +67,7 @@ func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
 			}
 			ctx := context.TODO()
 			if tt.workload {
-				ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
+				ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			}
 			got, err := a.GetCVEExceptions(ctx)
 			if (err != nil) != tt.wantErr {
@@ -115,9 +115,9 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 				httpPostFunc:         tt.fields.httpPostFunc,
 			}
 			ctx := context.TODO()
-			ctx = context.WithValue(ctx, domain.TimestampKey, time.Now().Unix())
-			ctx = context.WithValue(ctx, domain.ScanIDKey, uuid.New().String())
-			ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			b, err := os.ReadFile("testdata/alpine-cve.json")
 			tools.EnsureSetup(t, err == nil)
 			var grypeCVE models.Document

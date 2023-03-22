@@ -19,7 +19,7 @@ func TestMockPlatform_SendStatus(t *testing.T) {
 	ctx := context.TODO()
 	err := m.SendStatus(ctx, domain.Done)
 	assert.Assert(t, err != nil)
-	ctx = context.WithValue(ctx, domain.WorkloadKey, domain.ScanCommand{})
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 	err = m.SendStatus(ctx, domain.Done)
 	assert.Assert(t, err == nil)
 }
