@@ -26,10 +26,7 @@ func (m MockScanService) GenerateSBOM(context.Context) error {
 }
 
 func (m MockScanService) Ready(context.Context) bool {
-	if m.happy {
-		return true
-	}
-	return false
+	return m.happy
 }
 
 func (m MockScanService) ScanCVE(context.Context) error {

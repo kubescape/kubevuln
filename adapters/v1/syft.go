@@ -120,7 +120,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 
 // Version returns Syft's version which is used to tag SBOMs
 func (s *SyftAdapter) Version(ctx context.Context) string {
-	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.Version")
+	_, span := otel.Tracer("").Start(ctx, "SyftAdapter.Version")
 	defer span.End()
 	return tools.PackageVersion("github.com/anchore/syft")
 }
