@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/docker/docker/api/types"
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -79,6 +80,18 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			if tt.workload {
 				workload := domain.ScanCommand{
 					ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+				}
+				workload.Credentialslist = []types.AuthConfig{
+					{
+						Username: "test",
+						Password: "test",
+					},
+					{
+						RegistryToken: "test",
+					},
+					{
+						Auth: "test",
+					},
 				}
 				var err error
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)

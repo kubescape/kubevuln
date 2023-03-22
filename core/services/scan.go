@@ -64,7 +64,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
 		if err != nil {
 			return err
 		}
@@ -128,7 +128,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
 			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{}) // FIXME: add registry options
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
 			if err != nil {
 				return err
 			}
@@ -212,6 +212,22 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Con
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	return ctx
+}
+
+func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
+	options := domain.RegistryOptions{}
+	for _, cred := range workload.Credentialslist {
+		if cred.Auth != "" {
+			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Authority: cred.Auth})
+		}
+		if cred.RegistryToken != "" {
+			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Token: cred.RegistryToken})
+		}
+		if cred.Username != "" && cred.Password != "" {
+			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Username: cred.Username, Password: cred.Password})
+		}
+	}
+	return options
 }
 
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
