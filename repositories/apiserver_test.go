@@ -107,7 +107,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 			tools.EnsureSetup(t, err == nil)
 			err = a.StoreCVE(tt.args.ctx, tt.cve, false)
 			tools.EnsureSetup(t, err == nil)
-			gotCve, err := a.GetCVE(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
+			gotCve, _ := a.GetCVE(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
 			if (gotCve.Content == nil) != tt.wantEmptyCVE {
 				t.Errorf("GetCVE() gotCve.Content = %v, wantEmptyCVE %v", gotCve.Content, tt.wantEmptyCVE)
 				return
@@ -204,7 +204,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			tools.EnsureSetup(t, err == nil)
 			err = a.StoreSBOM(tt.args.ctx, tt.sbom)
 			tools.EnsureSetup(t, err == nil)
-			gotSbom, err := a.GetSBOM(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
+			gotSbom, _ := a.GetSBOM(tt.args.ctx, tt.args.imageID, tt.args.SBOMCreatorVersion)
 			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
 				return
@@ -301,7 +301,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			tools.EnsureSetup(t, err == nil)
 			err = a.storeSBOMp(tt.args.ctx, tt.sbom)
 			tools.EnsureSetup(t, err == nil)
-			gotSbom, err := a.GetSBOMp(tt.args.ctx, tt.args.instanceID, tt.args.SBOMCreatorVersion)
+			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.instanceID, tt.args.SBOMCreatorVersion)
 			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
 				return

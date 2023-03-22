@@ -31,7 +31,7 @@ func (m MockPlatform) GetCVEExceptions(_ context.Context) (domain.CVEExceptions,
 // SendStatus logs the given status and details
 func (m MockPlatform) SendStatus(ctx context.Context, step int) error {
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}

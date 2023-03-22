@@ -23,7 +23,7 @@ func TestHTTPController_Alive(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Assert(t, http.StatusOK == w.Code, w.Code)
-	assert.Assert(t, "{\"status\":200,\"title\":\"OK\"}" == w.Body.String(), w.Body.String())
+	assert.Assert(t, w.Body.String() == "{\"status\":200,\"title\":\"OK\"}", w.Body.String())
 }
 
 func TestHTTPController_GenerateSBOM(t *testing.T) {

@@ -18,17 +18,17 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 	var vulnerabilityResults []containerscan.CommonContainerVulnerabilityResult
 
 	// retrieve timestamp from context
-	timestamp, ok := ctx.Value(domain.TimestampKey).(int64)
+	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
 	if !ok {
 		return vulnerabilityResults, errors.New("no timestamp found in context")
 	}
 	// retrieve scanID from context
-	scanID, ok := ctx.Value(domain.ScanIDKey).(string)
+	scanID, ok := ctx.Value(domain.ScanIDKey{}).(string)
 	if !ok {
 		return vulnerabilityResults, errors.New("no scanID found in context")
 	}
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey).(domain.ScanCommand)
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return vulnerabilityResults, errors.New("no workload found in context")
 	}
