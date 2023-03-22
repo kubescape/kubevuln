@@ -16,6 +16,8 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		name            string
 		sbom            domain.SBOM
 		storage         bool
+		getError        bool
+		storeError      bool
 		timeout         bool
 		workload        bool
 		wantErr         bool
@@ -40,7 +42,21 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			name:     "phase 1, timeout",
 			timeout:  true,
 			workload: true,
-			wantErr:  true,
+			wantErr:  false, // we no longer check for timeout
+		},
+		{
+			name:     "phase 2, get SBOM failed",
+			storage:  true,
+			getError: true,
+			workload: true,
+			wantErr:  false,
+		},
+		{
+			name:       "phase 2, store SBOM failed",
+			storage:    true,
+			storeError: true,
+			workload:   true,
+			wantErr:    true,
 		},
 		{
 			name:     "phase 2, create and store SBOM",
@@ -51,10 +67,12 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout),
-				repositories.NewMemoryStorage(),
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			storage := repositories.NewMemoryStorage(tt.getError, tt.storeError)
+			s := NewScanService(sbomAdapter,
+				storage,
 				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(),
+				storage,
 				adapters.NewMockPlatform(),
 				tt.storage)
 			ctx := context.TODO()
@@ -75,13 +93,19 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 
 func TestScanService_ScanCVE(t *testing.T) {
 	tests := []struct {
-		name      string
-		emptyWlid bool
-		sbom      bool
-		sbomp     bool
-		timeout   bool
-		workload  bool
-		wantErr   bool
+		createSBOMError bool
+		name            string
+		instanceID      string
+		emptyWlid       bool
+		sbom            bool
+		storage         bool
+		getErrorCVE     bool
+		getErrorSBOM    bool
+		storeErrorCVE   bool
+		storeErrorSBOM  bool
+		timeout         bool
+		workload        bool
+		wantErr         bool
 	}{
 		{
 			name:     "no workload",
@@ -89,35 +113,72 @@ func TestScanService_ScanCVE(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:      "empty wlid",
-			emptyWlid: true,
-			workload:  false,
-			wantErr:   true,
+			name:     "no storage",
+			workload: true,
+			wantErr:  false,
 		},
 		{
-			name:     "missing SBOM",
+			name:            "create SBOM error",
+			createSBOMError: true,
+			workload:        true,
+			wantErr:         true,
+		},
+		{
+			name:      "empty wlid",
+			emptyWlid: true,
+			storage:   true,
+			workload:  true,
+			wantErr:   false,
+		},
+		{
+			name:     "first scan",
+			storage:  true,
 			workload: true,
-			wantErr:  true,
+			wantErr:  false,
+		},
+		{
+			name:         "get SBOM failed",
+			getErrorSBOM: true,
+			storage:      true,
+			workload:     true,
+			wantErr:      false,
+		},
+		{
+			name:           "store SBOM failed",
+			storeErrorSBOM: true,
+			storage:        true,
+			workload:       true,
+			wantErr:        false,
+		},
+		{
+			name:        "get CVE failed",
+			getErrorCVE: true,
+			storage:     true,
+			workload:    true,
+			wantErr:     false,
+		},
+		{
+			name:          "store CVE failed",
+			storeErrorCVE: true,
+			storage:       true,
+			workload:      true,
+			wantErr:       true,
 		},
 		{
 			name:     "timeout SBOM",
 			sbom:     true,
+			storage:  true,
 			timeout:  true,
 			workload: true,
 			wantErr:  true,
 		},
 		{
-			name:     "missing SBOMp",
-			sbom:     true,
-			workload: true,
-			wantErr:  false,
-		},
-		{
-			name:     "with SBOMp",
-			sbom:     true,
-			sbomp:    true,
-			workload: true,
-			wantErr:  false,
+			name:       "with SBOMp",
+			sbom:       true,
+			instanceID: "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx",
+			storage:    true,
+			workload:   true,
+			wantErr:    false,
 		},
 	}
 	for _, tt := range tests {
@@ -127,20 +188,24 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.emptyWlid {
 				wlid = ""
 			}
-			sbomAdapter := adapters.NewMockSBOMAdapter(false, tt.timeout)
-			storage := repositories.NewMemoryStorage()
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
+			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
 			s := NewScanService(sbomAdapter,
-				storage,
+				storageSBOM,
 				adapters.NewMockCVEAdapter(),
-				storage,
+				storageCVE,
 				adapters.NewMockPlatform(),
-				true)
+				tt.storage)
 			ctx := context.TODO()
 			s.Ready(ctx)
 			if tt.workload {
 				workload := domain.ScanCommand{
 					ImageHash: imageHash,
 					Wlid:      wlid,
+				}
+				if tt.instanceID != "" {
+					workload.InstanceID = &tt.instanceID
 				}
 				var err error
 				ctx, _ = s.ValidateScanCVE(ctx, workload)
@@ -149,12 +214,12 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.sbom {
 				sbom, err := sbomAdapter.CreateSBOM(ctx, imageHash, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
-				storage.StoreSBOM(ctx, sbom)
+				storageSBOM.StoreSBOM(ctx, sbom)
 			}
-			if tt.sbomp {
-				sbomp, err := sbomAdapter.CreateSBOM(ctx, wlid, domain.RegistryOptions{})
+			if tt.instanceID != "" {
+				sbomp, err := sbomAdapter.CreateSBOM(ctx, tt.instanceID, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
-				storage.StoreSBOM(ctx, sbomp)
+				storageSBOM.StoreSBOM(ctx, sbomp)
 			}
 			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
@@ -185,9 +250,9 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
-				repositories.NewMemoryStorage(),
+				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(),
+				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(),
 				false)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
@@ -229,9 +294,9 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
-				repositories.NewMemoryStorage(),
+				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(),
+				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(),
 				false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)

@@ -147,7 +147,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ID))
 	return domain.CVEManifest{
-		ImageID:            sbom.ID,
+		ID:                 sbom.ID,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(ctx),
 		CVEDBVersion:       g.DBVersion(ctx),

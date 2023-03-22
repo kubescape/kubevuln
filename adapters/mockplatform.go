@@ -38,17 +38,17 @@ func (m MockPlatform) SendStatus(ctx context.Context, step int) error {
 
 	logger.L().Info(
 		"SendStatus",
-		helpers.String("Wlid", workload.Wlid),
+		helpers.String("wlid", workload.Wlid),
 		helpers.Int("step", step),
 	)
 	return nil
 }
 
 // SubmitCVE logs the given ID for CVE calculation
-func (m MockPlatform) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
+func (m MockPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
 	logger.L().Info(
 		"SubmitCVE",
-		helpers.String("ID", cve.ImageID),
+		helpers.String("ID", cve.ID),
 	)
 	return nil
 }

@@ -5,8 +5,10 @@ import (
 )
 
 const (
-	ImageIDKey         = "imageID"
-	StatusKey          = "status"
+	ImageTagKey        = "kubescape.io/image-tag"
+	InstanceIDKey      = "kubescape.io/instance-id"
+	StatusKey          = "kubescape.io/status"
+	WlidKey            = "kubescape.io/wlid"
 	SBOMStatusTimedOut = "timed out"
 )
 
