@@ -44,21 +44,24 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
+
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
 
+	// check if SBOM is already available
 	sbom := domain.SBOM{}
 	var err error
 	if s.storage {
-		// check if SBOM is already available
 		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
 	}
+
+	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{})
@@ -67,38 +70,11 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		}
 	}
 
+	// store SBOM
 	if s.storage {
-		// store SBOM
 		err = s.sbomRepository.StoreSBOM(ctx, sbom)
 		if err != nil {
 			return err
-		}
-		return nil
-	} else {
-		// here we need to scan for CVE (phase 1)
-		// do not process timed out SBOM
-		if sbom.Status == domain.SBOMStatusTimedOut {
-			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
-		}
-		// scan for CVE
-		cve, err := s.cveScanner.ScanSBOM(ctx, sbom)
-		if err != nil {
-			return err
-		}
-		// report to platform
-		err = s.platform.SendStatus(ctx, domain.Success)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
-		}
-		// submit to platform
-		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
-		if err != nil {
-			return err
-		}
-		// report to platform
-		err = s.platform.SendStatus(ctx, domain.Done)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
 	}
 
@@ -116,53 +92,79 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 func (s *ScanService) ScanCVE(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanCVE")
 	defer span.End()
+
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return errors.New("no workload found in context")
 	}
+
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
 
-	// check if CVE scans are already available
-	cve, err := s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
-	if err != nil {
-		logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
-	}
-	if cve.Content == nil {
-		// need to scan for CVE
-		// check if SBOM is available
-		sbom, err := s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
+	// check if CVE manifest is already available
+	cve := domain.CVEManifest{}
+	if s.storage {
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
+	}
+
+	// if CVE manifest is not available, create it
+	if cve.Content == nil {
+		// check if SBOM is already available
+		sbom := domain.SBOM{}
+		if s.storage {
+			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+			}
+		}
+
+		// if SBOM is not available, create it
 		if sbom.Content == nil {
-			return errors.New("missing SBOM, skipping CVE scan")
+			// create SBOM
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, domain.RegistryOptions{}) // FIXME: add registry options
+			if err != nil {
+				return err
+			}
 		}
+
 		// do not process timed out SBOM
 		if sbom.Status == domain.SBOMStatusTimedOut {
 			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 		}
+
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			return err
 		}
+
 		// submit to storage
-		err = s.cveRepository.StoreCVE(ctx, cve, false)
-		if err != nil {
-			return err
+		if s.storage {
+			err = s.cveRepository.StoreCVE(ctx, cve, false)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	// check if SBOM' is available
-	cvep := domain.CVEManifest{}
-	sbomp, err := s.sbomRepository.GetSBOMp(ctx, workload.Wlid, s.sbomCreator.Version(ctx))
-	if err != nil {
-		logger.L().Ctx(ctx).Warning("error getting SBOMp", helpers.Error(err), helpers.String("wlid", workload.Wlid))
+
+	// check if SBOM' is already available
+	sbomp := domain.SBOM{}
+	if s.storage && workload.InstanceID != nil {
+		sbomp, err = s.sbomRepository.GetSBOMp(ctx, *workload.InstanceID, s.sbomCreator.Version(ctx))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error getting SBOMp", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
+		}
 	}
+
+	// with SBOM' we can scan for CVE'
+	cvep := domain.CVEManifest{}
 	if sbomp.Content != nil {
 		// scan for CVE'
 		cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
@@ -170,26 +172,31 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return err
 		}
 		// submit to storage
-		err = s.cveRepository.StoreCVE(ctx, cvep, true)
-		if err != nil {
-			return err
+		if s.storage {
+			cvep.Wlid = workload.Wlid
+			err = s.cveRepository.StoreCVE(ctx, cvep, true)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	// report to platform
+
+	// report scan success to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
-	// submit to platform
-	err = s.platform.SubmitCVE(ctx, cve, cvep)
+	// submit CVE manifest to platform
+	err = s.platform.SubmitCVE(ctx, cve, cvep) // check name to use instanceID
 	if err != nil {
 		return err
 	}
-	// report to platform
+	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 	}
+
 	return nil
 }
 
@@ -235,8 +242,11 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	}
 	// add instanceID and imageID to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
-		parentSpan.SetAttributes(attribute.String("instanceID", workload.Wlid))
+		if workload.InstanceID != nil {
+			parentSpan.SetAttributes(attribute.String("instanceID", *workload.InstanceID))
+		}
 		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// report to platform

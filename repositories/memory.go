@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -24,6 +25,8 @@ type sbomID struct {
 type MemoryStore struct {
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
+	getError     bool
+	storeError   bool
 }
 
 var _ ports.CVERepository = (*MemoryStore)(nil)
@@ -31,10 +34,12 @@ var _ ports.CVERepository = (*MemoryStore)(nil)
 var _ ports.SBOMRepository = (*MemoryStore)(nil)
 
 // NewMemoryStorage initializes the MemoryStore struct and its maps
-func NewMemoryStorage() *MemoryStore {
+func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 	return &MemoryStore{
 		cveManifests: map[cveID]domain.CVEManifest{},
 		sboms:        map[sbomID]domain.SBOM{},
+		getError:     getError,
+		storeError:   storeError,
 	}
 }
 
@@ -42,6 +47,10 @@ func NewMemoryStorage() *MemoryStore {
 func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVE")
 	defer span.End()
+
+	if m.getError {
+		return domain.CVEManifest{}, errors.New("mock error")
+	}
 
 	id := cveID{
 		Name:               imageID,
@@ -56,12 +65,16 @@ func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, C
 }
 
 // StoreCVE stores a CVE manifest to an in-memory map
-func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreCVE")
 	defer span.End()
 
+	if m.storeError {
+		return errors.New("mock error")
+	}
+
 	id := cveID{
-		Name:               cve.ImageID,
+		Name:               cve.ID,
 		SBOMCreatorVersion: cve.SBOMCreatorVersion,
 		CVEScannerVersion:  cve.CVEScannerVersion,
 		CVEDBVersion:       cve.CVEDBVersion,
@@ -74,6 +87,10 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, with
 func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOM")
 	defer span.End()
+
+	if m.getError {
+		return domain.SBOM{}, errors.New("mock error")
+	}
 
 	id := sbomID{
 		Name:               imageID,
@@ -90,6 +107,10 @@ func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersi
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOMp")
 	defer span.End()
 
+	if m.getError {
+		return domain.SBOM{}, errors.New("mock error")
+	}
+
 	id := sbomID{
 		Name:               instanceID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
@@ -104,6 +125,10 @@ func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersi
 func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
+
+	if m.storeError {
+		return errors.New("mock error")
+	}
 
 	id := sbomID{
 		Name:               sbom.ID,

@@ -24,7 +24,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	config, err := config.LoadConfig("/etc/config")
+	c, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -33,8 +33,8 @@ func main() {
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv("RELEASE"),
-			config.AccountID,
-			config.ClusterName,
+			c.AccountID,
+			c.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -44,17 +44,17 @@ func main() {
 	defer stop()
 
 	var storage *repositories.APIServerStore
-	if config.Storage {
+	if c.Storage {
 		storage, err = repositories.NewAPIServerStorage("kubescape")
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(config.ScanTimeout)
+	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout)
 	cveAdapter := v1.NewGrypeAdapter()
-	platform := v1.NewArmoAdapter(config.AccountID, config.BackendOpenAPI, config.EventReceiverRestURL)
-	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, config.Storage)
-	controller := controllers.NewHTTPController(service, config.ScanConcurrency)
+	platform := v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
+	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
+	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

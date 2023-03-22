@@ -52,7 +52,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 				imageID: imageID,
 			},
 			domain.CVEManifest{
-				ImageID: imageID,
+				ID:      imageID,
 				Content: &v1beta1.GrypeDocument{},
 			},
 			false,
@@ -65,7 +65,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 				CVEScannerVersion: "v1.1.0",
 			},
 			domain.CVEManifest{
-				ImageID:           imageID,
+				ID:                imageID,
 				CVEScannerVersion: "v1.0.0",
 				Content:           &v1beta1.GrypeDocument{},
 			},
@@ -79,7 +79,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 				CVEDBVersion: "v1.1.0",
 			},
 			domain.CVEManifest{
-				ImageID:      imageID,
+				ID:           imageID,
 				CVEDBVersion: "v1.0.0",
 				Content:      &v1beta1.GrypeDocument{},
 			},
@@ -93,7 +93,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 				CVEDBVersion: "v1.1.0",
 			},
 			domain.CVEManifest{
-				ImageID:      "",
+				ID:           "",
 				CVEDBVersion: "v1.0.0",
 				Content:      &v1beta1.GrypeDocument{},
 			},

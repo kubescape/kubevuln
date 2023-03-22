@@ -4,16 +4,16 @@
  "dataLicense": "CC0-1.0",
  "SPDXID": "SPDXRef-DOCUMENT",
  "name": "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
- "documentNamespace": "https://anchore.com/syft/image/library/alpine@sha256-e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501-cbc7635e-ab70-4950-9b57-fc3c43c8dd89",
+ "documentNamespace": "https://anchore.com/syft/image/library/alpine@sha256-e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501-77f60834-758b-4755-b5f9-49f0defae9a3",
  "externalDocumentRefs": null,
  "comment": "",
  "creationInfo": {
-  "licenseListVersion": "3.19",
+  "licenseListVersion": "3.20",
   "creators": [
    "Organization: Anchore, Inc",
    "Tool: syft-"
   ],
-  "created": "2023-03-15T09:58:19Z",
+  "created": "2023-03-22T07:57:01Z",
   "comment": ""
  },
  "packages": [
@@ -79,7 +79,7 @@
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/alpine-baselayout@3.4.0-r0?arch=x86_64&upstream=alpine-baselayout&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/alpine-baselayout@3.4.0-r0?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -251,7 +251,7 @@
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64&upstream=alpine-keys&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -325,7 +325,7 @@
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/apk-tools@2.12.10-r1?arch=x86_64&upstream=apk-tools&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/apk-tools@2.12.10-r1?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -340,7 +340,7 @@
   {
    "hasFiles": null,
    "name": "busybox",
-   "SPDXID": "SPDXRef-Package-binary-busybox-d49bb0510b7c7ca7",
+   "SPDXID": "SPDXRef-Package-binary-busybox-e93bc067bebd50a9",
    "versionInfo": "1.35.0",
    "packageFileName": "",
    "supplier": null,
@@ -413,7 +413,7 @@
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/busybox@1.35.0-r29?arch=x86_64&upstream=busybox&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/busybox@1.35.0-r29?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -573,6 +573,18 @@
     {
      "referenceCategory": "SECURITY",
      "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:mozilla:ca-certificates-bundle:20220614-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:mozilla:ca_certificates_bundle:20220614-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
      "referenceLocator": "cpe:2.3:a:ca:ca-certificates-bundle:20220614-r4:*:*:*:*:*:*:*",
      "comment": ""
     },
@@ -701,6 +713,24 @@
      "comment": ""
     },
     {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libcrypto3:libcrypto:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libcrypto:libcrypto3:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libcrypto:libcrypto:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
      "referenceLocator": "pkg:apk/alpine/libcrypto3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
@@ -745,6 +775,24 @@
      "comment": ""
     },
     {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libssl3:libssl:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libssl:libssl3:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:libssl:libssl:3.0.8-r0:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
      "referenceLocator": "pkg:apk/alpine/libssl3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
@@ -785,13 +833,25 @@
     {
      "referenceCategory": "SECURITY",
      "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:musl-libc:musl:1.2.3-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:musl_libc:musl:1.2.3-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
      "referenceLocator": "cpe:2.3:a:musl:musl:1.2.3-r4:*:*:*:*:*:*:*",
      "comment": ""
     },
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/musl@1.2.3-r4?arch=x86_64&upstream=musl&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/musl@1.2.3-r4?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -848,6 +908,18 @@
      "referenceCategory": "SECURITY",
      "referenceType": "cpe23Type",
      "referenceLocator": "cpe:2.3:a:musl_utils:musl_utils:1.2.3-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:musl-libc:musl-utils:1.2.3-r4:*:*:*:*:*:*:*",
+     "comment": ""
+    },
+    {
+     "referenceCategory": "SECURITY",
+     "referenceType": "cpe23Type",
+     "referenceLocator": "cpe:2.3:a:musl-libc:musl_utils:1.2.3-r4:*:*:*:*:*:*:*",
      "comment": ""
     },
     {
@@ -1027,7 +1099,7 @@
     {
      "referenceCategory": "PACKAGE-MANAGER",
      "referenceType": "purl",
-     "referenceLocator": "pkg:apk/alpine/zlib@1.2.13-r0?arch=x86_64&upstream=zlib&distro=alpine-3.17.2",
+     "referenceLocator": "pkg:apk/alpine/zlib@1.2.13-r0?arch=x86_64&distro=alpine-3.17.2",
      "comment": ""
     }
    ],
@@ -3004,15 +3076,15 @@
   },
   {
    "spdxElementId": "SPDXRef-Package-apk-busybox-623d53216342d45e",
-   "relatedSpdxElement": "SPDXRef-Package-binary-busybox-d49bb0510b7c7ca7",
-   "relationshipType": "OTHER",
-   "comment": "ownership-by-file-overlap: indicates that the parent package claims ownership of a child package since the parent metadata indicates overlap with a location that a cataloger found the child package by"
-  },
-  {
-   "spdxElementId": "SPDXRef-Package-apk-busybox-623d53216342d45e",
    "relatedSpdxElement": "SPDXRef-da2faa18609cadef",
    "relationshipType": "CONTAINS",
    "comment": ""
+  },
+  {
+   "spdxElementId": "SPDXRef-Package-apk-busybox-623d53216342d45e",
+   "relatedSpdxElement": "SPDXRef-Package-binary-busybox-e93bc067bebd50a9",
+   "relationshipType": "OTHER",
+   "comment": "ownership-by-file-overlap: indicates that the parent package claims ownership of a child package since the parent metadata indicates overlap with a location that a cataloger found the child package by"
   },
   {
    "spdxElementId": "SPDXRef-Package-apk-busybox-623d53216342d45e",

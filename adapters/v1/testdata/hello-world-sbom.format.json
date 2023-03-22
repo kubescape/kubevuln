@@ -8,7 +8,7 @@
  "externalDocumentRefs": null,
  "comment": "",
  "creationInfo": {
-  "licenseListVersion": "3.19",
+  "licenseListVersion": "<<PRESENCE>>",
   "creators": [
    "Organization: Anchore, Inc",
    "Tool: syft-"
