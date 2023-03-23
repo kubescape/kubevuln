@@ -133,6 +133,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			// store SBOM
+			if s.storage {
+				err = s.sbomRepository.StoreSBOM(ctx, sbom)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+				}
+			}
 		}
 
 		// do not process timed out SBOM
@@ -146,11 +153,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return err
 		}
 
-		// submit to storage
+		// store CVE
 		if s.storage {
 			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
-				return err
+				logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 			}
 		}
 	}
@@ -160,7 +167,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if s.storage && workload.InstanceID != nil {
 		sbomp, err = s.sbomRepository.GetSBOMp(ctx, *workload.InstanceID, s.sbomCreator.Version(ctx))
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting SBOMp", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
+			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
 		}
 	}
 
@@ -172,12 +179,12 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// submit to storage
+		// store CVE'
 		if s.storage {
 			cvep.Wlid = workload.Wlid
 			err = s.cveRepository.StoreCVE(ctx, cvep, true)
 			if err != nil {
-				return err
+				logger.L().Ctx(ctx).Warning("error storing CVEp", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
 			}
 		}
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
@@ -86,8 +87,12 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		logger.L().Debug("empty image ID provided, skipping CVE retrieval")
 		return domain.CVEManifest{}, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
-	if err != nil {
+	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
+	switch  {
+	case errors.IsNotFound(err):
+		logger.L().Debug("CVE manifest not found in storage", helpers.String("ID", imageID))
+		return domain.CVEManifest{}, nil
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err), helpers.String("ID", imageID))
 		return domain.CVEManifest{}, nil
 	}
@@ -97,7 +102,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		logger.L().Debug("discarding CVE manifest with outdated scanner version", helpers.String("ID", imageID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("manifest DB version", manifest.Spec.Metadata.Tool.DatabaseVersion), helpers.String("wanted scanner version", CVEScannerVersion), helpers.String("wanted DB version", CVEDBVersion))
 		return domain.CVEManifest{}, nil
 	}
-	logger.L().Debug("found CVE manifest in storage", helpers.String("ID", imageID))
+	logger.L().Debug("got CVE manifest from storage", helpers.String("ID", imageID))
 	return domain.CVEManifest{
 		ID:                 imageID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
@@ -140,11 +145,15 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			Payload: *cve.Content,
 		},
 	}
-	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	if err != nil {
+	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		logger.L().Debug("CVE manifest already exists in storage", helpers.String("ID", cve.ID))
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID))
+	default:
+		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID))
 	}
-	logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID))
 	return nil
 }
 
@@ -155,8 +164,12 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		logger.L().Debug("empty image ID provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
-	if err != nil {
+	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
+	switch  {
+	case errors.IsNotFound(err):
+		logger.L().Debug("SBOM manifest not found in storage", helpers.String("ID", imageID))
+		return domain.SBOM{}, nil
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err), helpers.String("ID", imageID))
 		return domain.SBOM{}, nil
 	}
@@ -173,7 +186,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
 		result.Status = status
 	}
-	logger.L().Debug("found SBOM in storage", helpers.String("ID", imageID))
+	logger.L().Debug("got SBOM from storage", helpers.String("ID", imageID))
 	return result, nil
 }
 
@@ -181,17 +194,21 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
 	defer span.End()
 	if instanceID == "" {
-		logger.L().Debug("empty instance ID provided, skipping SBOMp retrieval")
+		logger.L().Debug("empty instance ID provided, skipping relevant SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(ctx, hashFromInstanceID(instanceID), metav1.GetOptions{})
-	if err != nil {
+	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), hashFromInstanceID(instanceID), metav1.GetOptions{})
+	switch  {
+	case errors.IsNotFound(err):
+		logger.L().Debug("relevant SBOM manifest not found in storage", helpers.String("ID", instanceID))
+		return domain.SBOM{}, nil
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err), helpers.String("ID", instanceID))
 		return domain.SBOM{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
-		logger.L().Debug("discarding SBOMp with outdated scanner version", helpers.String("ID", instanceID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("wanted scanner version", SBOMCreatorVersion))
+		logger.L().Debug("discarding relevant SBOM with outdated scanner version", helpers.String("ID", instanceID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("wanted scanner version", SBOMCreatorVersion))
 		return domain.SBOM{}, nil
 	}
 	result := domain.SBOM{
@@ -202,7 +219,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
 		result.Status = status
 	}
-	logger.L().Debug("found SBOMp in storage", helpers.String("ID", instanceID))
+	logger.L().Debug("got relevant SBOM from storage", helpers.String("ID", instanceID))
 	return result, nil
 }
 
@@ -236,10 +253,14 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	if err != nil {
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
 	}
-	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	if err != nil {
+	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		logger.L().Debug("SBOM manifest already exists in storage", helpers.String("ID", sbom.ID))
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err), helpers.String("ID", sbom.ID))
+	default:
+		logger.L().Debug("stored SBOM in storage", helpers.String("ID", sbom.ID))
 	}
-	logger.L().Debug("stored SBOM in storage", helpers.String("ID", sbom.ID))
 	return nil
 }
