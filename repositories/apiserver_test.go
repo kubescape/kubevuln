@@ -352,3 +352,29 @@ func Test_extractHashFromImageID(t *testing.T) {
 //	}
 //	repository.StoreCVE(ctx, cve, false)
 //}
+
+func Test_hashFromInstanceID(t *testing.T) {
+	type args struct {
+		instanceID string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "same as sniffer",
+			args: args{
+				instanceID: "apiVersion-v1/namespace-any/kind-deployment/name-aaa/resourceVersion-1234/containerName-contName",
+			},
+			want: "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hashFromInstanceID(tt.args.instanceID); got != tt.want {
+				t.Errorf("hashFromInstanceID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
