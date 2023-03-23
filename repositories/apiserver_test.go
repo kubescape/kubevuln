@@ -336,23 +336,6 @@ func Test_extractHashFromImageID(t *testing.T) {
 	}
 }
 
-//func TestForRazi(t *testing.T) {
-//	ctx := context.TODO()
-//	sbomAdapter := v1.NewSyftAdapter(1 * time.Hour)
-//	cveAdapter := v1.NewGrypeAdapter()
-//	cveAdapter.Ready(ctx)
-//	repository, _ := newFakeAPIServerStorage("kubescape")
-//	sbom, err := sbomAdapter.CreateSBOM(ctx, "requarks/wiki@sha256:dd83fff15e77843ff934b25c28c865ac000edf7653e5d11adad1dd51df87439d", domain.RegistryOptions{})
-//	if err != nil {
-//		panic(err)
-//	}
-//	cve, err := cveAdapter.ScanSBOM(ctx, sbom)
-//	if err != nil {
-//		panic(err)
-//	}
-//	repository.StoreCVE(ctx, cve, false)
-//}
-
 func Test_hashFromInstanceID(t *testing.T) {
 	type args struct {
 		instanceID string
@@ -378,3 +361,20 @@ func Test_hashFromInstanceID(t *testing.T) {
 		})
 	}
 }
+
+//func TestForRazi(t *testing.T) {
+//	ctx := context.TODO()
+//	sbomAdapter := v1.NewSyftAdapter(1 * time.Hour)
+//	cveAdapter := v1.NewGrypeAdapter()
+//	cveAdapter.Ready(ctx)
+//	repository, _ := newFakeAPIServerStorage("kubescape")
+//	sbom, err := sbomAdapter.CreateSBOM(ctx, "requarks/wiki@sha256:dd83fff15e77843ff934b25c28c865ac000edf7653e5d11adad1dd51df87439d", domain.RegistryOptions{})
+//	if err != nil {
+//		panic(err)
+//	}
+//	cve, err := cveAdapter.ScanSBOM(ctx, sbom)
+//	if err != nil {
+//		panic(err)
+//	}
+//	repository.StoreCVE(ctx, cve, false)
+//}
