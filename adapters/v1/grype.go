@@ -31,11 +31,12 @@ import (
 
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	mu       sync.RWMutex
-	dbCloser *db.Closer
-	dbStatus *db.Status
-	store    *store.Store
-	dbConfig db.Config
+	mu           sync.RWMutex
+	dbCloser     *db.Closer
+	dbStatus     *db.Status
+	store        *store.Store
+	dbConfig     db.Config
+	lastDbUpdate time.Time
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -76,7 +77,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	g.mu.RUnlock() // because TryRLock doesn't unlock
 	// DB is not initialized or needs to be updated
 	now := time.Now()
-	if g.dbStatus == nil || now.Sub(g.dbStatus.Built) > 24*time.Hour {
+	if g.dbStatus == nil || now.Sub(g.lastDbUpdate) > 24*time.Hour {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		logger.L().Info("updating grype DB")
@@ -86,6 +87,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
 			return false
 		}
+		g.lastDbUpdate = now
 		logger.L().Info("grype DB updated")
 		return true
 	}
