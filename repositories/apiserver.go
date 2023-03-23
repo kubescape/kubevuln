@@ -86,7 +86,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		logger.L().Debug("empty image ID provided, skipping CVE retrieval")
 		return domain.CVEManifest{}, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
+	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err), helpers.String("ID", imageID))
 		return domain.CVEManifest{}, nil
@@ -140,7 +140,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			Payload: *cve.Content,
 		},
 	}
-	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID))
 	}
@@ -155,7 +155,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		logger.L().Debug("empty image ID provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(ctx, hashFromImageID(imageID), metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err), helpers.String("ID", imageID))
 		return domain.SBOM{}, nil
@@ -184,7 +184,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		logger.L().Debug("empty instance ID provided, skipping SBOMp retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(ctx, hashFromInstanceID(instanceID), metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), hashFromInstanceID(instanceID), metav1.GetOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err), helpers.String("ID", instanceID))
 		return domain.SBOM{}, nil
@@ -236,7 +236,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	if err != nil {
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
 	}
-	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err), helpers.String("ID", sbom.ID))
 	}
