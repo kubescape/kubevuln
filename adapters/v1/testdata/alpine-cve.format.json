@@ -2,152 +2,129 @@
   "matches": [
     {
       "vulnerability": {
-        "id": "CVE-2022-28391",
-        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-28391",
-        "namespace": "nvd:cpe",
-        "severity": "High",
+        "id": "CVE-2023-0464",
+        "dataSource": "http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-0464",
+        "namespace": "alpine:distro:alpine:3.17",
+        "severity": "Unknown",
         "urls": [
-          "https://git.alpinelinux.org/aports/plain/main/busybox/0001-libbb-sockaddr2str-ensure-only-printable-characters-.patch",
-          "https://git.alpinelinux.org/aports/plain/main/busybox/0002-nslookup-sanitize-all-printed-strings-with-printable.patch",
-          "https://gitlab.alpinelinux.org/alpine/aports/-/issues/13661"
+          "http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-0464"
         ],
-        "description": "BusyBox through 1.35.0 allows remote attackers to execute arbitrary code if netstat is used to print a DNS PTR record's value to a VT compatible terminal. Alternatively, the attacker could choose to change the terminal's colors.",
-        "cvss": [
-          {
-            "version": "2.0",
-            "vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
-            "metrics": {
-              "baseScore": 6.8,
-              "exploitabilityScore": 8.6,
-              "impactScore": 6.4
-            },
-            "vendorMetadata": {}
-          },
-          {
-            "version": "3.1",
-            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-            "metrics": {
-              "baseScore": 8.8,
-              "exploitabilityScore": 2.8,
-              "impactScore": 5.9
-            },
-            "vendorMetadata": {}
-          }
-        ],
+        "cvss": null,
         "fix": {
-          "versions": [],
-          "state": "unknown"
+          "versions": [
+            "3.0.8-r1"
+          ],
+          "state": "fixed"
         },
         "advisories": null
       },
       "relatedVulnerabilities": null,
       "matchDetails": [
         {
-          "type": "cpe-match",
-          "matcher": "stock-matcher",
+          "type": "exact-indirect-match",
+          "matcher": "apk-matcher",
           "searchedBy": {
-            "namespace": "nvd:cpe",
-            "cpes": [
-              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
-            ]
+            "distro": {
+              "type": "alpine",
+              "version": "3.17.2"
+            },
+            "namespace": "alpine:distro:alpine:3.17",
+            "package": {
+              "name": "openssl",
+              "version": "3.0.8-r0"
+            }
           },
           "found": {
-            "vulnerabilityID": "CVE-2022-28391",
-            "versionConstraint": "<= 1.35.0 (unknown)",
-            "cpes": [
-              "cpe:2.3:a:busybox:busybox:*:*:*:*:*:*:*:*"
-            ]
+            "versionConstraint": "< 3.0.8-r1 (apk)",
+            "vulnerabilityID": "CVE-2023-0464"
           }
         }
       ],
       "artifact": {
-        "name": "busybox",
-        "version": "1.35.0",
-        "type": "",
+        "name": "libcrypto3",
+        "version": "3.0.8-r0",
+        "type": "apk",
         "locations": null,
         "language": "",
-        "licenses": [],
-        "cpes": [
-          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
-          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+        "licenses": [
+          "Apache-2.0"
         ],
-        "purl": "pkg:/",
-        "upstreams": null,
+        "cpes": [
+          "cpe:2.3:a:libcrypto3:libcrypto3:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libcrypto3:libcrypto:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libcrypto:libcrypto3:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libcrypto:libcrypto:3.0.8-r0:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:apk/alpine/libcrypto3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
+        "upstreams": [
+          {
+            "name": "openssl"
+          }
+        ],
         "metadata": null
       }
     },
     {
       "vulnerability": {
-        "id": "CVE-2022-30065",
-        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2022-30065",
-        "namespace": "nvd:cpe",
-        "severity": "High",
+        "id": "CVE-2023-0464",
+        "dataSource": "http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-0464",
+        "namespace": "alpine:distro:alpine:3.17",
+        "severity": "Unknown",
         "urls": [
-          "https://bugs.busybox.net/show_bug.cgi?id=14781",
-          "https://cert-portal.siemens.com/productcert/pdf/ssa-333517.pdf"
+          "http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-0464"
         ],
-        "description": "A use-after-free in Busybox 1.35-x's awk applet leads to denial of service and possibly code execution when processing a crafted awk pattern in the copyvar function.",
-        "cvss": [
-          {
-            "version": "2.0",
-            "vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
-            "metrics": {
-              "baseScore": 6.8,
-              "exploitabilityScore": 8.6,
-              "impactScore": 6.4
-            },
-            "vendorMetadata": {}
-          },
-          {
-            "version": "3.1",
-            "vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-            "metrics": {
-              "baseScore": 7.8,
-              "exploitabilityScore": 1.8,
-              "impactScore": 5.9
-            },
-            "vendorMetadata": {}
-          }
-        ],
+        "cvss": null,
         "fix": {
-          "versions": [],
-          "state": "unknown"
+          "versions": [
+            "3.0.8-r1"
+          ],
+          "state": "fixed"
         },
         "advisories": null
       },
       "relatedVulnerabilities": null,
       "matchDetails": [
         {
-          "type": "cpe-match",
-          "matcher": "stock-matcher",
+          "type": "exact-indirect-match",
+          "matcher": "apk-matcher",
           "searchedBy": {
-            "namespace": "nvd:cpe",
-            "cpes": [
-              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
-            ]
+            "distro": {
+              "type": "alpine",
+              "version": "3.17.2"
+            },
+            "namespace": "alpine:distro:alpine:3.17",
+            "package": {
+              "name": "openssl",
+              "version": "3.0.8-r0"
+            }
           },
           "found": {
-            "vulnerabilityID": "CVE-2022-30065",
-            "versionConstraint": "= 1.35.0 (unknown)",
-            "cpes": [
-              "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
-            ]
+            "versionConstraint": "< 3.0.8-r1 (apk)",
+            "vulnerabilityID": "CVE-2023-0464"
           }
         }
       ],
       "artifact": {
-        "name": "busybox",
-        "version": "1.35.0",
-        "type": "",
+        "name": "libssl3",
+        "version": "3.0.8-r0",
+        "type": "apk",
         "locations": null,
         "language": "",
-        "licenses": [],
-        "cpes": [
-          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*",
-          "cpe:2.3:a:busybox:busybox:1.35.0:*:*:*:*:*:*:*"
+        "licenses": [
+          "Apache-2.0"
         ],
-        "purl": "pkg:/",
-        "upstreams": null,
+        "cpes": [
+          "cpe:2.3:a:libssl3:libssl3:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libssl3:libssl:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libssl:libssl3:3.0.8-r0:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libssl:libssl:3.0.8-r0:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:apk/alpine/libssl3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
+        "upstreams": [
+          {
+            "name": "openssl"
+          }
+        ],
         "metadata": null
       }
     }
