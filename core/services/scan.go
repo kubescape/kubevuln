@@ -83,8 +83,6 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 
 // Ready proxies the cveScanner's readiness
 func (s *ScanService) Ready(ctx context.Context) bool {
-	ctx, span := otel.Tracer("").Start(ctx, "ScanService.Ready")
-	defer span.End()
 	return s.cveScanner.Ready(ctx)
 }
 
