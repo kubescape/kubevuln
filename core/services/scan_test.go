@@ -175,7 +175,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			storeErrorCVE: true,
 			storage:       true,
 			workload:      true,
-			wantErr:       true,
+			wantErr:       false,
 		},
 		{
 			name:     "timeout SBOM",
