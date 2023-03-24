@@ -56,9 +56,6 @@ func NewGrypeAdapter() *GrypeAdapter {
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
-	_, span := otel.Tracer("").Start(ctx, "GrypeAdapter.DBVersion")
-	defer span.End()
-
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
@@ -67,9 +64,6 @@ func (g *GrypeAdapter) DBVersion(ctx context.Context) string {
 
 // Ready returns the status of the vulnerabilities DB
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
-	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
-	defer span.End()
-
 	// DB update is in progress
 	if !g.mu.TryRLock() {
 		return false
@@ -80,6 +74,8 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	if g.dbStatus == nil || now.Sub(g.lastDbUpdate) > 24*time.Hour {
 		g.mu.Lock()
 		defer g.mu.Unlock()
+		ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
+		defer span.End()
 		logger.L().Info("updating grype DB")
 		var err error
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
@@ -176,7 +172,5 @@ func getMatchers() []matcher.Matcher {
 
 // Version returns Grype's version which is used to tag CVE manifests
 func (g *GrypeAdapter) Version(ctx context.Context) string {
-	_, span := otel.Tracer("").Start(ctx, "GrypeAdapter.Ready")
-	defer span.End()
 	return tools.PackageVersion("github.com/anchore/grype")
 }
