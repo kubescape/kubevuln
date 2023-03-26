@@ -16,7 +16,10 @@ const imageID = "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5
 const instanceID = "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-nginx-11233/containerName-nginx"
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
-	instancesID, _ := instanceidhandler.GenerateInstanceIDFromString(sbom.ID)
+	instancesID, e := instanceidhandler.GenerateInstanceIDFromString(sbom.ID)
+	if e != nil {
+		return nil
+	}
 
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{

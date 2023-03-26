@@ -165,11 +165,12 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	sbomp := domain.SBOM{}
 	if s.storage && workload.InstanceID != nil {
 		instancesID, err := instanceidhandler.GenerateInstanceIDFromString(*workload.InstanceID)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
-		}
-		sbomp, err = s.sbomRepository.GetSBOMp(ctx, instancesID.GetIDHashed(), s.sbomCreator.Version(ctx))
-		if err != nil {
+		if err == nil {
+			sbomp, err = s.sbomRepository.GetSBOMp(ctx, instancesID.GetIDHashed(), s.sbomCreator.Version(ctx))
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
+			}
+		} else {
 			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
 		}
 	}
