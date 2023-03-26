@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -12,13 +13,15 @@ import (
 )
 
 const imageID = "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
-const instanceID = "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx"
+const instanceID = "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-nginx-11233/containerName-nginx"
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
+	instancesID, _ := instanceidhandler.GenerateInstanceIDFromString(sbom.ID)
+
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   hashFromInstanceID(sbom.ID),
-			Labels: labelsFromInstanceID(sbom.ID),
+			Name:   instancesID.GetIDHashed(),
+			Labels: instancesID.GetLabels(),
 			Annotations: map[string]string{
 				domain.StatusKey: sbom.Status,
 			},
@@ -335,46 +338,3 @@ func Test_extractHashFromImageID(t *testing.T) {
 		})
 	}
 }
-
-func Test_hashFromInstanceID(t *testing.T) {
-	type args struct {
-		instanceID string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "same as sniffer",
-			args: args{
-				instanceID: "apiVersion-v1/namespace-any/kind-deployment/name-aaa/resourceVersion-1234/containerName-contName",
-			},
-			want: "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hashFromInstanceID(tt.args.instanceID); got != tt.want {
-				t.Errorf("hashFromInstanceID() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-//func TestForRazi(t *testing.T) {
-//	ctx := context.TODO()
-//	sbomAdapter := v1.NewSyftAdapter(1 * time.Hour)
-//	cveAdapter := v1.NewGrypeAdapter()
-//	cveAdapter.Ready(ctx)
-//	repository, _ := newFakeAPIServerStorage("kubescape")
-//	sbom, err := sbomAdapter.CreateSBOM(ctx, "requarks/wiki@sha256:dd83fff15e77843ff934b25c28c865ac000edf7653e5d11adad1dd51df87439d", domain.RegistryOptions{})
-//	if err != nil {
-//		panic(err)
-//	}
-//	cve, err := cveAdapter.ScanSBOM(ctx, sbom)
-//	if err != nil {
-//		panic(err)
-//	}
-//	repository.StoreCVE(ctx, cve, false)
-//}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -163,7 +164,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// check if SBOM' is already available
 	sbomp := domain.SBOM{}
 	if s.storage && workload.InstanceID != nil {
-		sbomp, err = s.sbomRepository.GetSBOMp(ctx, *workload.InstanceID, s.sbomCreator.Version(ctx))
+		instancesID, err := instanceidhandler.GenerateInstanceIDFromString(*workload.InstanceID)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
+		}
+		sbomp, err = s.sbomRepository.GetSBOMp(ctx, instancesID.GetIDHashed(), s.sbomCreator.Version(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", *workload.InstanceID))
 		}
