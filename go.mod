@@ -7,12 +7,13 @@ require (
 	github.com/anchore/grype v0.59.1
 	github.com/anchore/stereoscope v0.0.0-20230317134707-7928713c391e
 	github.com/anchore/syft v0.75.0
-	github.com/armosec/armoapi-go v0.0.173
+	github.com/armosec/armoapi-go v0.0.176
 	github.com/armosec/cluster-container-scanner-api v0.0.52
 	github.com/armosec/logger-go v0.0.14
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/distribution/distribution v2.8.1+incompatible
+	github.com/docker/docker v23.0.1+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.9.0
@@ -67,7 +68,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/cli v23.0.1+incompatible // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
-	github.com/docker/docker v23.0.1+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -115,7 +115,7 @@ require (
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/jinzhu/copier v0.3.5 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.4 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -218,7 +218,7 @@ require (
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/gorm v1.23.10 // indirect
+	gorm.io/gorm v1.24.6 // indirect
 	k8s.io/api v0.26.3 // indirect
 	k8s.io/klog/v2 v2.80.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20230123231816-1cb3ae25d79a // indirect
@@ -237,3 +237,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace gorm.io/gorm => gorm.io/gorm v1.23.10
