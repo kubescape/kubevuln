@@ -110,6 +110,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Annotations: annotations,
+			Labels:      cve.Labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
 			Metadata: v1beta1.VulnerabilityManifestMeta{
@@ -193,6 +194,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		ID:                 instanceID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
+		Labels:             manifest.Labels,
 	}
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
 		result.Status = status

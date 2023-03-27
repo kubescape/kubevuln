@@ -19,6 +19,7 @@ type SBOM struct {
 	SBOMCreatorVersion string
 	Status             string
 	Content            *v1beta1.Document
+	Labels             map[string]string
 }
 
 // RegistryCredentials contains OCI registry credentials required for connection
