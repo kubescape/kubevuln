@@ -63,11 +63,12 @@ func main() {
 	router.GET("/v1/liveness", controller.Alive)
 	router.GET("/v1/readiness", controller.Ready)
 
-	group := router.Group(apis.WebsocketScanCommandVersion)
+	group := router.Group(apis.VulnerabilityScanCommandVersion)
 	{
 		group.Use(otelgin.Middleware("kubevuln-svc"))
 		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
-		group.POST("/"+apis.WebsocketScanCommandPath, controller.ScanCVE)
+		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
+		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
 	}
 
 	srv := &http.Server{

@@ -1,11 +1,27 @@
 package domain
 
-import wssc "github.com/armosec/armoapi-go/apis"
+import (
+	"github.com/docker/docker/api/types"
+)
 
 type ScanIDKey struct{}
 type TimestampKey struct{}
 type WorkloadKey struct{}
 
-// ScanCommand is a proxy type for wssc.WebsocketScanCommand used to decouple business logic from implementation
-// it might evolve into its own struct at a later time
-type ScanCommand wssc.WebsocketScanCommand
+type ScanCommand struct {
+	Credentialslist []types.AuthConfig
+	ImageHash       string
+	InstanceID      string
+	Wlid            string
+	ImageTag        string
+	JobID           string
+	ContainerName   string
+	LastAction      int
+	ParentJobID     string
+	Args            map[string]interface{}
+	Session         Session
+}
+
+type Session struct {
+	JobIDs []string
+}
