@@ -21,7 +21,7 @@ func TestMemoryStore_GetCVE(t *testing.T) {
 		CVEDBVersion:       "",
 		Content:            &v1beta1.GrypeDocument{},
 	}
-	m.StoreCVE(ctx, cve, false)
+	_ = m.StoreCVE(ctx, cve, false)
 	got, _ = m.GetCVE(ctx, "imageID", "", "", "")
 	assert.Assert(t, got.Content != nil)
 }
@@ -39,7 +39,7 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 		Status:             "",
 		Content:            &v1beta1.Document{},
 	}
-	m.StoreSBOM(ctx, sbom)
+	_ = m.StoreSBOM(ctx, sbom)
 	got, _ = m.GetSBOM(ctx, "imageID", "")
 	assert.Assert(t, got.Content != nil)
 	got, _ = m.GetSBOMp(ctx, "imageID", "")
