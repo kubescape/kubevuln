@@ -43,10 +43,10 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			options: domain.RegistryOptions{
 				Credentials: []domain.RegistryCredentials{
 					{
-						"docker.io",
-						"username",
-						"password",
-						"token",
+						Authority: "docker.io",
+						Username: "username",
+						Password: "password",
+						Token: "token",
 					},
 				},
 			},

@@ -119,6 +119,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 }
 
 // Version returns Syft's version which is used to tag SBOMs
-func (s *SyftAdapter) Version(ctx context.Context) string {
+func (s *SyftAdapter) Version(context.Context) string {
 	return tools.PackageVersion("github.com/anchore/syft")
 }
