@@ -231,7 +231,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.sbom {
 				sbom, err := sbomAdapter.CreateSBOM(ctx, imageHash, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
-				storageSBOM.StoreSBOM(ctx, sbom)
+				_ = storageSBOM.StoreSBOM(ctx, sbom)
 			}
 			var sbomp domain.SBOM
 			if tt.instanceID != "" {
@@ -239,7 +239,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
 				sbomp.Labels = map[string]string{"foo": "bar"}
-				storageSBOM.StoreSBOM(ctx, sbomp)
+				_ = storageSBOM.StoreSBOM(ctx, sbomp)
 			}
 			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
