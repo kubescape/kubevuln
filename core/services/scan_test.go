@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
+	"gotest.tools/v3/assert"
 )
 
 func TestScanService_GenerateSBOM(t *testing.T) {
@@ -118,6 +119,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 		storeErrorSBOM  bool
 		timeout         bool
 		workload        bool
+		wantCvep        bool
 		wantErr         bool
 	}{
 		{
@@ -188,9 +190,10 @@ func TestScanService_ScanCVE(t *testing.T) {
 		{
 			name:       "with SBOMp",
 			sbom:       true,
-			instanceID: "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx",
+			instanceID: "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef",
 			storage:    true,
 			workload:   true,
+			wantCvep:   true,
 			wantErr:    false,
 		},
 	}
@@ -202,11 +205,12 @@ func TestScanService_ScanCVE(t *testing.T) {
 				wlid = ""
 			}
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			cveAdapter := adapters.NewMockCVEAdapter()
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
 			s := NewScanService(sbomAdapter,
 				storageSBOM,
-				adapters.NewMockCVEAdapter(),
+				cveAdapter,
 				storageCVE,
 				adapters.NewMockPlatform(),
 				tt.storage)
@@ -229,13 +233,21 @@ func TestScanService_ScanCVE(t *testing.T) {
 				tools.EnsureSetup(t, err == nil)
 				storageSBOM.StoreSBOM(ctx, sbom)
 			}
+			var sbomp domain.SBOM
 			if tt.instanceID != "" {
-				sbomp, err := sbomAdapter.CreateSBOM(ctx, tt.instanceID, domain.RegistryOptions{})
+				var err error
+				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
+				sbomp.Labels = map[string]string{"foo": "bar"}
 				storageSBOM.StoreSBOM(ctx, sbomp)
 			}
 			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantCvep {
+				cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(ctx), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+				tools.EnsureSetup(t, err == nil)
+				assert.Assert(t, cvep.Labels != nil)
 			}
 		})
 	}

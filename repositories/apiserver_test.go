@@ -12,7 +12,7 @@ import (
 )
 
 const imageID = "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
-const instanceID = "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/resourceVersion-153294/containerName-nginx"
+const instanceID = "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef"
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
