@@ -17,8 +17,7 @@ const instanceID = "apiVersion-v1/namespace-default/kind-Deployment/name-nginx/r
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   hashFromInstanceID(sbom.ID),
-			Labels: labelsFromInstanceID(sbom.ID),
+			Name:   sbom.ID,
 			Annotations: map[string]string{
 				domain.StatusKey: sbom.Status,
 			},
@@ -331,32 +330,6 @@ func Test_extractHashFromImageID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := hashFromImageID(tt.imageID); got != tt.want {
 				t.Errorf("hashFromImageID() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_hashFromInstanceID(t *testing.T) {
-	type args struct {
-		instanceID string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "same as sniffer",
-			args: args{
-				instanceID: "apiVersion-v1/namespace-any/kind-deployment/name-aaa/resourceVersion-1234/containerName-contName",
-			},
-			want: "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hashFromInstanceID(tt.args.instanceID); got != tt.want {
-				t.Errorf("hashFromInstanceID() = %v, want %v", got, tt.want)
 			}
 		})
 	}

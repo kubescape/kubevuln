@@ -17,4 +17,5 @@ type CVEManifest struct {
 	CVEScannerVersion  string
 	CVEDBVersion       string
 	Content            *v1beta1.GrypeDocument
+	Labels             map[string]string
 }

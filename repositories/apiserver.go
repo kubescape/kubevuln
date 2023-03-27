@@ -2,12 +2,9 @@ package repositories
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"time"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -21,12 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-)
-
-const (
-	labelKind      = "kubescape.io/workload-kind"
-	labelName      = "kubescape.io/workload-name"
-	labelNamespace = "kubescape.io/workload-namespace"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -67,19 +58,6 @@ func hashFromImageID(imageID string) string {
 	return strings.Split(reference.ReferenceRegexp.FindStringSubmatch(imageID)[3], ":")[1]
 }
 
-func hashFromInstanceID(instanceID string) string {
-	hash := sha256.Sum256([]byte(instanceID))
-	return hex.EncodeToString(hash[:])
-}
-
-func labelsFromInstanceID(instanceID string) map[string]string {
-	return map[string]string{
-		labelKind:      wlid.GetKindFromWlid(instanceID),
-		labelName:      wlid.GetNameFromWlid(instanceID),
-		labelNamespace: wlid.GetNamespaceFromWlid(instanceID),
-	}
-}
-
 func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetCVE")
 	defer span.End()
@@ -88,7 +66,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		return domain.CVEManifest{}, nil
 	}
 	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
-	switch  {
+	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("CVE manifest not found in storage", helpers.String("ID", imageID))
 		return domain.CVEManifest{}, nil
@@ -122,7 +100,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	name := hashFromImageID(cve.ID)
 	annotations := map[string]string{domain.ImageTagKey: cve.ID}
 	if withRelevancy {
-		name = hashFromInstanceID(cve.ID)
+		name = cve.ID
 		annotations = map[string]string{
 			domain.InstanceIDKey: cve.ID,
 			domain.WlidKey:       cve.Wlid,
@@ -132,6 +110,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Annotations: annotations,
+			Labels:      cve.Labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
 			Metadata: v1beta1.VulnerabilityManifestMeta{
@@ -165,7 +144,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		return domain.SBOM{}, nil
 	}
 	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
-	switch  {
+	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("SBOM manifest not found in storage", helpers.String("ID", imageID))
 		return domain.SBOM{}, nil
@@ -197,8 +176,8 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		logger.L().Debug("empty instance ID provided, skipping relevant SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), hashFromInstanceID(instanceID), metav1.GetOptions{})
-	switch  {
+	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), instanceID, metav1.GetOptions{})
+	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("relevant SBOM manifest not found in storage", helpers.String("ID", instanceID))
 		return domain.SBOM{}, nil
@@ -215,6 +194,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		ID:                 instanceID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
+		Labels:             manifest.Labels,
 	}
 	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
 		result.Status = status
