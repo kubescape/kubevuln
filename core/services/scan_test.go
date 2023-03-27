@@ -222,7 +222,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 					Wlid:      wlid,
 				}
 				if tt.instanceID != "" {
-					workload.InstanceID = &tt.instanceID
+					workload.InstanceID = tt.instanceID
 				}
 				var err error
 				ctx, _ = s.ValidateScanCVE(ctx, workload)
@@ -325,6 +325,111 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 				adapters.NewMockPlatform(),
 				false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+		})
+	}
+}
+
+func TestScanService_ScanRegistry(t *testing.T) {
+	tests := []struct {
+		createSBOMError bool
+		name            string
+		timeout         bool
+		workload        bool
+		wantErr         bool
+	}{
+		{
+			name:     "no workload",
+			workload: false,
+			wantErr:  true,
+		},
+		{
+			name:            "create SBOM error",
+			createSBOMError: true,
+			workload:        true,
+			wantErr:         true,
+		},
+		{
+			name:     "timeout SBOM",
+			timeout:  true,
+			workload: true,
+			wantErr:  true,
+		},
+		{
+			name:     "scan",
+			workload: true,
+			wantErr:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			storage := repositories.NewMemoryStorage(false, false)
+			s := NewScanService(sbomAdapter,
+				storage,
+				adapters.NewMockCVEAdapter(),
+				storage,
+				adapters.NewMockPlatform(),
+				false)
+			ctx := context.TODO()
+			if tt.workload {
+				workload := domain.ScanCommand{
+					ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+				}
+				workload.Credentialslist = []types.AuthConfig{
+					{
+						Username: "test",
+						Password: "test",
+					},
+					{
+						RegistryToken: "test",
+					},
+					{
+						Auth: "test",
+					},
+				}
+				var err error
+				ctx, _ = s.ValidateScanRegistry(ctx, workload)
+				tools.EnsureSetup(t, err == nil)
+			}
+			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
+				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestScanService_ValidateScanRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		workload domain.ScanCommand
+		wantErr  bool
+	}{
+		{
+			name:     "missing imageID",
+			workload: domain.ScanCommand{},
+			wantErr:  true,
+		},
+		{
+			name: "with imageID",
+			workload: domain.ScanCommand{
+				ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
+				repositories.NewMemoryStorage(false, false),
+				adapters.NewMockCVEAdapter(),
+				repositories.NewMemoryStorage(false, false),
+				adapters.NewMockPlatform(),
+				false)
+			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 				return

@@ -36,6 +36,13 @@ func (m MockScanService) ScanCVE(context.Context) error {
 	return errors.New("mock error")
 }
 
+func (m MockScanService) ScanRegistry(context.Context) error {
+	if m.happy {
+		return nil
+	}
+	return errors.New("mock error")
+}
+
 func (m MockScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
@@ -44,6 +51,13 @@ func (m MockScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.Scan
 }
 
 func (m MockScanService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	if m.happy {
+		return ctx, nil
+	}
+	return ctx, errors.New("mock error")
+}
+
+func (m MockScanService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
 	}

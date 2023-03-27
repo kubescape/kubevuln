@@ -33,18 +33,19 @@ func NewHTTPController(scanService ports.ScanService, concurrency int) *HTTPCont
 func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var newScan wssc.WebsocketScanCommand
-	err := c.ShouldBindJSON(&newScan)
+	var websocketScanCommand wssc.WebsocketScanCommand
+	err := c.ShouldBindJSON(&websocketScanCommand)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
 		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
-	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
+
 	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
 
-	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, domain.ScanCommand(newScan))
+	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("imageID", newScan.ImageHash))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
@@ -80,18 +81,19 @@ func (h HTTPController) Ready(c *gin.Context) {
 func (h HTTPController) ScanCVE(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var newScan wssc.WebsocketScanCommand
-	err := c.ShouldBindJSON(&newScan)
+	var websocketScanCommand wssc.WebsocketScanCommand
+	err := c.ShouldBindJSON(&websocketScanCommand)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
 		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
-	// TODO add proper transformation of wssc.WebsocketScanCommand to domain.ScanCommand
+	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
+
 	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
 
-	ctx, err = h.scanService.ValidateScanCVE(ctx, domain.ScanCommand(newScan))
+	ctx, err = h.scanService.ValidateScanCVE(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("wlid", newScan.Wlid), helpers.String("imageID", newScan.ImageHash))
 		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
@@ -106,6 +108,70 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			logger.L().Ctx(ctx).Error("service error", helpers.Error(err), helpers.String("wlid", newScan.Wlid), helpers.String("imageID", newScan.ImageHash))
 		}
 	})
+}
+
+func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanCommand {
+	command := domain.ScanCommand{
+		Credentialslist: c.Credentialslist,
+		ImageHash:       c.ImageHash,
+		Wlid:            c.Wlid,
+		ImageTag:        c.ImageTag,
+		JobID:           c.JobID,
+		ContainerName:   c.ContainerName,
+		LastAction:      c.LastAction,
+		ParentJobID:     c.ParentJobID,
+		Args:            c.Args,
+		Session:         sessionChainToSession(c.Session),
+	}
+	if c.InstanceID != nil {
+		command.InstanceID = *c.InstanceID
+	}
+	return command
+}
+
+func sessionChainToSession(s wssc.SessionChain) domain.Session {
+	return domain.Session{
+		JobIDs: s.JobIDs,
+	}
+}
+
+func (h HTTPController) ScanRegistry(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var registryScanCommand wssc.RegistryScanCommand
+	err := c.ShouldBindJSON(&registryScanCommand)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
+		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		return
+	}
+
+	newScan := registryScanCommandToScanCommand(registryScanCommand)
+
+	details := problem.Detailf("ImageTag=%s", newScan.ImageTag)
+
+	ctx, err = h.scanService.ValidateScanRegistry(ctx, newScan)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("imageID", newScan.ImageTag))
+		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		return
+	}
+
+	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+
+	h.workerPool.Submit(func() {
+		err = h.scanService.ScanRegistry(ctx)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("service error", helpers.Error(err), helpers.String("imageID", newScan.ImageTag))
+		}
+	})
+}
+
+func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
+	return domain.ScanCommand{
+		Credentialslist: c.Credentialslist,
+		ImageTag:        c.ImageTag,
+	}
 }
 
 func (h HTTPController) Shutdown() {
