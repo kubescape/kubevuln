@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -179,6 +180,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 		// store CVE'
 		if s.storage {
+			cvep.Labels = sbomp.Labels
 			cvep.Wlid = workload.Wlid
 			err = s.cveRepository.StoreCVE(ctx, cvep, true)
 			if err != nil {
@@ -249,6 +251,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	// add imageID to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	return ctx, nil
@@ -269,6 +272,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 			parentSpan.SetAttributes(attribute.String("instanceID", *workload.InstanceID))
 		}
 		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
