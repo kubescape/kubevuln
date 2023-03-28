@@ -12,7 +12,7 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	"github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/go-logger"
@@ -154,12 +154,6 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 		HasRelevancyData: hasRelevancy,
 	}
 
-	if hasRelevancy {
-		summary.SetRelevantLabel(containerscan.RelevantLabelYes)
-	} else {
-		summary.SetRelevantLabel(containerscan.RelevantLabelNo)
-	}
-
 	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTag)
 	if err == nil {
 		summary.Registry = imageInfo.Registry
@@ -233,6 +227,17 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 
 	summary.Status = "Success"
 	summary.Vulnerabilities = vulnsList
+
+	// if there is no CVEp, label is empty
+	if !hasRelevancy {
+		summary.SetRelevantLabel(containerscan.RelevantLabelNotExists)
+	} else if summary.SeverityStats.RelevantCount == 0 {
+		// if there is CVEp but no relevant vulnerabilities, label is "no"
+		summary.SetRelevantLabel(containerscan.RelevantLabelNo)
+	} else {
+		// if there is CVEp and there are relevant vulnerabilities, label is "yes"
+		summary.SetRelevantLabel(containerscan.RelevantLabelYes)
+	}
 
 	for sever := range actualSeveritiesStats {
 		summary.SeveritiesStats = append(summary.SeveritiesStats, actualSeveritiesStats[sever])
