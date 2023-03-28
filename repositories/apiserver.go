@@ -55,7 +55,12 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 
 // we're guaranteed to have a digest in the imageID by the operator
 func hashFromImageID(imageID string) string {
-	return strings.Split(reference.ReferenceRegexp.FindStringSubmatch(imageID)[3], ":")[1]
+	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
+	if match[3] == "" {
+		// just a digest
+		return imageID
+	}
+	return strings.Split(match[3], ":")[1]
 }
 
 func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
@@ -98,13 +103,12 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		return nil
 	}
 	name := hashFromImageID(cve.ID)
-	annotations := map[string]string{domain.ImageTagKey: cve.ID}
+	annotations := make(map[string]string)
 	if withRelevancy {
-		name = cve.ID
-		annotations = map[string]string{
-			domain.InstanceIDKey: cve.ID,
-			domain.WlidKey:       cve.Wlid,
-		}
+		annotations[domain.InstanceIDKey] = cve.ID
+		annotations[domain.WlidKey] = cve.Wlid
+	} else {
+		annotations[domain.ImageTagKey] = cve.ID
 	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
