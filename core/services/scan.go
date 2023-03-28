@@ -290,6 +290,12 @@ func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
 			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Username: cred.Username, Password: cred.Password})
 		}
 	}
+	if useHTTP, ok := workload.Args[domain.AttributeUseHTTP]; ok {
+		options.InsecureUseHTTP = useHTTP.(bool)
+	}
+	if skipTLSVerify, ok := workload.Args[domain.AttributeSkipTLSVerify]; ok {
+		options.InsecureSkipTLSVerify = skipTLSVerify.(bool)
+	}
 	return options
 }
 
