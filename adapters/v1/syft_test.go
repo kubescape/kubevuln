@@ -51,6 +51,12 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "system tests image",
+			imageID: "public-registry.systest-ns-bpf7:5000/nginx:test",
+			format:  "null",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
