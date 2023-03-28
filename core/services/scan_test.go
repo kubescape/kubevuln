@@ -245,7 +245,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantCvep {
-				cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(ctx), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+				cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
 				tools.EnsureSetup(t, err == nil)
 				assert.Assert(t, cvep.Labels != nil)
 			}
