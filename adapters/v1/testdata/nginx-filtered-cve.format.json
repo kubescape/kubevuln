@@ -18,9 +18,11 @@
     }
   },
   "distro": {
-    "name": "",
-    "version": "",
-    "idLike": null
+    "name": "debian",
+    "version": "9",
+    "idLike": [
+      "debian"
+    ]
   },
   "descriptor": {
     "name": "grype",
