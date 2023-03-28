@@ -220,6 +220,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
 	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	firstVulnerabilitiesChunk = nil
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
