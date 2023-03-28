@@ -1,0 +1,37 @@
+{
+  "matches": null,
+  "source": {
+    "type": "image",
+    "target": {
+      "userInput": "",
+      "imageID": "",
+      "manifestDigest": "",
+      "mediaType": "",
+      "tags": [],
+      "imageSize": 0,
+      "layers": null,
+      "manifest": null,
+      "config": null,
+      "repoDigests": [],
+      "architecture": "",
+      "os": ""
+    }
+  },
+  "distro": {
+    "name": "",
+    "version": "",
+    "idLike": null
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "[not provided]",
+    "configuration": null,
+    "db": {
+      "built": "<<PRESENCE>>",
+      "schemaVersion": 5,
+      "location": "<<PRESENCE>>",
+      "checksum": "<<PRESENCE>>",
+      "error": null
+    }
+  }
+}
