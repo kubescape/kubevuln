@@ -47,8 +47,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 		SBOMCreatorVersion: s.Version(ctx),
 	}
 	// translate business models into Syft models
-	userInput := "registry:" + imageID
-	sourceInput, err := source.ParseInput(userInput, "", true)
+	sourceInput, err := source.ParseInput(imageID, "", true)
 	if err != nil {
 		return domainSBOM, err
 	}
@@ -70,8 +69,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	// download image
 	// TODO check ephemeral storage usage and see if we can kill the goroutine
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, cleanup, err := source.New(*sourceInput, registryOptions, []string{})
-	defer cleanup()
+	src, cleanup, err := source.NewFromRegistry(*sourceInput, registryOptions, []string{})
+	if cleanup != nil {
+		defer cleanup()
+	}
 	if err != nil {
 		return domainSBOM, err
 	}
