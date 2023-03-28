@@ -94,6 +94,10 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 						Auth: "test",
 					},
 				}
+				workload.Args = map[string]interface{}{
+					domain.AttributeUseHTTP:       false,
+					domain.AttributeSkipTLSVerify: false,
+				}
 				var err error
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)
 				tools.EnsureSetup(t, err == nil)

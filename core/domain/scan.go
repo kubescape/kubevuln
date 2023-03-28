@@ -1,7 +1,13 @@
 package domain
 
 import (
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/docker/docker/api/types"
+)
+
+const (
+	AttributeUseHTTP = armotypes.AttributeUseHTTP
+	AttributeSkipTLSVerify = armotypes.AttributeSkipTLSVerify
 )
 
 type ScanIDKey struct{}
