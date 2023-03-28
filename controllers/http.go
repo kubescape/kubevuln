@@ -168,10 +168,15 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 }
 
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
-	return domain.ScanCommand{
+	command := domain.ScanCommand{
 		Credentialslist: c.Credentialslist,
 		ImageTag:        c.ImageTag,
+		JobID:           c.JobID,
+		ParentJobID:     c.ParentJobID,
+		Args:            c.Args,
+		Session:         sessionChainToSession(c.Session),
 	}
+	return command
 }
 
 func (h HTTPController) Shutdown() {
