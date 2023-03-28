@@ -2,13 +2,17 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/docker/docker/api/types"
 	"github.com/kubescape/kubevuln/adapters"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"gotest.tools/v3/assert"
 )
 
@@ -229,7 +233,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 					workload.InstanceID = tt.instanceID
 				}
 				var err error
-				ctx, _ = s.ValidateScanCVE(ctx, workload)
+				ctx, err = s.ValidateScanCVE(ctx, workload)
 				tools.EnsureSetup(t, err == nil)
 			}
 			if tt.sbom {
@@ -255,6 +259,55 @@ func TestScanService_ScanCVE(t *testing.T) {
 			}
 		})
 	}
+}
+
+func fileContent(path string) []byte {
+	b, _ := os.ReadFile(path)
+	return b
+}
+
+func fileToSBOM(path string) *v1beta1.Document {
+	sbom := v1beta1.Document{}
+	_ = json.Unmarshal(fileContent(path), &sbom)
+	return &sbom
+}
+
+func TestScanService_NginxTest(t *testing.T) {
+	imageHash := "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+	instanceID := "1c83b589d90ba26957627525e08124b1a24732755a330924f7987e9d9e3952c1"
+	ctx := context.TODO()
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false)
+	cveAdapter := v1.NewGrypeAdapter()
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	platform := adapters.NewMockPlatform()
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true)
+	s.Ready(ctx)
+	workload := domain.ScanCommand{
+		ImageHash:  imageHash,
+		InstanceID: instanceID,
+		Wlid:       "wlid://cluster-minikube/namespace-default/deployment-nginx",
+	}
+	ctx, _ = s.ValidateScanCVE(ctx, workload)
+	sbom := domain.SBOM{
+		ID:                 imageHash,
+		Content:            fileToSBOM("../../adapters/v1/testdata/nginx-sbom.json"),
+		SBOMCreatorVersion: sbomAdapter.Version(),
+	}
+	err := storageSBOM.StoreSBOM(ctx, sbom)
+	tools.EnsureSetup(t, err == nil)
+	sbomp := domain.SBOM{
+		ID:                 instanceID,
+		Content:            fileToSBOM("../../adapters/v1/testdata/nginx-filtered-sbom.json"),
+		SBOMCreatorVersion: sbomAdapter.Version(),
+	}
+	err = storageSBOM.StoreSBOM(ctx, sbomp)
+	tools.EnsureSetup(t, err == nil)
+	err = s.ScanCVE(ctx)
+	tools.EnsureSetup(t, err == nil)
+	cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+	tools.EnsureSetup(t, err == nil)
+	assert.Assert(t, cvep.Content != nil)
 }
 
 func TestScanService_ValidateGenerateSBOM(t *testing.T) {

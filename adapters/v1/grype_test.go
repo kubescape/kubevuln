@@ -55,9 +55,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			sbom: domain.SBOM{
 				ID:                 "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
 				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/filtered-sbom.json"),
+				Content:            fileToSBOM("testdata/nginx-filtered-sbom.json"),
 			},
-			format: string(fileContent("testdata/filtered-cve.format.json")),
+			format: string(fileContent("testdata/nginx-filtered-cve.format.json")),
 		},
 	}
 	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
