@@ -8,12 +8,12 @@ import (
 	"github.com/spdx/tools-golang/spdx/v2/v2_3"
 )
 
-func syftToDomain(syftSBOM sbom.SBOM) (*v1beta1.Document, error) {
+func (s *SyftAdapter) syftToDomain(syftSBOM sbom.SBOM) (*v1beta1.Document, error) {
 	spdxDoc := spdxhelpers.ToFormatModel(syftSBOM)
-	return spdxToDomain(spdxDoc)
+	return s.spdxToDomain(spdxDoc)
 }
 
-func spdxToDomain(spdxDoc *v2_3.Document) (*v1beta1.Document, error) {
+func (s *SyftAdapter) spdxToDomain(spdxDoc *v2_3.Document) (*v1beta1.Document, error) {
 	doc := v1beta1.Document{
 		SPDXVersion:                spdxDoc.SPDXVersion,
 		DataLicense:                spdxDoc.DataLicense,
@@ -33,7 +33,7 @@ func spdxToDomain(spdxDoc *v2_3.Document) (*v1beta1.Document, error) {
 	if spdxDoc.CreationInfo != nil {
 		doc.CreationInfo = &v1beta1.CreationInfo{
 			LicenseListVersion: spdxDoc.CreationInfo.LicenseListVersion,
-			Creators:           syftToDomainCreators(spdxDoc.CreationInfo.Creators),
+			Creators:           s.syftToDomainCreators(spdxDoc.CreationInfo.Creators),
 			Created:            spdxDoc.CreationInfo.Created,
 			CreatorComment:     spdxDoc.CreationInfo.CreatorComment,
 		}
@@ -56,11 +56,15 @@ func syftToDomainExternalDocumentReferences(externalDocumentReferences []v2_3.Ex
 	return result
 }
 
-func syftToDomainCreators(creators []common.Creator) []v1beta1.Creator {
+func (s *SyftAdapter) syftToDomainCreators(creators []common.Creator) []v1beta1.Creator {
 	var result []v1beta1.Creator
 	for _, c := range creators {
+		creator := c.Creator
+		if creator == "syft-" {
+			creator += s.Version()
+		}
 		result = append(result, v1beta1.Creator{
-			Creator:     c.Creator,
+			Creator:     creator,
 			CreatorType: c.CreatorType,
 		})
 	}

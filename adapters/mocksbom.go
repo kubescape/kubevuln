@@ -36,7 +36,7 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 	}
 	sbom := domain.SBOM{
 		ID:                 imageID,
-		SBOMCreatorVersion: m.Version(ctx),
+		SBOMCreatorVersion: m.Version(),
 		Content: &v1beta1.Document{
 			CreationInfo: &v1beta1.CreationInfo{
 				Created: time.Now().Format(time.RFC3339),
@@ -50,7 +50,7 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 }
 
 // Version returns a static version
-func (m MockSBOMAdapter) Version(_ context.Context) string {
+func (m MockSBOMAdapter) Version() string {
 	logger.L().Info("MockSBOMAdapter.Version")
 	return "Mock SBOM 1.0"
 }
