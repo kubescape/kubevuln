@@ -56,7 +56,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	var err error
 	if s.storage {
-		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
+		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
@@ -108,7 +108,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// check if CVE manifest is already available
 	cve := domain.CVEManifest{}
 	if s.storage {
-		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(ctx), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 		}
@@ -119,7 +119,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// check if SBOM is already available
 		sbom := domain.SBOM{}
 		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version(ctx))
+			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
 			}
@@ -164,7 +164,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// check if SBOM' is already available
 	sbomp := domain.SBOM{}
 	if s.storage && workload.InstanceID != "" {
-		sbomp, err = s.sbomRepository.GetSBOMp(ctx, workload.InstanceID, s.sbomCreator.Version(ctx))
+		sbomp, err = s.sbomRepository.GetSBOMp(ctx, workload.InstanceID, s.sbomCreator.Version())
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", workload.InstanceID))
 		}

@@ -76,7 +76,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 
 func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter(5 * time.Minute)
-	version := s.Version(context.TODO())
+	version := s.Version()
 	assert.Assert(t, version != "")
 }
 
@@ -86,7 +86,8 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	tools.EnsureSetup(t, err == nil)
 	spdxSBOM, err := domainToSpdx(*sbom.Content)
 	tools.EnsureSetup(t, err == nil)
-	domainSBOM, err := spdxToDomain(spdxSBOM)
+	s := NewSyftAdapter(5 * time.Minute)
+	domainSBOM, err := s.spdxToDomain(spdxSBOM)
 	tools.EnsureSetup(t, err == nil)
 	assert.DeepEqual(t, sbom.Content, domainSBOM)
 }

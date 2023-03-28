@@ -44,7 +44,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
 		ID:                 imageID,
-		SBOMCreatorVersion: s.Version(ctx),
+		SBOMCreatorVersion: s.Version(),
 	}
 	// translate business models into Syft models
 	sourceInput, err := source.ParseInput(imageID, "", true)
@@ -113,13 +113,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	}
 	// convert SBOM
 	logger.L().Debug("converting SBOM", helpers.String("imageID", imageID))
-	domainSBOM.Content, err = syftToDomain(syftSBOM)
+	domainSBOM.Content, err = s.syftToDomain(syftSBOM)
 	// return SBOM
 	logger.L().Debug("returning SBOM", helpers.String("imageID", imageID))
 	return domainSBOM, err
 }
 
 // Version returns Syft's version which is used to tag SBOMs
-func (s *SyftAdapter) Version(context.Context) string {
+func (s *SyftAdapter) Version() string {
 	return tools.PackageVersion("github.com/anchore/syft")
 }

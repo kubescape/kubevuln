@@ -28,5 +28,5 @@ func TestMockSBOMAdapter_CreateSBOM_Timeout(t *testing.T) {
 
 func TestMockSBOMAdapter_Version(t *testing.T) {
 	m := NewMockSBOMAdapter(false, false)
-	assert.Assert(t, m.Version(context.TODO()) == "Mock SBOM 1.0")
+	assert.Assert(t, m.Version() == "Mock SBOM 1.0")
 }
