@@ -15,6 +15,7 @@ type SBOM struct {
 	SBOMCreatorVersion string
 	Status             string
 	Content            *v1beta1.Document
+	Annotations        map[string]string
 	Labels             map[string]string
 }
 
