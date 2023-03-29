@@ -9,6 +9,7 @@ import (
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -106,10 +107,10 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	name := hashFromImageID(cve.ID)
 	annotations := make(map[string]string)
 	if withRelevancy {
-		annotations[domain.InstanceIDKey] = cve.ID
-		annotations[domain.WlidKey] = cve.Wlid
+		annotations[instanceidhandler.InstanceIDAnnotationKey] = cve.ID
+		annotations[instanceidhandler.WlidAnnotationKey] = cve.Wlid
 	} else {
-		annotations[domain.ImageTagKey] = cve.ID
+		annotations[instanceidhandler.ImageTagAnnotationKey] = cve.ID
 	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
@@ -171,7 +172,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
-	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got SBOM from storage", helpers.String("ID", imageID))
@@ -205,7 +206,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		Content:            &manifest.Spec.SPDX,
 		Labels:             manifest.Labels,
 	}
-	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got relevant SBOM from storage", helpers.String("ID", instanceID))
@@ -223,8 +224,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hashFromImageID(sbom.ID),
 			Annotations: map[string]string{
-				domain.ImageTagKey: sbom.ID,
-				domain.StatusKey:   sbom.Status,
+				instanceidhandler.ImageTagAnnotationKey: sbom.ID,
+				instanceidhandler.StatusAnnotationKey:   sbom.Status,
 			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
