@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -17,9 +18,9 @@ const instanceID = "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c53
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   sbom.ID,
+			Name: sbom.ID,
 			Annotations: map[string]string{
-				domain.StatusKey: sbom.Status,
+				instanceidhandler.StatusAnnotationKey: sbom.Status,
 			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
