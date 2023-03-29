@@ -15,6 +15,7 @@ import (
 	"github.com/eapache/go-resiliency/deadline"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -45,6 +46,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	domainSBOM := domain.SBOM{
 		ID:                 imageID,
 		SBOMCreatorVersion: s.Version(),
+		Annotations: map[string]string{
+			instanceidhandler.ImageTagAnnotationKey: imageID,
+		},
+		Labels: tools.LabelsFromImageID(imageID),
 	}
 	// translate business models into Syft models
 	sourceInput, err := source.ParseInput(imageID, "", true)

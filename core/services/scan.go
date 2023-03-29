@@ -180,7 +180,6 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 		// store CVE'
 		if s.storage {
-			cvep.Labels = sbomp.Labels
 			cvep.Wlid = workload.Wlid
 			err = s.cveRepository.StoreCVE(ctx, cvep, true)
 			if err != nil {
