@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -133,13 +134,28 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
-		_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), &manifest, metav1.UpdateOptions{})
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
+			// update the vulnerability manifest
+			result.Annotations = manifest.Annotations
+			result.Labels = manifest.Labels
+			result.Spec = manifest.Spec
+			// try to send the updated vulnerability manifest
+			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		} else {
+			logger.L().Debug("updated CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		}
-		logger.L().Debug("updated CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
 		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
