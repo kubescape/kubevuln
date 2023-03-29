@@ -68,7 +68,6 @@ func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultRepo
 		errorChan <- err
 		return
 	}
-	logger.L().Ctx(ctx).Debug("sending payload", helpers.String("payload", string(payload)), helpers.String("wlid", wlid))
 
 	urlBase, err := url.Parse(eventReceiverURL)
 	if err != nil {
