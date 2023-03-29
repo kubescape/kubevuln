@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,7 +100,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
 	defer span.End()
 	if cve.ID == "" {
-		logger.L().Debug("skipping storing CVE manifest with empty ID")
+		logger.L().Debug("skipping storing CVE manifest with empty ID", helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
 	name := hashFromImageID(cve.ID)
@@ -131,11 +132,15 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
-		logger.L().Debug("CVE manifest already exists in storage", helpers.String("ID", cve.ID))
+		_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), &manifest, metav1.UpdateOptions{})
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		}
+		logger.L().Debug("updated CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID))
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
-		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID))
+		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
 }

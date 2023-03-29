@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -17,7 +18,7 @@ const instanceID = "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c53
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   sbom.ID,
+			Name: sbom.ID,
 			Annotations: map[string]string{
 				domain.StatusKey: sbom.Status,
 			},
@@ -113,6 +114,27 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAPIServerStore_UpdateCVE(t *testing.T) {
+	ctx := context.TODO()
+	a := NewFakeAPIServerStorage("kubescape")
+	cvep := domain.CVEManifest{
+		ID:           instanceID,
+		Content:      &v1beta1.GrypeDocument{
+			Descriptor: v1beta1.Descriptor{
+				Version: "v1.0.0",
+			},
+		},
+	}
+	err := a.StoreCVE(ctx, cvep, true)
+	tools.EnsureSetup(t, err == nil)
+	cvep.Content.Descriptor.Version = "v1.1.0"
+	err = a.StoreCVE(ctx, cvep, true)
+	assert.Assert(t, err == nil)
+	got, err := a.GetCVE(ctx, instanceID, "", "", "")
+	tools.EnsureSetup(t, err == nil)
+	assert.Assert(t, got.Content.Descriptor.Version == "v1.1.0")
 }
 
 func TestAPIServerStore_GetSBOM(t *testing.T) {
