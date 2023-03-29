@@ -168,35 +168,35 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 
 	vulnsList := make([]containerscan.ShortVulnerabilityResult, 0)
 
-	for _, vul := range report.Vulnerabilities {
-		isIgnored := len(vul.ExceptionApplied) > 0 &&
-			len(vul.ExceptionApplied[0].Actions) > 0 &&
-			vul.ExceptionApplied[0].Actions[0] == armotypes.Ignore
+	for i := range report.Vulnerabilities {
+		isIgnored := len(report.Vulnerabilities[i].ExceptionApplied) > 0 &&
+			len(report.Vulnerabilities[i].ExceptionApplied[0].Actions) > 0 &&
+			report.Vulnerabilities[i].ExceptionApplied[0].Actions[0] == armotypes.Ignore
 
 		severitiesStats := exculdedSeveritiesStats
 		if !isIgnored {
 			summary.TotalCount++
-			vulnsList = append(vulnsList, *(vul.ToShortVulnerabilityResult()))
+			vulnsList = append(vulnsList, *(report.Vulnerabilities[i].ToShortVulnerabilityResult()))
 			severitiesStats = actualSeveritiesStats
 		}
 
 		// TODO: maybe add all severities just to have a placeholders
-		if !containerscan.KnownSeverities[vul.Severity] {
-			vul.Severity = containerscan.UnknownSeverity
+		if !containerscan.KnownSeverities[report.Vulnerabilities[i].Severity] {
+			report.Vulnerabilities[i].Severity = containerscan.UnknownSeverity
 		}
 
-		vulnSeverityStats, ok := severitiesStats[vul.Severity]
+		vulnSeverityStats, ok := severitiesStats[report.Vulnerabilities[i].Severity]
 		if !ok {
-			vulnSeverityStats = containerscan.SeverityStats{Severity: vul.Severity}
+			vulnSeverityStats = containerscan.SeverityStats{Severity: report.Vulnerabilities[i].Severity}
 		}
 
 		vulnSeverityStats.TotalCount++
-		isFixed := containerscan.CalculateFixed(vul.Fixes) > 0
+		isFixed := containerscan.CalculateFixed(report.Vulnerabilities[i].Fixes) > 0
 		if isFixed {
 			vulnSeverityStats.FixAvailableOfTotalCount++
 			incrementCounter(&summary.FixAvailableOfTotalCount, true, isIgnored)
 		}
-		isRCE := vul.IsRCE()
+		isRCE := report.Vulnerabilities[i].IsRCE()
 		if isRCE {
 			vulnSeverityStats.RCECount++
 			incrementCounter(&summary.RCECount, true, isIgnored)
@@ -206,12 +206,12 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 			}
 		}
 
-		isRelevant := vul.GetIsRelevant()
+		isRelevant := report.Vulnerabilities[i].GetIsRelevant()
 		if isRelevant != nil {
 			// if IsRelevant is not nil, we have relevancy data
 			if *isRelevant {
 				// vulnerability is relevant
-				vul.SetRelevantLabel(containerscan.RelevantLabelYes)
+				report.Vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelYes)
 				vulnSeverityStats.RelevantCount++
 				incrementCounter(&summary.RelevantCount, true, isIgnored)
 				if isFixed {
@@ -220,10 +220,10 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 				}
 			} else {
 				// vulnerability is not relevant
-				vul.SetRelevantLabel(containerscan.RelevantLabelNo)
+				report.Vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelNo)
 			}
 		}
-		severitiesStats[vul.Severity] = vulnSeverityStats
+		severitiesStats[report.Vulnerabilities[i].Severity] = vulnSeverityStats
 	}
 
 	summary.Status = "Success"
