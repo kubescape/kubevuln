@@ -39,8 +39,8 @@ func sanitize(s string) string {
 func LabelsFromImageID(imageID string) map[string]string {
 	labels := map[string]string{}
 	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
-	labels[instanceidhandler.ImageNameAnnotationKey] = sanitize(match[1])
-	labels[instanceidhandler.ImageTagAnnotationKey] = sanitize(match[2])
+	labels[instanceidhandler.ImageNameMetadataKey] = sanitize(match[1])
+	labels[instanceidhandler.ImageTagMetadataKey] = sanitize(match[2])
 	// prune invalid labels
 	for key, value := range labels {
 		if errs := validation.IsDNS1123Label(value); len(errs) != 0 {

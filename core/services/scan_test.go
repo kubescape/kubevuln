@@ -284,9 +284,11 @@ func TestScanService_NginxTest(t *testing.T) {
 	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
-		ImageHash:  imageHash,
-		InstanceID: instanceID,
-		Wlid:       "wlid://cluster-minikube/namespace-default/deployment-nginx",
+		ContainerName: "nginx",
+		ImageHash:     imageHash,
+		ImageTag:      "docker.io/library/nginx:1.14.1",
+		InstanceID:    instanceID,
+		Wlid:          "wlid://cluster-minikube/namespace-default/deployment-nginx",
 	}
 	ctx, _ = s.ValidateScanCVE(ctx, workload)
 	sbom := domain.SBOM{

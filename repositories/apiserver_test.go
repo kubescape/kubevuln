@@ -21,7 +21,7 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbom.ID,
 			Annotations: map[string]string{
-				instanceidhandler.StatusAnnotationKey: sbom.Status,
+				instanceidhandler.StatusMetadataKey: sbom.Status,
 			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
@@ -121,8 +121,8 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	ctx := context.TODO()
 	a := NewFakeAPIServerStorage("kubescape")
 	cvep := domain.CVEManifest{
-		ID:           instanceID,
-		Content:      &v1beta1.GrypeDocument{
+		ID: instanceID,
+		Content: &v1beta1.GrypeDocument{
 			Descriptor: v1beta1.Descriptor{
 				Version: "v1.0.0",
 			},
