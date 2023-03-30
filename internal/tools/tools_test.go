@@ -1,9 +1,9 @@
 package tools
 
 import (
-	"reflect"
 	"testing"
 
+	"github.com/go-test/deep"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"gotest.tools/v3/assert"
 )
@@ -44,9 +44,11 @@ func TestLabelsFromImageID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.imageID, func(t *testing.T) {
-			if got := LabelsFromImageID(tt.imageID); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("LabelsFromImageID() = %v, want %v", got, tt.want)
-			}
+			got := LabelsFromImageID(tt.imageID)
+			diff := deep.Equal(got, tt.want)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
+			}	
 		})
 	}
 }
