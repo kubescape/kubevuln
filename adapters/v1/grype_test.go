@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
-	"github.com/adrg/xdg"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -20,9 +18,7 @@ import (
 func Test_grypeAdapter_DBVersion(t *testing.T) {
 	ctx := context.TODO()
 	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
-	g := NewGrypeAdapter()
-	g.dbConfig.DBRootDir = path.Join(xdg.CacheHome, "grype-light", "db")
-	g.dbConfig.ListingURL = "http://localhost:8000/listing.json"
+	g := NewGrypeAdapterFixedDB()
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
 	assert.Assert(t, version == "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a")
@@ -67,9 +63,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-			g := NewGrypeAdapter()
-			g.dbConfig.DBRootDir = path.Join(xdg.CacheHome, "grype-light", "db")
-			g.dbConfig.ListingURL = "http://localhost:8000/listing.json"
+			g := NewGrypeAdapterFixedDB()
 			g.Ready(ctx) // need to call ready to load the DB
 			got, err := g.ScanSBOM(ctx, tt.sbom)
 			if (err != nil) != tt.wantErr {

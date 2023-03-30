@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"testing"
 
@@ -277,7 +278,8 @@ func TestScanService_NginxTest(t *testing.T) {
 	instanceID := "1c83b589d90ba26957627525e08124b1a24732755a330924f7987e9d9e3952c1"
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false)
-	cveAdapter := v1.NewGrypeAdapter()
+	go http.ListenAndServe(":8000", http.FileServer(http.Dir("../../adapters/v1/testdata")))
+	cveAdapter := v1.NewGrypeAdapterFixedDB()
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform()

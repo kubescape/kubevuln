@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-test/deep"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -89,5 +90,8 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	s := NewSyftAdapter(5 * time.Minute)
 	domainSBOM, err := s.spdxToDomain(spdxSBOM)
 	tools.EnsureSetup(t, err == nil)
-	assert.DeepEqual(t, sbom.Content, domainSBOM)
+	diff := deep.Equal(sbom.Content, domainSBOM)
+	if diff != nil {
+		t.Errorf("compare failed: %v", diff)
+	}
 }
