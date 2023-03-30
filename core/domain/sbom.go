@@ -5,10 +5,6 @@ import (
 )
 
 const (
-	ImageTagKey        = "kubescape.io/image-tag"
-	InstanceIDKey      = "kubescape.io/instance-id"
-	StatusKey          = "kubescape.io/status"
-	WlidKey            = "kubescape.io/wlid"
 	SBOMStatusTimedOut = "timed out"
 )
 
@@ -19,6 +15,7 @@ type SBOM struct {
 	SBOMCreatorVersion string
 	Status             string
 	Content            *v1beta1.Document
+	Annotations        map[string]string
 	Labels             map[string]string
 }
 

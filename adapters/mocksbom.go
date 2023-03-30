@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -37,6 +39,10 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 	sbom := domain.SBOM{
 		ID:                 imageID,
 		SBOMCreatorVersion: m.Version(),
+		Annotations: map[string]string{
+			instanceidhandler.ImageTagAnnotationKey: imageID,
+		},
+		Labels: tools.LabelsFromImageID(imageID),
 		Content: &v1beta1.Document{
 			CreationInfo: &v1beta1.CreationInfo{
 				Created: time.Now().Format(time.RFC3339),
