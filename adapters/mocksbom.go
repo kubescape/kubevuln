@@ -40,7 +40,7 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 		ID:                 imageID,
 		SBOMCreatorVersion: m.Version(),
 		Annotations: map[string]string{
-			instanceidhandler.ImageTagAnnotationKey: imageID,
+			instanceidhandler.ImageTagMetadataKey: imageID,
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 		Content: &v1beta1.Document{

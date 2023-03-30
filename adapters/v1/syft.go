@@ -47,7 +47,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 		ID:                 imageID,
 		SBOMCreatorVersion: s.Version(),
 		Annotations: map[string]string{
-			instanceidhandler.ImageTagAnnotationKey: imageID,
+			instanceidhandler.ImageTagMetadataKey: imageID,
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 	}
