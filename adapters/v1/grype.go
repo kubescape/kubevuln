@@ -149,6 +149,8 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(ctx),
 		CVEDBVersion:       g.DBVersion(ctx),
+		Annotations:        sbom.Annotations,
+		Labels:             sbom.Labels,
 		Content:            vulnerabilityResults,
 	}, nil
 }

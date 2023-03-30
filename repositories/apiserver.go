@@ -2,12 +2,14 @@ package repositories
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -18,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -99,21 +102,14 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
 	defer span.End()
 	if cve.ID == "" {
-		logger.L().Debug("skipping storing CVE manifest with empty ID")
+		logger.L().Debug("skipping storing CVE manifest with empty ID", helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
 	name := hashFromImageID(cve.ID)
-	annotations := make(map[string]string)
-	if withRelevancy {
-		annotations[domain.InstanceIDKey] = cve.ID
-		annotations[domain.WlidKey] = cve.Wlid
-	} else {
-		annotations[domain.ImageTagKey] = cve.ID
-	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			Annotations: annotations,
+			Annotations: cve.Annotations,
 			Labels:      cve.Labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
@@ -131,11 +127,30 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
-		logger.L().Debug("CVE manifest already exists in storage", helpers.String("ID", cve.ID))
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
+			// update the vulnerability manifest
+			result.Annotations = manifest.Annotations
+			result.Labels = manifest.Labels
+			result.Spec = manifest.Spec
+			// try to send the updated vulnerability manifest
+			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		} else {
+			logger.L().Debug("updated CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		}
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest into apiserver", helpers.Error(err), helpers.String("ID", cve.ID))
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
-		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID))
+		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
 }
@@ -166,7 +181,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
-	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got SBOM from storage", helpers.String("ID", imageID))
@@ -200,7 +215,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		Content:            &manifest.Spec.SPDX,
 		Labels:             manifest.Labels,
 	}
-	if status, ok := manifest.Annotations[domain.StatusKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got relevant SBOM from storage", helpers.String("ID", instanceID))
@@ -216,11 +231,9 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	}
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: hashFromImageID(sbom.ID),
-			Annotations: map[string]string{
-				domain.ImageTagKey: sbom.ID,
-				domain.StatusKey:   sbom.Status,
-			},
+			Name:        hashFromImageID(sbom.ID),
+			Annotations: sbom.Annotations,
+			Labels:      sbom.Labels,
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
 			Metadata: v1beta1.SPDXMeta{
@@ -233,6 +246,10 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		},
 		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
 	}
+	if manifest.Annotations == nil {
+		manifest.Annotations = map[string]string{}
+	}
+	manifest.Annotations[instanceidhandler.StatusAnnotationKey] = sbom.Status // for the moment stored as an annotation
 	created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
 	if err != nil {
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
