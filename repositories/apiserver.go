@@ -106,17 +106,10 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		return nil
 	}
 	name := hashFromImageID(cve.ID)
-	annotations := make(map[string]string)
-	if withRelevancy {
-		annotations[instanceidhandler.InstanceIDAnnotationKey] = cve.ID
-		annotations[instanceidhandler.WlidAnnotationKey] = cve.Wlid
-	} else {
-		annotations[instanceidhandler.ImageTagAnnotationKey] = cve.ID
-	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			Annotations: annotations,
+			Annotations: cve.Annotations,
 			Labels:      cve.Labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
@@ -238,11 +231,9 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	}
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: hashFromImageID(sbom.ID),
-			Annotations: map[string]string{
-				instanceidhandler.ImageTagAnnotationKey: sbom.ID,
-				instanceidhandler.StatusAnnotationKey:   sbom.Status,
-			},
+			Name:        hashFromImageID(sbom.ID),
+			Annotations: sbom.Annotations,
+			Labels:      sbom.Labels,
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
 			Metadata: v1beta1.SPDXMeta{
@@ -255,6 +246,10 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		},
 		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
 	}
+	if manifest.Annotations == nil {
+		manifest.Annotations = map[string]string{}
+	}
+	manifest.Annotations[instanceidhandler.StatusAnnotationKey] = sbom.Status // for the moment stored as an annotation
 	created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
 	if err != nil {
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
