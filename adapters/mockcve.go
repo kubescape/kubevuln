@@ -41,6 +41,8 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  m.Version(ctx),
 		CVEDBVersion:       m.DBVersion(ctx),
+		Annotations:        sbom.Annotations,
+		Labels:             sbom.Labels,
 		Content:            &v1beta1.GrypeDocument{},
 	}, nil
 }
