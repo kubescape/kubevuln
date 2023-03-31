@@ -13,6 +13,104 @@ import (
 	"k8s.io/utils/pointer"
 )
 
+func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
+	testCases := []struct {
+		name       string
+		srcCVEList []armotypes.VulnerabilityExceptionPolicy
+		CVEName    string
+		expected   []armotypes.VulnerabilityExceptionPolicy
+	}{
+		{
+			name:       "empty source list",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{},
+			CVEName:    "CVE-2021-1234",
+			expected:   nil,
+		},
+		{
+			name: "no matches in source list",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2022-5678"},
+					},
+				},
+			},
+			CVEName:  "CVE-2021-1234",
+			expected: nil,
+		},
+		{
+			name: "one match in source list",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+			CVEName: "CVE-2021-1234",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+		},
+		{
+			name: "multiple matches in source list",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-5678"},
+						{Name: "CVE-2021-1234"},
+					},
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+						{Name: "CVE-2021-9012"},
+					},
+				},
+			},
+			CVEName: "CVE-2021-1234",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-5678"},
+						{Name: "CVE-2021-1234"},
+					},
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+						{Name: "CVE-2021-9012"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName)
+			diff := deep.Equal(actual, tc.expected)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
+			}
+		})
+	}
+}
+
 func Test_summarize(t *testing.T) {
 	containerScanID := "9711c327-1a08-487e-b24a-72128712ef2d"
 	designators := armotypes.PortalDesignator{
@@ -99,12 +197,12 @@ func Test_summarize(t *testing.T) {
 							IsLastScan:        1,
 							Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 							Vulnerability: containerscan.Vulnerability{
-								IsRelevant:  nil,
-								ImageID:     imageHash,
-								ImageTag:    imageTag,
-								Severity:    "Negligible",
-								Name:        "CVE-2005-2541",
-								Categories:  containerscan.VulnerabilityCategory{IsRCE: false},
+								IsRelevant: nil,
+								ImageID:    imageHash,
+								ImageTag:   imageTag,
+								Severity:   "Negligible",
+								Name:       "CVE-2005-2541",
+								Categories: containerscan.VulnerabilityCategory{IsRCE: false},
 							},
 							WLID: wlid,
 						},
@@ -226,12 +324,12 @@ func Test_summarize(t *testing.T) {
 							IsLastScan:        1,
 							Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 							Vulnerability: containerscan.Vulnerability{
-								IsRelevant:  pointer.Bool(false),
-								ImageID:     imageHash,
-								ImageTag:    imageTag,
-								Severity:    "Negligible",
-								Name:        "CVE-2005-2541",
-								Categories:  containerscan.VulnerabilityCategory{IsRCE: false},
+								IsRelevant: pointer.Bool(false),
+								ImageID:    imageHash,
+								ImageTag:   imageTag,
+								Severity:   "Negligible",
+								Name:       "CVE-2005-2541",
+								Categories: containerscan.VulnerabilityCategory{IsRCE: false},
 							},
 							WLID: wlid,
 						},
@@ -243,13 +341,13 @@ func Test_summarize(t *testing.T) {
 							IsLastScan:        1,
 							Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 							Vulnerability: containerscan.Vulnerability{
-								IsRelevant:  pointer.Bool(false),
-								ImageID:     imageHash,
-								ImageTag:    imageTag,
-								Severity:    "Medium",
-								Name:        "CVE-2016-9318",
-								Fixes:       containerscan.VulFixes{{Version: "foo"}},
-								Categories:  containerscan.VulnerabilityCategory{IsRCE: false},
+								IsRelevant: pointer.Bool(false),
+								ImageID:    imageHash,
+								ImageTag:   imageTag,
+								Severity:   "Medium",
+								Name:       "CVE-2016-9318",
+								Fixes:      containerscan.VulFixes{{Version: "foo"}},
+								Categories: containerscan.VulnerabilityCategory{IsRCE: false},
 							},
 							WLID: wlid,
 						},
