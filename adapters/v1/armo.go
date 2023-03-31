@@ -180,7 +180,6 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 		Designators:     *armotypes.AttributesDesignatorsFromWLID(workload.Wlid),
 		Summary:         nil,
 		ContainerScanID: scanID,
-		Vulnerabilities: vulnerabilities,
 		Timestamp:       timestamp,
 	}
 
