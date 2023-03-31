@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/go-test/deep"
 	"github.com/google/uuid"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -74,8 +74,9 @@ func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
 				t.Errorf("GetCVEExceptions() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("GetCVEExceptions() got = %v, want %v", got, tt.want)
+			diff := deep.Equal(got, tt.want)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
 			}
 		})
 	}
@@ -160,8 +161,9 @@ func TestNewArmoAdapter(t *testing.T) {
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewArmoAdapter() = %v, want %v", got, tt.want)
+			diff := deep.Equal(got, tt.want)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
 			}
 		})
 	}

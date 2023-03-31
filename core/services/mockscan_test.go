@@ -2,9 +2,9 @@ package services
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
+	"github.com/go-test/deep"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
@@ -144,8 +144,9 @@ func TestMockScanService_ValidateGenerateSBOM(t *testing.T) {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ValidateGenerateSBOM() got = %v, want %v", got, tt.want)
+			diff := deep.Equal(got, tt.want)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
 			}
 		})
 	}
@@ -185,8 +186,9 @@ func TestMockScanService_ValidateScanCVE(t *testing.T) {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ValidateScanCVE() got = %v, want %v", got, tt.want)
+			diff := deep.Equal(got, tt.want)
+			if diff != nil {
+				t.Errorf("compare failed: %v", diff)
 			}
 		})
 	}

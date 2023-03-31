@@ -21,7 +21,7 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbom.ID,
 			Annotations: map[string]string{
-				instanceidhandler.StatusAnnotationKey: sbom.Status,
+				instanceidhandler.StatusMetadataKey: sbom.Status,
 			},
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{
@@ -121,8 +121,8 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	ctx := context.TODO()
 	a := NewFakeAPIServerStorage("kubescape")
 	cvep := domain.CVEManifest{
-		ID:           instanceID,
-		Content:      &v1beta1.GrypeDocument{
+		ID: instanceID,
+		Content: &v1beta1.GrypeDocument{
 			Descriptor: v1beta1.Descriptor{
 				Version: "v1.0.0",
 			},
@@ -362,20 +362,3 @@ func Test_extractHashFromImageID(t *testing.T) {
 		})
 	}
 }
-
-//func TestForRazi(t *testing.T) {
-//	ctx := context.TODO()
-//	sbomAdapter := v1.NewSyftAdapter(1 * time.Hour)
-//	cveAdapter := v1.NewGrypeAdapter()
-//	cveAdapter.Ready(ctx)
-//	repository, _ := newFakeAPIServerStorage("kubescape")
-//	sbom, err := sbomAdapter.CreateSBOM(ctx, "requarks/wiki@sha256:dd83fff15e77843ff934b25c28c865ac000edf7653e5d11adad1dd51df87439d", domain.RegistryOptions{})
-//	if err != nil {
-//		panic(err)
-//	}
-//	cve, err := cveAdapter.ScanSBOM(ctx, sbom)
-//	if err != nil {
-//		panic(err)
-//	}
-//	repository.StoreCVE(ctx, cve, false)
-//}

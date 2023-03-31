@@ -181,7 +181,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
-	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got SBOM from storage", helpers.String("ID", imageID))
@@ -215,7 +215,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		Content:            &manifest.Spec.SPDX,
 		Labels:             manifest.Labels,
 	}
-	if status, ok := manifest.Annotations[instanceidhandler.StatusAnnotationKey]; ok {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got relevant SBOM from storage", helpers.String("ID", instanceID))
@@ -249,7 +249,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
-	manifest.Annotations[instanceidhandler.StatusAnnotationKey] = sbom.Status // for the moment stored as an annotation
+	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
 	if err != nil {
 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
