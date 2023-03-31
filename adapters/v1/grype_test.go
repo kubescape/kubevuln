@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
-	"github.com/adrg/xdg"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -20,9 +18,7 @@ import (
 func Test_grypeAdapter_DBVersion(t *testing.T) {
 	ctx := context.TODO()
 	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
-	g := NewGrypeAdapter()
-	g.dbConfig.DBRootDir = path.Join(xdg.CacheHome, "grype-light", "db")
-	g.dbConfig.ListingURL = "http://localhost:8000/listing.json"
+	g := NewGrypeAdapterFixedDB()
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
 	assert.Assert(t, version == "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a")
@@ -55,9 +51,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			sbom: domain.SBOM{
 				ID:                 "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
 				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/filtered-sbom.json"),
+				Content:            fileToSBOM("testdata/nginx-filtered-sbom.json"),
 			},
-			format: string(fileContent("testdata/filtered-cve.format.json")),
+			format: string(fileContent("testdata/nginx-filtered-cve.format.json")),
 		},
 	}
 	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
@@ -67,9 +63,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-			g := NewGrypeAdapter()
-			g.dbConfig.DBRootDir = path.Join(xdg.CacheHome, "grype-light", "db")
-			g.dbConfig.ListingURL = "http://localhost:8000/listing.json"
+			g := NewGrypeAdapterFixedDB()
 			g.Ready(ctx) // need to call ready to load the DB
 			got, err := g.ScanSBOM(ctx, tt.sbom)
 			if (err != nil) != tt.wantErr {

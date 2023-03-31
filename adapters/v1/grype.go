@@ -44,12 +44,21 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
 func NewGrypeAdapter() *GrypeAdapter {
-	dbConfig := db.Config{
-		DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
-		ListingURL: "https://toolbox-data.anchore.io/grype/databases/listing.json",
-	}
 	g := &GrypeAdapter{
-		dbConfig: dbConfig,
+		dbConfig: db.Config{
+			DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
+			ListingURL: "https://toolbox-data.anchore.io/grype/databases/listing.json",
+		},
+	}
+	return g
+}
+
+func NewGrypeAdapterFixedDB() *GrypeAdapter {
+	g := &GrypeAdapter{
+		dbConfig: db.Config{
+			DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
+			ListingURL: "http://localhost:8000/listing.json",
+		},
 	}
 	return g
 }
