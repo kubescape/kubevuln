@@ -208,7 +208,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	}
 
 	// add summary
-	finalReport.Summary = summarize(finalReport, workload, hasRelevancy)
+	finalReport.Summary, vulnerabilities = summarize(finalReport, vulnerabilities, workload, hasRelevancy)
 	finalReport.Summary.Context = armoContext
 
 	// split vulnerabilities to chunks
