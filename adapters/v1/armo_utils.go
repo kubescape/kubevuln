@@ -138,7 +138,7 @@ func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
 	*counter++
 }
 
-func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelevancy bool) *containerscan.CommonContainerScanSummaryResult {
+func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.CommonContainerVulnerabilityResult, workload domain.ScanCommand, hasRelevancy bool) (*containerscan.CommonContainerScanSummaryResult, []containerscan.CommonContainerVulnerabilityResult) {
 	summary := containerscan.CommonContainerScanSummaryResult{
 		Designators:      report.Designators,
 		SeverityStats:    containerscan.SeverityStats{},
@@ -168,35 +168,35 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 
 	vulnsList := make([]containerscan.ShortVulnerabilityResult, 0)
 
-	for i := range report.Vulnerabilities {
-		isIgnored := len(report.Vulnerabilities[i].ExceptionApplied) > 0 &&
-			len(report.Vulnerabilities[i].ExceptionApplied[0].Actions) > 0 &&
-			report.Vulnerabilities[i].ExceptionApplied[0].Actions[0] == armotypes.Ignore
+	for i := range vulnerabilities {
+		isIgnored := len(vulnerabilities[i].ExceptionApplied) > 0 &&
+			len(vulnerabilities[i].ExceptionApplied[0].Actions) > 0 &&
+			vulnerabilities[i].ExceptionApplied[0].Actions[0] == armotypes.Ignore
 
 		severitiesStats := exculdedSeveritiesStats
 		if !isIgnored {
 			summary.TotalCount++
-			vulnsList = append(vulnsList, *(report.Vulnerabilities[i].ToShortVulnerabilityResult()))
+			vulnsList = append(vulnsList, *(vulnerabilities[i].ToShortVulnerabilityResult()))
 			severitiesStats = actualSeveritiesStats
 		}
 
 		// TODO: maybe add all severities just to have a placeholders
-		if !containerscan.KnownSeverities[report.Vulnerabilities[i].Severity] {
-			report.Vulnerabilities[i].Severity = containerscan.UnknownSeverity
+		if !containerscan.KnownSeverities[vulnerabilities[i].Severity] {
+			vulnerabilities[i].Severity = containerscan.UnknownSeverity
 		}
 
-		vulnSeverityStats, ok := severitiesStats[report.Vulnerabilities[i].Severity]
+		vulnSeverityStats, ok := severitiesStats[vulnerabilities[i].Severity]
 		if !ok {
-			vulnSeverityStats = containerscan.SeverityStats{Severity: report.Vulnerabilities[i].Severity}
+			vulnSeverityStats = containerscan.SeverityStats{Severity: vulnerabilities[i].Severity}
 		}
 
 		vulnSeverityStats.TotalCount++
-		isFixed := containerscan.CalculateFixed(report.Vulnerabilities[i].Fixes) > 0
+		isFixed := containerscan.CalculateFixed(vulnerabilities[i].Fixes) > 0
 		if isFixed {
 			vulnSeverityStats.FixAvailableOfTotalCount++
 			incrementCounter(&summary.FixAvailableOfTotalCount, true, isIgnored)
 		}
-		isRCE := report.Vulnerabilities[i].IsRCE()
+		isRCE := vulnerabilities[i].IsRCE()
 		if isRCE {
 			vulnSeverityStats.RCECount++
 			incrementCounter(&summary.RCECount, true, isIgnored)
@@ -206,12 +206,12 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 			}
 		}
 
-		isRelevant := report.Vulnerabilities[i].GetIsRelevant()
+		isRelevant := vulnerabilities[i].GetIsRelevant()
 		if isRelevant != nil {
 			// if IsRelevant is not nil, we have relevancy data
 			if *isRelevant {
 				// vulnerability is relevant
-				report.Vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelYes)
+				vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelYes)
 				vulnSeverityStats.RelevantCount++
 				incrementCounter(&summary.RelevantCount, true, isIgnored)
 				if isFixed {
@@ -220,10 +220,10 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 				}
 			} else {
 				// vulnerability is not relevant
-				report.Vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelNo)
+				vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelNo)
 			}
 		}
-		severitiesStats[report.Vulnerabilities[i].Severity] = vulnSeverityStats
+		severitiesStats[vulnerabilities[i].Severity] = vulnSeverityStats
 	}
 
 	summary.Status = "Success"
@@ -247,7 +247,7 @@ func summarize(report v1.ScanResultReport, workload domain.ScanCommand, hasRelev
 		summary.ExcludedSeveritiesStats = append(summary.ExcludedSeveritiesStats, exculdedSeveritiesStats[sever])
 	}
 
-	return &summary
+	return &summary, vulnerabilities
 }
 
 func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) []armotypes.VulnerabilityExceptionPolicy {
