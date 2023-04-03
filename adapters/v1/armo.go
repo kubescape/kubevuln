@@ -202,9 +202,9 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 
 	// fill context and designators into vulnerabilities
 	armoContext := armotypes.DesignatorToArmoContext(&finalReport.Designators, "designators")
-	for i := range finalReport.Vulnerabilities {
-		finalReport.Vulnerabilities[i].Context = armoContext
-		finalReport.Vulnerabilities[i].Designators = finalReport.Designators
+	for i := range vulnerabilities {
+		vulnerabilities[i].Context = armoContext
+		vulnerabilities[i].Designators = finalReport.Designators
 	}
 
 	// add summary
