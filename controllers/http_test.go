@@ -160,3 +160,53 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPController_ScanRegistry(t *testing.T) {
+	tests := []struct {
+		name         string
+		scanService  ports.ScanService
+		expectedCode int
+		expectedBody string
+		yamlFile     string
+	}{
+		{
+			name:         "invalid request",
+			scanService:  services.NewMockScanService(true),
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"status\":400,\"title\":\"Bad Request\"}",
+			yamlFile:     "../api/v1/testdata/scan-invalid.yaml",
+		},
+		{
+			name:         "validation error",
+			scanService:  services.NewMockScanService(false),
+			expectedCode: http.StatusInternalServerError,
+			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			yamlFile:     "../api/v1/testdata/scan.yaml",
+		},
+		{
+			name:         "ready",
+			scanService:  services.NewMockScanService(true),
+			expectedCode: http.StatusOK,
+			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":200,\"title\":\"OK\"}",
+			yamlFile:     "../api/v1/testdata/scan.yaml",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := HTTPController{
+				scanService: tt.scanService,
+				workerPool:  workerpool.New(1),
+			}
+			router := gin.Default()
+			path := "/v1/scanRegistryImage"
+			router.POST(path, c.ScanRegistry)
+			file, err := os.Open(tt.yamlFile)
+			tools.EnsureSetup(t, err == nil)
+			req, _ := http.NewRequest("POST", path, file)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			assert.Assert(t, tt.expectedCode == w.Code, w.Code)
+			assert.Assert(t, tt.expectedBody == w.Body.String(), w.Body.String())
+		})
+	}
+}
