@@ -18,6 +18,7 @@ import (
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/go-test/deep"
 	"github.com/google/uuid"
+	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
@@ -99,16 +100,19 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 	getCVEExceptionsFunc := func(s string, s2 string, designator *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		return []armotypes.VulnerabilityExceptionPolicy{}, nil
 	}
+	ja := jsonassert.New(t)
 	tests := []struct {
-		name    string
-		cve     domain.CVEManifest
-		cvep    domain.CVEManifest
-		wantErr bool
+		name          string
+		cve           domain.CVEManifest
+		cvep          domain.CVEManifest
+		checkFullBody bool
+		wantErr       bool
 	}{
 		{
-			name: "submit small cve",
-			cve:  fileToCVEManifest("testdata/nginx-cve-small.json"),
-			cvep: domain.CVEManifest{},
+			name:          "submit small cve",
+			cve:           fileToCVEManifest("testdata/nginx-cve-small.json"),
+			cvep:          domain.CVEManifest{},
+			checkFullBody: true,
 		},
 		{
 			name: "submit big cve",
@@ -131,6 +135,21 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 				if err != nil {
 					t.Errorf("failed to unmarshal report: %v", err)
 				}
+				var expectedBody []byte
+				switch {
+				case tt.checkFullBody:
+					expectedBody, err = os.ReadFile("testdata/cve-body.json")
+				case report.Summary == nil:
+					expectedBody, err = os.ReadFile("testdata/cve-chunk.json")
+				case tt.cvep.Content != nil:
+					expectedBody, err = os.ReadFile("testdata/cve-chunk-with-relevant-summary.json")
+				default:
+					expectedBody, err = os.ReadFile("testdata/cve-chunk-with-summary.json")
+				}
+				if err != nil {
+					t.Errorf("failed to read expected body: %v", err)
+				}
+				ja.Assertf(string(body), string(expectedBody))
 				mu.Lock()
 				for _, v := range report.Vulnerabilities {
 					id := v.Name + "+" + v.RelatedPackageName
