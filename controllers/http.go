@@ -37,7 +37,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	err := c.ShouldBindJSON(&websocketScanCommand)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
@@ -48,11 +48,11 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("imageID", newScan.ImageHash))
-		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
-	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
 		err = h.scanService.GenerateSBOM(ctx)
@@ -64,17 +64,17 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 
 // Alive returns 200 OK
 func (h HTTPController) Alive(c *gin.Context) {
-	problem.Of(http.StatusOK).WriteTo(c.Writer)
+	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
 // Ready calls scanService.Ready
 func (h HTTPController) Ready(c *gin.Context) {
 	if !h.scanService.Ready(c.Request.Context()) {
-		problem.Of(http.StatusServiceUnavailable).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusServiceUnavailable).WriteTo(c.Writer)
 		return
 	}
 
-	problem.Of(http.StatusOK).WriteTo(c.Writer)
+	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
@@ -85,7 +85,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	err := c.ShouldBindJSON(&websocketScanCommand)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
@@ -96,11 +96,11 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	ctx, err = h.scanService.ValidateScanCVE(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("wlid", newScan.Wlid), helpers.String("imageID", newScan.ImageHash))
-		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
-	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCVE(ctx)
@@ -142,7 +142,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	err := c.ShouldBindJSON(&registryScanCommand)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return
 	}
 
@@ -153,11 +153,11 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	ctx, err = h.scanService.ValidateScanRegistry(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err), helpers.String("imageID", newScan.ImageTag))
-		problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
 	}
 
-	problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanRegistry(ctx)
