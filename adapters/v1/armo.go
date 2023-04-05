@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,8 +18,6 @@ import (
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/hashicorp/go-multierror"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -224,10 +221,6 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	// get the first chunk
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
-
-	finalReportJSON, _ := json.Marshal(finalReport)
-	logger.L().Debug("final report", helpers.String("finalReport", string(finalReportJSON)))
-
 	// send the summary and the first chunk in one or two reports according to the size
 	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	// if not all vulnerabilities got into the first chunk
