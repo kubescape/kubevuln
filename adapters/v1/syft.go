@@ -52,7 +52,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 		Labels: tools.LabelsFromImageID(imageID),
 	}
 	// translate business models into Syft models
-	sourceInput, err := source.ParseInput(imageID, "", true)
+	sourceInput, err := source.ParseInput(imageID, "")
 	if err != nil {
 		return domainSBOM, err
 	}
