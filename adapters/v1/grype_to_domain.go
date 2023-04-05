@@ -34,6 +34,9 @@ func grypeToDomain(grypeDoc models.Document) (*v1beta1.GrypeDocument, error) {
 }
 
 func toRawMessage(v interface{}) json.RawMessage {
+	if v == nil {
+		return nil
+	}
 	b, _ := json.Marshal(v)
 	return b
 }
