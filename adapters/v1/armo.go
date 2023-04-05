@@ -29,7 +29,8 @@ import (
 type ArmoAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
 	getCVEExceptionsFunc func(string, string, *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc         func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error)
+	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
+	sendStatusFunc       func(*sysreport.BaseReport, string, bool, chan<- error)
 }
 
 var _ ports.Platform = (*ArmoAdapter)(nil)
@@ -43,6 +44,9 @@ func NewArmoAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *Arm
 		},
 		getCVEExceptionsFunc: wssc.BackendGetCVEExceptionByDEsignator,
 		httpPostFunc:         httputils.HttpPost,
+		sendStatusFunc: func(report *sysreport.BaseReport, status string, sendReport bool, errChan chan<- error) {
+			report.SendStatus(status, sendReport, errChan)
+		},
 	}
 }
 
@@ -120,7 +124,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 
 	ReportErrorsChan := make(chan error)
-	report.SendStatus(sysreport.JobSuccess, true, ReportErrorsChan)
+	a.sendStatusFunc(report, sysreport.JobSuccess, true, ReportErrorsChan)
 	err := <-ReportErrorsChan
 	return err
 }
@@ -226,7 +230,6 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 
 	// send the summary and the first chunk in one or two reports according to the size
 	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
-	firstVulnerabilitiesChunk = nil
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
