@@ -27,7 +27,6 @@
   "descriptor": {
     "name": "grype",
     "version": "[not provided]",
-    "configuration": null,
     "db": {
       "built": "<<PRESENCE>>",
       "schemaVersion": 5,

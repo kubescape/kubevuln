@@ -17,7 +17,9 @@ import (
 
 func Test_grypeAdapter_DBVersion(t *testing.T) {
 	ctx := context.TODO()
-	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
+	go func() {
+		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
+	}()
 	g := NewGrypeAdapterFixedDB()
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
@@ -56,7 +58,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			format: string(fileContent("testdata/nginx-filtered-cve.format.json")),
 		},
 	}
-	go http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
+	go func() {
+		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata")))
+	}()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()

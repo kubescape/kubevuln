@@ -137,20 +137,27 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 					t.Errorf("failed to unmarshal report: %v", err)
 				}
 				var expectedBody []byte
+				vulns := "null"
+				if report.Vulnerabilities != nil {
+					vulns = "\"<<PRESENCE>>\""
+				}
+				var args []interface{}
 				switch {
 				case tt.checkFullBody:
 					expectedBody, err = os.ReadFile("testdata/cve-body.json")
 				case report.Summary == nil:
 					expectedBody, err = os.ReadFile("testdata/cve-chunk.json")
 				case tt.cvep.Content != nil:
+					args = append(args, vulns)
 					expectedBody, err = os.ReadFile("testdata/cve-chunk-with-relevant-summary.json")
 				default:
+					args = append(args, vulns)
 					expectedBody, err = os.ReadFile("testdata/cve-chunk-with-summary.json")
 				}
 				if err != nil {
 					t.Errorf("failed to read expected body: %v", err)
 				}
-				ja.Assertf(string(body), string(expectedBody))
+				ja.Assertf(string(body), string(expectedBody), args...)
 				mu.Lock()
 				for _, v := range report.Vulnerabilities {
 					id := v.Name + "+" + v.RelatedPackageName
@@ -232,11 +239,11 @@ func TestArmoAdapter_SendStatus(t *testing.T) {
 			},
 		},
 	}
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:govet
 		t.Run(tt.name, func(t *testing.T) {
 			a := &ArmoAdapter{
 				sendStatusFunc: func(report *sysreport.BaseReport, s string, b bool, c chan<- error) {
-					diff := deep.Equal(*report, tt.report)
+					diff := deep.Equal(*report, tt.report) //nolint:govet
 					if diff != nil {
 						t.Errorf("compare failed: %v", diff)
 					}

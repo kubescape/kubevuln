@@ -89,8 +89,8 @@ func Test_parseLayersPayload(t *testing.T) {
 		},
 		RootFS: v1.RootFS{
 			DiffIDs: []v1.Hash{
-				{"sha256", "5f6201014d118db78bfb090a1e932db880c3dce93d9c2dc29289bc389148b666"},
-				{"sha256", "55b314485cd7090cd64730398b85f42bd9b6d3bb33b6eddfc043154692c51b99"},
+				{Algorithm: "sha256", Hex: "5f6201014d118db78bfb090a1e932db880c3dce93d9c2dc29289bc389148b666"},
+				{Algorithm: "sha256", Hex: "55b314485cd7090cd64730398b85f42bd9b6d3bb33b6eddfc043154692c51b99"},
 			},
 		},
 	}
