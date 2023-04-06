@@ -121,8 +121,10 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 					DatabaseVersion: cve.CVEDBVersion,
 				},
 			},
-			Payload: *cve.Content,
 		},
+	}
+	if cve.Content != nil {
+		manifest.Spec.Payload = *cve.Content
 	}
 	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
@@ -242,19 +244,21 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 					Version: sbom.SBOMCreatorVersion,
 				},
 			},
-			SPDX: *sbom.Content,
 		},
 		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
+	}
+	if sbom.Content != nil {
+		manifest.Spec.SPDX = *sbom.Content
+		created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
+		if err != nil {
+			manifest.Spec.Metadata.Report.CreatedAt.Time = created
+		}
 	}
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
-	if err != nil {
-		manifest.Spec.Metadata.Report.CreatedAt.Time = created
-	}
-	_, err = a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		logger.L().Debug("SBOM manifest already exists in storage", helpers.String("ID", sbom.ID))
