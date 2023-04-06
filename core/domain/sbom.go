@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	SBOMStatusTimedOut = "timed out"
+	SBOMStatusIncomplete = "incomplete"
 )
 
 // SBOM contains an SPDX SBOM in JSON format with some metadata

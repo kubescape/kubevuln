@@ -50,7 +50,7 @@ func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domai
 		},
 	}
 	if m.timeout {
-		sbom.Status = domain.SBOMStatusTimedOut
+		sbom.Status = domain.SBOMStatusIncomplete
 	}
 	return sbom, nil
 }
