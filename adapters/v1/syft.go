@@ -3,12 +3,14 @@ package v1
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/file"
+	"github.com/anchore/stereoscope/pkg/filetree"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/artifact"
@@ -33,15 +35,18 @@ import (
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
-	scanTimeout time.Duration
+	maxImageSize int64
+	scanTimeout  time.Duration
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
+var ErrImageTooLarge = fmt.Errorf("image size exceeds maximum allowed size")
 
 // NewSyftAdapter initializes the SyftAdapter struct
-func NewSyftAdapter(scanTimeout time.Duration) *SyftAdapter {
+func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter {
 	return &SyftAdapter{
-		scanTimeout: scanTimeout,
+		maxImageSize: maxImageSize,
+		scanTimeout:  scanTimeout,
 	}
 }
 
@@ -92,10 +97,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 		}
 	}(t)
 	// download image
-	// TODO check ephemeral storage usage and see if we can kill the goroutine
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := newFromRegistry(ctx, t, sourceInput, registryOptions)
-	if err != nil {
+	src, err := newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
+	switch {
+	case errors.Is(err, ErrImageTooLarge):
+		logger.L().Ctx(ctx).Warning("Image exceeds size limit", helpers.Int("maxImageSize", int(s.maxImageSize)), helpers.String("imageID", imageID))
+		domainSBOM.Status = domain.SBOMStatusIncomplete
+		return domainSBOM, nil
+	case err != nil:
 		return domainSBOM, err
 	}
 	// extract packages
@@ -117,7 +126,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	switch err {
 	case deadline.ErrTimedOut:
 		logger.L().Ctx(ctx).Warning("Syft timed out", helpers.String("imageID", imageID))
-		domainSBOM.Status = domain.SBOMStatusTimedOut
+		domainSBOM.Status = domain.SBOMStatusIncomplete
 		return domainSBOM, nil
 	case nil:
 		// continue
@@ -142,7 +151,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	return domainSBOM, err
 }
 
-func newFromRegistry(ctx context.Context, t *file.TempDirGenerator, sourceInput *source.Input, registryOptions image.RegistryOptions) (source.Source, error) {
+func newFromRegistry(t *file.TempDirGenerator, sourceInput *source.Input, registryOptions image.RegistryOptions, maxImageSize int64) (source.Source, error) {
 	imageTempDir, err := t.NewDirectory("oci-registry-image")
 	if err != nil {
 		return source.Source{}, err
@@ -150,20 +159,20 @@ func newFromRegistry(ctx context.Context, t *file.TempDirGenerator, sourceInput 
 	// download image
 	ref, err := name.ParseReference(sourceInput.UserInput, prepareReferenceOptions(registryOptions)...)
 	if err != nil {
-		return source.Source{}, fmt.Errorf("unable to parse registry reference=%q: %+v", sourceInput.UserInput, err)
+		return source.Source{}, fmt.Errorf("unable to parse registry reference=%q: %w", sourceInput.UserInput, err)
 	}
 	platform, err := image.NewPlatform(registryOptions.Platform)
 	if err != nil {
-		return source.Source{}, fmt.Errorf("unable to create platform reference=%q: %+v", sourceInput.UserInput, err)
+		return source.Source{}, fmt.Errorf("unable to create platform reference=%q: %w", sourceInput.UserInput, err)
 	}
-	descriptor, err := remote.Get(ref, prepareRemoteOptions(ctx, ref, registryOptions, platform)...)
+	descriptor, err := remote.Get(ref, prepareRemoteOptions(ref, registryOptions, platform)...)
 	if err != nil {
-		return source.Source{}, fmt.Errorf("failed to get image descriptor from registry: %+v", err)
+		return source.Source{}, fmt.Errorf("failed to get image descriptor from registry: %w", err)
 	}
 
 	imgRemote, err := descriptor.Image()
 	if err != nil {
-		return source.Source{}, fmt.Errorf("failed to get image from registry: %+v", err)
+		return source.Source{}, fmt.Errorf("failed to get image from registry: %w", err)
 	}
 
 	// craft a repo digest from the registry reference and the known digest
@@ -188,9 +197,9 @@ func newFromRegistry(ctx context.Context, t *file.TempDirGenerator, sourceInput 
 
 	img := image.New(imgRemote, t, imageTempDir, metadata...)
 
-	err = img.Read()
+	err = read(img, imgRemote, imageTempDir, maxImageSize)
 	if err != nil {
-		return source.Source{}, fmt.Errorf("could not read image: %+v", err)
+		return source.Source{}, fmt.Errorf("could not read image: %w", err)
 	}
 
 	src, err := source.NewFromImageWithName(img, sourceInput.Location, sourceInput.Name)
@@ -208,8 +217,8 @@ func prepareReferenceOptions(registryOptions image.RegistryOptions) []name.Optio
 	return options
 }
 
-func prepareRemoteOptions(ctx context.Context, ref name.Reference, registryOptions image.RegistryOptions, p *image.Platform) (options []remote.Option) {
-	options = append(options, remote.WithContext(ctx))
+func prepareRemoteOptions(ref name.Reference, registryOptions image.RegistryOptions, p *image.Platform) (options []remote.Option) {
+	options = append(options, remote.WithContext(context.TODO()))
 
 	if registryOptions.InsecureSkipTLSVerify {
 		t := &http.Transport{
@@ -239,6 +248,102 @@ func prepareRemoteOptions(ctx context.Context, ref name.Reference, registryOptio
 	}
 
 	return options
+}
+
+func read(i *image.Image, imgRemote containerregistryV1.Image, imageTempDir string, maxImageSize int64) error {
+	var layers = make([]*image.Layer, 0)
+	var err error
+	i.Metadata, err = readImageMetadata(imgRemote)
+	if err != nil {
+		return err
+	}
+
+	v1Layers, err := imgRemote.Layers()
+	if err != nil {
+		return err
+	}
+
+	fileCatalog := image.NewFileCatalog()
+
+	for idx, v1Layer := range v1Layers {
+		layer := image.NewLayer(v1Layer)
+		err := layer.Read(fileCatalog, i.Metadata, idx, imageTempDir)
+		if err != nil {
+			return err
+		}
+		i.Metadata.Size += layer.Metadata.Size
+		// unfortunately we cannot check the size before we gunzip the layer
+		if i.Metadata.Size > maxImageSize {
+			return ErrImageTooLarge
+		}
+		layers = append(layers, layer)
+	}
+
+	i.Layers = layers
+
+	// in order to resolve symlinks all squashed trees must be available
+	err = squash(i, fileCatalog)
+
+	i.FileCatalog = fileCatalog
+	i.SquashedSearchContext = filetree.NewSearchContext(i.SquashedTree(), i.FileCatalog)
+
+	return err
+}
+
+func readImageMetadata(img containerregistryV1.Image) (image.Metadata, error) {
+	id, err := img.ConfigName()
+	if err != nil {
+		return image.Metadata{}, err
+	}
+
+	config, err := img.ConfigFile()
+	if err != nil {
+		return image.Metadata{}, err
+	}
+
+	mediaType, err := img.MediaType()
+	if err != nil {
+		return image.Metadata{}, err
+	}
+
+	rawConfig, err := img.RawConfigFile()
+	if err != nil {
+		return image.Metadata{}, err
+	}
+
+	return image.Metadata{
+		ID:        id.String(),
+		Config:    *config,
+		MediaType: mediaType,
+		RawConfig: rawConfig,
+	}, nil
+}
+
+func squash(i *image.Image, catalog *image.FileCatalog) error {
+	var lastSquashTree filetree.ReadWriter
+
+	for idx, layer := range i.Layers {
+		if idx == 0 {
+			lastSquashTree = layer.Tree.(filetree.ReadWriter)
+			layer.SquashedTree = layer.Tree
+			layer.SquashedSearchContext = filetree.NewSearchContext(layer.SquashedTree, catalog.Index)
+			continue
+		}
+
+		var unionTree = filetree.NewUnionFileTree()
+		unionTree.PushTree(lastSquashTree)
+		unionTree.PushTree(layer.Tree.(filetree.ReadWriter))
+
+		squashedTree, err := unionTree.Squash()
+		if err != nil {
+			return fmt.Errorf("failed to squash tree %d: %w", idx, err)
+		}
+
+		layer.SquashedTree = squashedTree
+		layer.SquashedSearchContext = filetree.NewSearchContext(layer.SquashedTree, catalog.Index)
+		lastSquashTree = squashedTree
+	}
+	return nil
 }
 
 // Version returns Syft's version which is used to tag SBOMs
