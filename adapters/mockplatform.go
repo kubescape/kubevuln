@@ -2,12 +2,11 @@ package adapters
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"go.opentelemetry.io/otel"
 )
 
 // MockPlatform implements a mocked Platform to be used for tests
@@ -18,37 +17,27 @@ var _ ports.Platform = (*MockPlatform)(nil)
 
 // NewMockPlatform initializes the MockPlatform struct
 func NewMockPlatform() *MockPlatform {
-	logger.L().Info("NewMockPlatform")
+	logger.L().Info("keepLocal config is true, statuses and scan reports won't be sent to Armo cloud")
 	return &MockPlatform{}
 }
 
 // GetCVEExceptions returns an empty CVEExceptions
-func (m MockPlatform) GetCVEExceptions(_ context.Context) (domain.CVEExceptions, error) {
-	logger.L().Info("GetCVEExceptions")
+func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+	_, span := otel.Tracer("").Start(ctx, "MockPlatform.GetCVEExceptions")
+	defer span.End()
 	return domain.CVEExceptions{}, nil
 }
 
 // SendStatus logs the given status and details
-func (m MockPlatform) SendStatus(ctx context.Context, step int) error {
-	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
-	if !ok {
-		return errors.New("no workload found in context")
-	}
-
-	logger.L().Info(
-		"SendStatus",
-		helpers.String("wlid", workload.Wlid),
-		helpers.Int("step", step),
-	)
+func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
+	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SendStatus")
+	defer span.End()
 	return nil
 }
 
 // SubmitCVE logs the given ID for CVE calculation
-func (m MockPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
-	logger.L().Info(
-		"SubmitCVE",
-		helpers.String("ID", cve.ID),
-	)
+func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest) error {
+	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")
+	defer span.End()
 	return nil
 }

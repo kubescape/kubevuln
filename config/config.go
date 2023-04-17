@@ -11,6 +11,7 @@ type Config struct {
 	BackendOpenAPI       string        `mapstructure:"backendOpenAPI"`
 	ClusterName          string        `mapstructure:"clusterName"`
 	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
+	KeepLocal            bool          `mapstructure:"keepLocal"`
 	MaxImageSize         int64         `mapstructure:"maxImageSize"`
 	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
 	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
