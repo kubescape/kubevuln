@@ -16,7 +16,7 @@ import (
 const imageID = "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
 const instanceID = "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef"
 
-func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error {
+func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incomplete bool) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbom.ID,
@@ -28,6 +28,9 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 	}
 	if sbom.Content != nil {
 		manifest.Spec.SPDX = *sbom.Content
+	}
+	if incomplete {
+		manifest.Annotations[instanceidhandler.StatusMetadataKey] = domain.SBOMStatusIncomplete
 	}
 	_, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
@@ -246,15 +249,16 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 		name          string
 		args          args
 		sbom          domain.SBOM
+		incomplete    bool
 		wantEmptySBOM bool
 	}{
 		{
-			"valid SBOMp is retrieved",
-			args{
+			name: "valid SBOMp is retrieved",
+			args: args{
 				ctx:        context.TODO(),
 				instanceID: instanceID,
 			},
-			domain.SBOM{
+			sbom: domain.SBOM{
 				ID: instanceID,
 				Content: &v1beta1.Document{
 					CreationInfo: &v1beta1.CreationInfo{
@@ -262,15 +266,14 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 					},
 				},
 			},
-			false,
 		},
 		{
-			"invalid timestamp, SBOMp is still retrieved",
-			args{
+			name: "invalid timestamp, SBOMp is still retrieved",
+			args: args{
 				ctx:        context.TODO(),
 				instanceID: instanceID,
 			},
-			domain.SBOM{
+			sbom: domain.SBOM{
 				ID: instanceID,
 				Content: &v1beta1.Document{
 					CreationInfo: &v1beta1.CreationInfo{
@@ -278,16 +281,15 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 					},
 				},
 			},
-			false,
 		},
 		{
-			"SBOMCreatorVersion mismatch",
-			args{
+			name: "SBOMCreatorVersion mismatch",
+			args: args{
 				ctx:                context.TODO(),
 				instanceID:         instanceID,
 				SBOMCreatorVersion: "v1.1.0",
 			},
-			domain.SBOM{
+			sbom: domain.SBOM{
 				ID:                 instanceID,
 				SBOMCreatorVersion: "v1.0.0",
 				Content: &v1beta1.Document{
@@ -296,16 +298,16 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 					},
 				},
 			},
-			true,
+			wantEmptySBOM: false, // SBOMp is not versioned
 		},
 		{
-			"empty imageID",
-			args{
+			name: "empty imageID",
+			args: args{
 				ctx:                context.TODO(),
 				instanceID:         "",
 				SBOMCreatorVersion: "v1.1.0",
 			},
-			domain.SBOM{
+			sbom: domain.SBOM{
 				ID:                 "",
 				SBOMCreatorVersion: "v1.0.0",
 				Content: &v1beta1.Document{
@@ -314,7 +316,24 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 					},
 				},
 			},
-			true,
+			wantEmptySBOM: true,
+		},
+		{
+			name: "incomplete SBOMp is retrieved",
+			args: args{
+				ctx:        context.TODO(),
+				instanceID: instanceID,
+			},
+			sbom: domain.SBOM{
+				ID: instanceID,
+				Content: &v1beta1.Document{
+					CreationInfo: &v1beta1.CreationInfo{
+						Created: time.Now().Format(time.RFC3339),
+					},
+				},
+			},
+			incomplete:    true,
+			wantEmptySBOM: true,
 		},
 	}
 	for _, tt := range tests {
@@ -322,7 +341,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetSBOMp(tt.args.ctx, tt.args.instanceID, tt.args.SBOMCreatorVersion)
 			tools.EnsureSetup(t, err == nil)
-			err = a.storeSBOMp(tt.args.ctx, tt.sbom)
+			err = a.storeSBOMp(tt.args.ctx, tt.sbom, tt.incomplete)
 			tools.EnsureSetup(t, err == nil)
 			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.instanceID, tt.args.SBOMCreatorVersion)
 			if (gotSbom.Content == nil) != tt.wantEmptySBOM {

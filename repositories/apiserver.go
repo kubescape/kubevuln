@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -190,6 +191,13 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 	return result, nil
 }
 
+func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
+	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok && status == domain.SBOMStatusIncomplete {
+		return fmt.Errorf("relevant SBOM is incomplete")
+	}
+	return nil
+}
+
 func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
 	defer span.End()
@@ -206,9 +214,9 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err), helpers.String("ID", instanceID))
 		return domain.SBOM{}, nil
 	}
-	// discard the manifest if it was created by an older version of the scanner
-	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
-		logger.L().Debug("discarding relevant SBOM with outdated scanner version", helpers.String("ID", instanceID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("wanted scanner version", SBOMCreatorVersion))
+	// validate SBOMp manifest
+	if err := validateSBOMp(manifest); err != nil {
+		logger.L().Debug("discarding relevant SBOM", helpers.Error(err), helpers.String("ID", instanceID))
 		return domain.SBOM{}, nil
 	}
 	result := domain.SBOM{
