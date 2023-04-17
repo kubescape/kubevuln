@@ -142,7 +142,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// do not process timed out SBOM
-		if sbom.Status == domain.SBOMStatusTimedOut {
+		if sbom.Status == domain.SBOMStatusIncomplete {
 			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 		}
 
@@ -232,7 +232,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// do not process timed out SBOM
-	if sbom.Status == domain.SBOMStatusTimedOut {
+	if sbom.Status == domain.SBOMStatusIncomplete {
 		return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 	}
 

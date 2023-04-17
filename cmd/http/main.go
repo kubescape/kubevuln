@@ -50,7 +50,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout)
+	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize)
 	cveAdapter := v1.NewGrypeAdapter()
 	platform := v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)

@@ -23,7 +23,7 @@ func TestMockSBOMAdapter_CreateSBOM_Error(t *testing.T) {
 func TestMockSBOMAdapter_CreateSBOM_Timeout(t *testing.T) {
 	m := NewMockSBOMAdapter(false, true)
 	sbom, _ := m.CreateSBOM(context.TODO(), "image", domain.RegistryOptions{})
-	assert.Assert(t, sbom.Status == domain.SBOMStatusTimedOut)
+	assert.Assert(t, sbom.Status == domain.SBOMStatusIncomplete)
 }
 
 func TestMockSBOMAdapter_Version(t *testing.T) {

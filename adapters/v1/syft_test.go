@@ -21,11 +21,13 @@ func fileContent(path string) []byte {
 
 func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	tests := []struct {
-		name    string
-		imageID string
-		format  string
-		options domain.RegistryOptions
-		wantErr bool
+		name           string
+		imageID        string
+		format         string
+		maxImageSize   int64
+		options        domain.RegistryOptions
+		wantErr        bool
+		wantIncomplete bool
 	}{
 		{
 			name:    "empty image produces empty SBOM",
@@ -45,12 +47,19 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				Credentials: []domain.RegistryCredentials{
 					{
 						Authority: "docker.io",
-						Username: "username",
-						Password: "password",
-						Token: "token",
+						Username:  "username",
+						Password:  "password",
+						Token:     "token",
 					},
 				},
 			},
+		},
+		{
+			name:           "big image produces incomplete SBOM",
+			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:         "null",
+			maxImageSize:   1,
+			wantIncomplete: true,
 		},
 		{
 			name:    "system tests image",
@@ -61,10 +70,18 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewSyftAdapter(5 * time.Minute)
+			maxImageSize := int64(512 * 1024 * 1024)
+			if tt.maxImageSize > 0 {
+				maxImageSize = tt.maxImageSize
+			}
+			s := NewSyftAdapter(5*time.Minute, maxImageSize)
 			got, err := s.CreateSBOM(context.TODO(), tt.imageID, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantIncomplete && got.Status != domain.SBOMStatusIncomplete {
+				t.Errorf("CreateSBOM() want incomplete SBOM, got %v", got.Status)
 				return
 			}
 			content, err := json.Marshal(got.Content)
@@ -76,7 +93,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 }
 
 func Test_syftAdapter_Version(t *testing.T) {
-	s := NewSyftAdapter(5 * time.Minute)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
 	version := s.Version()
 	assert.Assert(t, version != "")
 }
@@ -87,7 +104,7 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	tools.EnsureSetup(t, err == nil)
 	spdxSBOM, err := domainToSpdx(*sbom.Content)
 	tools.EnsureSetup(t, err == nil)
-	s := NewSyftAdapter(5 * time.Minute)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
 	domainSBOM, err := s.spdxToDomain(spdxSBOM)
 	tools.EnsureSetup(t, err == nil)
 	diff := deep.Equal(sbom.Content, domainSBOM)

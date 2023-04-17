@@ -24,9 +24,10 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM) error
 				instanceidhandler.StatusMetadataKey: sbom.Status,
 			},
 		},
-		Spec: v1beta1.SBOMSPDXv2p3Spec{
-			SPDX: *sbom.Content,
-		},
+		Spec: v1beta1.SBOMSPDXv2p3Spec{},
+	}
+	if sbom.Content != nil {
+		manifest.Spec.SPDX = *sbom.Content
 	}
 	_, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
