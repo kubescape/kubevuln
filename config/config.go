@@ -11,6 +11,7 @@ type Config struct {
 	BackendOpenAPI       string        `mapstructure:"backendOpenAPI"`
 	ClusterName          string        `mapstructure:"clusterName"`
 	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
+	MaxImageSize         int64         `mapstructure:"maxImageSize"`
 	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
 	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
 	Storage              bool          `mapstructure:"storage"`
@@ -22,6 +23,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigName("clusterData")
 	viper.SetConfigType("json")
 
+	viper.SetDefault("maxImageSize", 512*1024*1024)
 	viper.SetDefault("scanConcurrency", 1)
 	viper.SetDefault("scanTimeout", 5*time.Minute)
 
