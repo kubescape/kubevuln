@@ -13,9 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/controllers"
+	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -52,7 +54,12 @@ func main() {
 	}
 	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize)
 	cveAdapter := v1.NewGrypeAdapter()
-	platform := v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
+	var platform ports.Platform
+	if c.KeepLocal {
+		platform = adapters.NewMockPlatform()
+	} else {
+		platform = v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
+	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 

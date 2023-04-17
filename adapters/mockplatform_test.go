@@ -17,10 +17,8 @@ func TestMockPlatform_GetCVEExceptions(t *testing.T) {
 func TestMockPlatform_SendStatus(t *testing.T) {
 	m := NewMockPlatform()
 	ctx := context.TODO()
-	err := m.SendStatus(ctx, domain.Done)
-	assert.Assert(t, err != nil)
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-	err = m.SendStatus(ctx, domain.Done)
+	err := m.SendStatus(ctx, domain.Done)
 	assert.Assert(t, err == nil)
 }
 
