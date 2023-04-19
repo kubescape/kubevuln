@@ -500,3 +500,48 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 		})
 	}
 }
+
+func Test_generateScanID(t *testing.T) {
+	type args struct {
+		workload domain.ScanCommand
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "generate scanID with imageHash",
+			args: args{
+				workload: domain.ScanCommand{
+					ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
+					ImageHash: "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
+				},
+			},
+			want: "k8s.gcr.io/kube-proxy:v1.24.3sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
+		},
+		{
+			name: "generate scanID with instanceID",
+			args: args{
+				workload: domain.ScanCommand{
+					InstanceID: "InstanceID",
+				},
+			},
+			want: "InstanceID",
+		},
+		// {
+		// 	name: "generate scanID with UUID",
+		// 	args: args{
+		// 		workload: domain.ScanCommand{},
+		// 	},
+		// 	want: "",
+		// },
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := generateScanID(tt.args.workload); got != tt.want {
+				t.Errorf("generateScanID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
