@@ -14,7 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/adapters"
-	"github.com/kubescape/kubevuln/adapters/v1"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -26,7 +26,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	c, err := config.LoadConfig("/etc/config")
+	c, err := config.LoadConfig("/home/daniel/kubevuln/.vscode")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":8081",
 		Handler: router,
 	}
 
