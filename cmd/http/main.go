@@ -14,7 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/adapters"
-	"github.com/kubescape/kubevuln/adapters/v1"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
