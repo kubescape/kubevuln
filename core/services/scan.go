@@ -266,14 +266,22 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Con
 	// record start time
 	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 	// generate unique scanID and add to context
-	scanID, err := uuid.NewRandom()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("error generating scanID", helpers.Error(err))
-	}
-	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID.String())
+	scanID := generateScanID(workload)
+
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID)
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	return ctx
+}
+
+func generateScanID(workload domain.ScanCommand) string {
+	if workload.InstanceID != "" {
+		return workload.InstanceID
+	}
+	if workload.ImageTag != "" && workload.ImageHash != "" {
+		return workload.ImageTag + workload.ImageHash
+	}
+	return uuid.New().String()
 }
 
 func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
