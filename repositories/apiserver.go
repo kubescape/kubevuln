@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -106,6 +107,16 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		logger.L().Debug("skipping storing CVE manifest with empty ID", helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
+	if cve.Labels == nil {
+		cve.Labels = make(map[string]string)
+	}
+
+	if withRelevancy {
+		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+	} else {
+		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+	}
+
 	name := hashFromImageID(cve.ID)
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
