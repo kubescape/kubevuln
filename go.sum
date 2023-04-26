@@ -262,8 +262,8 @@ github.com/armosec/cluster-container-scanner-api v0.0.52 h1:u6T4wCTGwyJiPPTIAVrR
 github.com/armosec/cluster-container-scanner-api v0.0.52/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
 github.com/armosec/logger-go v0.0.14 h1:5YpXMlYt/7zIAcmJP4q1BmWNH/7bpkSndfZTyysrtUE=
 github.com/armosec/logger-go v0.0.14/go.mod h1:OKV/cBcEjNv/T62vd1cnD2lf07POPSpy3PQkURfoCeI=
-github.com/armosec/utils-go v0.0.14 h1:Q6HGxOyc5aPObgUM2FQpkYGXjj7/LSrUPkppFJGTexU=
-github.com/armosec/utils-go v0.0.14/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
+github.com/armosec/utils-go v0.0.15 h1:oXGIoTh3u3J6bT2mNNwfVAEy/MR9FEhHz2yNofHLGl0=
+github.com/armosec/utils-go v0.0.15/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.13 h1:MzrRotrtZjpz4Yq1VRGbxDOfd6b5qRqZupzLnpj+W1A=
 github.com/armosec/utils-k8s-go v0.0.13/go.mod h1:rPHiOaHefWa9ujspwvYYAp0uEbqGGyAMiNrFa/Gpp/8=
 github.com/aws/aws-sdk-go v1.44.122/go.mod h1:y4AeaBuwd2Lk+GepC1E9v0qOiTws0MIWAX4oIKwKHZo=
@@ -942,8 +942,6 @@ github.com/wagoodman/go-progress v0.0.0-20230301185719-21920a456ad5/go.mod h1:jL
 github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 h1:nIPpBwaJSVYIxUFsDv3M8ofmx9yWTog9BfvIu0q41lo=
 github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8/go.mod h1:HUYIGzjTL3rfEspMxjDjgmT5uz5wzYJKVo23qUhYTos=
 github.com/xo/terminfo v0.0.0-20210125001918-ca9a967f8778 h1:QldyIu/L63oPpyvQmHgvgickp1Yw510KJOqX7H24mg8=
-github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
-github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
