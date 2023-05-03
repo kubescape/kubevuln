@@ -11,7 +11,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.176
 	github.com/armosec/cluster-container-scanner-api v0.0.52
 	github.com/armosec/logger-go v0.0.14
-	github.com/armosec/utils-go v0.0.15
+	github.com/armosec/utils-go v0.0.16
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/distribution/distribution v2.8.1+incompatible
 	github.com/docker/docker v23.0.3+incompatible
