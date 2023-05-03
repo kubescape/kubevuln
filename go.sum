@@ -262,8 +262,8 @@ github.com/armosec/cluster-container-scanner-api v0.0.52 h1:u6T4wCTGwyJiPPTIAVrR
 github.com/armosec/cluster-container-scanner-api v0.0.52/go.mod h1:HP1ZdO9/R8x8IMiTwO3dwI+MNH1oBTrIwtqdE40lfuI=
 github.com/armosec/logger-go v0.0.14 h1:5YpXMlYt/7zIAcmJP4q1BmWNH/7bpkSndfZTyysrtUE=
 github.com/armosec/logger-go v0.0.14/go.mod h1:OKV/cBcEjNv/T62vd1cnD2lf07POPSpy3PQkURfoCeI=
-github.com/armosec/utils-go v0.0.15 h1:oXGIoTh3u3J6bT2mNNwfVAEy/MR9FEhHz2yNofHLGl0=
-github.com/armosec/utils-go v0.0.15/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
+github.com/armosec/utils-go v0.0.16 h1:rz4jtEdQgQ5i+GnMYhhrlVn4izWxl04mUKMmTRSRA4o=
+github.com/armosec/utils-go v0.0.16/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.13 h1:MzrRotrtZjpz4Yq1VRGbxDOfd6b5qRqZupzLnpj+W1A=
 github.com/armosec/utils-k8s-go v0.0.13/go.mod h1:rPHiOaHefWa9ujspwvYYAp0uEbqGGyAMiNrFa/Gpp/8=
 github.com/aws/aws-sdk-go v1.44.122/go.mod h1:y4AeaBuwd2Lk+GepC1E9v0qOiTws0MIWAX4oIKwKHZo=
