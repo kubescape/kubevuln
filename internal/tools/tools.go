@@ -39,6 +39,7 @@ func sanitize(s string) string {
 func LabelsFromImageID(imageID string) map[string]string {
 	labels := map[string]string{}
 	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
+	labels[instanceidhandler.ImageIDMetadataKey] = sanitize(match[0])
 	labels[instanceidhandler.ImageNameMetadataKey] = sanitize(match[1])
 	labels[instanceidhandler.ImageTagMetadataKey] = sanitize(match[2])
 	// prune invalid labels
