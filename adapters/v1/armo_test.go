@@ -98,32 +98,39 @@ func fileToCVEManifest(path string) domain.CVEManifest {
 }
 
 func TestArmoAdapter_SubmitCVE(t *testing.T) {
-	getCVEExceptionsFunc := func(s string, s2 string, designator *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		return []armotypes.VulnerabilityExceptionPolicy{}, nil
-	}
 	ja := jsonassert.New(t)
 	tests := []struct {
-		name          string
-		cve           domain.CVEManifest
-		cvep          domain.CVEManifest
-		checkFullBody bool
-		wantErr       bool
+		name                       string
+		cve                        domain.CVEManifest
+		cvep                       domain.CVEManifest
+		checkFullBody              bool
+		checkFullBodyWithException bool
+		exceptions                 []armotypes.VulnerabilityExceptionPolicy
+		wantErr                    bool
 	}{
 		{
 			name:          "submit small cve",
 			cve:           fileToCVEManifest("testdata/nginx-cve-small.json"),
-			cvep:          domain.CVEManifest{},
 			checkFullBody: true,
 		},
 		{
 			name: "submit big cve",
 			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
-			cvep: domain.CVEManifest{},
 		},
 		{
 			name: "submit big cve with relevancy",
 			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
 			cvep: fileToCVEManifest("testdata/nginx-filtered-cve.json"),
+		},
+		{
+			name:                       "submit small cve with exceptions",
+			cve:                        fileToCVEManifest("testdata/nginx-cve-small.json"),
+			checkFullBodyWithException: true,
+			exceptions: []armotypes.VulnerabilityExceptionPolicy{{
+				PolicyType:            "vulnerabilityExceptionPolicy",
+				Actions:               []armotypes.VulnerabilityExceptionPolicyActions{"ignore"},
+				VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2007-5686"}},
+			}},
 		},
 	}
 	for _, tt := range tests {
@@ -145,6 +152,8 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 				switch {
 				case tt.checkFullBody:
 					expectedBody, err = os.ReadFile("testdata/cve-body.json")
+				case tt.checkFullBodyWithException:
+					expectedBody, err = os.ReadFile("testdata/cve-body-with-exception.json")
 				case report.Summary == nil:
 					expectedBody, err = os.ReadFile("testdata/cve-chunk.json")
 				case tt.cvep.Content != nil:
@@ -173,9 +182,11 @@ func TestArmoAdapter_SubmitCVE(t *testing.T) {
 				}, nil
 			}
 			a := &ArmoAdapter{
-				clusterConfig:        armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: getCVEExceptionsFunc,
-				httpPostFunc:         httpPostFunc,
+				clusterConfig: armometadata.ClusterConfig{},
+				getCVEExceptionsFunc: func(s string, s2 string, designator *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+					return tt.exceptions, nil
+				},
+				httpPostFunc: httpPostFunc,
 			}
 			ctx := context.TODO()
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
