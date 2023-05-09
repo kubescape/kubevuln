@@ -4,10 +4,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-const (
-	SBOMStatusIncomplete = "incomplete"
-)
-
 // SBOM contains an SPDX SBOM in JSON format with some metadata
 type SBOM struct {
 	ID                 string

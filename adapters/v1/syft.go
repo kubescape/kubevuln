@@ -102,7 +102,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	switch {
 	case errors.Is(err, ErrImageTooLarge):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit", helpers.Int("maxImageSize", int(s.maxImageSize)), helpers.String("imageID", imageID))
-		domainSBOM.Status = domain.SBOMStatusIncomplete
+		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, nil
 	case err != nil:
 		return domainSBOM, err
@@ -126,11 +126,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	switch err {
 	case deadline.ErrTimedOut:
 		logger.L().Ctx(ctx).Warning("Syft timed out", helpers.String("imageID", imageID))
-		domainSBOM.Status = domain.SBOMStatusIncomplete
+		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, nil
 	case nil:
 		// continue
 	default:
+		// also mark as incomplete if we failed to extract packages
+		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, err
 	}
 	// generate SBOM

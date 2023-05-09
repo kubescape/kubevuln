@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -142,7 +143,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// do not process timed out SBOM
-		if sbom.Status == domain.SBOMStatusIncomplete {
+		if sbom.Status == instanceidhandler.Incomplete {
 			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 		}
 
@@ -232,7 +233,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// do not process timed out SBOM
-	if sbom.Status == domain.SBOMStatusIncomplete {
+	if sbom.Status == instanceidhandler.Incomplete {
 		return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
 	}
 
