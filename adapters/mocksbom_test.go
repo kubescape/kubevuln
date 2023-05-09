@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"gotest.tools/v3/assert"
 )
@@ -23,7 +24,7 @@ func TestMockSBOMAdapter_CreateSBOM_Error(t *testing.T) {
 func TestMockSBOMAdapter_CreateSBOM_Timeout(t *testing.T) {
 	m := NewMockSBOMAdapter(false, true)
 	sbom, _ := m.CreateSBOM(context.TODO(), "image", domain.RegistryOptions{})
-	assert.Assert(t, sbom.Status == domain.SBOMStatusIncomplete)
+	assert.Assert(t, sbom.Status == instanceidhandler.Incomplete)
 }
 
 func TestMockSBOMAdapter_Version(t *testing.T) {
