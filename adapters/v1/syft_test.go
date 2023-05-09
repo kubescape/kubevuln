@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-test/deep"
 	"github.com/kinbiko/jsonassert"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"gotest.tools/v3/assert"
@@ -80,7 +81,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantIncomplete && got.Status != domain.SBOMStatusIncomplete {
+			if tt.wantIncomplete && got.Status != instanceidhandler.Incomplete {
 				t.Errorf("CreateSBOM() want incomplete SBOM, got %v", got.Status)
 				return
 			}
