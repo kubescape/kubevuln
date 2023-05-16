@@ -13,7 +13,7 @@ require (
 	github.com/armosec/logger-go v0.0.14
 	github.com/armosec/utils-go v0.0.16
 	github.com/armosec/utils-k8s-go v0.0.13
-	github.com/distribution/distribution v2.8.1+incompatible
+	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/docker/docker v23.0.3+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/gammazero/workerpool v1.1.3
