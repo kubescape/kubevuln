@@ -2,13 +2,11 @@ package services
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -278,12 +276,13 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Con
 }
 
 func generateScanID(workload domain.ScanCommand) string {
-	// ID is wlid/containerName/imageTag hashed
-	id := fmt.Sprintf("%s/%s/%s", workload.Wlid, workload.ContainerName, workload.ImageTag)
-	hash := sha256.Sum256([]byte(id))
-	idHashed := hex.EncodeToString(hash[:])
-
-	return idHashed
+	if workload.InstanceID != "" {
+		return workload.InstanceID
+	}
+	if workload.ImageTag != "" && workload.ImageHash != "" {
+		return workload.ImageTag + workload.ImageHash
+	}
+	return uuid.New().String()
 }
 
 func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {

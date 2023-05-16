@@ -518,7 +518,7 @@ func Test_generateScanID(t *testing.T) {
 					ImageHash: "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
 				},
 			},
-			want: "f21dc043dab98dc4b4f2971a803434fddd83be9eb1074511f0dcfa2fbe1b25d1",
+			want: "k8s.gcr.io/kube-proxy:v1.24.3sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
 		},
 		{
 			name: "generate scanID with instanceID",
@@ -527,7 +527,7 @@ func Test_generateScanID(t *testing.T) {
 					InstanceID: "InstanceID",
 				},
 			},
-			want: "a2c2339691fc48fbd14fb307292dff3e21222712d9240810742d7df0c6d74dfb",
+			want: "InstanceID",
 		},
 	}
 	for _, tt := range tests {
