@@ -207,8 +207,7 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		}
 
 		isRelevant := vulnerabilities[i].GetIsRelevant()
-		if isRelevant != nil {
-			// if IsRelevant is not nil, we have relevancy data
+		if isRelevant != nil { // if IsRelevant is not nil, we have relevancy data
 			if *isRelevant {
 				// vulnerability is relevant
 				vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelYes)
@@ -232,12 +231,20 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	// if there is no CVEp, label is empty
 	if !hasRelevancy {
 		summary.SetRelevantLabel(containerscan.RelevantLabelNotExists)
-	} else if summary.SeverityStats.RelevantCount == 0 {
-		// if there is CVEp but no relevant vulnerabilities, label is "no"
-		summary.SetRelevantLabel(containerscan.RelevantLabelNo)
 	} else {
-		// if there is CVEp and there are relevant vulnerabilities, label is "yes"
-		summary.SetRelevantLabel(containerscan.RelevantLabelYes)
+		// mark relevancy scan in severities stats
+		for severity, severityStats := range actualSeveritiesStats {
+			severityStats.RelevancyScanCount = 1
+			actualSeveritiesStats[severity] = severityStats
+		}
+		summary.SeverityStats.RelevancyScanCount = 1
+		if summary.SeverityStats.RelevantCount == 0 {
+			// if there is CVEp but no relevant vulnerabilities, label is "no"
+			summary.SetRelevantLabel(containerscan.RelevantLabelNo)
+		} else {
+			// if there is CVEp and there are relevant vulnerabilities, label is "yes"
+			summary.SetRelevantLabel(containerscan.RelevantLabelYes)
+		}
 	}
 
 	for sever := range actualSeveritiesStats {
