@@ -529,13 +529,6 @@ func Test_generateScanID(t *testing.T) {
 			},
 			want: "InstanceID",
 		},
-		// {
-		// 	name: "generate scanID with UUID",
-		// 	args: args{
-		// 		workload: domain.ScanCommand{},
-		// 	},
-		// 	want: "",
-		// },
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
