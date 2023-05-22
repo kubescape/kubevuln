@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -280,7 +282,8 @@ func generateScanID(workload domain.ScanCommand) string {
 		return workload.InstanceID
 	}
 	if workload.ImageTag != "" && workload.ImageHash != "" {
-		return workload.ImageTag + workload.ImageHash
+		sum := sha256.Sum256([]byte(workload.ImageTag + workload.ImageHash))
+		return fmt.Sprintf("%x", sum)
 	}
 	return uuid.New().String()
 }
