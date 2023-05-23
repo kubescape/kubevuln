@@ -17,10 +17,10 @@ import (
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
-	"github.com/go-test/deep"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
@@ -76,10 +76,7 @@ func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
 				t.Errorf("GetCVEExceptions() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -221,10 +218,7 @@ func TestNewArmoAdapter(t *testing.T) {
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.NotEqual(t, got, tt.want)
 		})
 	}
 }
@@ -254,10 +248,7 @@ func TestArmoAdapter_SendStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &ArmoAdapter{
 				sendStatusFunc: func(report *sysreport.BaseReport, s string, b bool, c chan<- error) {
-					diff := deep.Equal(*report, tt.report) //nolint:govet
-					if diff != nil {
-						t.Errorf("compare failed: %v", diff)
-					}
+					assert.NotEqual(t, *report, tt.report) //nolint:govet
 					close(c)
 				},
 			}

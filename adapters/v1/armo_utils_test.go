@@ -8,8 +8,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
 	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
-	"github.com/go-test/deep"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/pointer"
 )
 
@@ -103,10 +103,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName)
-			diff := deep.Equal(actual, tc.expected)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, actual, tc.expected)
 		})
 	}
 }
@@ -449,10 +446,7 @@ func Test_summarize(t *testing.T) {
 			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
 				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
 			})
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
