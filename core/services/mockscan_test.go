@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-test/deep"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMockScanService_GenerateSBOM(t *testing.T) {
@@ -144,10 +144,7 @@ func TestMockScanService_ValidateGenerateSBOM(t *testing.T) {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -186,10 +183,7 @@ func TestMockScanService_ValidateScanCVE(t *testing.T) {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

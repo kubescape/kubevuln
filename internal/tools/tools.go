@@ -8,12 +8,12 @@ import (
 	"github.com/aquilax/truncate"
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func EnsureSetup(t *testing.T, errored bool) {
-	assert.Assert(t, errored, "Error during test setup")
+	assert.True(t, errored, "Error during test setup")
 }
 
 func PackageVersion(name string) string {

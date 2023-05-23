@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_grypeAdapter_DBVersion(t *testing.T) {
@@ -23,7 +23,7 @@ func Test_grypeAdapter_DBVersion(t *testing.T) {
 	g := NewGrypeAdapterFixedDB()
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
-	assert.Assert(t, version == "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a")
+	assert.Equal(t, version, "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a")
 }
 
 func fileToSBOM(path string) *v1beta1.Document {
@@ -86,5 +86,5 @@ func Test_grypeAdapter_Version(t *testing.T) {
 	ctx := context.TODO()
 	g := NewGrypeAdapter()
 	version := g.Version(ctx)
-	assert.Assert(t, version != "")
+	assert.NotEqual(t, version, "")
 }
