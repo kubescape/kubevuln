@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-test/deep"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEnsureSetup(t *testing.T) {
@@ -13,7 +13,7 @@ func TestEnsureSetup(t *testing.T) {
 }
 
 func TestPackageVersion(t *testing.T) {
-	assert.Assert(t, PackageVersion("github.com/anchore/syft") == "unknown") // only works on compiled binaries
+	assert.True(t, PackageVersion("github.com/anchore/syft") == "unknown") // only works on compiled binaries
 }
 
 func TestLabelsFromImageID(t *testing.T) {

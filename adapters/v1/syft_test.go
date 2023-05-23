@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func fileContent(path string) []byte {
@@ -96,7 +96,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
 	version := s.Version()
-	assert.Assert(t, version != "")
+	assert.NotEqual(t, version, "")
 }
 
 func Test_syftAdapter_transformations(t *testing.T) {
