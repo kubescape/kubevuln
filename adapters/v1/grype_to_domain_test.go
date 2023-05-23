@@ -5,8 +5,8 @@ import (
 
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/syft/syft/source"
-	"github.com/go-test/deep"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_grypeToDomain(t *testing.T) {
@@ -65,10 +65,7 @@ func Test_grypeToDomain(t *testing.T) {
 				t.Errorf("grypeToDomain() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

@@ -3,10 +3,10 @@ package v1
 import (
 	"testing"
 
-	"github.com/go-test/deep"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spdx/tools-golang/spdx/v2/v2_3"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_domainToSpdx(t *testing.T) {
@@ -77,10 +77,7 @@ func Test_domainToSpdx(t *testing.T) {
 				t.Errorf("domainToSpdx() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
