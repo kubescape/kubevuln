@@ -13,7 +13,7 @@ import (
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestScan(t *testing.T) {
@@ -117,8 +117,8 @@ func TestScan(t *testing.T) {
 			w = httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			assert.Assert(t, test.expectedCode == w.Code)
-			assert.Assert(t, test.expectedBody == w.Body.String(), w.Body.String())
+			assert.Equal(t, test.expectedCode, w.Code, w.Code)
+			assert.Equal(t, test.expectedBody, w.Body.String(), w.Body.String())
 
 			controller.Shutdown()
 		})

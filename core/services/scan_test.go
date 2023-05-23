@@ -14,7 +14,7 @@ import (
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestScanService_GenerateSBOM(t *testing.T) {
@@ -256,7 +256,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
 				tools.EnsureSetup(t, err == nil)
-				assert.Assert(t, cvep.Labels != nil)
+				assert.NotNil(t, cvep.Labels)
 			}
 		})
 	}
@@ -313,7 +313,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	tools.EnsureSetup(t, err == nil)
 	cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
 	tools.EnsureSetup(t, err == nil)
-	assert.Assert(t, cvep.Content != nil)
+	assert.NotNil(t, cvep.Content)
 }
 
 func TestScanService_ValidateGenerateSBOM(t *testing.T) {
@@ -459,7 +459,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				tools.EnsureSetup(t, err == nil)
 			}
 			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
-				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -494,7 +494,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 		})

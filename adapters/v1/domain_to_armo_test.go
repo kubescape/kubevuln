@@ -10,11 +10,11 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	"github.com/go-test/deep"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/uuid"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_domainToArmo(t *testing.T) {
@@ -73,10 +73,7 @@ func Test_domainToArmo(t *testing.T) {
 			}
 			got[0].ContainerScanID = ""
 			got[0].Timestamp = 0
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -133,10 +130,7 @@ func Test_parseLayersPayload(t *testing.T) {
 				t.Errorf("parseLayersPayload() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

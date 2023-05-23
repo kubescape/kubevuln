@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-test/deep"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spdx/tools-golang/spdx/v2/v2_3"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSyftAdapter_spdxToDomain(t *testing.T) {
@@ -91,10 +91,7 @@ func TestSyftAdapter_spdxToDomain(t *testing.T) {
 				t.Errorf("spdxToDomain() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			diff := deep.Equal(got, tt.want)
-			if diff != nil {
-				t.Errorf("compare failed: %v", diff)
-			}
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
