@@ -9,7 +9,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -136,10 +136,10 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	tools.EnsureSetup(t, err == nil)
 	cvep.Content.Descriptor.Version = "v1.1.0"
 	err = a.StoreCVE(ctx, cvep, true)
-	assert.Assert(t, err == nil)
+	assert.NoError(t, err)
 	got, err := a.GetCVE(ctx, instanceID, "", "", "")
 	tools.EnsureSetup(t, err == nil)
-	assert.Assert(t, got.Content.Descriptor.Version == "v1.1.0")
+	assert.Equal(t, got.Content.Descriptor.Version, "v1.1.0")
 }
 
 func TestAPIServerStore_GetSBOM(t *testing.T) {

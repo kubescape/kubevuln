@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/tools"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHTTPController_Alive(t *testing.T) {
@@ -22,8 +22,8 @@ func TestHTTPController_Alive(t *testing.T) {
 	req, _ := http.NewRequest("GET", path, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	assert.Assert(t, http.StatusOK == w.Code, w.Code)
-	assert.Assert(t, w.Body.String() == "{\"status\":200,\"title\":\"OK\"}", w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code, w.Code)
+	assert.Equal(t, w.Body.String(), "{\"status\":200,\"title\":\"OK\"}", w.Body.String())
 }
 
 func TestHTTPController_GenerateSBOM(t *testing.T) {
@@ -70,8 +70,8 @@ func TestHTTPController_GenerateSBOM(t *testing.T) {
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			assert.Assert(t, tt.expectedCode == w.Code, w.Code)
-			assert.Assert(t, tt.expectedBody == w.Body.String(), w.Body.String())
+			assert.Equal(t, tt.expectedCode, w.Code, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
 	}
 }
@@ -105,8 +105,8 @@ func TestHTTPController_Ready(t *testing.T) {
 			req, _ := http.NewRequest("GET", path, nil)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			assert.Assert(t, tt.expectedCode == w.Code, w.Code)
-			assert.Assert(t, tt.expectedBody == w.Body.String(), w.Body.String())
+			assert.Equal(t, tt.expectedCode, w.Code, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
 	}
 }
@@ -155,8 +155,8 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			assert.Assert(t, tt.expectedCode == w.Code, w.Code)
-			assert.Assert(t, tt.expectedBody == w.Body.String(), w.Body.String())
+			assert.Equal(t, tt.expectedCode, w.Code, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
 	}
 }
@@ -205,8 +205,8 @@ func TestHTTPController_ScanRegistry(t *testing.T) {
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
-			assert.Assert(t, tt.expectedCode == w.Code, w.Code)
-			assert.Assert(t, tt.expectedBody == w.Body.String(), w.Body.String())
+			assert.Equal(t, tt.expectedCode, w.Code, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
 	}
 }
