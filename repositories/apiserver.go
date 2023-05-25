@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -204,7 +203,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 
 func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok && status == instanceidhandler.Incomplete {
-		return fmt.Errorf("relevant SBOM is incomplete")
+		return domain.ErrIncompleteSBOM
 	}
 	return nil
 }

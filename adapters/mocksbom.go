@@ -2,9 +2,11 @@ package adapters
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -15,18 +17,20 @@ import (
 
 // MockSBOMAdapter implements a mocked SBOMCreator to be used for tests
 type MockSBOMAdapter struct {
-	error   bool
-	timeout bool
+	error           bool
+	timeout         bool
+	toomanyrequests bool
 }
 
 var _ ports.SBOMCreator = (*MockSBOMAdapter)(nil)
 
 // NewMockSBOMAdapter initializes the MockSBOMAdapter struct
-func NewMockSBOMAdapter(error, timeout bool) *MockSBOMAdapter {
+func NewMockSBOMAdapter(error, timeout, toomanyrequests bool) *MockSBOMAdapter {
 	logger.L().Info("NewMockSBOMAdapter")
 	return &MockSBOMAdapter{
-		error:   error,
-		timeout: timeout,
+		error:           error,
+		timeout:         timeout,
+		toomanyrequests: toomanyrequests,
 	}
 }
 
@@ -34,7 +38,14 @@ func NewMockSBOMAdapter(error, timeout bool) *MockSBOMAdapter {
 func (m MockSBOMAdapter) CreateSBOM(ctx context.Context, imageID string, _ domain.RegistryOptions) (domain.SBOM, error) {
 	logger.L().Info("CreateSBOM")
 	if m.error {
-		return domain.SBOM{}, errors.New("mock error")
+		return domain.SBOM{}, domain.ErrMockError
+	}
+	if m.toomanyrequests {
+		return domain.SBOM{}, fmt.Errorf("failed to get image descriptor from registry: %w",
+			&transport.Error{
+				StatusCode: http.StatusTooManyRequests,
+			},
+		)
 	}
 	sbom := domain.SBOM{
 		ID:                 imageID,
