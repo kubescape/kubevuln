@@ -40,13 +40,13 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:  string(fileContent("testdata/alpine-sbom.format.json")),
 		},
 		{
-			name:    "valid image with registry credentials produces well-formed SBOM",
+			name:    "public image with invalid registry credentials falls back to unauthenticated and produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  string(fileContent("testdata/alpine-sbom.format.json")),
 			options: domain.RegistryOptions{
 				Credentials: []domain.RegistryCredentials{
 					{
-						Authority: "docker.io",
+						Authority: "index.docker.io",
 						Username:  "username",
 						Password:  "password",
 						Token:     "token",
