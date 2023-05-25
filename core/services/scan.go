@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/akyoto/cache"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -19,15 +22,21 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const (
+	cleaningInterval = 1 * time.Minute
+	ttl              = 10 * time.Minute
+)
+
 // ScanService implements ScanService from ports, this is the business component
 // business logic should be independent of implementations
 type ScanService struct {
-	sbomCreator    ports.SBOMCreator
-	sbomRepository ports.SBOMRepository
-	cveScanner     ports.CVEScanner
-	cveRepository  ports.CVERepository
-	platform       ports.Platform
-	storage        bool
+	sbomCreator     ports.SBOMCreator
+	sbomRepository  ports.SBOMRepository
+	cveScanner      ports.CVEScanner
+	cveRepository   ports.CVERepository
+	platform        ports.Platform
+	storage         bool
+	tooManyRequests *cache.Cache
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
@@ -35,12 +44,22 @@ var _ ports.ScanService = (*ScanService)(nil)
 // NewScanService initializes the ScanService with all injected dependencies
 func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool) *ScanService {
 	return &ScanService{
-		sbomCreator:    sbomCreator,
-		sbomRepository: sbomRepository,
-		cveScanner:     cveScanner,
-		cveRepository:  cveRepository,
-		platform:       platform,
-		storage:        storage,
+		sbomCreator:     sbomCreator,
+		sbomRepository:  sbomRepository,
+		cveScanner:      cveScanner,
+		cveRepository:   cveRepository,
+		platform:        platform,
+		storage:         storage,
+		tooManyRequests: cache.New(cleaningInterval),
+	}
+}
+
+func (s *ScanService) checkCreateSBOM(err error, key string) {
+	if err != nil {
+		var transportError *transport.Error
+		if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
+			s.tooManyRequests.Set(key, true, ttl)
+		}
 	}
 }
 
@@ -52,7 +71,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return errors.New("no workload found in context")
+		return domain.ErrMissingWorkload
 	}
 
 	// check if SBOM is already available
@@ -69,6 +88,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if sbom.Content == nil {
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
+		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			return err
 		}
@@ -98,7 +118,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return errors.New("no workload found in context")
+		return domain.ErrMissingWorkload
 	}
 	logger.L().Info("scan started", helpers.String("imageID", workload.ImageHash), helpers.String("jobID", workload.JobID))
 
@@ -132,6 +152,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if sbom.Content == nil {
 			// create SBOM
 			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
+			s.checkCreateSBOM(err, workload.ImageHash)
 			if err != nil {
 				return err
 			}
@@ -146,7 +167,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 		// do not process timed out SBOM
 		if sbom.Status == instanceidhandler.Incomplete {
-			return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
+			return domain.ErrIncompleteSBOM
 		}
 
 		// scan for CVE
@@ -218,7 +239,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return errors.New("no workload found in context")
+		return domain.ErrMissingWorkload
 	}
 	logger.L().Info("registry scan started", helpers.String("imageID", workload.ImageTag), helpers.String("jobID", workload.JobID))
 
@@ -230,13 +251,14 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 	// create SBOM
 	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageTag, optionsFromWorkload(workload))
+	s.checkCreateSBOM(err, workload.ImageTag)
 	if err != nil {
 		return err
 	}
 
 	// do not process timed out SBOM
 	if sbom.Status == instanceidhandler.Incomplete {
-		return errors.New("SBOM incomplete due to timeout, skipping CVE scan")
+		return domain.ErrIncompleteSBOM
 	}
 
 	// scan for CVE
@@ -317,13 +339,17 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
 	if workload.ImageHash == "" {
-		return ctx, errors.New("missing imageID")
+		return ctx, domain.ErrMissingImageID
 	}
 	// add imageID to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
+	}
+	// check if previous image pull resulted in TOOMANYREQUESTS error
+	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
 }
@@ -335,7 +361,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
 	if workload.ImageHash == "" {
-		return ctx, errors.New("missing imageID")
+		return ctx, domain.ErrMissingImageID
 	}
 	// add instanceID and imageID to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
@@ -346,6 +372,10 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
+	}
+	// check if previous image pull resulted in TOOMANYREQUESTS error
+	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+		return ctx, domain.ErrTooManyRequests
 	}
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Accepted)
@@ -362,13 +392,17 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
 	if workload.ImageTag == "" {
-		return ctx, errors.New("missing imageID")
+		return ctx, domain.ErrMissingImageID
 	}
 	// add imageID to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageTag))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
+	}
+	// check if previous image pull resulted in TOOMANYREQUESTS error
+	if _, ok := s.tooManyRequests.Get(workload.ImageTag); ok {
+		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
 }
