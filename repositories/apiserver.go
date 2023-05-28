@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,10 @@ var _ ports.CVERepository = (*APIServerStore)(nil)
 
 var _ ports.SBOMRepository = (*APIServerStore)(nil)
 
+var re = regexp.MustCompile(`([a-f0-9]{64})`)
+
+const ImageHashLength = 64
+
 // NewAPIServerStorage initializes the APIServerStore struct
 func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	config, err := rest.InClusterConfig()
@@ -58,14 +63,35 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	}
 }
 
-// we're guaranteed to have a digest in the imageID by the operator
-func hashFromImageID(imageID string) string {
-	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
-	if match[3] == "" {
-		// just a digest
-		return imageID
+func newImageHashError(imageID string) error {
+	return fmt.Errorf("failed to get image hash from imageID: %s", imageID)
+}
+func getImageHash(imageID string) (string, error) {
+	if match := re.FindStringSubmatch(imageID); len(match) > 1 {
+		return match[1], nil
 	}
-	return strings.Split(match[3], ":")[1]
+	return "", newImageHashError(imageID)
+}
+
+func hashFromImageID(imageID string) (string, error) {
+	// Check if the imageID is a plain SHA256 hash
+	if len(imageID) == ImageHashLength && re.MatchString(imageID) {
+		return imageID, nil
+	}
+
+	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
+
+	if len(match) < 3 || match[3] == "" {
+		// Fall back to getImageHash if not enough submatches or if the third submatch is empty
+		return getImageHash(imageID)
+	}
+
+	if s := strings.Split(match[3], ":"); len(s) > 1 {
+		// If there's a ":" in the third submatch, return the part after it
+		return s[1], nil
+	}
+
+	return "", newImageHashError(imageID)
 }
 
 func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
@@ -75,7 +101,12 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 		logger.L().Debug("empty image ID provided, skipping CVE retrieval")
 		return domain.CVEManifest{}, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
+	imageHash, err := hashFromImageID(imageID)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err), helpers.String("ID", imageID))
+		return domain.CVEManifest{}, nil
+	}
+	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), imageHash, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("CVE manifest not found in storage", helpers.String("ID", imageID))
@@ -117,7 +148,11 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
 	}
 
-	name := hashFromImageID(cve.ID)
+	name, e := hashFromImageID(cve.ID)
+	if e != nil {
+		logger.L().Debug("skipping storing CVE manifest with unsupported ID", helpers.Error(e))
+		return nil
+	}
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -176,7 +211,12 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersio
 		logger.L().Debug("empty image ID provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), hashFromImageID(imageID), metav1.GetOptions{})
+	imageHash, err := hashFromImageID(imageID)
+	if err != nil {
+		logger.L().Debug("unsupported image ID provided, skipping SBOM retrieval")
+		return domain.SBOM{}, nil
+	}
+	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), imageHash, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("SBOM manifest not found in storage", helpers.String("ID", imageID))
@@ -250,9 +290,14 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		logger.L().Debug("skipping storing SBOM with empty ID")
 		return nil
 	}
+	imageHash, e := hashFromImageID(sbom.ID)
+	if e != nil {
+		logger.L().Debug("skipping storing SBOM with unknown SBOM ID", helpers.String("ID", sbom.ID), helpers.Error(e))
+		return nil
+	}
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        hashFromImageID(sbom.ID),
+			Name:        imageHash,
 			Annotations: sbom.Annotations,
 			Labels:      sbom.Labels,
 		},
