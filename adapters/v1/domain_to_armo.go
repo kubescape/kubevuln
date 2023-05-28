@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
@@ -20,17 +19,17 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 	// retrieve timestamp from context
 	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
 	if !ok {
-		return vulnerabilityResults, errors.New("no timestamp found in context")
+		return vulnerabilityResults, domain.ErrMissingTimestamp
 	}
 	// retrieve scanID from context
 	scanID, ok := ctx.Value(domain.ScanIDKey{}).(string)
 	if !ok {
-		return vulnerabilityResults, errors.New("no scanID found in context")
+		return vulnerabilityResults, domain.ErrMissingScanID
 	}
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return vulnerabilityResults, errors.New("no workload found in context")
+		return vulnerabilityResults, domain.ErrMissingWorkload
 	}
 
 	if grypeDocument.Source != nil {

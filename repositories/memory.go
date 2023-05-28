@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -49,7 +48,7 @@ func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, C
 	defer span.End()
 
 	if m.getError {
-		return domain.CVEManifest{}, errors.New("mock error")
+		return domain.CVEManifest{}, domain.ErrMockError
 	}
 
 	id := cveID{
@@ -70,7 +69,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 	defer span.End()
 
 	if m.storeError {
-		return errors.New("mock error")
+		return domain.ErrMockError
 	}
 
 	id := cveID{
@@ -89,7 +88,7 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion s
 	defer span.End()
 
 	if m.getError {
-		return domain.SBOM{}, errors.New("mock error")
+		return domain.SBOM{}, domain.ErrMockError
 	}
 
 	id := sbomID{
@@ -108,7 +107,7 @@ func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersi
 	defer span.End()
 
 	if m.getError {
-		return domain.SBOM{}, errors.New("mock error")
+		return domain.SBOM{}, domain.ErrMockError
 	}
 
 	id := sbomID{
@@ -127,7 +126,7 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	defer span.End()
 
 	if m.storeError {
-		return errors.New("mock error")
+		return domain.ErrMockError
 	}
 
 	id := sbomID{
