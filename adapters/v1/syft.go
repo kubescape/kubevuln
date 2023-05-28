@@ -24,6 +24,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	containerregistryV1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -99,6 +100,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options do
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 	src, err := newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
+	// check for 401 error and retry without credentials
+	var transportError *transport.Error
+	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusUnauthorized {
+		logger.L().Debug("got 401, retrying without credentials", helpers.String("imageID", imageID))
+		registryOptions.Credentials = nil
+		src, err = newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
+	}
 	switch {
 	case errors.Is(err, ErrImageTooLarge):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit", helpers.Int("maxImageSize", int(s.maxImageSize)), helpers.String("imageID", imageID))
