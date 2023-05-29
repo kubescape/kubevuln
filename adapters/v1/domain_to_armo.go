@@ -89,7 +89,7 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 							Version: version,
 						},
 					},
-					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, match.Vulnerability.ID),
+					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, match.Vulnerability.ID, isFixed == 1),
 					IsRelevant:       nil, // TODO add relevancy here?
 				},
 			}
