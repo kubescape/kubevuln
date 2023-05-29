@@ -19,6 +19,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 		srcCVEList []armotypes.VulnerabilityExceptionPolicy
 		CVEName    string
 		expected   []armotypes.VulnerabilityExceptionPolicy
+		isFixed    bool
 	}{
 		{
 			name:       "empty source list",
@@ -78,6 +79,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 				},
 			},
 			CVEName: "CVE-2021-1234",
+			isFixed: true,
 			expected: []armotypes.VulnerabilityExceptionPolicy{
 				{
 					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
@@ -98,11 +100,64 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "multiple matches in source list filtered by with expiration on fix",
+			isFixed: true,
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+					ExpiredOnFix: pointer.BoolPtr(true),
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-5678"},
+						{Name: "CVE-2021-1234"},
+					},
+				},
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+						{Name: "CVE-2021-9012"},
+					},
+					ExpiredOnFix: pointer.BoolPtr(true),
+				},
+			},
+			CVEName: "CVE-2021-1234",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-5678"},
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+		},
+		{
+			name:    "one match in source list, filter fix with no expire on fix",
+			isFixed: true,
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+			CVEName: "CVE-2021-1234",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName)
+			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName, tc.isFixed)
 			assert.Equal(t, actual, tc.expected)
 		})
 	}
