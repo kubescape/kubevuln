@@ -26,6 +26,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		getError        bool
 		storeError      bool
 		timeout         bool
+		toomanyrequests bool
 		workload        bool
 		wantErr         bool
 	}{
@@ -52,6 +53,12 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			wantErr:  false, // we no longer check for timeout
 		},
 		{
+			name:            "phase 1, too many requests",
+			toomanyrequests: true,
+			workload:        true,
+			wantErr:         true,
+		},
+		{
 			name:     "phase 2, get SBOM failed",
 			storage:  true,
 			getError: true,
@@ -74,7 +81,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(tt.getError, tt.storeError)
 			s := NewScanService(sbomAdapter,
 				storage,
@@ -83,32 +90,35 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				adapters.NewMockPlatform(),
 				tt.storage)
 			ctx := context.TODO()
+
+			workload := domain.ScanCommand{
+				ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+			}
+			workload.Credentialslist = []types.AuthConfig{
+				{
+					Username: "test",
+					Password: "test",
+				},
+				{
+					RegistryToken: "test",
+				},
+				{
+					Auth: "test",
+				},
+			}
+			workload.Args = map[string]interface{}{
+				domain.AttributeUseHTTP:       false,
+				domain.AttributeSkipTLSVerify: false,
+			}
 			if tt.workload {
-				workload := domain.ScanCommand{
-					ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
-				}
-				workload.Credentialslist = []types.AuthConfig{
-					{
-						Username: "test",
-						Password: "test",
-					},
-					{
-						RegistryToken: "test",
-					},
-					{
-						Auth: "test",
-					},
-				}
-				workload.Args = map[string]interface{}{
-					domain.AttributeUseHTTP:       false,
-					domain.AttributeSkipTLSVerify: false,
-				}
-				var err error
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)
-				tools.EnsureSetup(t, err == nil)
 			}
 			if err := s.GenerateSBOM(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.toomanyrequests {
+				_, err := s.ValidateGenerateSBOM(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, err)
 			}
 		})
 	}
@@ -127,6 +137,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 		storeErrorCVE   bool
 		storeErrorSBOM  bool
 		timeout         bool
+		toomanyrequests bool
 		workload        bool
 		wantCvep        bool
 		wantErr         bool
@@ -144,6 +155,12 @@ func TestScanService_ScanCVE(t *testing.T) {
 		{
 			name:            "create SBOM error",
 			createSBOMError: true,
+			workload:        true,
+			wantErr:         true,
+		},
+		{
+			name:            "create SBOM too many requests",
+			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
 		},
@@ -213,7 +230,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.emptyWlid {
 				wlid = ""
 			}
-			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			cveAdapter := adapters.NewMockCVEAdapter()
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
@@ -225,14 +242,15 @@ func TestScanService_ScanCVE(t *testing.T) {
 				tt.storage)
 			ctx := context.TODO()
 			s.Ready(ctx)
+
+			workload := domain.ScanCommand{
+				ImageHash: imageHash,
+				Wlid:      wlid,
+			}
+			if tt.instanceID != "" {
+				workload.InstanceID = tt.instanceID
+			}
 			if tt.workload {
-				workload := domain.ScanCommand{
-					ImageHash: imageHash,
-					Wlid:      wlid,
-				}
-				if tt.instanceID != "" {
-					workload.InstanceID = tt.instanceID
-				}
 				var err error
 				ctx, err = s.ValidateScanCVE(ctx, workload)
 				tools.EnsureSetup(t, err == nil)
@@ -252,6 +270,10 @@ func TestScanService_ScanCVE(t *testing.T) {
 			}
 			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.toomanyrequests {
+				_, err := s.ValidateScanCVE(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, err)
 			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, sbomp.ID, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
@@ -277,7 +299,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	imageHash := "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
 	instanceID := "1c83b589d90ba26957627525e08124b1a24732755a330924f7987e9d9e3952c1"
 	ctx := context.TODO()
-	sbomAdapter := adapters.NewMockSBOMAdapter(false, false)
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	go func() {
 		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("../../adapters/v1/testdata")))
 	}()
@@ -337,7 +359,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
@@ -381,7 +403,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
@@ -401,6 +423,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 		createSBOMError bool
 		name            string
 		timeout         bool
+		toomanyrequests bool
 		workload        bool
 		wantErr         bool
 	}{
@@ -422,6 +445,12 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:            "toomanyrequests SBOM",
+			toomanyrequests: true,
+			workload:        true,
+			wantErr:         true,
+		},
+		{
 			name:     "scan",
 			workload: true,
 			wantErr:  false,
@@ -429,7 +458,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout)
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(false, false)
 			s := NewScanService(sbomAdapter,
 				storage,
@@ -438,28 +467,32 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				adapters.NewMockPlatform(),
 				false)
 			ctx := context.TODO()
+			workload := domain.ScanCommand{
+				ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+			}
+			workload.Credentialslist = []types.AuthConfig{
+				{
+					Username: "test",
+					Password: "test",
+				},
+				{
+					RegistryToken: "test",
+				},
+				{
+					Auth: "test",
+				},
+			}
 			if tt.workload {
-				workload := domain.ScanCommand{
-					ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
-				}
-				workload.Credentialslist = []types.AuthConfig{
-					{
-						Username: "test",
-						Password: "test",
-					},
-					{
-						RegistryToken: "test",
-					},
-					{
-						Auth: "test",
-					},
-				}
 				var err error
 				ctx, _ = s.ValidateScanRegistry(ctx, workload)
 				tools.EnsureSetup(t, err == nil)
 			}
 			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.toomanyrequests {
+				_, err := s.ValidateScanRegistry(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, err)
 			}
 		})
 	}
@@ -486,7 +519,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false),
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),

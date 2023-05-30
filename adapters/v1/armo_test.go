@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -45,7 +45,7 @@ func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
 			workload: true,
 			fields: fields{
 				getCVEExceptionsFunc: func(s string, s2 string, designator *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-					return nil, errors.New("error")
+					return nil, fmt.Errorf("error")
 				},
 			},
 			wantErr: true,
