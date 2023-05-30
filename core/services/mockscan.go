@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -22,7 +21,7 @@ func (m MockScanService) GenerateSBOM(context.Context) error {
 	if m.happy {
 		return nil
 	}
-	return errors.New("mock error")
+	return domain.ErrMockError
 }
 
 func (m MockScanService) Ready(context.Context) bool {
@@ -33,33 +32,33 @@ func (m MockScanService) ScanCVE(context.Context) error {
 	if m.happy {
 		return nil
 	}
-	return errors.New("mock error")
+	return domain.ErrMockError
 }
 
 func (m MockScanService) ScanRegistry(context.Context) error {
 	if m.happy {
 		return nil
 	}
-	return errors.New("mock error")
+	return domain.ErrMockError
 }
 
 func (m MockScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
 	}
-	return ctx, errors.New("mock error")
+	return ctx, domain.ErrMockError
 }
 
 func (m MockScanService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
 	}
-	return ctx, errors.New("mock error")
+	return ctx, domain.ErrMockError
 }
 
 func (m MockScanService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
 	}
-	return ctx, errors.New("mock error")
+	return ctx, domain.ErrMockError
 }
