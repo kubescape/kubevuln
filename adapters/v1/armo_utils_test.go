@@ -108,7 +108,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
 						{Name: "CVE-2021-1234"},
 					},
-					ExpiredOnFix: pointer.BoolPtr(true),
+					ExpiredOnFix: pointer.Bool(true),
 				},
 				{
 					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
@@ -121,7 +121,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 						{Name: "CVE-2021-1234"},
 						{Name: "CVE-2021-9012"},
 					},
-					ExpiredOnFix: pointer.BoolPtr(true),
+					ExpiredOnFix: pointer.Bool(true),
 				},
 			},
 			CVEName: "CVE-2021-1234",
