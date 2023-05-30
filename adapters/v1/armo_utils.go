@@ -257,12 +257,15 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	return &summary, vulnerabilities
 }
 
-func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string) []armotypes.VulnerabilityExceptionPolicy {
+func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
 	var l []armotypes.VulnerabilityExceptionPolicy
 
 	for i := range srcCVEList {
 		for j := range srcCVEList[i].VulnerabilityPolicies {
 			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
+				if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
+					continue
+				}
 				l = append(l, srcCVEList[i])
 			}
 		}
