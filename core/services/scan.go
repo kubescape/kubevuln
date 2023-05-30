@@ -68,6 +68,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
 
+	ctx = addTimestamp(ctx)
+
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
@@ -114,6 +116,8 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 func (s *ScanService) ScanCVE(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanCVE")
 	defer span.End()
+
+	ctx = addTimestamp(ctx)
 
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
@@ -236,6 +240,8 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanRegistry")
 	defer span.End()
 
+	ctx = addTimestamp(ctx)
+
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
@@ -287,12 +293,13 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	return nil
 }
 
+func addTimestamp(ctx context.Context) context.Context {
+	return context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+}
+
 func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Context {
-	// record start time
-	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 	// generate unique scanID and add to context
 	scanID := generateScanID(workload)
-
 	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID)
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
