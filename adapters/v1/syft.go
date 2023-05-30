@@ -54,12 +54,12 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter 
 // CreateSBOM creates an SBOM for a given imageID, restrict parallelism to prevent disk space issues,
 // a timeout prevents the process from hanging for too long.
 // Format is SPDX JSON and the resulting SBOM is tagged with the Syft version.
-func (s *SyftAdapter) CreateSBOM(ctx context.Context, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
+func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.CreateSBOM")
 	defer span.End()
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
-		ID:                 imageID,
+		ID:                 name,
 		SBOMCreatorVersion: s.Version(),
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,

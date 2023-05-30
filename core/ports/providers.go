@@ -16,7 +16,7 @@ type CVEScanner interface {
 
 // SBOMCreator is the port implemented by adapters to be used in ScanService to generate SBOM
 type SBOMCreator interface {
-	CreateSBOM(ctx context.Context, imageID string, options domain.RegistryOptions) (domain.SBOM, error)
+	CreateSBOM(ctx context.Context, name, imageID string, options domain.RegistryOptions) (domain.SBOM, error)
 	Version() string
 }
 

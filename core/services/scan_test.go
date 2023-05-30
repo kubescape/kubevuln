@@ -92,6 +92,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			ctx := context.TODO()
 
 			workload := domain.ScanCommand{
+				ImageID:   "imageID",
 				ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
 			}
 			workload.Credentialslist = []types.AuthConfig{
@@ -244,6 +245,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			s.Ready(ctx)
 
 			workload := domain.ScanCommand{
+				ImageID:   "imageID",
 				ImageHash: imageHash,
 				Wlid:      wlid,
 			}
@@ -256,14 +258,14 @@ func TestScanService_ScanCVE(t *testing.T) {
 				tools.EnsureSetup(t, err == nil)
 			}
 			if tt.sbom {
-				sbom, err := sbomAdapter.CreateSBOM(ctx, imageHash, domain.RegistryOptions{})
+				sbom, err := sbomAdapter.CreateSBOM(ctx, "sbom", imageHash, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
 				_ = storageSBOM.StoreSBOM(ctx, sbom)
 			}
 			var sbomp domain.SBOM
 			if tt.instanceID != "" {
 				var err error
-				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, domain.RegistryOptions{})
+				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, tt.instanceID, domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
 				sbomp.Labels = map[string]string{"foo": "bar"}
 				_ = storageSBOM.StoreSBOM(ctx, sbomp)
@@ -297,6 +299,7 @@ func fileToSBOM(path string) *v1beta1.Document {
 
 func TestScanService_NginxTest(t *testing.T) {
 	imageHash := "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+	imageID := "name"
 	instanceID := "1c83b589d90ba26957627525e08124b1a24732755a330924f7987e9d9e3952c1"
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
@@ -312,13 +315,14 @@ func TestScanService_NginxTest(t *testing.T) {
 	workload := domain.ScanCommand{
 		ContainerName: "nginx",
 		ImageHash:     imageHash,
+		ImageID:       imageID,
 		ImageTag:      "docker.io/library/nginx:1.14.1",
 		InstanceID:    instanceID,
 		Wlid:          "wlid://cluster-minikube/namespace-default/deployment-nginx",
 	}
 	ctx, _ = s.ValidateScanCVE(ctx, workload)
 	sbom := domain.SBOM{
-		ID:                 imageHash,
+		ID:                 imageID,
 		Content:            fileToSBOM("../../adapters/v1/testdata/nginx-sbom.json"),
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
@@ -352,6 +356,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 		{
 			name: "with imageID",
 			workload: domain.ScanCommand{
+				ImageID:   "imageID",
 				ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
 			},
 			wantErr: false,
@@ -395,6 +400,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 		{
 			name: "with Wlid and ImageHash",
 			workload: domain.ScanCommand{
+				ImageID:   "imageID",
 				ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
 				Wlid:      "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
 			},
@@ -468,6 +474,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
+				ImageID:  "imageID",
 				ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
 			}
 			workload.Credentialslist = []types.AuthConfig{
@@ -512,6 +519,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 		{
 			name: "with imageID",
 			workload: domain.ScanCommand{
+				ImageID:  "imageID",
 				ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
 			},
 			wantErr: false,
