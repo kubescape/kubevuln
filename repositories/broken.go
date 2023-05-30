@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -22,29 +21,29 @@ func NewBrokenStorage() *BrokenStore {
 func (b BrokenStore) GetSBOM(ctx context.Context, _ string, _ string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOM")
 	defer span.End()
-	return domain.SBOM{}, errors.New("expected error")
+	return domain.SBOM{}, domain.ErrExpectedError
 }
 
 func (b BrokenStore) GetSBOMp(ctx context.Context, _ string, _ string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOMp")
 	defer span.End()
-	return domain.SBOM{}, errors.New("expected error")
+	return domain.SBOM{}, domain.ErrExpectedError
 }
 
 func (b BrokenStore) StoreSBOM(ctx context.Context, _ domain.SBOM) error {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreSBOM")
 	defer span.End()
-	return errors.New("expected error")
+	return domain.ErrExpectedError
 }
 
 func (b BrokenStore) GetCVE(ctx context.Context, _ string, _ string, _ string, _ string) (cve domain.CVEManifest, err error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetCVE")
 	defer span.End()
-	return domain.CVEManifest{}, errors.New("expected error")
+	return domain.CVEManifest{}, domain.ErrExpectedError
 }
 
 func (b BrokenStore) StoreCVE(ctx context.Context, _ domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreCVE")
 	defer span.End()
-	return errors.New("expected error")
+	return domain.ErrExpectedError
 }
