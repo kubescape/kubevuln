@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -71,7 +70,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, errors.New("no workload found in context")
+		return nil, domain.ErrMissingWorkload
 	}
 
 	designator := armotypes.PortalDesignator{
@@ -100,7 +99,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return errors.New("no workload found in context")
+		return domain.ErrMissingWorkload
 	}
 
 	lastAction := workload.LastAction + 1
@@ -133,17 +132,17 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	// retrieve timestamp from context
 	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
 	if !ok {
-		return errors.New("no timestamp found in context")
+		return domain.ErrMissingTimestamp
 	}
 	// retrieve scanID from context
 	scanID, ok := ctx.Value(domain.ScanIDKey{}).(string)
 	if !ok {
-		return errors.New("no scanID found in context")
+		return domain.ErrMissingScanID
 	}
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return errors.New("no workload found in context")
+		return domain.ErrMissingWorkload
 	}
 
 	// get exceptions

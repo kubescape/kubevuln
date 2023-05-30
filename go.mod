@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/adrg/xdg v0.4.0
+	github.com/akyoto/cache v1.0.6
 	github.com/anchore/grype v0.61.0
 	github.com/anchore/stereoscope v0.0.0-20230323161519-d7551b7f46f5
 	github.com/anchore/syft v0.76.0
