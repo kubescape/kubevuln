@@ -357,6 +357,7 @@ func Test_extractHashFromImageID(t *testing.T) {
 		name    string
 		imageID string
 		want    string
+		err     bool
 	}{
 		{
 			name:    "no tag",
@@ -373,10 +374,26 @@ func Test_extractHashFromImageID(t *testing.T) {
 			imageID: "c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
 			want:    "c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
 		},
+		{
+			name:    "sha256 hash",
+			imageID: "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+			want:    "c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+		},
+		{
+			name:    "docker imageID",
+			imageID: "docker://sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+			want:    "c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+		},
+		{
+			name:    "empty imageID",
+			imageID: "",
+			want:    "",
+			err:     true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hashFromImageID(tt.imageID); got != tt.want {
+			if got, e := hashFromImageID(tt.imageID); got != tt.want || (e != nil) != tt.err {
 				t.Errorf("hashFromImageID() = %v, want %v", got, tt.want)
 			}
 		})
