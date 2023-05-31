@@ -12,6 +12,7 @@ type Config struct {
 	ClusterName          string        `mapstructure:"clusterName"`
 	EventReceiverRestURL string        `mapstructure:"eventReceiverRestURL"`
 	KeepLocal            bool          `mapstructure:"keepLocal"`
+	ListingURL           string        `mapstructure:"listingURL"`
 	MaxImageSize         int64         `mapstructure:"maxImageSize"`
 	ScanConcurrency      int           `mapstructure:"scanConcurrency"`
 	ScanTimeout          time.Duration `mapstructure:"scanTimeout"`
@@ -24,6 +25,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigName("clusterData")
 	viper.SetConfigType("json")
 
+	viper.SetDefault("listingURL", "https://toolbox-data.anchore.io/grype/databases/listing.json")
 	viper.SetDefault("maxImageSize", 512*1024*1024)
 	viper.SetDefault("scanConcurrency", 1)
 	viper.SetDefault("scanTimeout", 5*time.Minute)
