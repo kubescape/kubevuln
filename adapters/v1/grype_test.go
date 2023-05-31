@@ -84,7 +84,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 
 func Test_grypeAdapter_Version(t *testing.T) {
 	ctx := context.TODO()
-	g := NewGrypeAdapter()
+	g := NewGrypeAdapter("")
 	version := g.Version(ctx)
 	assert.NotEqual(t, version, "")
 }
