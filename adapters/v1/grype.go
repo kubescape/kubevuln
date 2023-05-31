@@ -42,11 +42,11 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
-func NewGrypeAdapter() *GrypeAdapter {
+func NewGrypeAdapter(listingURL string) *GrypeAdapter {
 	g := &GrypeAdapter{
 		dbConfig: db.Config{
 			DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
-			ListingURL: "https://toolbox-data.anchore.io/grype/databases/listing.json",
+			ListingURL: listingURL,
 		},
 	}
 	return g
@@ -84,7 +84,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		defer g.mu.Unlock()
 		ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
 		defer span.End()
-		logger.L().Info("updating grype DB")
+		logger.L().Info("updating grype DB", helpers.String("listingURL", g.dbConfig.ListingURL))
 		var err error
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
 		if err != nil {
