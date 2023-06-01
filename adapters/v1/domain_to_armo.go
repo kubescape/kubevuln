@@ -51,13 +51,13 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		for _, match := range grypeDocument.Matches {
 			var isFixed int
 			var version string
-			var description string
+			description := match.Vulnerability.Description
 			link := "https://nvd.nist.gov/vuln/detail/" + match.Vulnerability.ID
 			if len(match.Vulnerability.Fix.Versions) != 0 {
 				isFixed = 1
 				version = match.Vulnerability.Fix.Versions[0]
 			}
-			if len(match.RelatedVulnerabilities) != 0 {
+			if description == "" && len(match.RelatedVulnerabilities) > 0 {
 				description = match.RelatedVulnerabilities[0].Description
 			}
 			// create a vulnerability result for this vulnerability

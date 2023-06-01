@@ -26,7 +26,39 @@ func Test_domainToArmo(t *testing.T) {
 		wantErr                          bool
 	}{
 		{
-			name: "Test domainToArmo",
+			name: "Test domainToArmo with description",
+			grypeDocument: v1beta1.GrypeDocument{
+				Source: &v1beta1.Source{
+					Target: json.RawMessage(`{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"dummyLayer","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`),
+				},
+				Matches: []v1beta1.Match{{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+							ID:          "CVE-2021-21300",
+							Description: "test description",
+						},
+						Fix: v1beta1.Fix{
+							Versions: []string{"1.0.0"},
+						},
+					},
+				}},
+			},
+			want: []containerscan.CommonContainerVulnerabilityResult{{
+				IntroducedInLayer: dummyLayer,
+				Vulnerability: containerscan.Vulnerability{
+					Description: "test description",
+					Name:        "CVE-2021-21300",
+					Link:        "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
+					Fixes:       containerscan.VulFixes{{Version: "1.0.0"}},
+				},
+				Layers:        []containerscan.ESLayer{{LayerHash: dummyLayer}},
+				RelevantLinks: []string{"https://nvd.nist.gov/vuln/detail/CVE-2021-21300", ""},
+				IsLastScan:    1,
+				IsFixed:       1,
+			}},
+		},
+		{
+			name: "Test domainToArmo with related description",
 			grypeDocument: v1beta1.GrypeDocument{
 				Source: &v1beta1.Source{
 					Target: json.RawMessage(`{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"dummyLayer","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`),
@@ -41,14 +73,14 @@ func Test_domainToArmo(t *testing.T) {
 						},
 					},
 					RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{{
-						Description: "test description",
+						Description: "related description",
 					}},
 				}},
 			},
 			want: []containerscan.CommonContainerVulnerabilityResult{{
 				IntroducedInLayer: dummyLayer,
 				Vulnerability: containerscan.Vulnerability{
-					Description: "test description",
+					Description: "related description",
 					Name:        "CVE-2021-21300",
 					Link:        "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
 					Fixes:       containerscan.VulFixes{{Version: "1.0.0"}},
