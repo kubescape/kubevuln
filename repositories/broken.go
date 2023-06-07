@@ -18,13 +18,13 @@ func NewBrokenStorage() *BrokenStore {
 	return &BrokenStore{}
 }
 
-func (b BrokenStore) GetSBOM(ctx context.Context, _ string, _ string) (sbom domain.SBOM, err error) {
+func (b BrokenStore) GetSBOM(ctx context.Context, _ string, _ string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOM")
 	defer span.End()
 	return domain.SBOM{}, domain.ErrExpectedError
 }
 
-func (b BrokenStore) GetSBOMp(ctx context.Context, _ string, _ string) (sbom domain.SBOM, err error) {
+func (b BrokenStore) GetSBOMp(ctx context.Context, _ string, _ string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOMp")
 	defer span.End()
 	return domain.SBOM{}, domain.ErrExpectedError
@@ -36,7 +36,7 @@ func (b BrokenStore) StoreSBOM(ctx context.Context, _ domain.SBOM) error {
 	return domain.ErrExpectedError
 }
 
-func (b BrokenStore) GetCVE(ctx context.Context, _ string, _ string, _ string, _ string) (cve domain.CVEManifest, err error) {
+func (b BrokenStore) GetCVE(ctx context.Context, _ string, _ string, _ string, _ string) (domain.CVEManifest, error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetCVE")
 	defer span.End()
 	return domain.CVEManifest{}, domain.ErrExpectedError
