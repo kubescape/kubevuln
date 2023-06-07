@@ -43,7 +43,7 @@ func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 }
 
 // GetCVE returns a CVE manifest from an in-memory map
-func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (domain.CVEManifest, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVE")
 	defer span.End()
 
@@ -83,7 +83,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 }
 
 // GetSBOM returns a SBOM from an in-memory map
-func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOM")
 	defer span.End()
 
@@ -102,7 +102,7 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 }
 
 // GetSBOMp returns a SBOM' from an in-memory map
-func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOMp")
 	defer span.End()
 
