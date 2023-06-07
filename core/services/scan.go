@@ -80,16 +80,17 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	var err error
 	if s.storage {
-		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
+		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err),
+				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
 
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, optionsFromWorkload(workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			return err
@@ -124,20 +125,24 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if !ok {
 		return domain.ErrMissingWorkload
 	}
-	logger.L().Info("scan started", helpers.String("imageID", workload.ImageHash), helpers.String("jobID", workload.JobID))
+	logger.L().Info("scan started",
+		helpers.String("imageSlug", workload.ImageSlug),
+		helpers.String("jobID", workload.JobID))
 
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageSlug", workload.ImageSlug))
 	}
 
 	// check if CVE manifest is already available
 	cve := domain.CVEManifest{}
 	if s.storage {
-		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageHash, s.sbomCreator.Version(), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
+				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
 
@@ -146,16 +151,17 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// check if SBOM is already available
 		sbom := domain.SBOM{}
 		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageHash, s.sbomCreator.Version())
+			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+				logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
 
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
 			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageHash, optionsFromWorkload(workload))
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, optionsFromWorkload(workload))
 			s.checkCreateSBOM(err, workload.ImageHash)
 			if err != nil {
 				return err
@@ -164,7 +170,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if s.storage {
 				err = s.sbomRepository.StoreSBOM(ctx, sbom)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+					logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
 				}
 			}
 		}
@@ -184,7 +191,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if s.storage {
 			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+				logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
 	}
@@ -194,7 +202,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if s.storage && workload.InstanceID != "" {
 		sbomp, err = s.sbomRepository.GetSBOMp(ctx, workload.InstanceID, s.sbomCreator.Version())
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err), helpers.String("instanceID", workload.InstanceID))
+			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err),
+				helpers.String("instanceID", workload.InstanceID))
 		}
 	}
 
@@ -211,7 +220,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			cvep.Wlid = workload.Wlid
 			err = s.cveRepository.StoreCVE(ctx, cvep, true)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error storing CVEp", helpers.Error(err), helpers.String("instanceID", workload.InstanceID))
+				logger.L().Ctx(ctx).Warning("error storing CVEp", helpers.Error(err),
+					helpers.String("instanceID", workload.InstanceID))
 			}
 		}
 	}
@@ -219,7 +229,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// report scan success to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageSlug", workload.ImageSlug))
 	}
 	// submit CVE manifest to platform
 	err = s.platform.SubmitCVE(ctx, cve, cvep)
@@ -229,10 +240,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageHash))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageSlug", workload.ImageSlug))
 	}
 
-	logger.L().Info("scan complete", helpers.String("imageID", workload.ImageHash), helpers.String("jobID", workload.JobID))
+	logger.L().Info("scan complete",
+		helpers.String("imageSlug", workload.ImageSlug),
+		helpers.String("jobID", workload.JobID))
 	return nil
 }
 
@@ -247,16 +261,19 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	if !ok {
 		return domain.ErrMissingWorkload
 	}
-	logger.L().Info("registry scan started", helpers.String("imageID", workload.ImageTag), helpers.String("jobID", workload.JobID))
+	logger.L().Info("registry scan started",
+		helpers.String("imageSlug", workload.ImageSlug),
+		helpers.String("jobID", workload.JobID))
 
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageTag))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageSlug", workload.ImageSlug))
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageTag, optionsFromWorkload(workload))
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageTag, optionsFromWorkload(workload))
 	s.checkCreateSBOM(err, workload.ImageTag)
 	if err != nil {
 		return err
@@ -276,7 +293,8 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// report scan success to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageTag))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageSlug", workload.ImageSlug))
 	}
 	// submit CVE manifest to platform
 	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
@@ -286,10 +304,13 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err), helpers.String("imageID", workload.ImageTag))
+		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+			helpers.String("imageID", workload.ImageSlug))
 	}
 
-	logger.L().Info("registry scan complete", helpers.String("imageID", workload.ImageTag), helpers.String("jobID", workload.JobID))
+	logger.L().Info("registry scan complete",
+		helpers.String("imageSlug", workload.ImageSlug),
+		helpers.String("jobID", workload.JobID))
 	return nil
 }
 
@@ -345,12 +366,12 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
-	if workload.ImageHash == "" {
-		return ctx, domain.ErrMissingImageID
+	if workload.ImageHash == "" || workload.ImageSlug == "" {
+		return ctx, domain.ErrMissingImageInfo
 	}
-	// add imageID to parent span
+	// add imageSlug to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
-		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		parentSpan.SetAttributes(attribute.String("imageSlug", workload.ImageSlug))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
@@ -367,15 +388,15 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
-	if workload.ImageHash == "" {
-		return ctx, domain.ErrMissingImageID
+	if workload.ImageHash == "" || workload.ImageSlug == "" {
+		return ctx, domain.ErrMissingImageInfo
 	}
-	// add instanceID and imageID to parent span
+	// add instanceID and imageSlug to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		if workload.InstanceID != "" {
 			parentSpan.SetAttributes(attribute.String("instanceID", workload.InstanceID))
 		}
-		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageHash))
+		parentSpan.SetAttributes(attribute.String("imageSlug", workload.ImageSlug))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
@@ -398,12 +419,12 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 
 	ctx = enrichContext(ctx, workload)
 	// validate inputs
-	if workload.ImageTag == "" {
-		return ctx, domain.ErrMissingImageID
+	if workload.ImageTag == "" || workload.ImageSlug == "" {
+		return ctx, domain.ErrMissingImageInfo
 	}
-	// add imageID to parent span
+	// add imageSlug to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
-		parentSpan.SetAttributes(attribute.String("imageID", workload.ImageTag))
+		parentSpan.SetAttributes(attribute.String("imageSlug", workload.ImageSlug))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}

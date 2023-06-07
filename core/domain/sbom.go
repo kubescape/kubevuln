@@ -6,7 +6,7 @@ import (
 
 // SBOM contains an SPDX SBOM in JSON format with some metadata
 type SBOM struct {
-	ID                 string
+	Name               string
 	SBOMCreatorName    string
 	SBOMCreatorVersion string
 	Status             string
