@@ -18,16 +18,18 @@ const name = "k8s.gcr.io-kube-proxy-sha256-c1b13"
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incomplete bool) error {
 	manifest := v1beta1.SBOMSPDXv2p3Filtered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: sbom.Name,
-			Annotations: map[string]string{
-				instanceidhandler.StatusMetadataKey: sbom.Status,
-			},
+			Name:        sbom.Name,
+			Annotations: sbom.Annotations,
 		},
 		Spec: v1beta1.SBOMSPDXv2p3Spec{},
 	}
 	if sbom.Content != nil {
 		manifest.Spec.SPDX = *sbom.Content
 	}
+	if manifest.Annotations == nil {
+		manifest.Annotations = map[string]string{}
+	}
+	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	if incomplete {
 		manifest.Annotations[instanceidhandler.StatusMetadataKey] = instanceidhandler.Incomplete
 	}
@@ -56,7 +58,10 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 				name: name,
 			},
 			domain.CVEManifest{
-				Name:    name,
+				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
 				Content: &v1beta1.GrypeDocument{},
 			},
 			false,
@@ -112,9 +117,9 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 			err = a.StoreCVE(tt.args.ctx, tt.cve, false)
 			tools.EnsureSetup(t, err == nil)
 			gotCve, _ := a.GetCVE(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
-			if (gotCve.Content == nil) != tt.wantEmptyCVE {
-				t.Errorf("GetCVE() gotCve.Content = %v, wantEmptyCVE %v", gotCve.Content, tt.wantEmptyCVE)
-				return
+			if !tt.wantEmptyCVE {
+				assert.NotNil(t, gotCve.Content)
+				assert.Equal(t, "bar", gotCve.Annotations["foo"])
 			}
 		})
 	}
@@ -259,6 +264,9 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			},
 			sbom: domain.SBOM{
 				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
 				Content: &v1beta1.Document{
 					CreationInfo: &v1beta1.CreationInfo{
 						Created: time.Now().Format(time.RFC3339),
@@ -274,6 +282,9 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			},
 			sbom: domain.SBOM{
 				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
 				Content: &v1beta1.Document{
 					CreationInfo: &v1beta1.CreationInfo{
 						Created: "invalid timestamp",
@@ -289,7 +300,10 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				SBOMCreatorVersion: "v1.1.0",
 			},
 			sbom: domain.SBOM{
-				Name:               name,
+				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
 				SBOMCreatorVersion: "v1.0.0",
 				Content: &v1beta1.Document{
 					CreationInfo: &v1beta1.CreationInfo{
@@ -343,9 +357,9 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			err = a.storeSBOMp(tt.args.ctx, tt.sbom, tt.incomplete)
 			tools.EnsureSetup(t, err == nil)
 			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
-			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
-				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
-				return
+			if !tt.wantEmptySBOM {
+				assert.NotNil(t, gotSbom.Content)
+				assert.Equal(t, "bar", gotSbom.Annotations["foo"])
 			}
 		})
 	}

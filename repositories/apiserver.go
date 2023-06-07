@@ -55,7 +55,7 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	}
 }
 
-func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (domain.CVEManifest, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetCVE")
 	defer span.End()
 	if name == "" {
@@ -88,6 +88,8 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		helpers.String("name", name))
 	return domain.CVEManifest{
 		Name:               name,
+		Annotations:        manifest.Annotations,
+		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
@@ -172,7 +174,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	return nil
 }
 
-func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOM")
 	defer span.End()
 	if name == "" {
@@ -200,6 +202,8 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	}
 	result := domain.SBOM{
 		Name:               name,
+		Annotations:        manifest.Annotations,
+		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
@@ -218,7 +222,7 @@ func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
 	return nil
 }
 
-func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
 	defer span.End()
 	if name == "" {
@@ -244,9 +248,10 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 	}
 	result := domain.SBOM{
 		Name:               name,
+		Annotations:        manifest.Annotations,
+		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
-		Labels:             manifest.Labels,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
