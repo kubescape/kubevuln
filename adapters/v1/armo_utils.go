@@ -64,14 +64,17 @@ func (a *ArmoAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.Sca
 func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err), helpers.String("wlid", wlid))
+		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
+			helpers.String("wlid", wlid))
 		errorChan <- err
 		return
 	}
 
 	urlBase, err := url.Parse(eventReceiverURL)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed parsing eventReceiverURL", helpers.Error(err), helpers.String("url", eventReceiverURL), helpers.String("wlid", wlid))
+		logger.L().Ctx(ctx).Error("failed parsing eventReceiverURL", helpers.Error(err),
+			helpers.String("url", eventReceiverURL),
+			helpers.String("wlid", wlid))
 		err = fmt.Errorf("fail parsing URL, %s, err: %s", eventReceiverURL, err.Error())
 		errorChan <- err
 		return
@@ -84,14 +87,17 @@ func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultRepo
 
 	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed posting to event", helpers.String("image", imagetag), helpers.String("wlid", wlid), helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
+			helpers.String("image", imagetag),
+			helpers.String("wlid", wlid))
 		errorChan <- err
 		return
 	}
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Vulnerabilities post to event receiver failed", helpers.Error(err), helpers.String("body", body))
+		logger.L().Ctx(ctx).Error("Vulnerabilities post to event receiver failed", helpers.Error(err),
+			helpers.String("body", body))
 		errorChan <- err
 		return
 	}

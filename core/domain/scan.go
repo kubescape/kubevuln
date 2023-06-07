@@ -16,7 +16,7 @@ var (
 	ErrExpectedError    = errors.New("expected error")
 	ErrInitVulnDB       = errors.New("vulnerability DB is not initialized, run readiness probe")
 	ErrIncompleteSBOM   = errors.New("incomplete SBOM, skipping CVE scan")
-	ErrMissingImageID   = errors.New("missing imageID")
+	ErrMissingImageInfo = errors.New("missing image information")
 	ErrMissingScanID    = errors.New("missing scanID")
 	ErrMissingTimestamp = errors.New("missing timestamp")
 	ErrMissingWorkload  = errors.New("missing workload")
@@ -31,6 +31,7 @@ type WorkloadKey struct{}
 type ScanCommand struct {
 	Credentialslist []types.AuthConfig
 	ImageHash       string
+	ImageSlug       string
 	InstanceID      string
 	Wlid            string
 	ImageTag        string

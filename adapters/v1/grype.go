@@ -84,7 +84,8 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		defer g.mu.Unlock()
 		ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
 		defer span.End()
-		logger.L().Info("updating grype DB", helpers.String("listingURL", g.dbConfig.ListingURL))
+		logger.L().Info("updating grype DB",
+			helpers.String("listingURL", g.dbConfig.ListingURL))
 		var err error
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
 		if err != nil {
@@ -113,13 +114,15 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, domain.ErrInitVulnDB
 	}
 
-	logger.L().Debug("decoding SBOM", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("decoding SBOM",
+		helpers.String("name", sbom.Name))
 	s, err := domainToSyft(*sbom.Content)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("reading packages from SBOM", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("reading packages from SBOM",
+		helpers.String("name", sbom.Name))
 	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
@@ -133,27 +136,31 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Matchers: getMatchers(),
 	}
 
-	logger.L().Debug("finding vulnerabilities", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("finding vulnerabilities",
+		helpers.String("name", sbom.Name))
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("compiling results", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("compiling results",
+		helpers.String("name", sbom.Name))
 	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("converting results to common format", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("converting results to common format",
+		helpers.String("name", sbom.Name))
 	vulnerabilityResults, err := grypeToDomain(doc)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("returning CVE manifest", helpers.String("imageID", sbom.ID))
+	logger.L().Debug("returning CVE manifest",
+		helpers.String("name", sbom.Name))
 	return domain.CVEManifest{
-		ID:                 sbom.ID,
+		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(ctx),
 		CVEDBVersion:       g.DBVersion(ctx),
