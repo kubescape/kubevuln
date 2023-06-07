@@ -55,31 +55,39 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	}
 }
 
-func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetCVE")
 	defer span.End()
-	if imageID == "" {
-		logger.L().Debug("empty image ID provided, skipping CVE retrieval")
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping CVE retrieval")
 		return domain.CVEManifest{}, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), imageID, metav1.GetOptions{})
+	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
-		logger.L().Debug("CVE manifest not found in storage", helpers.String("ID", imageID))
+		logger.L().Debug("CVE manifest not found in storage",
+			helpers.String("name", name))
 		return domain.CVEManifest{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err), helpers.String("ID", imageID))
+		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err),
+			helpers.String("name", name))
 		return domain.CVEManifest{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	// TODO: also check SBOMCreatorVersion ?
 	if manifest.Spec.Metadata.Tool.Version != CVEScannerVersion || manifest.Spec.Metadata.Tool.DatabaseVersion != CVEDBVersion {
-		logger.L().Debug("discarding CVE manifest with outdated scanner version", helpers.String("ID", imageID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("manifest DB version", manifest.Spec.Metadata.Tool.DatabaseVersion), helpers.String("wanted scanner version", CVEScannerVersion), helpers.String("wanted DB version", CVEDBVersion))
+		logger.L().Debug("discarding CVE manifest with outdated scanner version",
+			helpers.String("name", name),
+			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
+			helpers.String("manifest DB version", manifest.Spec.Metadata.Tool.DatabaseVersion),
+			helpers.String("wanted scanner version", CVEScannerVersion),
+			helpers.String("wanted DB version", CVEDBVersion))
 		return domain.CVEManifest{}, nil
 	}
-	logger.L().Debug("got CVE manifest from storage", helpers.String("ID", imageID))
+	logger.L().Debug("got CVE manifest from storage",
+		helpers.String("name", name))
 	return domain.CVEManifest{
-		ID:                 imageID,
+		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
@@ -90,8 +98,9 @@ func (a *APIServerStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion
 func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
 	defer span.End()
-	if cve.ID == "" {
-		logger.L().Debug("skipping storing CVE manifest with empty ID", helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+	if cve.Name == "" {
+		logger.L().Debug("skipping storing CVE manifest with empty name",
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
 	if cve.Labels == nil {
@@ -106,7 +115,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        cve.ID,
+			Name:        cve.Name,
 			Annotations: cve.Annotations,
 			Labels:      cve.Labels,
 		},
@@ -130,7 +139,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.ID, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
@@ -143,48 +152,62 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err),
+				helpers.String("name", cve.Name),
+				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		} else {
-			logger.L().Debug("updated CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			logger.L().Debug("updated CVE manifest in storage",
+				helpers.String("name", cve.Name),
+				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		}
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err), helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err),
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
-		logger.L().Debug("stored CVE manifest in storage", helpers.String("ID", cve.ID), helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		logger.L().Debug("stored CVE manifest in storage",
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
 }
 
-func (a *APIServerStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOM")
 	defer span.End()
-	if imageID == "" {
-		logger.L().Debug("empty image ID provided, skipping SBOM retrieval")
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), imageID, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
-		logger.L().Debug("SBOM manifest not found in storage", helpers.String("ID", imageID))
+		logger.L().Debug("SBOM manifest not found in storage",
+			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err), helpers.String("ID", imageID))
+		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err),
+			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
-		logger.L().Debug("discarding SBOM with outdated scanner version", helpers.String("ID", imageID), helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version), helpers.String("wanted scanner version", SBOMCreatorVersion))
+		logger.L().Debug("discarding SBOM with outdated scanner version",
+			helpers.String("name", name),
+			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
+			helpers.String("wanted scanner version", SBOMCreatorVersion))
 		return domain.SBOM{}, nil
 	}
 	result := domain.SBOM{
-		ID:                 imageID,
+		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
 	}
-	logger.L().Debug("got SBOM from storage", helpers.String("ID", imageID))
+	logger.L().Debug("got SBOM from storage",
+		helpers.String("name", name))
 	return result, nil
 }
 
@@ -195,29 +218,32 @@ func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
 	return nil
 }
 
-func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
 	defer span.End()
-	if instanceID == "" {
-		logger.L().Debug("empty instance ID provided, skipping relevant SBOM retrieval")
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping relevant SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), instanceID, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
-		logger.L().Debug("relevant SBOM manifest not found in storage", helpers.String("ID", instanceID))
+		logger.L().Debug("relevant SBOM manifest not found in storage",
+			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err), helpers.String("ID", instanceID))
+		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err),
+			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	}
 	// validate SBOMp manifest
 	if err := validateSBOMp(manifest); err != nil {
-		logger.L().Debug("discarding relevant SBOM", helpers.Error(err), helpers.String("ID", instanceID))
+		logger.L().Debug("discarding relevant SBOM", helpers.Error(err),
+			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	}
 	result := domain.SBOM{
-		ID:                 instanceID,
+		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.SPDX,
 		Labels:             manifest.Labels,
@@ -225,20 +251,21 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVe
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
 	}
-	logger.L().Debug("got relevant SBOM from storage", helpers.String("ID", instanceID))
+	logger.L().Debug("got relevant SBOM from storage",
+		helpers.String("name", name))
 	return result, nil
 }
 
 func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOM")
 	defer span.End()
-	if sbom.ID == "" {
-		logger.L().Debug("skipping storing SBOM with empty ID")
+	if sbom.Name == "" {
+		logger.L().Debug("skipping storing SBOM with empty name")
 		return nil
 	}
 	manifest := v1beta1.SBOMSPDXv2p3{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        sbom.ID,
+			Name:        sbom.Name,
 			Annotations: sbom.Annotations,
 			Labels:      sbom.Labels,
 		},
@@ -266,11 +293,14 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 	_, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
-		logger.L().Debug("SBOM manifest already exists in storage", helpers.String("ID", sbom.ID))
+		logger.L().Debug("SBOM manifest already exists in storage",
+			helpers.String("name", sbom.Name))
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err), helpers.String("ID", sbom.ID))
+		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err),
+			helpers.String("name", sbom.Name))
 	default:
-		logger.L().Debug("stored SBOM in storage", helpers.String("ID", sbom.ID))
+		logger.L().Debug("stored SBOM in storage",
+			helpers.String("name", sbom.Name))
 	}
 	return nil
 }

@@ -49,7 +49,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("imageID", newScan.ImageID),
+			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTag", newScan.ImageTag),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
@@ -62,7 +62,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 		err = h.scanService.GenerateSBOM(ctx)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
-				helpers.String("imageID", newScan.ImageID),
+				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
@@ -103,7 +103,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	ctx, err = h.scanService.ValidateScanCVE(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("imageID", newScan.ImageID),
+			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTag", newScan.ImageTag),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
@@ -117,7 +117,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 		if err != nil {
 			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
-				helpers.String("imageID", newScan.ImageID),
+				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
@@ -138,7 +138,7 @@ func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanC
 		Session:         sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(c.ImageTag, c.ImageHash); err == nil {
-		command.ImageID = slug
+		command.ImageSlug = slug
 	}
 	if c.InstanceID != nil {
 		command.InstanceID = *c.InstanceID
@@ -170,7 +170,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	ctx, err = h.scanService.ValidateScanRegistry(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("imageID", newScan.ImageID),
+			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTag", newScan.ImageTag),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
@@ -183,7 +183,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 		err = h.scanService.ScanRegistry(ctx)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
-				helpers.String("imageID", newScan.ImageID),
+				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
@@ -200,12 +200,13 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 		Session:         sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(c.ImageTag, "nohash"); err == nil {
-		command.ImageID = slug
+		command.ImageSlug = slug
 	}
 	return command
 }
 
 func (h HTTPController) Shutdown() {
-	logger.L().Info("purging SBOM creation queue", helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())))
+	logger.L().Info("purging SBOM creation queue",
+		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())))
 	h.workerPool.StopWait()
 }

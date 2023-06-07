@@ -42,7 +42,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 		{
 			name: "valid SBOM produces well-formed vulnerability list",
 			sbom: domain.SBOM{
-				ID:                 "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+				Name:               "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 				SBOMCreatorVersion: "TODO",
 				Content:            fileToSBOM("testdata/alpine-sbom.json"),
 			},
@@ -51,7 +51,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 		{
 			name: "filtered SBOM",
 			sbom: domain.SBOM{
-				ID:                 "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
+				Name:               "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
 				SBOMCreatorVersion: "TODO",
 				Content:            fileToSBOM("testdata/nginx-filtered-sbom.json"),
 			},

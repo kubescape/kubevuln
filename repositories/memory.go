@@ -43,7 +43,7 @@ func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 }
 
 // GetCVE returns a CVE manifest from an in-memory map
-func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
+func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (cve domain.CVEManifest, err error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVE")
 	defer span.End()
 
@@ -52,7 +52,7 @@ func (m *MemoryStore) GetCVE(ctx context.Context, imageID, SBOMCreatorVersion, C
 	}
 
 	id := cveID{
-		Name:               imageID,
+		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
@@ -73,7 +73,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 	}
 
 	id := cveID{
-		Name:               cve.ID,
+		Name:               cve.Name,
 		SBOMCreatorVersion: cve.SBOMCreatorVersion,
 		CVEScannerVersion:  cve.CVEScannerVersion,
 		CVEDBVersion:       cve.CVEDBVersion,
@@ -83,7 +83,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 }
 
 // GetSBOM returns a SBOM from an in-memory map
-func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
+func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (sbom domain.SBOM, err error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOM")
 	defer span.End()
 
@@ -92,7 +92,7 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, imageID, SBOMCreatorVersion s
 	}
 
 	id := sbomID{
-		Name:               imageID,
+		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 	}
 	if value, ok := m.sboms[id]; ok {
@@ -130,7 +130,7 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	}
 
 	id := sbomID{
-		Name:               sbom.ID,
+		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 	}
 	m.sboms[id] = sbom
