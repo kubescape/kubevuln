@@ -12,36 +12,36 @@ import (
 func TestMemoryStore_GetCVE(t *testing.T) {
 	m := NewMemoryStorage(false, false)
 	ctx := context.TODO()
-	got, _ := m.GetCVE(ctx, "imageID", "", "", "")
+	got, _ := m.GetCVE(ctx, "name", "", "", "")
 	assert.Nil(t, got.Content)
 	cve := domain.CVEManifest{
-		ID:                 "imageID",
+		Name:               "name",
 		SBOMCreatorVersion: "",
 		CVEScannerVersion:  "",
 		CVEDBVersion:       "",
 		Content:            &v1beta1.GrypeDocument{},
 	}
 	_ = m.StoreCVE(ctx, cve, false)
-	got, _ = m.GetCVE(ctx, "imageID", "", "", "")
+	got, _ = m.GetCVE(ctx, "name", "", "", "")
 	assert.NotNil(t, got.Content)
 }
 
 func TestMemoryStore_GetSBOM(t *testing.T) {
 	m := NewMemoryStorage(false, false)
 	ctx := context.TODO()
-	got, _ := m.GetSBOM(ctx, "imageID", "")
+	got, _ := m.GetSBOM(ctx, "name", "")
 	assert.Nil(t, got.Content)
-	got, _ = m.GetSBOMp(ctx, "imageID", "")
+	got, _ = m.GetSBOMp(ctx, "name", "")
 	assert.Nil(t, got.Content)
 	sbom := domain.SBOM{
-		ID:                 "imageID",
+		Name:               "name",
 		SBOMCreatorVersion: "",
 		Status:             "",
 		Content:            &v1beta1.Document{},
 	}
 	_ = m.StoreSBOM(ctx, sbom)
-	got, _ = m.GetSBOM(ctx, "imageID", "")
+	got, _ = m.GetSBOM(ctx, "name", "")
 	assert.NotNil(t, got.Content)
-	got, _ = m.GetSBOMp(ctx, "imageID", "")
+	got, _ = m.GetSBOMp(ctx, "name", "")
 	assert.NotNil(t, got.Content)
 }

@@ -48,7 +48,7 @@ func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID string, _ d
 		)
 	}
 	sbom := domain.SBOM{
-		ID:                 name,
+		Name:               name,
 		SBOMCreatorVersion: m.Version(),
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,

@@ -31,7 +31,7 @@ type WorkloadKey struct{}
 type ScanCommand struct {
 	Credentialslist []types.AuthConfig
 	ImageHash       string
-	ImageID         string
+	ImageSlug       string
 	InstanceID      string
 	Wlid            string
 	ImageTag        string

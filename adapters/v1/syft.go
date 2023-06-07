@@ -59,7 +59,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	defer span.End()
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
-		ID:                 name,
+		Name:               name,
 		SBOMCreatorVersion: s.Version(),
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,
@@ -94,22 +94,27 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	defer func(t *file.TempDirGenerator) {
 		err := t.Cleanup()
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to cleanup temp dir", helpers.String("imageID", imageID), helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to cleanup temp dir", helpers.Error(err),
+				helpers.String("imageID", imageID))
 		}
 	}(t)
 	// download image
-	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
+	logger.L().Debug("downloading image",
+		helpers.String("imageID", imageID))
 	src, err := newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
 	// check for 401 error and retry without credentials
 	var transportError *transport.Error
 	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusUnauthorized {
-		logger.L().Debug("got 401, retrying without credentials", helpers.String("imageID", imageID))
+		logger.L().Debug("got 401, retrying without credentials",
+			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
 		src, err = newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
 	}
 	switch {
 	case errors.Is(err, ErrImageTooLarge):
-		logger.L().Ctx(ctx).Warning("Image exceeds size limit", helpers.Int("maxImageSize", int(s.maxImageSize)), helpers.String("imageID", imageID))
+		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
+			helpers.Int("maxImageSize", int(s.maxImageSize)),
+			helpers.String("imageID", imageID))
 		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, nil
 	case err != nil:
@@ -123,7 +128,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	var actualDistro *linux.Release
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
-		logger.L().Debug("extracting packages", helpers.String("imageID", imageID))
+		logger.L().Debug("extracting packages",
+			helpers.String("imageID", imageID))
 		catalogOptions := cataloger.Config{
 			Search:      cataloger.DefaultSearchConfig(),
 			Parallelism: 4, // TODO assess this value
@@ -133,7 +139,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	})
 	switch err {
 	case deadline.ErrTimedOut:
-		logger.L().Ctx(ctx).Warning("Syft timed out", helpers.String("imageID", imageID))
+		logger.L().Ctx(ctx).Warning("Syft timed out",
+			helpers.String("imageID", imageID))
 		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, nil
 	case nil:
@@ -144,7 +151,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		return domainSBOM, err
 	}
 	// generate SBOM
-	logger.L().Debug("generating SBOM", helpers.String("imageID", imageID))
+	logger.L().Debug("generating SBOM",
+		helpers.String("imageID", imageID))
 	syftSBOM := sbom.SBOM{
 		Source:        src.Metadata,
 		Relationships: relationships,
@@ -154,10 +162,12 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		},
 	}
 	// convert SBOM
-	logger.L().Debug("converting SBOM", helpers.String("imageID", imageID))
+	logger.L().Debug("converting SBOM",
+		helpers.String("imageID", imageID))
 	domainSBOM.Content, err = s.syftToDomain(syftSBOM)
 	// return SBOM
-	logger.L().Debug("returning SBOM", helpers.String("imageID", imageID))
+	logger.L().Debug("returning SBOM",
+		helpers.String("imageID", imageID))
 	return domainSBOM, err
 }
 
