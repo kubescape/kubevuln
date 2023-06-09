@@ -28,10 +28,15 @@ func PackageVersion(name string) string {
 	return "unknown"
 }
 
-var offendingChars = regexp.MustCompile("[@:/ .]")
+var offendingChars = regexp.MustCompile("[@:/ ._]")
 
 func sanitize(s string) string {
-	return truncate.Truncate(offendingChars.ReplaceAllString(s, "-"), 63, "", truncate.PositionEnd)
+	s2 := truncate.Truncate(offendingChars.ReplaceAllString(s, "-"), 63, "", truncate.PositionEnd)
+	// remove trailing dash
+	if len(s2) > 0 && s2[len(s2)-1] == '-' {
+		return s2[:len(s2)-1]
+	}
+	return s2
 }
 
 // LabelsFromImageID returns a map of labels from an image ID.

@@ -105,7 +105,7 @@ func Test_domainToArmo(t *testing.T) {
 			}
 			got[0].ContainerScanID = ""
 			got[0].Timestamp = 0
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -162,7 +162,7 @@ func Test_parseLayersPayload(t *testing.T) {
 				t.Errorf("parseLayersPayload() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
