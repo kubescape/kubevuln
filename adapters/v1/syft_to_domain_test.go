@@ -91,7 +91,7 @@ func TestSyftAdapter_spdxToDomain(t *testing.T) {
 				t.Errorf("spdxToDomain() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
