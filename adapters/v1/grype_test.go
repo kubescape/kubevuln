@@ -23,7 +23,7 @@ func Test_grypeAdapter_DBVersion(t *testing.T) {
 	g := NewGrypeAdapterFixedDB()
 	g.Ready(ctx) // need to call ready to load the DB
 	version := g.DBVersion(ctx)
-	assert.Equal(t, version, "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a")
+	assert.Equal(t, "sha256:9be2df3d7d657bfb40ddcc68c9d00520ee7f5a34c7a26333f90cf89cefd5668a", version)
 }
 
 func fileToSBOM(path string) *v1beta1.Document {

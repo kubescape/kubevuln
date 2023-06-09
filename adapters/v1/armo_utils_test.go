@@ -158,7 +158,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName, tc.isFixed)
-			assert.Equal(t, actual, tc.expected)
+			assert.Equal(t, tc.expected, actual)
 		})
 	}
 }
@@ -501,7 +501,7 @@ func Test_summarize(t *testing.T) {
 			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
 				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
 			})
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
