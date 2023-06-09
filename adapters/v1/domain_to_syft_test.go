@@ -77,7 +77,7 @@ func Test_domainToSpdx(t *testing.T) {
 				t.Errorf("domainToSpdx() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 func TestMockCVEAdapter_DBVersion(t *testing.T) {
 	m := NewMockCVEAdapter()
-	assert.Equal(t, m.DBVersion(context.TODO()), "v1.0.0")
+	assert.Equal(t, "v1.0.0", m.DBVersion(context.TODO()))
 }
 
 func TestMockCVEAdapter_Ready(t *testing.T) {
@@ -26,5 +26,5 @@ func TestMockCVEAdapter_ScanSBOM(t *testing.T) {
 
 func TestMockCVEAdapter_Version(t *testing.T) {
 	m := NewMockCVEAdapter()
-	assert.Equal(t, m.Version(context.TODO()), "Mock CVE 1.0")
+	assert.Equal(t, "Mock CVE 1.0", m.Version(context.TODO()))
 }

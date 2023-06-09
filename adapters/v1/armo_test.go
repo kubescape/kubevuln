@@ -76,7 +76,7 @@ func TestArmoAdapter_GetCVEExceptions(t *testing.T) {
 				t.Errorf("GetCVEExceptions() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.Equal(t, got, tt.want)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
