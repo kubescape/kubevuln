@@ -91,6 +91,41 @@ func Test_domainToArmo(t *testing.T) {
 				IsFixed:       1,
 			}},
 		},
+		{
+			name: "Detect fixed vulnerability with CPE match",
+			grypeDocument: v1beta1.GrypeDocument{
+				Source: &v1beta1.Source{
+					Target: json.RawMessage(`{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"dummyLayer","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`),
+				},
+				Matches: []v1beta1.Match{{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+							ID: "CVE-2021-21300",
+						},
+					},
+					RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{{
+						Description: "related description",
+					}},
+					MatchDetails: []v1beta1.MatchDetails{{
+						Type:  "cpe-match",
+						Found: json.RawMessage(`{"vulnerabilityID":"CVE-2018-20200","versionConstraint":">= 3.0.0, <= 3.12.0 (unknown)","cpes":["cpe:2.3:a:squareup:okhttp:*:*:*:*:*:*:*:*"]}`),
+					}},
+				}},
+			},
+			want: []containerscan.CommonContainerVulnerabilityResult{{
+				IntroducedInLayer: dummyLayer,
+				Vulnerability: containerscan.Vulnerability{
+					Description: "related description",
+					Name:        "CVE-2021-21300",
+					Link:        "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
+					Fixes:       containerscan.VulFixes{{Version: "unknown"}},
+				},
+				Layers:        []containerscan.ESLayer{{LayerHash: dummyLayer}},
+				RelevantLinks: []string{"https://nvd.nist.gov/vuln/detail/CVE-2021-21300", ""},
+				IsLastScan:    1,
+				IsFixed:       1,
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
