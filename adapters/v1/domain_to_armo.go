@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 
+	"github.com/anchore/grype/grype/search"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/cluster-container-scanner-api/containerscan"
@@ -56,6 +58,20 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 			if len(match.Vulnerability.Fix.Versions) != 0 {
 				isFixed = 1
 				version = match.Vulnerability.Fix.Versions[0]
+			} else {
+				// also check CPE matches
+				for _, detail := range match.MatchDetails {
+					var found search.CPEResult
+					err := json.Unmarshal(detail.Found, &found)
+					if err == nil {
+						// we assume that if a higher version is mentioned in the CPE, then it is fixed somewhere
+						if strings.Contains(found.VersionConstraint, "<") {
+							isFixed = 1
+							version = "unknown"
+							break
+						}
+					}
+				}
 			}
 			if description == "" && len(match.RelatedVulnerabilities) > 0 {
 				description = match.RelatedVulnerabilities[0].Description
