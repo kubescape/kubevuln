@@ -145,6 +145,11 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 		return domain.ErrMissingWorkload
 	}
 
+	// validate one more time the scanID before sending it to the platform
+	if !armotypes.ValidateContainerScanID(scanID) {
+		return domain.ErrInvalidScanID
+	}
+
 	// get exceptions
 	exceptions, err := a.GetCVEExceptions(ctx)
 	if err != nil {

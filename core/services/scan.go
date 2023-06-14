@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/akyoto/cache"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -328,12 +329,14 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Con
 }
 
 func generateScanID(workload domain.ScanCommand) string {
-	if workload.InstanceID != "" {
+	if workload.InstanceID != "" && armotypes.ValidateContainerScanID(workload.InstanceID) {
 		return workload.InstanceID
 	}
 	if workload.ImageTag != "" && workload.ImageHash != "" {
 		sum := sha256.Sum256([]byte(workload.ImageTag + workload.ImageHash))
-		return fmt.Sprintf("%x", sum)
+		if scanID := fmt.Sprintf("%x", sum); armotypes.ValidateContainerScanID(scanID) {
+			return scanID
+		}
 	}
 	return uuid.New().String()
 }
