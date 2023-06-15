@@ -20,7 +20,7 @@ jobs:
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
       IMAGE_TAG: v0.2.${{ github.run_number }}
-      COMPONENT_NAME: node-agent
+      COMPONENT_NAME: kubevuln
       SYSTEM_TESTS_BRANCH: relevancy
       CGO_ENABLED: 0
       GO111MODULE: "on"
