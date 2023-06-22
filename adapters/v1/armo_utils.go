@@ -33,7 +33,7 @@ func (a *ArmoAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report 
 		firstVulnerabilitiesChunk = nil
 	} else {
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
-		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount != 0
+		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount == 0
 	}
 	//send the summary report
 	a.postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
