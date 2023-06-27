@@ -97,9 +97,10 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 	}, nil
 }
 
-func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
+func (a *APIServerStore) storeCVEWithFullContent(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVEWithFullContent")
 	defer span.End()
+
 	if cve.Name == "" {
 		logger.L().Debug("skipping storing CVE manifest with empty name",
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
@@ -171,6 +172,126 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			helpers.String("name", cve.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
+	return nil
+}
+
+func parseSeverities(cve domain.CVEManifest) v1beta1.SeveritySummary {
+	critical := 0
+	high := 0
+	medium := 0
+	low := 0
+	negligible := 0
+	unknown := 0
+
+	for i := range cve.Content.Matches {
+		switch cve.Content.Matches[i].Vulnerability.Severity {
+		case domain.CriticalSeverity:
+			critical += 1
+		case domain.HighSeverity:
+			high += 1
+		case domain.MediumSeverity:
+			medium += 1
+		case domain.LowSeverity:
+			low += 1
+		case domain.NegligibleSeverity:
+			negligible += 1
+		case domain.UnknownSeverity:
+			unknown += 1
+		}
+	}
+
+	return v1beta1.SeveritySummary{
+		Critical:   v1beta1.VulnerabilityCounters{All: critical},
+		High:       v1beta1.VulnerabilityCounters{All: high},
+		Medium:     v1beta1.VulnerabilityCounters{All: medium},
+		Low:        v1beta1.VulnerabilityCounters{All: low},
+		Negligible: v1beta1.VulnerabilityCounters{All: negligible},
+		Unknown:    v1beta1.VulnerabilityCounters{All: unknown},
+	}
+}
+
+func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.storeCVESummary")
+	defer span.End()
+
+	if cve.Name == "" {
+		logger.L().Debug("skipping storing CVE manifest with empty name",
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		return nil
+	}
+	if cve.Labels == nil {
+		cve.Labels = make(map[string]string)
+	}
+
+	if withRelevancy {
+		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+	} else {
+		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+	}
+
+	manifest := v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        cve.Name,
+			Annotations: cve.Annotations,
+			Labels:      cve.Labels,
+		},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: parseSeverities(cve),
+		},
+	}
+	_, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
+			// update the vulnerability manifest
+			result.Annotations = manifest.Annotations
+			result.Labels = manifest.Labels
+			result.Spec = manifest.Spec
+			// try to send the updated vulnerability manifest
+			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to update CVE summary manifest in storage", helpers.Error(err),
+				helpers.String("name", cve.Name),
+				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		} else {
+			logger.L().Debug("updated CVE summary manifest in storage",
+				helpers.String("name", cve.Name),
+				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		}
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to store CVE summary manifest in storage", helpers.Error(err),
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+	default:
+		logger.L().Debug("stored CVE summary manifest in storage",
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+	}
+	return nil
+}
+
+func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	innerCtx, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
+	defer span.End()
+
+	err := a.storeCVEWithFullContent(innerCtx, cve, withRelevancy)
+	if err != nil {
+		return err
+	}
+
+	err = a.storeCVESummary(innerCtx, cve, withRelevancy)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -261,9 +382,10 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 	return result, nil
 }
 
-func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOM")
+func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.SBOM) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOMWithContent")
 	defer span.End()
+
 	if sbom.Name == "" {
 		logger.L().Debug("skipping storing SBOM with empty name")
 		return nil
@@ -307,5 +429,58 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		logger.L().Debug("stored SBOM in storage",
 			helpers.String("name", sbom.Name))
 	}
+	return nil
+}
+
+func (a *APIServerStore) storeSBOMWithoutContent(ctx context.Context, sbom domain.SBOM) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOMWithoutContent")
+	defer span.End()
+
+	if sbom.Name == "" {
+		logger.L().Debug("skipping storing SBOM with empty name")
+		return nil
+	}
+	manifest := v1beta1.SBOMSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        sbom.Name,
+			Annotations: sbom.Annotations,
+			Labels:      sbom.Labels,
+		},
+		Spec:   v1beta1.SBOMSummarySpec{},
+		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
+	}
+	if manifest.Annotations == nil {
+		manifest.Annotations = map[string]string{}
+	}
+	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
+	_, err := a.StorageClient.SBOMSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		logger.L().Debug("SBOM summary manifest already exists in storage",
+			helpers.String("name", sbom.Name))
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to store SBOM summary into apiserver", helpers.Error(err),
+			helpers.String("name", sbom.Name))
+	default:
+		logger.L().Debug("stored SBOM summary in storage",
+			helpers.String("name", sbom.Name))
+	}
+	return nil
+}
+
+func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
+	innerCtx, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOM")
+	defer span.End()
+
+	err := a.storeSBOMWithContent(innerCtx, sbom)
+	if err != nil {
+		return err
+	}
+
+	err = a.storeSBOMWithoutContent(innerCtx, sbom)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

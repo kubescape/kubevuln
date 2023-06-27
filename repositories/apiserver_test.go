@@ -364,3 +364,40 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIServerStore_parseSeverities(t *testing.T) {
+	var nginxCVECriticalSeveritiesNumber = 72
+	var nginxCVEHighSeveritiesNumber = 128
+	var nginxCVEMediumSeveritiesNumber = 98
+	var nginxCVELowSeveritiesNumber = 56
+	var nginxCVENegligibleSeveritiesNumber = 102
+	var nginxCVEUnknownSeveritiesNumber = 0
+
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	severities := parseSeverities(cveManifest)
+	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.All)
+	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.All)
+	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.All)
+	assert.Equal(t, nginxCVELowSeveritiesNumber, severities.Low.All)
+	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.All)
+	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.All)
+}
+
+func TestAPIServerStore_storeCVESummary(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	a := NewFakeAPIServerStorage("kubescape")
+
+	err := a.storeCVESummary(context.TODO(), cveManifest, false)
+	assert.Equal(t, err, nil)
+}
+
+func TestAPIServerStore_storeSBOMWithoutContent(t *testing.T) {
+	SBOMData := tools.FileToSBOM("testdata/alpine-sbom.json")
+	SBOM := domain.SBOM{
+		Content: SBOMData,
+	}
+	a := NewFakeAPIServerStorage("kubescape")
+
+	err := a.storeSBOMWithoutContent(context.TODO(), SBOM)
+	assert.Equal(t, err, nil)
+}
