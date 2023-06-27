@@ -5,6 +5,15 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+const (
+	CriticalSeverity   = "Critical"
+	HighSeverity       = "High"
+	MediumSeverity     = "Medium"
+	LowSeverity        = "Low"
+	NegligibleSeverity = "Negligible"
+	UnknownSeverity    = "Unknown"
+)
+
 type CVEExceptions []armotypes.VulnerabilityExceptionPolicy
 
 // CVEManifest contains a JSON CVE report manifest with some metadata

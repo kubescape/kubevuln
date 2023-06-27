@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"encoding/json"
+	"os"
 	"regexp"
 	"runtime/debug"
 	"testing"
@@ -8,6 +10,8 @@ import (
 	"github.com/aquilax/truncate"
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -54,4 +58,28 @@ func LabelsFromImageID(imageID string) map[string]string {
 		}
 	}
 	return labels
+}
+
+func FileContent(path string) []byte {
+	b, _ := os.ReadFile(path)
+	return b
+}
+
+func FileToSBOM(path string) *v1beta1.Document {
+	sbom := v1beta1.Document{}
+	_ = json.Unmarshal(FileContent(path), &sbom)
+	return &sbom
+}
+
+func FileToCVEManifest(path string) domain.CVEManifest {
+	var cve domain.CVEManifest
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	err = json.Unmarshal(b, &cve)
+	if err != nil {
+		panic(err)
+	}
+	return cve
 }
