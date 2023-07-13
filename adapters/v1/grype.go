@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -90,7 +91,11 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
-			return false
+			err := tools.DeleteContents(g.dbConfig.DBRootDir)
+			logger.L().Debug("cleaned up cache", helpers.Error(err),
+				helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+			logger.L().Info("restarting to release previous grype DB")
+			os.Exit(0)
 		}
 		g.lastDbUpdate = now
 		logger.L().Info("grype DB updated")
