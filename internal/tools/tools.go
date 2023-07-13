@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"regexp"
 	"runtime/debug"
 	"testing"
@@ -82,4 +83,18 @@ func FileToCVEManifest(path string) domain.CVEManifest {
 		panic(err)
 	}
 	return cve
+}
+
+func DeleteContents(dir string) error {
+	d, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, c := range d {
+		err := os.RemoveAll(path.Join([]string{dir, c.Name()}...))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
