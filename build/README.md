@@ -9,5 +9,5 @@ git clone https://github.com/kubescape/kubevuln.git kubevuln && cd "$_"
 
 2. Build
 ```
-docker build -t kubevuln -f build/Dockerfile .
+docker buildx build -t kubevuln -f build/Dockerfile --load .
 ```
