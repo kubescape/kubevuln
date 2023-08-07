@@ -48,10 +48,17 @@ func sanitize(s string) string {
 // Each label is sanitized and verified to be a valid DNS1123 label.
 func LabelsFromImageID(imageID string) map[string]string {
 	labels := map[string]string{}
-	match := reference.ReferenceRegexp.FindStringSubmatch(imageID)
-	labels[instanceidhandler.ImageIDMetadataKey] = sanitize(match[0])
-	labels[instanceidhandler.ImageNameMetadataKey] = sanitize(match[1])
-	labels[instanceidhandler.ImageTagMetadataKey] = sanitize(match[2])
+	ref, err := reference.Parse(imageID)
+	if err != nil {
+		return labels
+	}
+	if named, ok := ref.(reference.Named); ok {
+		labels[instanceidhandler.ImageIDMetadataKey] = sanitize(named.String())
+		labels[instanceidhandler.ImageNameMetadataKey] = sanitize(named.Name())
+	}
+	if tagged, ok := ref.(reference.Tagged); ok {
+		labels[instanceidhandler.ImageTagMetadataKey] = sanitize(tagged.Tag())
+	}
 	// prune invalid labels
 	for key, value := range labels {
 		if errs := validation.IsDNS1123Label(value); len(errs) != 0 {
