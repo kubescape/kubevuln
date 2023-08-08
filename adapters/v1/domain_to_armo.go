@@ -91,7 +91,7 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 				Vulnerability: containerscan.Vulnerability{
 					Name:               match.Vulnerability.ID,
 					ImageID:            workload.ImageHash,
-					ImageTag:           workload.ImageTag,
+					ImageTag:           workload.ImageTagNormalized,
 					RelatedPackageName: match.Artifact.Name,
 					PackageVersion:     match.Artifact.Version,
 					Link:               link,
@@ -101,7 +101,7 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 					Fixes: []containerscan.FixedIn{
 						{
 							Name:    match.Vulnerability.Fix.State,
-							ImgTag:  workload.ImageTag,
+							ImgTag:  workload.ImageTagNormalized,
 							Version: version,
 						},
 					},

@@ -105,3 +105,11 @@ func DeleteContents(dir string) error {
 	}
 	return nil
 }
+
+func NormalizeReference(ref string) string {
+	n, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return ref
+	}
+	return n.String()
+}

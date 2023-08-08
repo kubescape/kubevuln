@@ -111,7 +111,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 	)
 	report.Status = statuses[step]
 	report.Target = fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s",
-		workload.Wlid, workload.ContainerName, workload.ImageTag, workload.ImageHash)
+		workload.Wlid, workload.ContainerName, workload.ImageTagNormalized, workload.ImageHash)
 	report.ActionID = strconv.Itoa(lastAction)
 	report.ActionIDN = lastAction
 	report.ActionName = ActionName
