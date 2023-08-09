@@ -152,7 +152,7 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		ContainerScanID:  report.ContainerScanID,
 		WLID:             workload.Wlid,
 		ImageID:          workload.ImageHash,
-		ImageTag:         workload.ImageTag,
+		ImageTag:         workload.ImageTagNormalized,
 		ClusterName:      report.Designators.Attributes[armotypes.AttributeCluster],
 		Namespace:        report.Designators.Attributes[armotypes.AttributeNamespace],
 		ContainerName:    report.Designators.Attributes[armotypes.AttributeContainerName],
@@ -161,7 +161,7 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		HasRelevancyData: hasRelevancy,
 	}
 
-	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTag)
+	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTagNormalized)
 	if err == nil {
 		summary.Registry = imageInfo.Registry
 		summary.Version = imageInfo.VersionImage

@@ -214,9 +214,10 @@ func Test_summarize(t *testing.T) {
 			args: args{
 				report: v1.ScanResultReport{},
 				workload: domain.ScanCommand{
-					ImageHash: imageHash,
-					Wlid:      wlid,
-					ImageTag:  imageTag,
+					ImageHash:          imageHash,
+					Wlid:               wlid,
+					ImageTag:           imageTag,
+					ImageTagNormalized: imageTag,
 					Session: domain.Session{
 						JobIDs: jobIDs,
 					},
@@ -318,9 +319,10 @@ func Test_summarize(t *testing.T) {
 					},
 				},
 				workload: domain.ScanCommand{
-					ImageHash: imageHash,
-					Wlid:      wlid,
-					ImageTag:  imageTag,
+					ImageHash:          imageHash,
+					Wlid:               wlid,
+					ImageTag:           imageTag,
+					ImageTagNormalized: imageTag,
 					Session: domain.Session{
 						JobIDs: jobIDs,
 					},
@@ -446,9 +448,10 @@ func Test_summarize(t *testing.T) {
 					},
 				},
 				workload: domain.ScanCommand{
-					ImageHash: imageHash,
-					Wlid:      wlid,
-					ImageTag:  imageTag,
+					ImageHash:          imageHash,
+					Wlid:               wlid,
+					ImageTag:           imageTag,
+					ImageTagNormalized: imageTag,
 					Session: domain.Session{
 						JobIDs: jobIDs,
 					},

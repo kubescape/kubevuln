@@ -30,18 +30,19 @@ type TimestampKey struct{}
 type WorkloadKey struct{}
 
 type ScanCommand struct {
-	Credentialslist []types.AuthConfig
-	ImageHash       string
-	ImageSlug       string
-	InstanceID      string
-	Wlid            string
-	ImageTag        string
-	JobID           string
-	ContainerName   string
-	LastAction      int
-	ParentJobID     string
-	Args            map[string]interface{}
-	Session         Session
+	Credentialslist    []types.AuthConfig
+	ImageHash          string
+	ImageSlug          string
+	InstanceID         string
+	Wlid               string
+	ImageTag           string
+	ImageTagNormalized string
+	JobID              string
+	ContainerName      string
+	LastAction         int
+	ParentJobID        string
+	Args               map[string]interface{}
+	Session            Session
 }
 
 type Session struct {
