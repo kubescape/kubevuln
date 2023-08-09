@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"schneider.vip/problem"
 )
 
@@ -126,16 +127,17 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 
 func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanCommand {
 	command := domain.ScanCommand{
-		Credentialslist: c.Credentialslist,
-		ImageHash:       c.ImageHash,
-		Wlid:            c.Wlid,
-		ImageTag:        c.ImageTag,
-		JobID:           c.JobID,
-		ContainerName:   c.ContainerName,
-		LastAction:      c.LastAction,
-		ParentJobID:     c.ParentJobID,
-		Args:            c.Args,
-		Session:         sessionChainToSession(c.Session),
+		Credentialslist:    c.Credentialslist,
+		ImageHash:          c.ImageHash,
+		Wlid:               c.Wlid,
+		ImageTag:           c.ImageTag,
+		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		JobID:              c.JobID,
+		ContainerName:      c.ContainerName,
+		LastAction:         c.LastAction,
+		ParentJobID:        c.ParentJobID,
+		Args:               c.Args,
+		Session:            sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(c.ImageTag, c.ImageHash); err == nil {
 		command.ImageSlug = slug
