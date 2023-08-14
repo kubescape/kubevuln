@@ -194,12 +194,13 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
 	command := domain.ScanCommand{
-		Credentialslist: c.Credentialslist,
-		ImageTag:        c.ImageTag,
-		JobID:           c.JobID,
-		ParentJobID:     c.ParentJobID,
-		Args:            c.Args,
-		Session:         sessionChainToSession(c.Session),
+		Credentialslist:    c.Credentialslist,
+		ImageTag:           c.ImageTag,
+		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		JobID:              c.JobID,
+		ParentJobID:        c.ParentJobID,
+		Args:               c.Args,
+		Session:            sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(c.ImageTag, "nohash"); err == nil {
 		command.ImageSlug = slug
