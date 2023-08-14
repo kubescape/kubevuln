@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/docker/docker/api/types"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -208,5 +210,71 @@ func TestHTTPController_ScanRegistry(t *testing.T) {
 			assert.Equal(t, tt.expectedCode, w.Code, w.Code)
 			assert.Equal(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
+	}
+}
+
+func Test_registryScanCommandToScanCommand(t *testing.T) {
+
+	tests := []struct {
+		wssc.RegistryScanCommand
+	}{
+		{
+			wssc.RegistryScanCommand{
+				ImageScanParams: wssc.ImageScanParams{
+					Credentialslist: []types.AuthConfig{},
+					ImageTag:        "docker.io/library/nginx:1.14.1",
+					JobID:           "some Job ID for nginx",
+					ParentJobID:     "some Parent Job ID for nginx",
+				},
+			},
+		},
+		{
+			wssc.RegistryScanCommand{
+				ImageScanParams: wssc.ImageScanParams{
+					Credentialslist: []types.AuthConfig{},
+					ImageTag:        "nginx@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
+					JobID:           "some Job ID for nginx sha",
+					ParentJobID:     "some Parent Job ID for nginx sha",
+				},
+			},
+		},
+		{
+			wssc.RegistryScanCommand{
+				ImageScanParams: wssc.ImageScanParams{
+					Credentialslist: []types.AuthConfig{},
+					ImageTag:        "nginx:latest",
+					JobID:           "some Job ID for nginx latest",
+					ParentJobID:     "some Parent Job ID for nginx latest",
+				},
+			},
+		},
+		{
+			wssc.RegistryScanCommand{
+				ImageScanParams: wssc.ImageScanParams{
+					Credentialslist: []types.AuthConfig{},
+					ImageTag:        "docker.io/library/nginx:latest",
+					JobID:           "some Job ID for nginx latest with docker hub",
+					ParentJobID:     "some Parent Job ID for nginx latest with docker hub",
+				},
+			},
+		},
+		{
+			wssc.RegistryScanCommand{
+				ImageScanParams: wssc.ImageScanParams{
+					Credentialslist: []types.AuthConfig{},
+					ImageTag:        "docker.io/library/nginx:latest@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
+					JobID:           "some Job ID for nginx latest with docker hub library",
+					ParentJobID:     "some Parent Job ID for nginx latest with docker hub library",
+				},
+			},
+		},
+	}
+	for i := range tests {
+		scanComm := registryScanCommandToScanCommand(tests[i].RegistryScanCommand)
+		assert.Equal(t, tests[i].Credentialslist, scanComm.Credentialslist)
+		assert.Equal(t, tests[i].ImageTag, scanComm.ImageTag)
+		assert.Equal(t, tools.NormalizeReference(tests[i].ImageTag), scanComm.ImageTagNormalized)
+		assert.Equal(t, tests[i].JobID, scanComm.JobID)
+		assert.Equal(t, tests[i].ParentJobID, scanComm.ParentJobID)
 	}
 }
