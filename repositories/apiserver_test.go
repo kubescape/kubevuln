@@ -374,13 +374,34 @@ func TestAPIServerStore_parseSeverities(t *testing.T) {
 	var nginxCVEUnknownSeveritiesNumber = 0
 
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
-	severities := parseSeverities(cveManifest)
+	severities := parseSeverities(cveManifest, false)
 	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.All)
 	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.All)
 	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.All)
 	assert.Equal(t, nginxCVELowSeveritiesNumber, severities.Low.All)
 	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.All)
 	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.All)
+
+	severities = parseSeverities(cveManifest, true)
+	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.Relevant)
+	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.Relevant)
+	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.Relevant)
+	assert.Equal(t, nginxCVELowSeveritiesNumber, severities.Low.Relevant)
+	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.Relevant)
+	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.Relevant)
+}
+
+func TestAPIServerStore_parseVulnerabilitiesComponents(t *testing.T) {
+	any := "any"
+	namespace := "namespace"
+
+	res := parseVulnerabilitiesComponents(any, namespace, false)
+	assert.Equal(t, res.ImageVulnerabilitiesObj.Name, any)
+	assert.Equal(t, res.ImageVulnerabilitiesObj.Namespace, namespace)
+
+	res = parseVulnerabilitiesComponents(any, namespace, true)
+	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Name, any)
+	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Namespace, namespace)
 }
 
 func TestAPIServerStore_storeCVESummary(t *testing.T) {
@@ -388,6 +409,9 @@ func TestAPIServerStore_storeCVESummary(t *testing.T) {
 	a := NewFakeAPIServerStorage("kubescape")
 
 	err := a.storeCVESummary(context.TODO(), cveManifest, false)
+	assert.Equal(t, err, nil)
+
+	err = a.storeCVESummary(context.TODO(), cveManifest, true)
 	assert.Equal(t, err, nil)
 }
 
@@ -400,4 +424,22 @@ func TestAPIServerStore_storeSBOMWithoutContent(t *testing.T) {
 
 	err := a.storeSBOMWithoutContent(context.TODO(), SBOM)
 	assert.Equal(t, err, nil)
+}
+
+func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
+	ctx := context.Background()
+
+	labels := map[string]string{}
+
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-bbb/deployment-ccc",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "contName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+	_, err := enrichSummaryManifestObjectLabels(ctx, labels)
+	assert.NotEqual(t, err, nil)
+
 }

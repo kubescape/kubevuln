@@ -5,10 +5,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -20,6 +22,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
+)
+
+const (
+	vulnerabilityManifestSummaryKindPlural string = "vulnerabilitymanifests"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -175,39 +181,121 @@ func (a *APIServerStore) storeCVEWithFullContent(ctx context.Context, cve domain
 	return nil
 }
 
-func parseSeverities(cve domain.CVEManifest) v1beta1.SeveritySummary {
+func parseVulnerabilitiesComponents(name, namespace string, withRelevancy bool) v1beta1.VulnerabilitiesComponents {
+	vulComp := v1beta1.VulnerabilitiesComponents{}
+
+	if withRelevancy {
+		vulComp.WorkloadVulnerabilitiesObj.Name = name
+		vulComp.WorkloadVulnerabilitiesObj.Kind = vulnerabilityManifestSummaryKindPlural
+		vulComp.WorkloadVulnerabilitiesObj.Namespace = namespace
+	} else {
+		vulComp.ImageVulnerabilitiesObj.Name = name
+		vulComp.ImageVulnerabilitiesObj.Kind = vulnerabilityManifestSummaryKindPlural
+		vulComp.ImageVulnerabilitiesObj.Namespace = namespace
+	}
+	return vulComp
+}
+
+func parseSeverities(cve domain.CVEManifest, withRelevancy bool) v1beta1.SeveritySummary {
 	critical := 0
+	criticalRelevant := 0
 	high := 0
+	highRelevant := 0
 	medium := 0
+	mediumRelevant := 0
 	low := 0
+	lowRelevant := 0
 	negligible := 0
+	negligibleRelevant := 0
 	unknown := 0
+	unknownRelevant := 0
 
 	for i := range cve.Content.Matches {
 		switch cve.Content.Matches[i].Vulnerability.Severity {
 		case domain.CriticalSeverity:
-			critical += 1
+			if withRelevancy {
+				criticalRelevant += 1
+			} else {
+				critical += 1
+			}
 		case domain.HighSeverity:
-			high += 1
+			if withRelevancy {
+				highRelevant += 1
+			} else {
+				high += 1
+			}
 		case domain.MediumSeverity:
-			medium += 1
+			if withRelevancy {
+				mediumRelevant += 1
+			} else {
+				medium += 1
+			}
 		case domain.LowSeverity:
-			low += 1
+			if withRelevancy {
+				lowRelevant += 1
+			} else {
+				low += 1
+			}
 		case domain.NegligibleSeverity:
-			negligible += 1
+			if withRelevancy {
+				negligibleRelevant += 1
+			} else {
+				negligible += 1
+			}
 		case domain.UnknownSeverity:
-			unknown += 1
+			if withRelevancy {
+				unknownRelevant += 1
+			} else {
+				unknown += 1
+			}
 		}
 	}
 
 	return v1beta1.SeveritySummary{
-		Critical:   v1beta1.VulnerabilityCounters{All: critical},
-		High:       v1beta1.VulnerabilityCounters{All: high},
-		Medium:     v1beta1.VulnerabilityCounters{All: medium},
-		Low:        v1beta1.VulnerabilityCounters{All: low},
-		Negligible: v1beta1.VulnerabilityCounters{All: negligible},
-		Unknown:    v1beta1.VulnerabilityCounters{All: unknown},
+		Critical:   v1beta1.VulnerabilityCounters{All: critical, Relevant: criticalRelevant},
+		High:       v1beta1.VulnerabilityCounters{All: high, Relevant: highRelevant},
+		Medium:     v1beta1.VulnerabilityCounters{All: medium, Relevant: mediumRelevant},
+		Low:        v1beta1.VulnerabilityCounters{All: low, Relevant: lowRelevant},
+		Negligible: v1beta1.VulnerabilityCounters{All: negligible, Relevant: negligibleRelevant},
+		Unknown:    v1beta1.VulnerabilityCounters{All: unknown, Relevant: unknownRelevant},
 	}
+}
+
+func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map[string]string) (map[string]string, error) {
+	enrichedAnnotations := annotations
+
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return nil, domain.ErrMissingWorkload
+	}
+	enrichedAnnotations[v1.WlidMetadataKey] = workload.Wlid
+	enrichedAnnotations[v1.ContainerNameMetadataKey] = workload.ContainerName
+
+	return enrichedAnnotations, nil
+}
+
+func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]string) (map[string]string, error) {
+	enrichedLabels := labels
+
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return nil, domain.ErrMissingWorkload
+	}
+
+	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
+	groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind)
+	if err != nil {
+		return nil, err
+	}
+
+	enrichedLabels[v1.ApiGroupMetadataKey] = groupVersionScheme.Group
+	enrichedLabels[v1.ApiVersionMetadataKey] = groupVersionScheme.Version
+	enrichedLabels[v1.KindMetadataKey] = workloadKind
+	enrichedLabels[v1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+	enrichedLabels[v1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	enrichedLabels[v1.ContainerNameMetadataKey] = workload.ContainerName
+
+	return enrichedLabels, nil
 }
 
 func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
@@ -229,17 +317,27 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
 	}
 
+	annotations, err := enrichSummaryManifestObjectAnnotations(ctx, cve.Annotations)
+	if err != nil {
+		return err
+	}
+	labels, err := enrichSummaryManifestObjectLabels(ctx, cve.Labels)
+	if err != nil {
+		return err
+	}
+
 	manifest := v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        cve.Name,
-			Annotations: cve.Annotations,
-			Labels:      cve.Labels,
+			Annotations: annotations,
+			Labels:      labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSummarySpec{
-			Severities: parseSeverities(cve),
+			Severities:      parseSeverities(cve, withRelevancy),
+			Vulnerabilities: parseVulnerabilitiesComponents(cve.Name, a.Namespace, withRelevancy),
 		},
 	}
-	_, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
