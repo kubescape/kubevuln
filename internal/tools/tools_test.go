@@ -133,6 +133,13 @@ func TestNormalizeReference(t *testing.T) {
 			},
 			want: "quay.io/kubescape/kubevuln:latest@sha256:616d1d4312551b94088deb6ddab232ecabbbff0c289949a0d5f12d4b527c3f8a",
 		},
+		{
+			name: "some image other registry",
+			args: args{
+				ref: "public-registry.systest-ns-na6n:5000/nginx:test",
+			},
+			want: "public-registry.systest-ns-na6n:5000/nginx:test",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
