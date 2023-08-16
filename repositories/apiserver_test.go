@@ -592,36 +592,43 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	tests := []struct {
 		workload domain.ScanCommand
+		expRes   string
 	}{
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "default-replicaset-nginx-77b4fdf86c-6e03-a89e",
+				InstanceID: "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-nginx-77b4fdf86c/containerName-nginx",
 			},
+			expRes: "default-replicaset-nginx-77b4fdf86c-6e03-a89e",
 		},
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "kubescape-replicaset-gateway-66967b649-495e-df93",
+				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-otel-collector-76bb986488/containerName-otel-collector",
 			},
+			expRes: "kubescape-replicaset-otel-collector-76bb986488-6d83-cca3",
 		},
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "kubescape-replicaset-kubescape-5d4bf4589c-7b8d-5074",
+				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-gateway-66967b649/containerName-gateway",
 			},
+			expRes: "kubescape-replicaset-gateway-66967b649-495e-df93",
 		},
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "kubescape-replicaset-kubevuln-988fd7dbd-468f-8953",
+				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-StatefulSet/name-kollector/containerName-kollector",
 			},
+			expRes: "kubescape-statefulset-kollector-c1be-77d8",
 		},
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "kubescape-replicaset-operator-647f75985c-ff5d-6454",
+				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubescape-5d4bf4589c/containerName-kubescape",
 			},
+			expRes: "kubescape-replicaset-kubescape-5d4bf4589c-7b8d-5074",
 		},
 		{
 			workload: domain.ScanCommand{
-				ImageSlug: "kubescape-replicaset-storage-5ff864df8f-fc62-4b1c",
+				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
 			},
+			expRes: "kubescape-replicaset-kubevuln-65bfbfdcdd-9730-b4bb",
 		},
 	}
 
@@ -638,7 +645,7 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, tests[i].workload)
 		name, err := getCVESummaryK8sResourceName(ctx)
 		assert.Equal(t, err, nil)
-		assert.Equal(t, tests[i].workload.ImageSlug, name)
+		assert.Equal(t, tests[i].expRes, name)
 	}
 
 	for i := range testsErrorCases {
