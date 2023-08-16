@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -109,11 +110,19 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 			true,
 		},
 	}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetCVE(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
 			tools.EnsureSetup(t, err == nil)
+			tt.args.ctx = context.WithValue(tt.args.ctx, domain.WorkloadKey{}, workload)
 			err = a.StoreCVE(tt.args.ctx, tt.cve, false)
 			tools.EnsureSetup(t, err == nil)
 			gotCve, _ := a.GetCVE(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
@@ -136,6 +145,14 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 			},
 		},
 	}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	err := a.StoreCVE(ctx, cvep, true)
 	tools.EnsureSetup(t, err == nil)
 	cvep.Content.Descriptor.Version = "v1.1.0"
@@ -429,17 +446,145 @@ func TestAPIServerStore_storeSBOMWithoutContent(t *testing.T) {
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 	ctx := context.Background()
 
-	labels := map[string]string{}
-
-	workload := domain.ScanCommand{
-		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
-		InstanceID:    "",
-		Wlid:          "wlid://cluster-aaa/namespace-bbb/deployment-ccc",
-		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
-		ContainerName: "contName",
+	tests := []struct {
+		k8sResourceType      string
+		k8sResourceGroup     string
+		k8sResourceVersion   string
+		k8sResourceName      string
+		k8sResourceNamespace string
+		labels               map[string]string
+		workload             domain.ScanCommand
+	}{
+		{
+			k8sResourceType:      "Deployment",
+			k8sResourceGroup:     "apps",
+			k8sResourceVersion:   "v1",
+			k8sResourceName:      "ccc",
+			k8sResourceNamespace: "bbb",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-bbb/deployment-ccc",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contName",
+			},
+		},
+		{
+			k8sResourceType:      "CronJob",
+			k8sResourceGroup:     "batch",
+			k8sResourceVersion:   "v1",
+			k8sResourceName:      "123",
+			k8sResourceNamespace: "456",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-456/cronjob-123",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contNameCronJob",
+			},
+		},
+		{
+			k8sResourceType:      "Job",
+			k8sResourceGroup:     "batch",
+			k8sResourceVersion:   "v1",
+			k8sResourceName:      "anyJob",
+			k8sResourceNamespace: "anyNamespaceJob",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "anyJobContName",
+			},
+		},
 	}
-	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
-	_, err := enrichSummaryManifestObjectLabels(ctx, labels)
-	assert.NotEqual(t, err, nil)
+
+	for i := range tests {
+		ctx = context.WithValue(ctx, domain.WorkloadKey{}, tests[i].workload)
+		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels)
+		assert.Equal(t, err, nil)
+
+		val, exist := enrichedLabels[v1.ApiGroupMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].k8sResourceGroup)
+
+		val, exist = enrichedLabels[v1.ApiVersionMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].k8sResourceVersion)
+
+		val, exist = enrichedLabels[v1.KindMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].k8sResourceType)
+
+		val, exist = enrichedLabels[v1.NameMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].k8sResourceName)
+
+		val, exist = enrichedLabels[v1.NamespaceMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].k8sResourceNamespace)
+
+		val, exist = enrichedLabels[v1.ContainerNameMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].workload.ContainerName)
+	}
+
+}
+
+func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		annotations map[string]string
+		workload    domain.ScanCommand
+	}{
+		{
+			annotations: make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-bbb/deployment-ccc",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contName",
+			},
+		},
+		{
+			annotations: make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-456/cronjob-123",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contNameCronJob",
+			},
+		},
+		{
+			annotations: make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "anyJobContName",
+			},
+		},
+	}
+
+	for i := range tests {
+		ctx = context.WithValue(ctx, domain.WorkloadKey{}, tests[i].workload)
+		enrichedAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, tests[i].annotations)
+		assert.Equal(t, err, nil)
+
+		val, exist := enrichedAnnotations[v1.WlidMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].workload.Wlid)
+
+		val, exist = enrichedAnnotations[v1.ContainerNameMetadataKey]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, tests[i].workload.ContainerName)
+	}
 
 }
