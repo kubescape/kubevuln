@@ -310,6 +310,9 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 	if cve.Labels == nil {
 		cve.Labels = make(map[string]string)
 	}
+	if cve.Annotations == nil {
+		cve.Annotations = make(map[string]string)
+	}
 
 	if withRelevancy {
 		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
