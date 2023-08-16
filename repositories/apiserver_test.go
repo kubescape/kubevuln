@@ -504,7 +504,7 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 
 	for i := range tests {
 		ctx = context.WithValue(ctx, domain.WorkloadKey{}, tests[i].workload)
-		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels)
+		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels, true)
 		assert.Equal(t, err, nil)
 
 		val, exist := enrichedLabels[v1.ApiGroupMetadataKey]
