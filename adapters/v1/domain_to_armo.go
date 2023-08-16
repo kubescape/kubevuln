@@ -31,7 +31,7 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return vulnerabilityResults, domain.ErrMissingWorkload
+		return vulnerabilityResults, domain.ErrCastingWorkload
 	}
 
 	if grypeDocument.Source != nil {

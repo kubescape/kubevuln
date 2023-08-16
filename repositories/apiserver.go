@@ -269,7 +269,7 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrMissingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 	enrichedAnnotations[v1.WlidMetadataKey] = workload.Wlid
 	enrichedAnnotations[v1.ContainerNameMetadataKey] = workload.ContainerName
@@ -290,7 +290,7 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrMissingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 
 	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
@@ -307,6 +307,14 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 	enrichedLabels[v1.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedLabels, nil
+}
+
+func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return "", domain.ErrCastingWorkload
+	}
+	return workload.ImageSlug, nil
 }
 
 func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
@@ -327,10 +335,14 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
+	summaryK8sResourceName, err := getCVESummaryK8sResourceName(ctx)
+	if err != nil {
+		return err
+	}
 
 	manifest := v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        cve.Name,
+			Name:        summaryK8sResourceName,
 			Annotations: annotations,
 			Labels:      labels,
 		},

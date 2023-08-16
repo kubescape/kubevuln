@@ -20,7 +20,7 @@ var (
 	ErrMissingImageInfo = errors.New("missing image information")
 	ErrMissingScanID    = errors.New("missing scanID")
 	ErrMissingTimestamp = errors.New("missing timestamp")
-	ErrMissingWorkload  = errors.New("missing workload")
+	ErrCastingWorkload  = errors.New("casting workload")
 	ErrMockError        = errors.New("mock error")
 	ErrTooManyRequests  = errors.New("too many requests")
 )
