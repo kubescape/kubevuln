@@ -689,8 +689,8 @@ github.com/kubescape/go-logger v0.0.13 h1:Rio+grBhpcdExZIVT+HcBVcgbvwrU/aVSV99iK
 github.com/kubescape/go-logger v0.0.13/go.mod h1:Tod++iNn5kofkhjpfwjUrqie2YHkLZNoH0Pq0+KldMo=
 github.com/kubescape/k8s-interface v0.0.127 h1:9H4TxbUliliQe4eY+jsZDOaYRWMEK/jriMBj4cMX73A=
 github.com/kubescape/k8s-interface v0.0.127/go.mod h1:ENpA9SkkS6E3PIT+AaMu/JGkuyE04aUamY+a7WLqsJQ=
-github.com/kubescape/storage v0.0.8 h1:QnFdBASsiner/TY0lKpimEk/dbxMDHPnPyzCVJKCuW0=
-github.com/kubescape/storage v0.0.8/go.mod h1:LDJDA+AxRosIer/1Ma/HSf2SvXgxCH8bYQ9eejAAv8s=
+github.com/kubescape/storage v0.0.16 h1:4BR4h8oSE+Q9w5O7ZwzJeGO8a4j2p/QAfx4nFEKO0dI=
+github.com/kubescape/storage v0.0.16/go.mod h1:LDJDA+AxRosIer/1Ma/HSf2SvXgxCH8bYQ9eejAAv8s=
 github.com/leodido/go-urn v1.2.4 h1:XlAE/cm/ms7TE/VMVoduSpNBoyc2dOxHs5MZSwAN63Q=
 github.com/leodido/go-urn v1.2.4/go.mod h1:7ZrI8mTSeBSHl/UaRyKQW1qZeMgak41ANeCNaVckg+4=
 github.com/logrusorgru/aurora v0.0.0-20200102142835-e9ef32dff381 h1:bqDmpDG49ZRnB5PcgP0RXtQvnMSgIF14M7CBd2shtXs=
