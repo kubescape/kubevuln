@@ -588,3 +588,48 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 	}
 
 }
+
+func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
+	tests := []struct {
+		workload domain.ScanCommand
+	}{
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "default-replicaset-nginx-77b4fdf86c-6e03-a89e",
+			},
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "kubescape-replicaset-gateway-66967b649-495e-df93",
+			},
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "kubescape-replicaset-kubescape-5d4bf4589c-7b8d-5074",
+			},
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "kubescape-replicaset-kubevuln-988fd7dbd-468f-8953",
+			},
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "kubescape-replicaset-operator-647f75985c-ff5d-6454",
+			},
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "kubescape-replicaset-storage-5ff864df8f-fc62-4b1c",
+			},
+		},
+	}
+
+	for i := range tests {
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, tests[i].workload)
+		name, err := getCVESummaryK8sResourceName(ctx)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, tests[i].workload.ImageSlug, name)
+	}
+
+}

@@ -309,6 +309,14 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 	return enrichedLabels, nil
 }
 
+func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return "", domain.ErrMissingWorkload
+	}
+	return workload.ImageSlug, nil
+}
+
 func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.storeCVESummary")
 	defer span.End()
@@ -327,10 +335,14 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
+	summaryK8sResourceName, err := getCVESummaryK8sResourceName(ctx)
+	if err != nil {
+		return err
+	}
 
 	manifest := v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        cve.Name,
+			Name:        summaryK8sResourceName,
 			Annotations: annotations,
 			Labels:      labels,
 		},
