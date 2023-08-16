@@ -262,6 +262,9 @@ func parseSeverities(cve domain.CVEManifest, withRelevancy bool) v1beta1.Severit
 }
 
 func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map[string]string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
 	enrichedAnnotations := annotations
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
@@ -274,7 +277,15 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	return enrichedAnnotations, nil
 }
 
-func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]string) (map[string]string, error) {
+func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]string, withRelevancy bool) (map[string]string, error) {
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	if withRelevancy {
+		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+	} else {
+		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+	}
 	enrichedLabels := labels
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
@@ -307,24 +318,12 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
-	if cve.Labels == nil {
-		cve.Labels = make(map[string]string)
-	}
-	if cve.Annotations == nil {
-		cve.Annotations = make(map[string]string)
-	}
-
-	if withRelevancy {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
-	} else {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
-	}
 
 	annotations, err := enrichSummaryManifestObjectAnnotations(ctx, cve.Annotations)
 	if err != nil {
 		return err
 	}
-	labels, err := enrichSummaryManifestObjectLabels(ctx, cve.Labels)
+	labels, err := enrichSummaryManifestObjectLabels(ctx, cve.Labels, withRelevancy)
 	if err != nil {
 		return err
 	}
