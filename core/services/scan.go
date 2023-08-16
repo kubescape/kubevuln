@@ -74,7 +74,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrMissingWorkload
+		return domain.ErrCastingWorkload
 	}
 
 	// check if SBOM is already available
@@ -124,7 +124,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrMissingWorkload
+		return domain.ErrCastingWorkload
 	}
 	logger.L().Info("scan started",
 		helpers.String("imageSlug", workload.ImageSlug),
@@ -260,7 +260,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrMissingWorkload
+		return domain.ErrCastingWorkload
 	}
 	logger.L().Info("registry scan started",
 		helpers.String("imageSlug", workload.ImageSlug),

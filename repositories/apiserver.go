@@ -269,7 +269,7 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrMissingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 	enrichedAnnotations[v1.WlidMetadataKey] = workload.Wlid
 	enrichedAnnotations[v1.ContainerNameMetadataKey] = workload.ContainerName
@@ -290,7 +290,7 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrMissingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 
 	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
@@ -312,7 +312,7 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return "", domain.ErrMissingWorkload
+		return "", domain.ErrCastingWorkload
 	}
 	return workload.ImageSlug, nil
 }

@@ -625,6 +625,15 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		},
 	}
 
+	testsErrorCases := []struct {
+		notWorkload any
+		err         error
+	}{
+		{
+			err: domain.ErrCastingWorkload,
+		},
+	}
+
 	for i := range tests {
 		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, tests[i].workload)
 		name, err := getCVESummaryK8sResourceName(ctx)
@@ -632,4 +641,11 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		assert.Equal(t, tests[i].workload.ImageSlug, name)
 	}
 
+	for i := range testsErrorCases {
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
+		name, err := getCVESummaryK8sResourceName(ctx)
+		assert.NotEqual(t, err, nil)
+		assert.Equal(t, err, testsErrorCases[i].err)
+		assert.Equal(t, name, "")
+	}
 }

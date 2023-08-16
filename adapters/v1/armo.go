@@ -70,7 +70,7 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrMissingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 
 	designator := armotypes.PortalDesignator{
@@ -99,7 +99,7 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrMissingWorkload
+		return domain.ErrCastingWorkload
 	}
 
 	lastAction := workload.LastAction + 1
@@ -142,7 +142,7 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrMissingWorkload
+		return domain.ErrCastingWorkload
 	}
 
 	// validate one more time the scanID before sending it to the platform
