@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 const (
 	vulnerabilityManifestSummaryKindPlural string = "vulnerabilitymanifests"
+	vulnSummaryContNameFormat              string = "%s-%s-%s" // "<kind>-<name>-<container-name>"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -309,16 +311,16 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 	return enrichedLabels, nil
 }
 
-func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
+func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return "", domain.ErrCastingWorkload
 	}
-	instanceID, err := instanceidhandler.GenerateInstanceIDFromString(workload.InstanceID)
-	if err != nil {
-		return "", err
-	}
-	return instanceID.GetSlug()
+	kind := wlid.GetKindFromWlid(workload.Wlid)
+	name := wlid.GetNameFromWlid(workload.Wlid)
+	contName := workload.ContainerName
+
+	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
 }
 
 func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
@@ -339,7 +341,7 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
-	summaryK8sResourceName, err := getCVESummaryK8sResourceName(ctx)
+	summaryK8sResourceName, err := GetCVESummaryK8sResourceName(ctx)
 	if err != nil {
 		return err
 	}

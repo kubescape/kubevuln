@@ -596,39 +596,45 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	}{
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-nginx-77b4fdf86c/containerName-nginx",
+				Wlid:          "wlid://cluster-aaa/deployment-default/deployment-nginx",
+				ContainerName: "nginx",
 			},
-			expRes: "default-replicaset-nginx-77b4fdf86c-6e03-a89e",
+			expRes: "Deployment-nginx-nginx",
 		},
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-otel-collector-76bb986488/containerName-otel-collector",
+				Wlid:          "wlid://cluster-aaa/deployment-default/deployment-nginx",
+				ContainerName: "nginx",
 			},
-			expRes: "kubescape-replicaset-otel-collector-76bb986488-6d83-cca3",
+			expRes: "Deployment-nginx-nginx",
 		},
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-gateway-66967b649/containerName-gateway",
+				Wlid:          "wlid://cluster-aaa/deployment-kubescape/deployment-kubescape",
+				ContainerName: "kubescape",
 			},
-			expRes: "kubescape-replicaset-gateway-66967b649-495e-df93",
+			expRes: "Deployment-kubescape-kubescape",
 		},
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-StatefulSet/name-kollector/containerName-kollector",
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-kubevuln",
+				ContainerName: "kubevuln",
 			},
-			expRes: "kubescape-statefulset-kollector-c1be-77d8",
+			expRes: "Deployment-kubevuln-kubevuln",
 		},
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubescape-5d4bf4589c/containerName-kubescape",
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-operator",
+				ContainerName: "operator",
 			},
-			expRes: "kubescape-replicaset-kubescape-5d4bf4589c-7b8d-5074",
+			expRes: "Deployment-operator-operator",
 		},
 		{
 			workload: domain.ScanCommand{
-				InstanceID: "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+				Wlid:          "wlid://cluster-aaa/namespace-kube-system/pod-etcd-control-plane",
+				ContainerName: "etcd-control-plane",
 			},
-			expRes: "kubescape-replicaset-kubevuln-65bfbfdcdd-9730-b4bb",
+			expRes: "Pod-etcd-control-plane-etcd-control-plane",
 		},
 	}
 
@@ -643,14 +649,14 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 
 	for i := range tests {
 		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, tests[i].workload)
-		name, err := getCVESummaryK8sResourceName(ctx)
+		name, err := GetCVESummaryK8sResourceName(ctx)
 		assert.Equal(t, err, nil)
 		assert.Equal(t, tests[i].expRes, name)
 	}
 
 	for i := range testsErrorCases {
 		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
-		name, err := getCVESummaryK8sResourceName(ctx)
+		name, err := GetCVESummaryK8sResourceName(ctx)
 		assert.NotEqual(t, err, nil)
 		assert.Equal(t, err, testsErrorCases[i].err)
 		assert.Equal(t, name, "")
