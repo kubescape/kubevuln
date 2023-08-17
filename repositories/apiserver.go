@@ -316,7 +316,7 @@ func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	}
 	instanceID, err := instanceidhandler.GenerateInstanceIDFromString(workload.InstanceID)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	return instanceID.GetSlug()
 }
