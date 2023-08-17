@@ -105,7 +105,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 	}, nil
 }
 
-func (a *APIServerStore) storeCVEWithFullContent(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVEWithFullContent")
 	defer span.End()
 
@@ -183,22 +183,22 @@ func (a *APIServerStore) storeCVEWithFullContent(ctx context.Context, cve domain
 	return nil
 }
 
-func parseVulnerabilitiesComponents(name, namespace string, withRelevancy bool) v1beta1.VulnerabilitiesComponents {
+func parseVulnerabilitiesComponents(cve domain.CVEManifest, cvep domain.CVEManifest, namespace string, withRelevancy bool) v1beta1.VulnerabilitiesComponents {
 	vulComp := v1beta1.VulnerabilitiesComponents{}
 
 	if withRelevancy {
-		vulComp.WorkloadVulnerabilitiesObj.Name = name
+		vulComp.WorkloadVulnerabilitiesObj.Name = cvep.Name
 		vulComp.WorkloadVulnerabilitiesObj.Kind = vulnerabilityManifestSummaryKindPlural
 		vulComp.WorkloadVulnerabilitiesObj.Namespace = namespace
-	} else {
-		vulComp.ImageVulnerabilitiesObj.Name = name
-		vulComp.ImageVulnerabilitiesObj.Kind = vulnerabilityManifestSummaryKindPlural
-		vulComp.ImageVulnerabilitiesObj.Namespace = namespace
 	}
+	vulComp.ImageVulnerabilitiesObj.Name = cve.Name
+	vulComp.ImageVulnerabilitiesObj.Kind = vulnerabilityManifestSummaryKindPlural
+	vulComp.ImageVulnerabilitiesObj.Namespace = namespace
+
 	return vulComp
 }
 
-func parseSeverities(cve domain.CVEManifest, withRelevancy bool) v1beta1.SeveritySummary {
+func parseSeverities(cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) v1beta1.SeveritySummary {
 	critical := 0
 	criticalRelevant := 0
 	high := 0
@@ -215,40 +215,34 @@ func parseSeverities(cve domain.CVEManifest, withRelevancy bool) v1beta1.Severit
 	for i := range cve.Content.Matches {
 		switch cve.Content.Matches[i].Vulnerability.Severity {
 		case domain.CriticalSeverity:
-			if withRelevancy {
-				criticalRelevant += 1
-			} else {
-				critical += 1
-			}
+			critical += 1
 		case domain.HighSeverity:
-			if withRelevancy {
-				highRelevant += 1
-			} else {
-				high += 1
-			}
+			high += 1
 		case domain.MediumSeverity:
-			if withRelevancy {
-				mediumRelevant += 1
-			} else {
-				medium += 1
-			}
+			medium += 1
 		case domain.LowSeverity:
-			if withRelevancy {
-				lowRelevant += 1
-			} else {
-				low += 1
-			}
+			low += 1
 		case domain.NegligibleSeverity:
-			if withRelevancy {
-				negligibleRelevant += 1
-			} else {
-				negligible += 1
-			}
+			negligible += 1
 		case domain.UnknownSeverity:
-			if withRelevancy {
+			unknown += 1
+		}
+	}
+	if withRelevancy {
+		for i := range cvep.Content.Matches {
+			switch cvep.Content.Matches[i].Vulnerability.Severity {
+			case domain.CriticalSeverity:
+				criticalRelevant += 1
+			case domain.HighSeverity:
+				highRelevant += 1
+			case domain.MediumSeverity:
+				mediumRelevant += 1
+			case domain.LowSeverity:
+				lowRelevant += 1
+			case domain.NegligibleSeverity:
+				negligibleRelevant += 1
+			case domain.UnknownSeverity:
 				unknownRelevant += 1
-			} else {
-				unknown += 1
 			}
 		}
 	}
@@ -323,8 +317,17 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
 }
 
-func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.storeCVESummary")
+func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return "", domain.ErrCastingWorkload
+	}
+
+	return wlid.GetNamespaceFromWlid(workload.Wlid), nil
+}
+
+func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVESummary")
 	defer span.End()
 
 	if cve.Name == "" {
@@ -345,6 +348,10 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
+	workloadNamespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	if err != nil {
+		return err
+	}
 
 	manifest := v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
@@ -353,17 +360,17 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 			Labels:      labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSummarySpec{
-			Severities:      parseSeverities(cve, withRelevancy),
-			Vulnerabilities: parseVulnerabilitiesComponents(cve.Name, a.Namespace, withRelevancy),
+			Severities:      parseSeverities(cve, cvep, withRelevancy),
+			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, workloadNamespace, withRelevancy),
 		},
 	}
-	_, err = a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
@@ -372,7 +379,7 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 			result.Labels = manifest.Labels
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -393,23 +400,6 @@ func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEMani
 			helpers.String("name", cve.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
-	return nil
-}
-
-func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
-	innerCtx, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVE")
-	defer span.End()
-
-	err := a.storeCVEWithFullContent(innerCtx, cve, withRelevancy)
-	if err != nil {
-		return err
-	}
-
-	err = a.storeCVESummary(innerCtx, cve, withRelevancy)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
