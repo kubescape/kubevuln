@@ -112,7 +112,7 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 	}
 	workload := domain.ScanCommand{
 		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
-		InstanceID:    "",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
 		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
 		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
 		ContainerName: "anyJobContName",
@@ -147,7 +147,7 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	}
 	workload := domain.ScanCommand{
 		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
-		InstanceID:    "",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
 		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
 		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
 		ContainerName: "anyJobContName",
