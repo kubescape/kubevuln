@@ -314,7 +314,11 @@ func getCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	if !ok {
 		return "", domain.ErrCastingWorkload
 	}
-	return workload.ImageSlug, nil
+	instanceID, err := instanceidhandler.GenerateInstanceIDFromString(workload.InstanceID)
+	if err != nil {
+		return "", err
+	}
+	return instanceID.GetSlug()
 }
 
 func (a *APIServerStore) storeCVESummary(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
