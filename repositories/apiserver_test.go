@@ -391,7 +391,7 @@ func TestAPIServerStore_parseSeverities(t *testing.T) {
 	var nginxCVEUnknownSeveritiesNumber = 0
 
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
-	severities := parseSeverities(cveManifest, false)
+	severities := parseSeverities(cveManifest, cveManifest, false)
 	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.All)
 	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.All)
 	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.All)
@@ -399,7 +399,21 @@ func TestAPIServerStore_parseSeverities(t *testing.T) {
 	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.All)
 	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.All)
 
-	severities = parseSeverities(cveManifest, true)
+	assert.Equal(t, 0, severities.Critical.Relevant)
+	assert.Equal(t, 0, severities.High.Relevant)
+	assert.Equal(t, 0, severities.Medium.Relevant)
+	assert.Equal(t, 0, severities.Low.Relevant)
+	assert.Equal(t, 0, severities.Negligible.Relevant)
+	assert.Equal(t, 0, severities.Unknown.Relevant)
+
+	severities = parseSeverities(cveManifest, cveManifest, true)
+	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.All)
+	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.All)
+	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.All)
+	assert.Equal(t, nginxCVELowSeveritiesNumber, severities.Low.All)
+	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.All)
+	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.All)
+
 	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.Relevant)
 	assert.Equal(t, nginxCVEHighSeveritiesNumber, severities.High.Relevant)
 	assert.Equal(t, nginxCVEMediumSeveritiesNumber, severities.Medium.Relevant)
@@ -409,15 +423,19 @@ func TestAPIServerStore_parseSeverities(t *testing.T) {
 }
 
 func TestAPIServerStore_parseVulnerabilitiesComponents(t *testing.T) {
-	any := "any"
 	namespace := "namespace"
 
-	res := parseVulnerabilitiesComponents(any, namespace, false)
-	assert.Equal(t, res.ImageVulnerabilitiesObj.Name, any)
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	res := parseVulnerabilitiesComponents(cveManifest, cveManifest, namespace, false)
+	assert.Equal(t, res.ImageVulnerabilitiesObj.Name, cveManifest.Name)
 	assert.Equal(t, res.ImageVulnerabilitiesObj.Namespace, namespace)
+	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Name, "")
+	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Namespace, "")
 
-	res = parseVulnerabilitiesComponents(any, namespace, true)
-	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Name, any)
+	res = parseVulnerabilitiesComponents(cveManifest, cveManifest, namespace, true)
+	assert.Equal(t, res.ImageVulnerabilitiesObj.Name, cveManifest.Name)
+	assert.Equal(t, res.ImageVulnerabilitiesObj.Namespace, namespace)
+	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Name, cveManifest.Name)
 	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Namespace, namespace)
 }
 
@@ -425,10 +443,10 @@ func TestAPIServerStore_storeCVESummary(t *testing.T) {
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	a := NewFakeAPIServerStorage("kubescape")
 
-	err := a.storeCVESummary(context.TODO(), cveManifest, false)
+	err := a.StoreCVESummary(context.TODO(), cveManifest, cveManifest, false)
 	assert.Equal(t, err, nil)
 
-	err = a.storeCVESummary(context.TODO(), cveManifest, true)
+	err = a.StoreCVESummary(context.TODO(), cveManifest, cveManifest, true)
 	assert.Equal(t, err, nil)
 }
 
