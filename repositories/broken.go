@@ -47,3 +47,9 @@ func (b BrokenStore) StoreCVE(ctx context.Context, _ domain.CVEManifest, _ bool)
 	defer span.End()
 	return domain.ErrExpectedError
 }
+
+func (b BrokenStore) StoreCVESummary(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest, _ bool) error {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreCVESummary")
+	defer span.End()
+	return domain.ErrExpectedError
+}

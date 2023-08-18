@@ -195,6 +195,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
+			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
 		}
 	}
 
@@ -223,6 +228,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("error storing CVEp", helpers.Error(err),
 					helpers.String("instanceID", workload.InstanceID))
+			}
+			err = s.cveRepository.StoreCVESummary(ctx, cve, cvep, true)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
 	}
