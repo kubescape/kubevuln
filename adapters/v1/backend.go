@@ -25,7 +25,7 @@ import (
 
 type BackendAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc func(string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
 	sendStatusFunc       func(*sysreport.BaseReport, string, bool, chan<- error)
 }
@@ -37,12 +37,12 @@ func NewBackendAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID:            accountID,
 			EventReceiverRestURL: eventReceiverRestURL,
-			GatewayRestURL:       gatewayRestURL,
+			GatewayRestURL:       gatewayRestURL, // why ???
 		},
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
 		sendStatusFunc: func(report *sysreport.BaseReport, status string, sendReport bool, errChan chan<- error) {
-			report.SendStatus(status, sendReport, errChan)
+			report.SendStatus(status, sendReport, errChan) // TODO - update this function to use from kubescape/backend
 		},
 	}
 }
@@ -86,7 +86,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, &designator)
 	if err != nil {
 		return nil, err
 	}
