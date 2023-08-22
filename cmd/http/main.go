@@ -23,10 +23,12 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
+const configPath = "/etc/config"
+
 func main() {
 	ctx := context.Background()
 
-	c, err := config.LoadConfig("/etc/config")
+	c, err := config.LoadConfig(configPath)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -58,7 +60,12 @@ func main() {
 	if c.KeepLocal {
 		platform = adapters.NewMockPlatform()
 	} else {
-		platform = v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
+		backendServices, err := config.LoadBackendServicesConfig(configPath)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
+		}
+		logger.L().Debug("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
+		platform = v1.NewBackendAdapter(c.AccountID, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl())
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
