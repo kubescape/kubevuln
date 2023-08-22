@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"sync"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
+	beClient "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -71,21 +71,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 		return
 	}
 
-	urlBase, err := url.Parse(eventReceiverURL)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed parsing eventReceiverURL", helpers.Error(err),
-			helpers.String("url", eventReceiverURL),
-			helpers.String("wlid", wlid))
-		err = fmt.Errorf("fail parsing URL, %s, err: %s", eventReceiverURL, err.Error())
-		errorChan <- err
-		return
-	}
-
-	urlBase.Path = "k8s/v2/containerScan"
-	q := urlBase.Query()
-	q.Add(armotypes.CustomerGuidQuery, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
-	urlBase.RawQuery = q.Encode()
-
+	urlBase := beClient.GetVulnerabilitiesReportURL(eventReceiverURL, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
 	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
@@ -18,6 +17,7 @@ import (
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/hashicorp/go-multierror"
+	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -39,7 +39,7 @@ func NewBackendAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *
 			EventReceiverRestURL: eventReceiverRestURL,
 			GatewayRestURL:       gatewayRestURL,
 		},
-		getCVEExceptionsFunc: wssc.BackendGetCVEExceptionByDEsignator,
+		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
 		sendStatusFunc: func(report *sysreport.BaseReport, status string, sendReport bool, errChan chan<- error) {
 			report.SendStatus(status, sendReport, errChan)
