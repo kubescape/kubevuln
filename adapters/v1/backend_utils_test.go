@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	"github.com/armosec/armoapi-go/containerscan"
+	v1 "github.com/armosec/armoapi-go/containerscan/v1"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/pointer"
@@ -165,7 +166,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 
 func Test_summarize(t *testing.T) {
 	containerScanID := "9711c327-1a08-487e-b24a-72128712ef2d"
-	designators := armotypes.PortalDesignator{
+	designators := identifiers.PortalDesignator{
 		DesignatorType: "Attributes",
 		Attributes: map[string]string{
 			"cluster":       "minikube",

@@ -9,7 +9,7 @@ import (
 	"github.com/anchore/grype/grype/search"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
+	"github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

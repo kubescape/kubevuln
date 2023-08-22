@@ -10,8 +10,9 @@ import (
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
-	cs "github.com/armosec/cluster-container-scanner-api/containerscan"
-	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	cs "github.com/armosec/armoapi-go/containerscan"
+	v1 "github.com/armosec/armoapi-go/containerscan/v1"
+	"github.com/armosec/armoapi-go/identifiers"
 	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	"github.com/armosec/utils-go/httputils"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
@@ -22,17 +23,17 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-type ArmoAdapter struct {
+type BackendAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, string, *armotypes.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
 	sendStatusFunc       func(*sysreport.BaseReport, string, bool, chan<- error)
 }
 
-var _ ports.Platform = (*ArmoAdapter)(nil)
+var _ ports.Platform = (*BackendAdapter)(nil)
 
-func NewArmoAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *ArmoAdapter {
-	return &ArmoAdapter{
+func NewBackendAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *BackendAdapter {
+	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID:            accountID,
 			EventReceiverRestURL: eventReceiverRestURL,
@@ -63,8 +64,8 @@ var statuses = []string{
 	"Dequeueing",
 }
 
-func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.GetCVEExceptions")
+func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.GetCVEExceptions")
 	defer span.End()
 
 	// retrieve workload from context
@@ -73,8 +74,8 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 		return nil, domain.ErrCastingWorkload
 	}
 
-	designator := armotypes.PortalDesignator{
-		DesignatorType: armotypes.DesignatorAttribute,
+	designator := identifiers.PortalDesignator{
+		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
@@ -93,8 +94,8 @@ func (a *ArmoAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEException
 }
 
 // SendStatus sends the given status and details to the platform
-func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
-	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SendStatus")
+func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
 	defer span.End()
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
@@ -126,8 +127,8 @@ func (a *ArmoAdapter) SendStatus(ctx context.Context, step int) error {
 }
 
 // SubmitCVE submits the given CVE to the platform
-func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
-	ctx, span := otel.Tracer("").Start(ctx, "ArmoAdapter.SubmitCVE")
+func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SubmitCVE")
 	defer span.End()
 	// retrieve timestamp from context
 	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
@@ -182,31 +183,31 @@ func (a *ArmoAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cve
 	}
 
 	finalReport := v1.ScanResultReport{
-		Designators:     *armotypes.AttributesDesignatorsFromWLID(workload.Wlid),
+		Designators:     *identifiers.AttributesDesignatorsFromWLID(workload.Wlid),
 		Summary:         nil,
 		ContainerScanID: scanID,
 		Timestamp:       timestamp,
 	}
 
 	// fill designators
-	finalReport.Designators.Attributes[armotypes.AttributeContainerName] = workload.ContainerName
-	finalReport.Designators.Attributes[armotypes.AttributeWorkloadHash] = cs.GenerateWorkloadHash(finalReport.Designators.Attributes)
-	finalReport.Designators.Attributes[armotypes.AttributeCustomerGUID] = a.clusterConfig.AccountID
-	if val, ok := workload.Args[armotypes.AttributeRegistryName]; ok {
-		finalReport.Designators.Attributes[armotypes.AttributeRegistryName] = val.(string)
+	finalReport.Designators.Attributes[identifiers.AttributeContainerName] = workload.ContainerName
+	finalReport.Designators.Attributes[identifiers.AttributeWorkloadHash] = cs.GenerateWorkloadHash(finalReport.Designators.Attributes)
+	finalReport.Designators.Attributes[identifiers.AttributeCustomerGUID] = a.clusterConfig.AccountID
+	if val, ok := workload.Args[identifiers.AttributeRegistryName]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryName] = val.(string)
 	}
-	if val, ok := workload.Args[armotypes.AttributeRepository]; ok {
-		finalReport.Designators.Attributes[armotypes.AttributeRepository] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRepository]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRepository] = val.(string)
 	}
-	if val, ok := workload.Args[armotypes.AttributeTag]; ok {
-		finalReport.Designators.Attributes[armotypes.AttributeTag] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeTag]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeTag] = val.(string)
 	}
-	if val, ok := workload.Args[armotypes.AttributeSensor]; ok {
-		finalReport.Designators.Attributes[armotypes.AttributeSensor] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeSensor]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val.(string)
 	}
 
 	// fill context and designators into vulnerabilities
-	armoContext := armotypes.DesignatorToArmoContext(&finalReport.Designators, "designators")
+	armoContext := identifiers.DesignatorToArmoContext(&finalReport.Designators, "designators")
 	for i := range vulnerabilities {
 		vulnerabilities[i].Context = armoContext
 		vulnerabilities[i].Designators = finalReport.Designators
