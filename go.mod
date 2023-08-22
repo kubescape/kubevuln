@@ -22,7 +22,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/backend v0.0.0-20230822144510-44490f21e7dd
+	github.com/kubescape/backend v0.0.0-20230822155126-39209f9e5ee7
 	github.com/kubescape/go-logger v0.0.14-0.20230730134225-e59751254525
 	github.com/kubescape/k8s-interface v0.0.135-0.20230730135750-e6e709507847
 	github.com/kubescape/storage v0.0.16
