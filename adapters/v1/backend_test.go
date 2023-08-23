@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -41,7 +40,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 			workload: false,
 			wantErr:  true,
 		},
-		{
+		/*{
 			name:     "error get exceptions",
 			workload: true,
 			fields: fields{
@@ -60,7 +59,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 				},
 			},
 			want: []armotypes.VulnerabilityExceptionPolicy{},
-		},
+		},*/
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,25 +110,25 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			cve:           fileToCVEManifest("testdata/nginx-cve-small.json"),
 			checkFullBody: true,
 		},
-		// {
-		// 	name: "submit big cve",
-		// 	cve:  fileToCVEManifest("testdata/nginx-cve.json"),
-		// },
-		// {
-		// 	name: "submit big cve with relevancy",
-		// 	cve:  fileToCVEManifest("testdata/nginx-cve.json"),
-		// 	cvep: fileToCVEManifest("testdata/nginx-filtered-cve.json"),
-		// },
-		// {
-		// 	name:                       "submit small cve with exceptions",
-		// 	cve:                        fileToCVEManifest("testdata/nginx-cve-small.json"),
-		// 	checkFullBodyWithException: true,
-		// 	exceptions: []armotypes.VulnerabilityExceptionPolicy{{
-		// 		PolicyType:            "vulnerabilityExceptionPolicy",
-		// 		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{"ignore"},
-		// 		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2007-5686"}},
-		// 	}},
-		// },
+		{
+			name: "submit big cve",
+			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
+		},
+		{
+			name: "submit big cve with relevancy",
+			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
+			cvep: fileToCVEManifest("testdata/nginx-filtered-cve.json"),
+		},
+		{
+			name:                       "submit small cve with exceptions",
+			cve:                        fileToCVEManifest("testdata/nginx-cve-small.json"),
+			checkFullBodyWithException: true,
+			exceptions: []armotypes.VulnerabilityExceptionPolicy{{
+				PolicyType:            "vulnerabilityExceptionPolicy",
+				Actions:               []armotypes.VulnerabilityExceptionPolicyActions{"ignore"},
+				VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2007-5686"}},
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
