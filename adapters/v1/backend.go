@@ -32,12 +32,12 @@ type BackendAdapter struct {
 
 var _ ports.Platform = (*BackendAdapter)(nil)
 
-func NewBackendAdapter(accountID, gatewayRestURL, eventReceiverRestURL string) *BackendAdapter {
+func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID:            accountID,
 			EventReceiverRestURL: eventReceiverRestURL,
-			GatewayRestURL:       gatewayRestURL, // why ???
+			ApiServerRestURL:     apiServerRestURL,
 		},
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
@@ -86,7 +86,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.ApiServerRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}

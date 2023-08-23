@@ -12,7 +12,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.220
 	github.com/armosec/logger-go v0.0.14
 	github.com/armosec/utils-go v0.0.20
-	github.com/armosec/utils-k8s-go v0.0.16
+	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/eapache/go-resiliency v1.3.0
