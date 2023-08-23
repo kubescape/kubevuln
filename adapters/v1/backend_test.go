@@ -199,7 +199,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 func TestNewBackendAdapter(t *testing.T) {
 	type args struct {
 		accountID            string
-		gatewayRestURL       string
+		apiServerRestURL     string
 		eventReceiverRestURL string
 	}
 	tests := []struct {
@@ -214,7 +214,7 @@ func TestNewBackendAdapter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewBackendAdapter(tt.args.accountID, tt.args.gatewayRestURL, tt.args.eventReceiverRestURL)
+			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL)
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil
