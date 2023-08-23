@@ -26,7 +26,7 @@ import (
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
 		clusterConfig        armometadata.ClusterConfig
-		getCVEExceptionsFunc func(string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	}
 	tests := []struct {
 		name     string
@@ -180,7 +180,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: func(s string, designator *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 					return tt.exceptions, nil
 				},
 				httpPostFunc: httpPostFunc,
