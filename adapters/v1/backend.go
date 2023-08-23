@@ -25,7 +25,7 @@ import (
 
 type BackendAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
 	sendStatusFunc       func(*sysreport.BaseReport, string, bool, chan<- error)
 }
@@ -86,7 +86,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.GatewayRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}
