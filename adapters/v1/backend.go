@@ -12,12 +12,13 @@ import (
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
-	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	"github.com/armosec/utils-go/httputils"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
+	sysreportClient "github.com/kubescape/backend/pkg/client/v1"
+	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -27,7 +28,7 @@ type BackendAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
 	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
-	sendStatusFunc       func(*sysreport.BaseReport, string, bool, chan<- error)
+	sendStatusFunc       func(*sysreportClient.BaseReportSender, string, bool, chan<- error)
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -41,8 +42,8 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string)
 		},
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
-		sendStatusFunc: func(report *sysreport.BaseReport, status string, sendReport bool, errChan chan<- error) {
-			report.SendStatus(status, sendReport, errChan) // TODO - update this function to use from kubescape/backend
+		sendStatusFunc: func(sender *sysreportClient.BaseReportSender, status string, sendReport bool, errChan chan<- error) {
+			sender.SendStatus(status, sendReport, errChan) // TODO - update this function to use from kubescape/backend
 		},
 	}
 }
@@ -107,8 +108,6 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report := sysreport.NewBaseReport(
 		a.clusterConfig.AccountID,
 		ReporterName,
-		a.clusterConfig.EventReceiverRestURL,
-		&http.Client{},
 	)
 	report.Status = statuses[step]
 	report.Target = fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s",
@@ -121,7 +120,8 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 
 	ReportErrorsChan := make(chan error)
-	a.sendStatusFunc(report, sysreport.JobSuccess, true, ReportErrorsChan)
+	sender := sysreportClient.NewBaseReportSender(a.clusterConfig.EventReceiverRestURL, &http.Client{}, report)
+	a.sendStatusFunc(sender, sysreport.JobSuccess, true, ReportErrorsChan)
 	err := <-ReportErrorsChan
 	return err
 }

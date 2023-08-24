@@ -10,7 +10,6 @@ require (
 	github.com/anchore/syft v0.76.0
 	github.com/aquilax/truncate v1.0.0
 	github.com/armosec/armoapi-go v0.0.220
-	github.com/armosec/logger-go v0.0.14
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/distribution/distribution v2.8.2+incompatible
@@ -22,7 +21,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/backend v0.0.0-20230823064127-e914c64f4aba
+	github.com/kubescape/backend v0.0.0-20230824164030-dba6312a2632
 	github.com/kubescape/go-logger v0.0.14-0.20230730134225-e59751254525
 	github.com/kubescape/k8s-interface v0.0.135-0.20230730135750-e6e709507847
 	github.com/kubescape/storage v0.0.16
@@ -130,7 +129,6 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
-	github.com/golang/glog v1.1.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect

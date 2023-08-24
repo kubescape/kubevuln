@@ -71,7 +71,13 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 		return
 	}
 
-	urlBase := beClient.GetVulnerabilitiesReportURL(eventReceiverURL, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
+	urlBase, err := beClient.GetVulnerabilitiesReportURL(eventReceiverURL, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
+			helpers.String("wlid", wlid))
+		errorChan <- err
+		return
+	}
 	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
