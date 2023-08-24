@@ -14,11 +14,12 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
-	sysreport "github.com/armosec/logger-go/system-reports/datastructures"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
+	sysreportClient "github.com/kubescape/backend/pkg/client/v1"
+	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
 )
@@ -247,8 +248,8 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 	for _, tt := range tests { //nolint:govet
 		t.Run(tt.name, func(t *testing.T) {
 			a := &BackendAdapter{
-				sendStatusFunc: func(report *sysreport.BaseReport, s string, b bool, c chan<- error) {
-					assert.NotEqual(t, *report, tt.report) //nolint:govet
+				sendStatusFunc: func(sender *sysreportClient.BaseReportSender, s string, b bool, c chan<- error) {
+					assert.NotEqual(t, *sender.GetReport(), tt.report) //nolint:govet
 					close(c)
 				},
 			}
