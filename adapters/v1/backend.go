@@ -17,7 +17,6 @@ import (
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
-	sysreportClient "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -28,7 +27,7 @@ type BackendAdapter struct {
 	clusterConfig        pkgcautils.ClusterConfig
 	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
-	sendStatusFunc       func(*sysreportClient.BaseReportSender, string, bool, chan<- error)
+	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool, chan<- error)
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -42,7 +41,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string)
 		},
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
-		sendStatusFunc: func(sender *sysreportClient.BaseReportSender, status string, sendReport bool, errChan chan<- error) {
+		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool, errChan chan<- error) {
 			sender.SendStatus(status, sendReport, errChan) // TODO - update this function to use from kubescape/backend
 		},
 	}
@@ -120,7 +119,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 
 	ReportErrorsChan := make(chan error)
-	sender := sysreportClient.NewBaseReportSender(a.clusterConfig.EventReceiverRestURL, &http.Client{}, report)
+	sender := backendClientV1.NewBaseReportSender(a.clusterConfig.EventReceiverRestURL, &http.Client{}, report)
 	a.sendStatusFunc(sender, sysreport.JobSuccess, true, ReportErrorsChan)
 	err := <-ReportErrorsChan
 	return err
