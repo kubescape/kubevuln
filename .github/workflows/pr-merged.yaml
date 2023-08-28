@@ -4,10 +4,10 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches: 
     - 'test-main'
-    paths-ignore:
-      - '*.md' 
-      - '*.yaml'
-      - '.github/workflows/*'
+    # paths-ignore:
+      # - '*.md' 
+      # - '*.yaml'
+      # - '.github/workflows/*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
