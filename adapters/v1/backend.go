@@ -24,6 +24,8 @@ import (
 )
 
 type BackendAdapter struct {
+	eventReceiverRestURL string
+	apiServerRestURL     string
 	clusterConfig        pkgcautils.ClusterConfig
 	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
@@ -35,10 +37,10 @@ var _ ports.Platform = (*BackendAdapter)(nil)
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
-			AccountID:            accountID,
-			EventReceiverRestURL: eventReceiverRestURL,
-			ApiServerRestURL:     apiServerRestURL,
+			AccountID: accountID,
 		},
+		eventReceiverRestURL: eventReceiverRestURL,
+		apiServerRestURL:     apiServerRestURL,
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool, errChan chan<- error) {
@@ -86,7 +88,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.clusterConfig.ApiServerRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +121,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 
 	ReportErrorsChan := make(chan error)
-	sender := backendClientV1.NewBaseReportSender(a.clusterConfig.EventReceiverRestURL, &http.Client{}, report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, report)
 	a.sendStatusFunc(sender, sysreport.JobSuccess, true, ReportErrorsChan)
 	err := <-ReportErrorsChan
 	return err
@@ -226,11 +228,11 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.clusterConfig.EventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.eventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent
-		a.sendVulnerabilitiesRoutine(ctx, chunksChan, a.clusterConfig.EventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
+		a.sendVulnerabilitiesRoutine(ctx, chunksChan, a.eventReceiverRestURL, scanID, finalReport, errChan, sendWG, totalVulnerabilities, firstChunkVulnerabilitiesCount, nextPartNum)
 	} else {
 		//only one chunk will be sent so need to close the error channel when it is done
 		go func(wg *sync.WaitGroup, errorChan chan error) {
