@@ -9,8 +9,8 @@ import (
 
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/armosec/armoapi-go/containerscan"
+	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/uuid"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -146,13 +146,13 @@ func Test_domainToArmo(t *testing.T) {
 }
 
 func Test_parseLayersPayload(t *testing.T) {
-	c := v1.ConfigFile{
-		History: []v1.History{
+	c := containerRegistryV1.ConfigFile{
+		History: []containerRegistryV1.History{
 			{EmptyLayer: false},
 			{EmptyLayer: false},
 		},
-		RootFS: v1.RootFS{
-			DiffIDs: []v1.Hash{
+		RootFS: containerRegistryV1.RootFS{
+			DiffIDs: []containerRegistryV1.Hash{
 				{Algorithm: "sha256", Hex: "5f6201014d118db78bfb090a1e932db880c3dce93d9c2dc29289bc389148b666"},
 				{Algorithm: "sha256", Hex: "55b314485cd7090cd64730398b85f42bd9b6d3bb33b6eddfc043154692c51b99"},
 			},

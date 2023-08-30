@@ -58,7 +58,12 @@ func main() {
 	if c.KeepLocal {
 		platform = adapters.NewMockPlatform()
 	} else {
-		platform = v1.NewArmoAdapter(c.AccountID, c.BackendOpenAPI, c.EventReceiverRestURL)
+		backendServices, err := config.LoadBackendServicesConfig("/etc/config")
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
+		}
+		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
+		platform = v1.NewBackendAdapter(c.AccountID, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl())
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
