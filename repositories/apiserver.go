@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -297,7 +298,7 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	enrichedLabels[v1.ApiGroupMetadataKey] = groupVersionScheme.Group
 	enrichedLabels[v1.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[v1.KindMetadataKey] = workloadKind
+	enrichedLabels[v1.KindMetadataKey] = strings.ToLower(workloadKind)
 	enrichedLabels[v1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
 	enrichedLabels[v1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
 	enrichedLabels[v1.ContainerNameMetadataKey] = workload.ContainerName
@@ -310,9 +311,9 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	if !ok {
 		return "", domain.ErrCastingWorkload
 	}
-	kind := wlid.GetKindFromWlid(workload.Wlid)
-	name := wlid.GetNameFromWlid(workload.Wlid)
-	contName := workload.ContainerName
+	kind := strings.ToLower(wlid.GetKindFromWlid(workload.Wlid))
+	name := strings.ToLower(wlid.GetNameFromWlid(workload.Wlid))
+	contName := strings.ToLower(workload.ContainerName)
 
 	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
 }

@@ -474,7 +474,7 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		workload             domain.ScanCommand
 	}{
 		{
-			k8sResourceType:      "Deployment",
+			k8sResourceType:      "deployment",
 			k8sResourceGroup:     "apps",
 			k8sResourceVersion:   "v1",
 			k8sResourceName:      "ccc",
@@ -489,7 +489,7 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 			},
 		},
 		{
-			k8sResourceType:      "CronJob",
+			k8sResourceType:      "cronjob",
 			k8sResourceGroup:     "batch",
 			k8sResourceVersion:   "v1",
 			k8sResourceName:      "123",
@@ -504,7 +504,7 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 			},
 		},
 		{
-			k8sResourceType:      "Job",
+			k8sResourceType:      "job",
 			k8sResourceGroup:     "batch",
 			k8sResourceVersion:   "v1",
 			k8sResourceName:      "anyJob",
@@ -617,42 +617,42 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 				Wlid:          "wlid://cluster-aaa/deployment-default/deployment-nginx",
 				ContainerName: "nginx",
 			},
-			expRes: "Deployment-nginx-nginx",
+			expRes: "deployment-nginx-nginx",
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/deployment-default/deployment-nginx",
 				ContainerName: "nginx",
 			},
-			expRes: "Deployment-nginx-nginx",
+			expRes: "deployment-nginx-nginx",
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/deployment-kubescape/deployment-kubescape",
 				ContainerName: "kubescape",
 			},
-			expRes: "Deployment-kubescape-kubescape",
+			expRes: "deployment-kubescape-kubescape",
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-kubevuln",
 				ContainerName: "kubevuln",
 			},
-			expRes: "Deployment-kubevuln-kubevuln",
+			expRes: "deployment-kubevuln-kubevuln",
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-operator",
 				ContainerName: "operator",
 			},
-			expRes: "Deployment-operator-operator",
+			expRes: "deployment-operator-operator",
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/namespace-kube-system/pod-etcd-control-plane",
 				ContainerName: "etcd-control-plane",
 			},
-			expRes: "Pod-etcd-control-plane-etcd-control-plane",
+			expRes: "pod-etcd-control-plane-etcd-control-plane",
 		},
 	}
 
