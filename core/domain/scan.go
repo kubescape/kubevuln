@@ -3,13 +3,13 @@ package domain
 import (
 	"errors"
 
-	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/docker/docker/api/types"
 )
 
 const (
-	AttributeUseHTTP       = armotypes.AttributeUseHTTP
-	AttributeSkipTLSVerify = armotypes.AttributeSkipTLSVerify
+	AttributeUseHTTP       = identifiers.AttributeUseHTTP
+	AttributeSkipTLSVerify = identifiers.AttributeSkipTLSVerify
 )
 
 var (

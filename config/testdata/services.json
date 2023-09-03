@@ -1,0 +1,10 @@
+{
+  "version": "v1",
+  "response": {
+    "event-receiver-http": "https://report.armo.cloud",
+    "event-receiver-ws": "wss://report.armo.cloud",
+    "gateway": "ens.euprod1.cyberarmorsoft.com",
+    "api-server": "https://api.armosec.io",
+    "metrics": "otelcol.armosec.io:443"
+  }
+}

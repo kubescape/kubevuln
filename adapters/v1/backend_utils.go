@@ -5,22 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"sync"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/cluster-container-scanner-api/containerscan"
-	v1 "github.com/armosec/cluster-container-scanner-api/containerscan/v1"
+	"github.com/armosec/armoapi-go/containerscan"
+	v1 "github.com/armosec/armoapi-go/containerscan/v1"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
+	beClient "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
-func (a *ArmoAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
+func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//if size of summary + first chunk does not exceed max size
@@ -53,7 +54,7 @@ func (a *ArmoAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report 
 	return nextPartNum
 }
 
-func (a *ArmoAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func(report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
@@ -61,7 +62,7 @@ func (a *ArmoAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.Sca
 	}(report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
-func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
+func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
@@ -70,21 +71,13 @@ func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultRepo
 		return
 	}
 
-	urlBase, err := url.Parse(eventReceiverURL)
+	urlBase, err := beClient.GetVulnerabilitiesReportURL(eventReceiverURL, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed parsing eventReceiverURL", helpers.Error(err),
-			helpers.String("url", eventReceiverURL),
+		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		err = fmt.Errorf("fail parsing URL, %s, err: %s", eventReceiverURL, err.Error())
 		errorChan <- err
 		return
 	}
-
-	urlBase.Path = "k8s/v2/containerScan"
-	q := urlBase.Query()
-	q.Add(armotypes.CustomerGuidQuery, report.Designators.Attributes[armotypes.AttributeCustomerGUID])
-	urlBase.RawQuery = q.Encode()
-
 	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
@@ -104,7 +97,7 @@ func (a *ArmoAdapter) postResults(ctx context.Context, report *v1.ScanResultRepo
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
 }
 
-func (a *ArmoAdapter) sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, scanID string, finalReport v1.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
+func (a *BackendAdapter) sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, scanID string, finalReport v1.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
 	go func(scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup, expectedVulnerabilitiesSum int, partNum int) {
 		a.sendVulnerabilities(ctx, chunksChan, eventReceiverURL, partNum, expectedVulnerabilitiesSum, scanID, finalReport, errorChan, sendWG)
 		//wait for all post request to end (including summary report)
@@ -114,7 +107,7 @@ func (a *ArmoAdapter) sendVulnerabilitiesRoutine(ctx context.Context, chunksChan
 	}(scanID, finalReport, errChan, sendWG, totalVulnerabilities-firstChunkVulnerabilitiesCount, nextPartNum)
 }
 
-func (a *ArmoAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, partNum int, expectedVulnerabilitiesSum int, scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
+func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, partNum int, expectedVulnerabilitiesSum int, scanID string, finalReport v1.ScanResultReport, errorChan chan<- error, sendWG *sync.WaitGroup) {
 	//post each vulnerability chunk in a different report
 	chunksVulnerabilitiesCount := 0
 	for vulnerabilities := range chunksChan {
@@ -148,14 +141,14 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	summary := containerscan.CommonContainerScanSummaryResult{
 		Designators:      report.Designators,
 		SeverityStats:    containerscan.SeverityStats{},
-		CustomerGUID:     report.Designators.Attributes[armotypes.AttributeCustomerGUID],
+		CustomerGUID:     report.Designators.Attributes[identifiers.AttributeCustomerGUID],
 		ContainerScanID:  report.ContainerScanID,
 		WLID:             workload.Wlid,
 		ImageID:          workload.ImageHash,
 		ImageTag:         workload.ImageTagNormalized,
-		ClusterName:      report.Designators.Attributes[armotypes.AttributeCluster],
-		Namespace:        report.Designators.Attributes[armotypes.AttributeNamespace],
-		ContainerName:    report.Designators.Attributes[armotypes.AttributeContainerName],
+		ClusterName:      report.Designators.Attributes[identifiers.AttributeCluster],
+		Namespace:        report.Designators.Attributes[identifiers.AttributeNamespace],
+		ContainerName:    report.Designators.Attributes[identifiers.AttributeContainerName],
 		JobIDs:           workload.Session.JobIDs,
 		Timestamp:        report.Timestamp,
 		HasRelevancyData: hasRelevancy,
