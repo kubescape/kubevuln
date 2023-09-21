@@ -43,7 +43,16 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.
 		CVEDBVersion:       m.DBVersion(ctx),
 		Annotations:        sbom.Annotations,
 		Labels:             sbom.Labels,
-		Content:            &v1beta1.GrypeDocument{},
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{
+					Vulnerability:          v1beta1.Vulnerability{},
+					RelatedVulnerabilities: nil,
+					MatchDetails:           nil,
+					Artifact:               v1beta1.GrypePackage{},
+				},
+			},
+		},
 	}, nil
 }
 
