@@ -167,7 +167,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	domainSBOM.Content, err = s.syftToDomain(syftSBOM)
 	// return SBOM
 	logger.L().Debug("returning SBOM",
-		helpers.String("imageID", imageID))
+		helpers.String("imageID", imageID),
+		helpers.Int("packages", len(domainSBOM.Content.Packages)))
 	return domainSBOM, err
 }
 
