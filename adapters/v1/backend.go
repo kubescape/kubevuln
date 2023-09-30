@@ -18,6 +18,8 @@ import (
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -248,4 +250,10 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		err = multierror.Append(err, e)
 	}
 	return err
+}
+
+//lint:ignore U1000 Ignore unused function temporarily for debugging
+func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
+	logger.L().Debug("httpPostDebug", helpers.String("fullURL", fullURL), helpers.Interface("headers", headers), helpers.String("body", string(body)))
+	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body)
 }
