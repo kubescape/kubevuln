@@ -62,6 +62,13 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 	}(report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
+func (a *BackendAdapter) setPostResultHeaders() map[string]string {
+	return map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + a.accessToken,
+	}
+}
+
 func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
@@ -78,7 +85,8 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 		errorChan <- err
 		return
 	}
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
+
+	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.setPostResultHeaders(), payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),

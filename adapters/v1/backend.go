@@ -27,14 +27,15 @@ type BackendAdapter struct {
 	eventReceiverRestURL string
 	apiServerRestURL     string
 	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
-	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool, chan<- error)
+	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool)
+	accessToken          string
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
 
-func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string) *BackendAdapter {
+func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessToken string) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID: accountID,
@@ -43,9 +44,10 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL string)
 		apiServerRestURL:     apiServerRestURL,
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
 		httpPostFunc:         httputils.HttpPost,
-		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool, errChan chan<- error) {
-			sender.SendStatus(status, sendReport, errChan) // TODO - update this function to use from kubescape/backend
+		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
+			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
+		accessToken: accessToken,
 	}
 }
 
@@ -88,7 +90,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.setPostResultHeaders())
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +122,9 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.ParentAction = workload.ParentJobID
 	report.Details = details[step]
 
-	ReportErrorsChan := make(chan error)
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, report)
-	a.sendStatusFunc(sender, sysreport.JobSuccess, true, ReportErrorsChan)
-	err := <-ReportErrorsChan
-	return err
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.setPostResultHeaders(), report)
+	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
+	return nil
 }
 
 // SubmitCVE submits the given CVE to the platform

@@ -27,7 +27,7 @@ import (
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
 		clusterConfig        armometadata.ClusterConfig
-		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error)
+		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	}
 	tests := []struct {
 		name     string
@@ -181,7 +181,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 					return tt.exceptions, nil
 				},
 				httpPostFunc: httpPostFunc,
@@ -215,7 +215,7 @@ func TestNewBackendAdapter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL)
+			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "")
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil
@@ -248,10 +248,9 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 	for _, tt := range tests { //nolint:govet
 		t.Run(tt.name, func(t *testing.T) {
 			a := &BackendAdapter{
-				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool, c chan<- error) {
+				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
 					report := sender.GetBaseReport()
 					assert.NotEqual(t, *report, tt.report) //nolint:govet
-					close(c)
 				},
 			}
 			ctx := context.TODO()

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/base64"
+	"io/ioutil"
 	"path/filepath"
 	"time"
 
@@ -19,6 +21,18 @@ type Config struct {
 	ScanConcurrency int           `mapstructure:"scanConcurrency"`
 	ScanTimeout     time.Duration `mapstructure:"scanTimeout"`
 	Storage         bool          `mapstructure:"storage"`
+}
+
+type SecretData struct {
+	Token string `mapstructure:"token"`
+}
+
+func decodeBase64(data []byte) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(string(data))
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -59,4 +73,19 @@ func LoadBackendServicesConfig(path string) (schema.IBackendServices, error) {
 		return nil, err
 	}
 	return services, nil
+}
+
+func LoadSecret(path string) (*SecretData, error) {
+	secretBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	token, err := decodeBase64(secretBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SecretData{
+		Token: token,
+	}, nil
 }
