@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
+	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/adapters"
@@ -31,7 +32,7 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	sd, err := config.LoadSecret("/etc/access-token-secret")
+	sd, err := utils.LoadTokenFromSecret("/etc/access-token-secret")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load secret data error", helpers.Error(err))
 	}
