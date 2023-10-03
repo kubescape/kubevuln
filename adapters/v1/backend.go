@@ -92,7 +92,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.setPostResultHeaders())
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.ParentAction = workload.ParentJobID
 	report.Details = details[step]
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.setPostResultHeaders(), report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
 	return nil
 }
