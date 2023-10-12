@@ -9,6 +9,7 @@ on:
       - '*.md'
       - '*.yaml'
       - '.github/workflows/*'
+  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,8 +17,8 @@ concurrency:
 
 jobs:
   pr-merged:
-    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
-    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    #if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@feat/add-sbom-creation
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
       IMAGE_TAG: v0.2.${{ github.run_number }}
@@ -43,4 +44,9 @@ jobs:
             ]'
       COSIGN: true
       HELM_E2E_TEST: true
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+      pull-requests: read
     secrets: inherit
