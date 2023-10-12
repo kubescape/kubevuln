@@ -47,4 +47,6 @@ jobs:
     permissions:
       id-token: write
       packages: write
+      contents: read
+      pull-requests: read
     secrets: inherit
