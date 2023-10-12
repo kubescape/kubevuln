@@ -26,7 +26,12 @@ import (
 func main() {
 	ctx := context.Background()
 
-	c, err := config.LoadConfig("/etc/config")
+	configPath := os.Getenv("CONFIG")
+	if configPath == "" {
+		configPath = "/etc/config"
+	}
+
+	c, err := config.LoadConfig(configPath)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
