@@ -44,4 +44,7 @@ jobs:
             ]'
       COSIGN: true
       HELM_E2E_TEST: true
+    permissions:
+      id-token: write
+      packages: write
     secrets: inherit
