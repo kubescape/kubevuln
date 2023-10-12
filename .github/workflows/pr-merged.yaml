@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   pr-merged:
-    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
+    #if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@feat/add-sbom-creation
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
