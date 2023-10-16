@@ -765,6 +765,10 @@ github.com/kubescape/backend v0.0.8-0.20231016101050-2911e86ac325 h1:Hy83WY8e3Yp
 github.com/kubescape/backend v0.0.8-0.20231016101050-2911e86ac325/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/backend v0.0.8-0.20231016120721-8bef98b7f750 h1:nUAQadDslHQa1vETybkK2aHjysCtFPxmB+HqmlmKm5o=
 github.com/kubescape/backend v0.0.8-0.20231016120721-8bef98b7f750/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
+github.com/kubescape/backend v0.0.8-0.20231016122707-b6057c796c76 h1:ozptGGGkrdS/TIo8OZ5lHQ49j8W+UAwfh64KCCTf3H4=
+github.com/kubescape/backend v0.0.8-0.20231016122707-b6057c796c76/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
+github.com/kubescape/backend v0.0.9-0.20231016122707-b6057c796c76 h1:RlmiCrFqCzsTd1uFcIlXujNjRBQRsZE6oresovpkjdA=
+github.com/kubescape/backend v0.0.9-0.20231016122707-b6057c796c76/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/go-logger v0.0.21 h1:4ZRIEw3UGUH6BG/cH3yiqFipzQSfGAoCrxlsZuk37ys=
 github.com/kubescape/go-logger v0.0.21/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
 github.com/kubescape/k8s-interface v0.0.135-0.20230730135750-e6e709507847 h1:GGuS6pE6KGa5q7j9fkRN3p1eQw16/jLUMnPR8FT3O6M=
