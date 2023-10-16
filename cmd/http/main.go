@@ -32,16 +32,20 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	sd, err := utils.LoadTokenFromSecret("/etc/access-token-secret")
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("load secret data error", helpers.Error(err))
+	tokenSecretData := &utils.TokenSecretData{AccountId: "", Token: ""}
+	if !c.KeepLocal {
+		var err error
+		tokenSecretData, err = utils.LoadTokenFromSecret("/etc/access-token-secret")
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("load secret data error", helpers.Error(err))
+		}
 	}
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv("RELEASE"),
-			c.AccountID,
+			tokenSecretData.AccountId,
 			c.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
@@ -69,7 +73,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		platform = v1.NewBackendAdapter(c.AccountID, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), sd.Token)
+		platform = v1.NewBackendAdapter(tokenSecretData.AccountId, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), tokenSecretData.Token)
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
