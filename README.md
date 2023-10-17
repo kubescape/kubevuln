@@ -1,6 +1,6 @@
 # Kubevuln
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/kubevuln/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/kubevuln)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape?ref=badge_shield&issueType=license)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubevuln?ref=badge_shield&issueType=license)
 
 
 The Kubevuln component is an in-cluster component of the Kubescape security platform.  
