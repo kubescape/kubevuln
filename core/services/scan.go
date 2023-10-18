@@ -234,6 +234,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
+			err = s.cveRepository.StoreVEX(ctx, cve, cvep, true)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("error storing VEX", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
 		}
 	}
 
