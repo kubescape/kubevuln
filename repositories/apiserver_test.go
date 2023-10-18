@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/openvex/go-vex/pkg/vex"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -448,6 +449,60 @@ func TestAPIServerStore_storeCVESummary(t *testing.T) {
 
 	err = a.StoreCVESummary(context.TODO(), cveManifest, cveManifest, true)
 	assert.Equal(t, err, nil)
+}
+
+func TestAPIServerStore_storeVEX(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// Test first store and read
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+	assert.Equal(t, vexContainer.Name, cveManifest.Name)
+
+	relevant := 0
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			relevant++
+		}
+	}
+	all := len(vexContainer.Spec.Statements)
+
+	assert.Equal(t, len(cveManifestFiltered.Content.Matches), relevant)
+	assert.Equal(t, len(cveManifest.Content.Matches), all)
+
+	// Test second store and read (update)
+	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
+
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered2, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+
+	relevant2 := 0
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			relevant2++
+		}
+	}
+
+	assert.Equal(t, relevant+1, relevant2)
 }
 
 func TestAPIServerStore_storeSBOMWithoutContent(t *testing.T) {
