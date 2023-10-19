@@ -32,12 +32,12 @@ type BackendAdapter struct {
 	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
 	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool)
-	accessToken          string
+	accessKey            string
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
 
-func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessToken string) *BackendAdapter {
+func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID: accountID,
@@ -49,7 +49,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
-		accessToken: accessToken,
+		accessKey: accessKey,
 	}
 }
 

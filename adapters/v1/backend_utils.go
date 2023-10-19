@@ -65,8 +65,8 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 
 func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	return map[string]string{
-		"Content-Type":              "application/json",
-		beServer.RequestTokenHeader: a.accessToken,
+		"Content-Type":           "application/json",
+		beServer.AccessKeyHeader: a.accessKey,
 	}
 }
 
