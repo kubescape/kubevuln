@@ -17,6 +17,11 @@ concurrency:
 jobs:
   pr-merged:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+      pull-requests: read
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
