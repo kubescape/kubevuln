@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
+	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/adapters"
@@ -31,11 +32,21 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
+	var credentials *utils.Credentials
+	if credentials, err = utils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
+		logger.L().Ctx(ctx).Error("failed to load credentials", helpers.Error(err))
+		credentials = &utils.Credentials{}
+	} else {
+		logger.L().Info("credentials loaded",
+			helpers.Int("accessKeyLength", len(credentials.AccessKey)),
+			helpers.Int("accountLength", len(credentials.Account)))
+	}
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubevuln",
 			os.Getenv("RELEASE"),
-			c.AccountID,
+			credentials.Account,
 			c.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
@@ -63,7 +74,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		platform = v1.NewBackendAdapter(c.AccountID, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl())
+		platform = v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey)
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
