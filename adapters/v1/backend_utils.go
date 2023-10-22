@@ -16,6 +16,7 @@ import (
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	beClient "github.com/kubescape/backend/pkg/client/v1"
+	beServer "github.com/kubescape/backend/pkg/server/v1"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -62,6 +63,13 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 	}(report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
+func (a *BackendAdapter) getRequestHeaders() map[string]string {
+	return map[string]string{
+		"Content-Type":           "application/json",
+		beServer.AccessKeyHeader: a.accessKey,
+	}
+}
+
 func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
@@ -78,7 +86,8 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 		errorChan <- err
 		return
 	}
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), map[string]string{"Content-Type": "application/json"}, payload)
+
+	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),
