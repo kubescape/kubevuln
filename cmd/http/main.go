@@ -26,7 +26,6 @@ import (
 
 func main() {
 	ctx := context.Background()
-
 	c, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
