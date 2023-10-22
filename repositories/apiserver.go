@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -442,15 +443,31 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 
 }
 
+func createProductStructForImageAndPackage(imagePullable string, packagePURL string) (*v1beta1.Product, error) {
+	imagePullable = strings.TrimPrefix(imagePullable, "docker://")
+	imageComponents := strings.Split(imagePullable, "/")
+	imageName := imageComponents[len(imageComponents)-1]
+	imageRepo := strings.Join(imageComponents[:len(imageComponents)-1], "/")
+	// pkg:oci/adservice@sha256%3A45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io/google-samples/microservices-demo
+	imageField := fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
+	product := v1beta1.Product{
+		Component: v1beta1.Component{
+			ID: imageField,
+		},
+	}
+	product.Subcomponents = append(product.Subcomponents, v1beta1.Subcomponent{
+		Component: v1beta1.Component{
+			ID: packagePURL,
+		},
+	})
+	return &product, nil
+}
+
 func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
 
-	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
-	if !ok {
-		return domain.ErrCastingWorkload
-	}
+	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
 
 	// Timestamp
 	timestamp := time.Now().Format(time.RFC3339)
@@ -458,6 +475,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Calculate VEX
 	vexDoc := v1beta1.VEX{
 		Metadata: v1beta1.Metadata{
+			Context:     "https://openvex.dev/ns/v0.2.0",
 			Author:      "kubescape.io",
 			AuthorRole:  "smart vulnerability scanner :-)",
 			Timestamp:   timestamp,
@@ -474,31 +492,22 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 			aliases = append(aliases, string(alias.ID))
 		}
 
-		identifiers := make(map[v1beta1.IdentifierType]string)
-		identifiers[v1beta1.IdentifierType(vex.PURL)] = v.Artifact.PURL
-		for _, cpe := range v.Artifact.CPEs {
-			if strings.HasPrefix(cpe, "cpe:2.3") {
-				identifiers[v1beta1.IdentifierType(vex.CPE23)] = cpe
-			} else if strings.HasPrefix(cpe, "cpe:2.2") {
-				identifiers[v1beta1.IdentifierType(vex.CPE22)] = cpe
-			}
+		product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+
+		if err != nil {
+			return err
 		}
 
 		vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
 			Vulnerability: v1beta1.VexVulnerability{
-				ID:          v.Vulnerability.DataSource,
-				Name:        v.Vulnerability.ID,
+				ID:          v.Vulnerability.ID,
+				Name:        v.Vulnerability.DataSource,
 				Description: v.Vulnerability.Description,
 				Aliases:     aliases,
 			},
 
 			Products: []v1beta1.Product{
-				{
-					Component: v1beta1.Component{
-						ID:          workload.ImageTag,
-						Identifiers: identifiers,
-					},
-				},
+				*product,
 			},
 
 			Status:          v1beta1.Status(vex.StatusNotAffected),
@@ -510,7 +519,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
-			if s.Vulnerability.Name == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Component.Identifiers[v1beta1.IdentifierType(vex.PURL)] {
+			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
 				vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
 				vexDoc.Statements[i].Justification = ""
 				vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
@@ -544,18 +553,14 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
 
-	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
-	if !ok {
-		return domain.ErrCastingWorkload
-	}
+	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
 	vexDoc := vexContainer.Spec
 	for _, v := range cve.Content.Matches {
 		found := false
 		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.Name == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Component.Identifiers[v1beta1.IdentifierType(vex.PURL)] {
+			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
 				found = true
 				continue
 			}
@@ -567,14 +572,9 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				aliases = append(aliases, string(alias.ID))
 			}
 
-			identifiers := make(map[v1beta1.IdentifierType]string)
-			identifiers[v1beta1.IdentifierType(vex.PURL)] = v.Artifact.PURL
-			for _, cpe := range v.Artifact.CPEs {
-				if strings.HasPrefix(cpe, "cpe:2.3") {
-					identifiers[v1beta1.IdentifierType(vex.CPE23)] = cpe
-				} else if strings.HasPrefix(cpe, "cpe:2.2") {
-					identifiers[v1beta1.IdentifierType(vex.CPE22)] = cpe
-				}
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+			if err != nil {
+				return err
 			}
 
 			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
@@ -586,12 +586,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				},
 
 				Products: []v1beta1.Product{
-					{
-						Component: v1beta1.Component{
-							ID:          workload.ImageTag,
-							Identifiers: identifiers,
-						},
-					},
+					*product,
 				},
 
 				Status:          v1beta1.Status(vex.StatusNotAffected),
@@ -604,7 +599,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
-			if s.Vulnerability.Name == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Component.Identifiers[v1beta1.IdentifierType(vex.PURL)] {
+			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
 				vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
 				vexDoc.Statements[i].Justification = ""
 				vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"

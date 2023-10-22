@@ -473,6 +473,7 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
 	assert.Equal(t, err, nil)
+	assert.NotEqual(t, vexContainer, nil)
 	assert.Equal(t, vexContainer.Name, cveManifest.Name)
 
 	relevant := 0
@@ -483,6 +484,7 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	}
 	all := len(vexContainer.Spec.Statements)
 
+	// First store should have all the CVEs and the relevant ones
 	assert.Equal(t, len(cveManifestFiltered.Content.Matches), relevant)
 	assert.Equal(t, len(cveManifest.Content.Matches), all)
 
@@ -502,6 +504,7 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 		}
 	}
 
+	// Second should have one more relevant CVE than the first one
 	assert.Equal(t, relevant+1, relevant2)
 }
 
