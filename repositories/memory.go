@@ -166,3 +166,8 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	m.sboms[id] = sbom
 	return nil
 }
+
+// StoreVEX stores a VEX to an in-memory map
+func (m *MemoryStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	return nil
+}

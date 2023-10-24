@@ -19,6 +19,7 @@ type Config struct {
 	ScanConcurrency int           `mapstructure:"scanConcurrency"`
 	ScanTimeout     time.Duration `mapstructure:"scanTimeout"`
 	Storage         bool          `mapstructure:"storage"`
+	VexGeneration   bool          `mapstructure:"vexGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -31,6 +32,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("maxImageSize", 512*1024*1024)
 	viper.SetDefault("scanConcurrency", 1)
 	viper.SetDefault("scanTimeout", 5*time.Minute)
+	viper.SetDefault("vexGeneration", false)
 
 	viper.AutomaticEnv()
 
