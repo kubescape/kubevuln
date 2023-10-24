@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	defaultNamespace = "default"
+	defaultNamespace = "kubescape"
 )
 
 func main() {
