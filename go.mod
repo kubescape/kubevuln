@@ -13,6 +13,7 @@ require (
 	github.com/armosec/utils-go v0.0.40
 	github.com/armosec/utils-k8s-go v0.0.18
 	github.com/distribution/distribution v2.8.2+incompatible
+	github.com/distribution/reference v0.5.0
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/gammazero/workerpool v1.1.3
@@ -25,6 +26,8 @@ require (
 	github.com/kubescape/go-logger v0.0.21
 	github.com/kubescape/k8s-interface v0.0.135-0.20230730135750-e6e709507847
 	github.com/kubescape/storage v0.0.18
+	github.com/openvex/go-vex v0.2.5
+	github.com/package-url/packageurl-go v0.1.1
 	github.com/spdx/tools-golang v0.5.0-rc1
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
@@ -134,7 +137,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/licensecheck v0.3.1 // indirect
 	github.com/google/s2a-go v0.1.4 // indirect
@@ -293,3 +296,5 @@ require (
 )
 
 replace gorm.io/gorm => gorm.io/gorm v1.23.10
+
+replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.0-20231016192125-da13f3622eee

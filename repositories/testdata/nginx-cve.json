@@ -1,6 +1,7 @@
 {
   "ID": "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
   "Wlid": "",
+  "Name": "nginx",
   "SBOMCreatorName": "",
   "SBOMCreatorVersion": "Mock SBOM 1.0",
   "CVEScannerName": "",
@@ -38154,7 +38155,9 @@
       }
     }
   },
-  "Annotations": null,
+  "Annotations": {
+    "kubescape.io/image-id": "docker-pullable://docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+  },
   "Labels": null
 }
 

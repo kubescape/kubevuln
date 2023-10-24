@@ -2,7 +2,10 @@ package repositories
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +22,7 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	"github.com/openvex/go-vex/pkg/vex"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -402,6 +406,343 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
+}
+
+func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreVEX")
+	defer span.End()
+
+	if cve.Name == "" {
+		logger.L().Debug("skipping storing VEX with empty name")
+		return nil
+	}
+
+	// Check if VEX already exists
+	// If it does, update it
+	// If it doesn't, create it
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create VEX
+			err = a.createVEX(ctx, cve, cvep, withRelevancy)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		// Update VEX
+		err = a.updateVEX(ctx, cve, cvep, withRelevancy, vexContainer)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+
+}
+
+func createProductStructForImageAndPackage(imagePullable string, packagePURL string) (*v1beta1.Product, error) {
+	imagePullable = strings.TrimPrefix(imagePullable, "docker://")
+	imageComponents := strings.Split(imagePullable, "/")
+	imageName := imageComponents[len(imageComponents)-1]
+	imageRepo := strings.Join(imageComponents[:len(imageComponents)-1], "/")
+	// pkg:oci/adservice@sha256%3A45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io/google-samples/microservices-demo
+	imageField := fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
+	product := v1beta1.Product{
+		Component: v1beta1.Component{
+			ID: imageField,
+		},
+	}
+	product.Subcomponents = append(product.Subcomponents, v1beta1.Subcomponent{
+		Component: v1beta1.Component{
+			ID: packagePURL,
+		},
+	})
+	return &product, nil
+}
+
+func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+	// Now change the status of the filtered vulnerabilities to "Affected"
+	for _, v := range cvep.Content.Matches {
+		for i, s := range vexDoc.Statements {
+			if s.Vulnerability.ID == v.Vulnerability.ID {
+				foundProduct := false
+				for _, p := range s.Products {
+					for _, sc := range p.Subcomponents {
+						if sc.ID == v.Artifact.PURL {
+							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
+							vexDoc.Statements[i].Justification = ""
+							vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
+							foundProduct = true
+						}
+						if foundProduct {
+							break
+						}
+					}
+					if foundProduct {
+						break
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
+	defer span.End()
+
+	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+
+	// Timestamp
+	timestamp := time.Now().Format(time.RFC3339)
+
+	// Calculate VEX
+	vexDoc := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Context:     "https://openvex.dev/ns/v0.2.0",
+			Author:      "kubescape.io",
+			AuthorRole:  "smart vulnerability scanner :-)",
+			Timestamp:   timestamp,
+			LastUpdated: timestamp,
+			Version:     0,
+			Tooling:     "kubescape-vulnerability-analyzer",
+		},
+	}
+
+	// Loop over the Vulnerability struct and add each vulnerability to the VEX document
+	for _, v := range cve.Content.Matches {
+		var aliases []string
+		for _, alias := range v.RelatedVulnerabilities {
+			aliases = append(aliases, string(alias.ID))
+		}
+
+		product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+
+		if err != nil {
+			return err
+		}
+
+		vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+			Vulnerability: v1beta1.VexVulnerability{
+				ID:          v.Vulnerability.ID,
+				Name:        v.Vulnerability.DataSource,
+				Description: v.Vulnerability.Description,
+				Aliases:     aliases,
+			},
+
+			Products: []v1beta1.Product{
+				*product,
+			},
+
+			Status:          v1beta1.Status(vex.StatusNotAffected),
+			Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+			ImpactStatement: "Vulnerable component is not loaded into the memory",
+		})
+	}
+
+	// Now change the status of the filtered vulnerabilities to "Affected"
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	if err != nil {
+		return err
+	}
+
+	calculatedId, err := calculateVexCanonicalHash(vexDoc)
+	if err != nil {
+		return err
+	}
+
+	vexDoc.Metadata.ID = calculatedId
+
+	// Create the VEX container
+	vexContainer := v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        cve.Name,
+			Labels:      cve.Labels,
+			Annotations: cve.Annotations,
+		},
+		Spec: vexDoc,
+	}
+
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Create(context.Background(), &vexContainer, metav1.CreateOptions{})
+
+	return err
+}
+
+func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool, vexContainer *v1beta1.OpenVulnerabilityExchangeContainer) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
+	defer span.End()
+
+	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+
+	// Extend the VEX document with vulnerability data from full vulnerability manifest
+	vexDoc := vexContainer.Spec
+	for _, v := range cve.Content.Matches {
+		found := false
+		for _, s := range vexDoc.Statements {
+			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				found = true
+				continue
+			}
+		}
+		if !found {
+			// Add the vulnerability to the VEX document
+			var aliases []string
+			for _, alias := range v.RelatedVulnerabilities {
+				aliases = append(aliases, string(alias.ID))
+			}
+
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+			if err != nil {
+				return err
+			}
+
+			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:          v.Vulnerability.DataSource,
+					Name:        v.Vulnerability.ID,
+					Description: v.Vulnerability.Description,
+					Aliases:     aliases,
+				},
+
+				Products: []v1beta1.Product{
+					*product,
+				},
+
+				Status:          v1beta1.Status(vex.StatusNotAffected),
+				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+				ImpactStatement: "Vulnerable component is not loaded into the memory",
+			})
+		}
+	}
+
+	// Now change the status of the filtered vulnerabilities to "Affected"
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	if err != nil {
+		return err
+	}
+
+	// Update the VEX document metadata
+	vexDoc.Metadata.LastUpdated = time.Now().Format(time.RFC3339)
+	vexDoc.Metadata.Version += 1
+
+	calculatedId, err := calculateVexCanonicalHash(vexDoc)
+	if err != nil {
+		return err
+	}
+
+	vexDoc.Metadata.ID = calculatedId
+
+	// Update the VEX container
+	vexContainer.Spec = vexDoc
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+
+	return err
+}
+
+func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
+	// Here's the algo:
+
+	ts, err := time.Parse(time.RFC3339, vexDoc.Timestamp)
+	if err != nil {
+		return "", err
+	}
+	cString := fmt.Sprintf("%d", ts.Unix())
+
+	cString += fmt.Sprintf(":%d", vexDoc.Version)
+
+	cString += fmt.Sprintf(":%s", vexDoc.Author)
+
+	stmts := vexDoc.Statements
+	sortVexStatements(stmts, ts)
+
+	//nolint:gocritic
+	for _, s := range stmts {
+		// 5a. Vulnerability
+		cString += cstringFromVulnerability(s.Vulnerability)
+		// 5b. Status + Justification
+		cString += fmt.Sprintf(":%s:%s", s.Status, s.Justification)
+		// 5c. Statement time, in unixtime. If it exists, if not the doc's
+		if s.Timestamp != "" {
+			ts, _ := time.Parse(time.RFC3339, s.Timestamp)
+			cString += fmt.Sprintf(":%d", ts.Unix())
+		} else {
+			ts, _ := time.Parse(time.RFC3339, vexDoc.Timestamp)
+			cString += fmt.Sprintf(":%d", ts.Unix())
+		}
+		// 5d. Sorted product strings
+		prods := []string{}
+		for _, p := range s.Products {
+			prodString := cstringFromComponent(p.Component)
+			if p.Subcomponents != nil && len(p.Subcomponents) > 0 {
+				for _, sc := range p.Subcomponents {
+					prodString += cstringFromComponent(sc.Component)
+				}
+			}
+			prods = append(prods, prodString)
+		}
+		sort.Strings(prods)
+		cString += fmt.Sprintf(":%s", strings.Join(prods, ":"))
+	}
+
+	h := sha256.New()
+	if _, err := h.Write([]byte(cString)); err != nil {
+		return "", fmt.Errorf("hashing canonicalization string: %w", err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func sortVexStatements(stmts []v1beta1.Statement, documentTimestamp time.Time) {
+	sort.SliceStable(stmts, func(i, j int) bool {
+		// TODO: Add methods for aliases
+		vulnComparison := strings.Compare(string(stmts[i].Vulnerability.Name), string(stmts[j].Vulnerability.Name))
+		if vulnComparison != 0 {
+			// i.e. different vulnerabilities; sort by string comparison
+			return vulnComparison < 0
+		}
+
+		// i.e. the same vulnerability; sort statements by timestamp
+
+		iTime, _ := time.Parse(time.RFC3339, stmts[i].Timestamp)
+		if iTime.IsZero() {
+			iTime = documentTimestamp
+		}
+
+		jTime, _ := time.Parse(time.RFC3339, stmts[j].Timestamp)
+		if jTime.IsZero() {
+			jTime = documentTimestamp
+		}
+
+		return iTime.Before(jTime)
+	})
+}
+
+func cstringFromVulnerability(v v1beta1.VexVulnerability) string {
+	cString := fmt.Sprintf(":%s:%s", v.ID, v.Name)
+	list := []string{}
+	for i := range v.Aliases {
+		list = append(list, string(v.Aliases[i]))
+	}
+	sort.Strings(list)
+	cString += strings.Join(list, ":")
+	return cString
+}
+
+func cstringFromComponent(c v1beta1.Component) string {
+	s := fmt.Sprintf(":%s", c.ID)
+
+	for algo, val := range c.Hashes {
+		s += fmt.Sprintf(":%s@%s", algo, val)
+	}
+
+	for t, id := range c.Identifiers {
+		s += fmt.Sprintf(":%s@%s", t, id)
+	}
+
+	return s
 }
 
 func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
