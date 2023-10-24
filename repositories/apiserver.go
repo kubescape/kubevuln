@@ -463,6 +463,34 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+	// Now change the status of the filtered vulnerabilities to "Affected"
+	for _, v := range cvep.Content.Matches {
+		for i, s := range vexDoc.Statements {
+			if s.Vulnerability.ID == v.Vulnerability.ID {
+				foundProduct := false
+				for _, p := range s.Products {
+					for _, sc := range p.Subcomponents {
+						if sc.ID == v.Artifact.PURL {
+							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
+							vexDoc.Statements[i].Justification = ""
+							vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
+							foundProduct = true
+						}
+						if foundProduct {
+							break
+						}
+					}
+					if foundProduct {
+						break
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
@@ -517,14 +545,9 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// Now change the status of the filtered vulnerabilities to "Affected"
-	for _, v := range cvep.Content.Matches {
-		for i, s := range vexDoc.Statements {
-			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
-				vexDoc.Statements[i].Justification = ""
-				vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
-			}
-		}
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	if err != nil {
+		return err
 	}
 
 	calculatedId, err := calculateVexCanonicalHash(vexDoc)
@@ -597,14 +620,9 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// Now change the status of the filtered vulnerabilities to "Affected"
-	for _, v := range cvep.Content.Matches {
-		for i, s := range vexDoc.Statements {
-			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
-				vexDoc.Statements[i].Justification = ""
-				vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
-			}
-		}
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	if err != nil {
+		return err
 	}
 
 	// Update the VEX document metadata
