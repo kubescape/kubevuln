@@ -65,7 +65,7 @@ func main() {
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
 		platform = v1.NewBackendAdapter(c.AccountID, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl())
 	}
-	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage)
+	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage, c.VexGeneration)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)

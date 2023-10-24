@@ -37,13 +37,14 @@ type ScanService struct {
 	cveRepository   ports.CVERepository
 	platform        ports.Platform
 	storage         bool
+	vexGeneration   bool
 	tooManyRequests *cache.Cache
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool, vexGeneration bool) *ScanService {
 	return &ScanService{
 		sbomCreator:     sbomCreator,
 		sbomRepository:  sbomRepository,
@@ -51,6 +52,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		cveRepository:   cveRepository,
 		platform:        platform,
 		storage:         storage,
+		vexGeneration:   vexGeneration,
 		tooManyRequests: cache.New(cleaningInterval),
 	}
 }
@@ -234,10 +236,12 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			err = s.cveRepository.StoreVEX(ctx, cve, cvep, true)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("error storing VEX", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
+			if s.vexGeneration {
+				err = s.cveRepository.StoreVEX(ctx, cve, cvep, true)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("error storing VEX", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
 			}
 		}
 	}

@@ -169,8 +169,5 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 
 // StoreVEX stores a VEX to an in-memory map
 func (m *MemoryStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
-	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreVEX")
-	defer span.End()
-
 	return nil
 }

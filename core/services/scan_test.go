@@ -88,7 +88,8 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(),
-				tt.storage)
+				tt.storage,
+				false)
 			ctx := context.TODO()
 
 			workload := domain.ScanCommand{
@@ -240,7 +241,8 @@ func TestScanService_ScanCVE(t *testing.T) {
 				cveAdapter,
 				storageCVE,
 				adapters.NewMockPlatform(),
-				tt.storage)
+				tt.storage,
+				false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -310,7 +312,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform()
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true, false)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		ContainerName: "nginx",
@@ -369,7 +371,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(),
-				false)
+				false, false)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -414,7 +416,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(),
-				false)
+				false, false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
@@ -471,7 +473,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(),
-				false)
+				false, false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
 				ImageSlug: "imageSlug",
@@ -532,7 +534,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(),
-				false)
+				false, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
