@@ -12,12 +12,13 @@ import (
 
 type Config struct {
 	AccountID       string        `mapstructure:"accountID"`
+	Namespace       string        `mapstructure:"namespace"`
 	ClusterName     string        `mapstructure:"clusterName"`
-	KeepLocal       bool          `mapstructure:"keepLocal"`
 	ListingURL      string        `mapstructure:"listingURL"`
 	MaxImageSize    int64         `mapstructure:"maxImageSize"`
 	ScanConcurrency int           `mapstructure:"scanConcurrency"`
 	ScanTimeout     time.Duration `mapstructure:"scanTimeout"`
+	KeepLocal       bool          `mapstructure:"keepLocal"`
 	Storage         bool          `mapstructure:"storage"`
 	VexGeneration   bool          `mapstructure:"vexGeneration"`
 }
@@ -33,6 +34,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("scanConcurrency", 1)
 	viper.SetDefault("scanTimeout", 5*time.Minute)
 	viper.SetDefault("vexGeneration", false)
+	viper.SetDefault("namespace", "kubescape")
 
 	viper.AutomaticEnv()
 

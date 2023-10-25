@@ -57,7 +57,7 @@ func main() {
 
 	var storage *repositories.APIServerStore
 	if c.Storage {
-		storage, err = repositories.NewAPIServerStorage("kubescape")
+		storage, err = repositories.NewAPIServerStorage(c.Namespace)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
