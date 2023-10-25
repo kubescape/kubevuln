@@ -24,10 +24,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
-const (
-	defaultNamespace = "kubescape"
-)
-
 func main() {
 	ctx := context.Background()
 	c, err := config.LoadConfig("/etc/config")
@@ -61,7 +57,7 @@ func main() {
 
 	var storage *repositories.APIServerStore
 	if c.Storage {
-		storage, err = repositories.NewAPIServerStorage(getDefaultStorageNamespace())
+		storage, err = repositories.NewAPIServerStorage(clusterData.Namespace)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
@@ -130,11 +126,4 @@ func main() {
 	controller.Shutdown()
 
 	logger.L().Info("kubevuln exiting")
-}
-
-func getDefaultStorageNamespace() string {
-	if ns, ok := os.LookupEnv("NAMESPACE"); ok && ns != "" {
-		return ns
-	}
-	return defaultNamespace
 }
