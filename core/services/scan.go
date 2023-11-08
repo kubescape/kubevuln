@@ -122,6 +122,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	defer span.End()
 
 	ctx = addTimestamp(ctx)
+	var cveRetrievedFromStorage bool // remember if we retrieved the CVE from storage
 
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
@@ -147,6 +148,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
+		cveRetrievedFromStorage = true
 	}
 
 	// if CVE manifest is not available, create it
@@ -189,6 +191,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		cveRetrievedFromStorage = false
 
 		// store CVE
 		if s.storage {
@@ -244,6 +247,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				}
 			}
 		}
+	}
+
+	// if CVE was retrieved from storage, and we don't have a CVE', we send an empty report
+	if cveRetrievedFromStorage && cvep.Content == nil {
+		cve.Content = nil
 	}
 
 	// report scan success to platform
