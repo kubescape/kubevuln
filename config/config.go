@@ -6,7 +6,7 @@ import (
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
-	v1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
+	v2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/spf13/viper"
 )
 
@@ -56,7 +56,7 @@ func LoadBackendServicesConfig(path string) (schema.IBackendServices, error) {
 
 	fullPath := filepath.Join(path, "services.json")
 	services, err := servicediscovery.GetServices(
-		v1.NewServiceDiscoveryFileV1(fullPath),
+		v2.NewServiceDiscoveryFileV2(fullPath),
 	)
 
 	if err != nil {
