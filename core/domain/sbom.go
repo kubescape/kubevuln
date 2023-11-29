@@ -10,7 +10,7 @@ type SBOM struct {
 	SBOMCreatorName    string
 	SBOMCreatorVersion string
 	Status             string
-	Content            *v1beta1.Document
+	Content            *v1beta1.SyftDocument
 	Annotations        map[string]string
 	Labels             map[string]string
 }
