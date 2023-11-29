@@ -1,7 +1,7 @@
 package v1
 
 import (
-	"github.com/anchore/syft/syft/formats/common/spdxhelpers"
+	"github.com/anchore/syft/syft/format/common/spdxhelpers"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spdx/tools-golang/spdx/v2/common"
