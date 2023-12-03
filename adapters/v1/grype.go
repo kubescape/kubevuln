@@ -137,8 +137,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Distro: s.Artifacts.LinuxDistribution,
 	}
 	vulnMatcher := grype.VulnerabilityMatcher{
-		Store:    *g.store,
-		Matchers: getMatchers(),
+		Store:          *g.store,
+		Matchers:       getMatchers(),
+		NormalizeByCVE: true,
 	}
 
 	logger.L().Debug("finding vulnerabilities",
