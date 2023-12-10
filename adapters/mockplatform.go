@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -11,14 +12,17 @@ import (
 
 // MockPlatform implements a mocked Platform to be used for tests
 type MockPlatform struct {
+	wantEmptyReport bool
 }
 
 var _ ports.Platform = (*MockPlatform)(nil)
 
 // NewMockPlatform initializes the MockPlatform struct
-func NewMockPlatform() *MockPlatform {
+func NewMockPlatform(wantEmptyReport bool) *MockPlatform {
 	logger.L().Info("keepLocal config is true, statuses and scan reports won't be sent to Armo cloud")
-	return &MockPlatform{}
+	return &MockPlatform{
+		wantEmptyReport: wantEmptyReport,
+	}
 }
 
 // GetCVEExceptions returns an empty CVEExceptions
@@ -36,8 +40,12 @@ func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
 }
 
 // SubmitCVE logs the given ID for CVE calculation
-func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest) error {
+func (m MockPlatform) SubmitCVE(ctx context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")
 	defer span.End()
+	emptyReport := cve.Content == nil
+	if m.wantEmptyReport != emptyReport {
+		return fmt.Errorf("wantEmptyReport: %t, got: %t", m.wantEmptyReport, emptyReport)
+	}
 	return nil
 }
