@@ -71,3 +71,14 @@ We configure the Kubevuln to listen to port 8080, and define the configuration i
 ## Changelog
 
 Kubevuln changes are tracked on the [release](https://github.com/kubescape/kubevuln/releases) page
+
+
+curl -X POST \
+   -H 'Content-Type: application/json' \
+   -d '{
+	    "wlid":"wlid://cluster-dwertent/namespace-kubescape/deployment-operator",
+        "instanceID":"kubescape-replicaset-operator-554677d856-9166-1670",
+        "imageTag":"quay.io/kubescape/operator:v0.1.67",
+        "imageHash":"quay.io/kubescape/operator@sha256:e38b22d522bf1d622c56efc04e6aac6982a8307ccc0c59951652a63bd6dc38da","credentials":null
+	}' \
+   http://127.0.0.1:8080/v1/scanImage

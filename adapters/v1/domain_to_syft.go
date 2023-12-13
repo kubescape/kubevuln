@@ -1,337 +1,339 @@
 package v1
 
 import (
-	"github.com/anchore/syft/syft/format/common/spdxhelpers"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+
+	"github.com/google/go-cmp/cmp"
+
+	stereoscopeFile "github.com/anchore/stereoscope/pkg/file"
+	"github.com/anchore/syft/syft/artifact"
+	"github.com/anchore/syft/syft/cpe"
+	"github.com/anchore/syft/syft/file"
+	"github.com/anchore/syft/syft/format/syftjson/model"
+	"github.com/anchore/syft/syft/linux"
+	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/sbom"
+	"github.com/anchore/syft/syft/source"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/spdx/tools-golang/spdx/v2/common"
-	"github.com/spdx/tools-golang/spdx/v2/v2_3"
 )
 
-func domainToSyft(doc v1beta1.Document) (*sbom.SBOM, error) {
-	spdxDoc, err := domainToSpdx(doc)
+func domainJSONToSyft(data []byte) (*sbom.SBOM, error) {
+	var d model.Document
+
+	if err := json.Unmarshal(data, &d); err != nil {
+		return nil, err
+	}
+	return toSyftModel(d), nil
+}
+
+func domainToSyft(doc v1beta1.SyftDocument) (*sbom.SBOM, error) {
+	b, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
 	}
-	return spdxhelpers.ToSyftModel(spdxDoc)
+	return domainJSONToSyft(b)
+
 }
 
-func domainToSpdx(doc v1beta1.Document) (*v2_3.Document, error) {
-	spdxDoc := v2_3.Document{
-		SPDXVersion:                doc.SPDXVersion,
-		DataLicense:                doc.DataLicense,
-		SPDXIdentifier:             common.ElementID(doc.SPDXIdentifier),
-		DocumentName:               doc.DocumentName,
-		DocumentNamespace:          doc.DocumentNamespace,
-		ExternalDocumentReferences: domainToSyftExternalDocumentReferences(doc.ExternalDocumentReferences),
-		DocumentComment:            doc.DocumentComment,
-		Packages:                   domainToSyftPackages(doc.Packages),
-		Files:                      domainToSyftFiles(doc.Files),
-		OtherLicenses:              domainToSyftOtherLicenses(doc.OtherLicenses),
-		Relationships:              domainToSyftRelationships(doc.Relationships),
-		Annotations:                domainToSyftAnnotations(doc.Annotations),
-		Snippets:                   domainToSyftSnippets(doc.Snippets),
-		Reviews:                    domainToSyftReviews(doc.Reviews),
+// ========================= copied code ================================
+// code below is copied from https://github.com/anchore/syft/blob/v0.98.0/syft/format/syftjson/to_syft_model.go
+func toSyftModel(doc model.Document) *sbom.SBOM {
+	idAliases := make(map[string]string)
+
+	catalog := toSyftCatalog(doc.Artifacts, idAliases)
+
+	fileArtifacts := toSyftFiles(doc.Files)
+
+	return &sbom.SBOM{
+		Artifacts: sbom.Artifacts{
+			Packages:          catalog,
+			FileMetadata:      fileArtifacts.FileMetadata,
+			FileDigests:       fileArtifacts.FileDigests,
+			FileContents:      fileArtifacts.FileContents,
+			FileLicenses:      fileArtifacts.FileLicenses,
+			LinuxDistribution: toSyftLinuxRelease(doc.Distro),
+		},
+		Source:        *toSyftSourceData(doc.Source),
+		Descriptor:    toSyftDescriptor(doc.Descriptor),
+		Relationships: toSyftRelationships(&doc, catalog, doc.ArtifactRelationships, idAliases),
 	}
-	if doc.CreationInfo != nil {
-		spdxDoc.CreationInfo = &v2_3.CreationInfo{
-			LicenseListVersion: doc.CreationInfo.LicenseListVersion,
-			Creators:           domainToSyftCreators(doc.CreationInfo.Creators),
-			Created:            doc.CreationInfo.Created,
-			CreatorComment:     doc.CreationInfo.CreatorComment,
-		}
-	}
-	return &spdxDoc, nil
 }
 
-func domainToSyftExternalDocumentReferences(externalDocumentReferences []v1beta1.ExternalDocumentRef) []v2_3.ExternalDocumentRef {
-	var result []v2_3.ExternalDocumentRef
-	for _, e := range externalDocumentReferences {
-		result = append(result, v2_3.ExternalDocumentRef{
-			DocumentRefID: e.DocumentRefID,
-			URI:           e.URI,
-			Checksum: common.Checksum{
-				Algorithm: common.ChecksumAlgorithm(e.Checksum.Algorithm),
-				Value:     e.Checksum.Value,
-			},
-		})
+func toSyftFiles(files []model.File) sbom.Artifacts {
+	ret := sbom.Artifacts{
+		FileMetadata: make(map[file.Coordinates]file.Metadata),
+		FileDigests:  make(map[file.Coordinates][]file.Digest),
+		FileContents: make(map[file.Coordinates]string),
+		FileLicenses: make(map[file.Coordinates][]file.License),
 	}
-	return result
-}
 
-func domainToSyftCreators(creators []v1beta1.Creator) []common.Creator {
-	var result []common.Creator
-	for _, c := range creators {
-		result = append(result, common.Creator{
-			Creator:     c.Creator,
-			CreatorType: c.CreatorType,
-		})
-	}
-	return result
-}
+	for _, f := range files {
+		coord := f.Location
+		if f.Metadata != nil {
+			mode, err := strconv.ParseInt(strconv.Itoa(f.Metadata.Mode), 8, 64)
+			if err != nil {
+				// todo: handle error
+				mode = 0
+			}
 
-func domainToSyftPackages(packages []*v1beta1.Package) []*v2_3.Package {
-	var result []*v2_3.Package
-	for _, p := range packages {
-		newP := v2_3.Package{
-			IsUnpackaged:                p.IsUnpackaged,
-			PackageName:                 p.PackageName,
-			PackageSPDXIdentifier:       common.ElementID(p.PackageSPDXIdentifier),
-			PackageVersion:              p.PackageVersion,
-			PackageFileName:             p.PackageFileName,
-			PackageDownloadLocation:     p.PackageDownloadLocation,
-			FilesAnalyzed:               p.FilesAnalyzed,
-			IsFilesAnalyzedTagPresent:   p.IsFilesAnalyzedTagPresent,
-			PackageChecksums:            domainToSyftPackagesPackageChecksums(p.PackageChecksums),
-			PackageHomePage:             p.PackageHomePage,
-			PackageSourceInfo:           p.PackageSourceInfo,
-			PackageLicenseConcluded:     p.PackageLicenseConcluded,
-			PackageLicenseInfoFromFiles: p.PackageLicenseInfoFromFiles,
-			PackageLicenseDeclared:      p.PackageLicenseDeclared,
-			PackageLicenseComments:      p.PackageLicenseComments,
-			PackageCopyrightText:        p.PackageCopyrightText,
-			PackageSummary:              p.PackageSummary,
-			PackageDescription:          p.PackageDescription,
-			PackageComment:              p.PackageComment,
-			PackageExternalReferences:   domainToSyftPackagesPackageExternalReferences(p.PackageExternalReferences),
-			PackageAttributionTexts:     p.PackageAttributionTexts,
-			PrimaryPackagePurpose:       p.PrimaryPackagePurpose,
-			ReleaseDate:                 p.ReleaseDate,
-			BuiltDate:                   p.BuiltDate,
-			ValidUntilDate:              p.ValidUntilDate,
-			Files:                       domainToSyftFiles(p.Files),
-			Annotations:                 domainToSyftPackagesAnnotations(p.Annotations),
-		}
-		if p.PackageSupplier != nil {
-			newP.PackageSupplier = &common.Supplier{
-				Supplier:     p.PackageSupplier.Supplier,
-				SupplierType: p.PackageSupplier.SupplierType,
+			fm := os.FileMode(mode)
+
+			ret.FileMetadata[coord] = file.Metadata{
+				FileInfo: stereoscopeFile.ManualInfo{
+					NameValue: path.Base(coord.RealPath),
+					SizeValue: f.Metadata.Size,
+					ModeValue: fm,
+				},
+				Path:            coord.RealPath,
+				LinkDestination: f.Metadata.LinkDestination,
+				UserID:          f.Metadata.UserID,
+				GroupID:         f.Metadata.GroupID,
+				Type:            toSyftFileType(f.Metadata.Type),
+				MIMEType:        f.Metadata.MIMEType,
 			}
 		}
-		if p.PackageOriginator != nil {
-			newP.PackageOriginator = &common.Originator{
-				Originator:     p.PackageOriginator.Originator,
-				OriginatorType: p.PackageOriginator.OriginatorType,
-			}
+
+		for _, d := range f.Digests {
+			ret.FileDigests[coord] = append(ret.FileDigests[coord], file.Digest{
+				Algorithm: d.Algorithm,
+				Value:     d.Value,
+			})
 		}
-		if p.PackageVerificationCode != nil {
-			newP.PackageVerificationCode = &common.PackageVerificationCode{
-				Value:         p.PackageVerificationCode.Value,
-				ExcludedFiles: p.PackageVerificationCode.ExcludedFiles,
-			}
+
+		if f.Contents != "" {
+			ret.FileContents[coord] = f.Contents
 		}
-		result = append(result, &newP)
+
+		for _, l := range f.Licenses {
+			var evidence *file.LicenseEvidence
+			if e := l.Evidence; e != nil {
+				evidence = &file.LicenseEvidence{
+					Confidence: e.Confidence,
+					Offset:     e.Offset,
+					Extent:     e.Extent,
+				}
+			}
+			ret.FileLicenses[coord] = append(ret.FileLicenses[coord], file.License{
+				Value:           l.Value,
+				SPDXExpression:  l.SPDXExpression,
+				Type:            l.Type,
+				LicenseEvidence: evidence,
+			})
+		}
 	}
-	return result
+
+	return ret
 }
 
-func domainToSyftPackagesPackageChecksums(packageChecksums []v1beta1.Checksum) []common.Checksum {
-	var result []common.Checksum
-	for _, p := range packageChecksums {
-		result = append(result, common.Checksum{
-			Algorithm: common.ChecksumAlgorithm(p.Algorithm),
-			Value:     p.Value,
+func toSyftLicenses(m []model.License) (p []pkg.License) {
+	for _, l := range m {
+		p = append(p, pkg.License{
+			Value:          l.Value,
+			SPDXExpression: l.SPDXExpression,
+			Type:           l.Type,
+			URLs:           l.URLs,
+			Locations:      file.NewLocationSet(l.Locations...),
 		})
 	}
-	return result
+	return
 }
 
-func domainToSyftPackagesPackageExternalReferences(packageExternalReferences []*v1beta1.PackageExternalReference) []*v2_3.PackageExternalReference {
-	var result []*v2_3.PackageExternalReference
-	for _, p := range packageExternalReferences {
-		result = append(result, &v2_3.PackageExternalReference{
-			Category:           p.Category,
-			RefType:            p.RefType,
-			Locator:            p.Locator,
-			ExternalRefComment: p.ExternalRefComment,
-		})
+func toSyftFileType(ty string) stereoscopeFile.Type {
+	switch ty {
+	case "SymbolicLink":
+		return stereoscopeFile.TypeSymLink
+	case "HardLink":
+		return stereoscopeFile.TypeHardLink
+	case "Directory":
+		return stereoscopeFile.TypeDirectory
+	case "Socket":
+		return stereoscopeFile.TypeSocket
+	case "BlockDevice":
+		return stereoscopeFile.TypeBlockDevice
+	case "CharacterDevice":
+		return stereoscopeFile.TypeCharacterDevice
+	case "FIFONode":
+		return stereoscopeFile.TypeFIFO
+	case "RegularFile":
+		return stereoscopeFile.TypeRegular
+	case "IrregularFile":
+		return stereoscopeFile.TypeIrregular
+	default:
+		return stereoscopeFile.TypeIrregular
 	}
-	return result
 }
 
-func domainToSyftPackagesAnnotations(annotations []v1beta1.Annotation) []v2_3.Annotation {
-	var result []v2_3.Annotation
-	for _, a := range annotations {
-		result = append(result, v2_3.Annotation{
-			Annotator: common.Annotator{
-				Annotator:     a.Annotator.Annotator,
-				AnnotatorType: a.Annotator.AnnotatorType,
-			},
-			AnnotationDate: a.AnnotationDate,
-			AnnotationType: a.AnnotationType,
-			AnnotationSPDXIdentifier: common.DocElementID{
-				DocumentRefID: a.AnnotationSPDXIdentifier.DocumentRefID,
-				ElementRefID:  common.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
-				SpecialID:     a.AnnotationSPDXIdentifier.SpecialID,
-			},
-			AnnotationComment: a.AnnotationComment,
-		})
-	}
-	return result
-}
-
-func domainToSyftPackagesFilesArtifactOfProjects(artifactOfProjects []*v1beta1.ArtifactOfProject) []*v2_3.ArtifactOfProject {
-	var result []*v2_3.ArtifactOfProject
-	for _, a := range artifactOfProjects {
-		result = append(result, &v2_3.ArtifactOfProject{
-			Name:     a.Name,
-			HomePage: a.HomePage,
-			URI:      a.URI,
-		})
-	}
-	return result
-}
-
-func domainToSyftPackagesFilesSnippets(snippets map[v1beta1.ElementID]*v1beta1.Snippet) map[common.ElementID]*v2_3.Snippet {
-	if len(snippets) == 0 {
+func toSyftLinuxRelease(d model.LinuxRelease) *linux.Release {
+	if cmp.Equal(d, model.LinuxRelease{}) {
 		return nil
 	}
-	result := make(map[common.ElementID]*v2_3.Snippet)
-	for k, s := range snippets {
-		result[common.ElementID(k)] = &v2_3.Snippet{
-			SnippetSPDXIdentifier:         common.ElementID(s.SnippetSPDXIdentifier),
-			SnippetFromFileSPDXIdentifier: common.ElementID(s.SnippetFromFileSPDXIdentifier),
-			Ranges:                        domainToSyftPackagesFilesSnippetsRanges(s.Ranges),
-			SnippetLicenseConcluded:       s.SnippetLicenseConcluded,
-			LicenseInfoInSnippet:          s.LicenseInfoInSnippet,
-			SnippetLicenseComments:        s.SnippetLicenseComments,
-			SnippetCopyrightText:          s.SnippetCopyrightText,
-			SnippetComment:                s.SnippetComment,
-			SnippetName:                   s.SnippetName,
-			SnippetAttributionTexts:       s.SnippetAttributionTexts,
+	return &linux.Release{
+		PrettyName:       d.PrettyName,
+		Name:             d.Name,
+		ID:               d.ID,
+		IDLike:           d.IDLike,
+		Version:          d.Version,
+		VersionID:        d.VersionID,
+		VersionCodename:  d.VersionCodename,
+		BuildID:          d.BuildID,
+		ImageID:          d.ImageID,
+		ImageVersion:     d.ImageVersion,
+		Variant:          d.Variant,
+		VariantID:        d.VariantID,
+		HomeURL:          d.HomeURL,
+		SupportURL:       d.SupportURL,
+		BugReportURL:     d.BugReportURL,
+		PrivacyPolicyURL: d.PrivacyPolicyURL,
+		CPEName:          d.CPEName,
+		SupportEnd:       d.SupportEnd,
+	}
+}
+
+func toSyftRelationships(doc *model.Document, catalog *pkg.Collection, relationships []model.Relationship, idAliases map[string]string) []artifact.Relationship {
+	idMap := make(map[string]interface{})
+
+	for _, p := range catalog.Sorted() {
+		idMap[string(p.ID())] = p
+		locations := p.Locations.ToSlice()
+		for _, l := range locations {
+			idMap[string(l.Coordinates.ID())] = l.Coordinates
 		}
 	}
-	return result
-}
 
-func domainToSyftPackagesFilesSnippetsRanges(ranges []v1beta1.SnippetRange) []common.SnippetRange {
-	var result []common.SnippetRange
-	for _, r := range ranges {
-		result = append(result, common.SnippetRange{
-			StartPointer: common.SnippetRangePointer{
-				Offset:             r.StartPointer.Offset,
-				LineNumber:         r.StartPointer.LineNumber,
-				FileSPDXIdentifier: common.ElementID(r.StartPointer.FileSPDXIdentifier),
-			},
-			EndPointer: common.SnippetRangePointer{
-				Offset:             r.EndPointer.Offset,
-				LineNumber:         r.EndPointer.LineNumber,
-				FileSPDXIdentifier: common.ElementID(r.EndPointer.FileSPDXIdentifier),
-			},
-		})
+	// set source metadata in identifier map
+	idMap[doc.Source.ID] = toSyftSource(doc.Source)
+
+	for _, f := range doc.Files {
+		idMap[f.ID] = f.Location
 	}
-	return result
-}
 
-func domainToSyftFiles(files []*v1beta1.File) []*v2_3.File {
-	var result []*v2_3.File
-	for _, f := range files {
-		result = append(result, &v2_3.File{
-			FileName:             f.FileName,
-			FileSPDXIdentifier:   common.ElementID(f.FileSPDXIdentifier),
-			FileTypes:            f.FileTypes,
-			Checksums:            domainToSyftPackagesPackageChecksums(f.Checksums),
-			LicenseConcluded:     f.LicenseConcluded,
-			LicenseInfoInFiles:   f.LicenseInfoInFiles,
-			LicenseComments:      f.LicenseComments,
-			FileCopyrightText:    f.FileCopyrightText,
-			ArtifactOfProjects:   domainToSyftPackagesFilesArtifactOfProjects(f.ArtifactOfProjects),
-			FileComment:          f.FileComment,
-			FileNotice:           f.FileNotice,
-			FileContributors:     f.FileContributors,
-			FileAttributionTexts: f.FileAttributionTexts,
-			FileDependencies:     f.FileDependencies,
-			Snippets:             domainToSyftPackagesFilesSnippets(f.Snippets),
-			Annotations:          domainToSyftPackagesAnnotations(f.Annotations),
-		})
-	}
-	return result
-}
-
-func domainToSyftOtherLicenses(otherLicenses []*v1beta1.OtherLicense) []*v2_3.OtherLicense {
-	var result []*v2_3.OtherLicense
-	for _, o := range otherLicenses {
-		result = append(result, &v2_3.OtherLicense{
-			LicenseIdentifier:      o.LicenseIdentifier,
-			ExtractedText:          o.ExtractedText,
-			LicenseName:            o.LicenseName,
-			LicenseCrossReferences: o.LicenseCrossReferences,
-			LicenseComment:         o.LicenseComment,
-		})
-	}
-	return result
-}
-
-func domainToSyftRelationships(relationships []*v1beta1.Relationship) []*v2_3.Relationship {
-	var result []*v2_3.Relationship
+	var out []artifact.Relationship
 	for _, r := range relationships {
-		result = append(result, &v2_3.Relationship{
-			RefA: common.DocElementID{
-				DocumentRefID: r.RefA.DocumentRefID,
-				ElementRefID:  common.ElementID(r.RefA.ElementRefID),
-				SpecialID:     r.RefA.SpecialID,
-			},
-			RefB: common.DocElementID{
-				DocumentRefID: r.RefB.DocumentRefID,
-				ElementRefID:  common.ElementID(r.RefB.ElementRefID),
-				SpecialID:     r.RefB.SpecialID,
-			},
-			Relationship:        r.Relationship,
-			RelationshipComment: r.RelationshipComment,
-		})
+		syftRelationship, err := toSyftRelationship(idMap, r, idAliases)
+		if err != nil {
+			// TODO handle error
+			continue
+		}
+		if syftRelationship != nil {
+			out = append(out, *syftRelationship)
+		}
 	}
-	return result
+
+	return out
 }
 
-func domainToSyftAnnotations(annotations []v1beta1.Annotation) []*v2_3.Annotation {
-	var result []*v2_3.Annotation
-	for _, a := range annotations {
-		result = append(result, &v2_3.Annotation{
-			Annotator: common.Annotator{
-				Annotator:     a.Annotator.Annotator,
-				AnnotatorType: a.Annotator.AnnotatorType,
-			},
-			AnnotationDate: a.AnnotationDate,
-			AnnotationType: a.AnnotationType,
-			AnnotationSPDXIdentifier: common.DocElementID{
-				DocumentRefID: a.AnnotationSPDXIdentifier.DocumentRefID,
-				ElementRefID:  common.ElementID(a.AnnotationSPDXIdentifier.ElementRefID),
-				SpecialID:     a.AnnotationSPDXIdentifier.SpecialID,
-			},
-			AnnotationComment: a.AnnotationComment,
-		})
+func toSyftSource(s model.Source) source.Source {
+	description := toSyftSourceData(s)
+	if description == nil {
+		return nil
 	}
-	return result
+	return source.FromDescription(*description)
 }
 
-func domainToSyftSnippets(snippets []v1beta1.Snippet) []v2_3.Snippet {
-	var result []v2_3.Snippet
-	for _, s := range snippets {
-		result = append(result, v2_3.Snippet{
-			SnippetSPDXIdentifier:         common.ElementID(s.SnippetSPDXIdentifier),
-			SnippetFromFileSPDXIdentifier: common.ElementID(s.SnippetFromFileSPDXIdentifier),
-			Ranges:                        domainToSyftPackagesFilesSnippetsRanges(s.Ranges),
-			SnippetLicenseConcluded:       s.SnippetLicenseConcluded,
-			LicenseInfoInSnippet:          s.LicenseInfoInSnippet,
-			SnippetLicenseComments:        s.SnippetLicenseComments,
-			SnippetCopyrightText:          s.SnippetCopyrightText,
-			SnippetComment:                s.SnippetComment,
-			SnippetName:                   s.SnippetName,
-			SnippetAttributionTexts:       s.SnippetAttributionTexts,
-		})
+func toSyftRelationship(idMap map[string]interface{}, relationship model.Relationship, idAliases map[string]string) (*artifact.Relationship, error) {
+	id := func(id string) string {
+		aliased, ok := idAliases[id]
+		if ok {
+			return aliased
+		}
+		return id
 	}
-	return result
+
+	from, ok := idMap[id(relationship.Parent)].(artifact.Identifiable)
+	if !ok {
+		return nil, fmt.Errorf("relationship mapping from key %s is not a valid artifact.Identifiable type: %+v", relationship.Parent, idMap[relationship.Parent])
+	}
+
+	to, ok := idMap[id(relationship.Child)].(artifact.Identifiable)
+	if !ok {
+		return nil, fmt.Errorf("relationship mapping to key %s is not a valid artifact.Identifiable type: %+v", relationship.Child, idMap[relationship.Child])
+	}
+
+	typ := artifact.RelationshipType(relationship.Type)
+
+	switch typ {
+	case artifact.OwnershipByFileOverlapRelationship, artifact.ContainsRelationship, artifact.DependencyOfRelationship, artifact.EvidentByRelationship:
+	default:
+		if !strings.Contains(string(typ), "dependency-of") {
+			return nil, fmt.Errorf("unknown relationship type: %s", string(typ))
+		}
+		// lets try to stay as compatible as possible with similar relationship types without dropping the relationship
+		typ = artifact.DependencyOfRelationship
+	}
+	return &artifact.Relationship{
+		From: from,
+		To:   to,
+		Type: typ,
+		Data: relationship.Metadata,
+	}, nil
 }
 
-func domainToSyftReviews(reviews []*v1beta1.Review) []*v2_3.Review {
-	var result []*v2_3.Review
-	for _, r := range reviews {
-		result = append(result, &v2_3.Review{
-			Reviewer:      r.Reviewer,
-			ReviewerType:  r.ReviewerType,
-			ReviewDate:    r.ReviewDate,
-			ReviewComment: r.ReviewComment,
-		})
+func toSyftDescriptor(d model.Descriptor) sbom.Descriptor {
+	return sbom.Descriptor{
+		Name:          d.Name,
+		Version:       d.Version,
+		Configuration: d.Configuration,
 	}
-	return result
 }
+
+func toSyftSourceData(s model.Source) *source.Description {
+	return &source.Description{
+		ID:       s.ID,
+		Name:     s.Name,
+		Version:  s.Version,
+		Metadata: s.Metadata,
+	}
+}
+
+func toSyftCatalog(pkgs []model.Package, idAliases map[string]string) *pkg.Collection {
+	catalog := pkg.NewCollection()
+	for _, p := range pkgs {
+		catalog.Add(toSyftPackage(p, idAliases))
+	}
+	return catalog
+}
+
+func toSyftPackage(p model.Package, idAliases map[string]string) pkg.Package {
+	var cpes []cpe.CPE
+	for _, c := range p.CPEs {
+		value, err := cpe.New(c)
+		if err != nil {
+			continue
+		}
+
+		cpes = append(cpes, value)
+	}
+
+	out := pkg.Package{
+		Name:      p.Name,
+		Version:   p.Version,
+		FoundBy:   p.FoundBy,
+		Locations: file.NewLocationSet(p.Locations...),
+		Licenses:  pkg.NewLicenseSet(toSyftLicenses(p.Licenses)...),
+		Language:  p.Language,
+		Type:      p.Type,
+		CPEs:      cpes,
+		PURL:      p.PURL,
+		Metadata:  p.Metadata,
+	}
+
+	// we don't know if this package ID is truly unique, however, we need to trust the user input in case there are
+	// external references to it. That is, we can't derive our own ID (using pkg.SetID()) since consumers won't
+	// be able to historically interact with data that references the IDs from the original SBOM document being decoded now.
+	out.OverrideID(artifact.ID(p.ID))
+
+	// this alias mapping is currently defunct, but could be useful in the future.
+	id := string(out.ID())
+	if id != p.ID {
+		idAliases[p.ID] = id
+	}
+
+	return out
+}
+
+// ========================= end of copied code ================================

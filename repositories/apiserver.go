@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -26,7 +25,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -47,9 +45,10 @@ var _ ports.SBOMRepository = (*APIServerStore)(nil)
 
 // NewAPIServerStorage initializes the APIServerStore struct
 func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
+
+	config := k8sinterface.GetK8sConfig()
+	if config == nil {
+		return nil, fmt.Errorf("failed to get k8s config")
 	}
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
@@ -124,9 +123,9 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 
 	if withRelevancy {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
 	} else {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
 	}
 
 	manifest := v1beta1.VulnerabilityManifest{
@@ -272,8 +271,8 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrCastingWorkload
 	}
-	enrichedAnnotations[v1.WlidMetadataKey] = workload.Wlid
-	enrichedAnnotations[v1.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedAnnotations[instanceidhandler.WlidMetadataKey] = workload.Wlid
+	enrichedAnnotations[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedAnnotations, nil
 }
@@ -283,9 +282,9 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		labels = make(map[string]string)
 	}
 	if withRelevancy {
-		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
 	} else {
-		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
 	}
 	enrichedLabels := labels
 
@@ -300,12 +299,12 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		return nil, err
 	}
 
-	enrichedLabels[v1.ApiGroupMetadataKey] = groupVersionScheme.Group
-	enrichedLabels[v1.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[v1.KindMetadataKey] = strings.ToLower(workloadKind)
-	enrichedLabels[v1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
-	enrichedLabels[v1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
-	enrichedLabels[v1.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedLabels[instanceidhandler.ApiGroupMetadataKey] = groupVersionScheme.Group
+	enrichedLabels[instanceidhandler.ApiVersionMetadataKey] = groupVersionScheme.Version
+	enrichedLabels[instanceidhandler.KindMetadataKey] = strings.ToLower(workloadKind)
+	enrichedLabels[instanceidhandler.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+	enrichedLabels[instanceidhandler.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	enrichedLabels[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedLabels, nil
 }
@@ -495,7 +494,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
 
 	// Timestamp
 	timestamp := time.Now().Format(time.RFC3339)
@@ -576,7 +575,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
 	vexDoc := vexContainer.Spec
@@ -752,7 +751,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		logger.L().Debug("empty name provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("SBOM manifest not found in storage",
@@ -776,7 +775,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
-		Content:            &manifest.Spec.SPDX,
+		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
@@ -786,7 +785,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	return result, nil
 }
 
-func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
+func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered) error {
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok && status == instanceidhandler.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
@@ -800,7 +799,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		logger.L().Debug("empty name provided, skipping relevant SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("relevant SBOM manifest not found in storage",
@@ -822,7 +821,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
-		Content:            &manifest.Spec.SPDX,
+		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
@@ -840,34 +839,34 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 		logger.L().Debug("skipping storing SBOM with empty name")
 		return nil
 	}
-	manifest := v1beta1.SBOMSPDXv2p3{
+	manifest := v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        sbom.Name,
 			Annotations: sbom.Annotations,
 			Labels:      sbom.Labels,
 		},
-		Spec: v1beta1.SBOMSPDXv2p3Spec{
+		Spec: v1beta1.SBOMSyftSpec{
 			Metadata: v1beta1.SPDXMeta{
 				Tool: v1beta1.ToolMeta{
 					Name:    sbom.SBOMCreatorName,
 					Version: sbom.SBOMCreatorVersion,
 				},
+				Report: v1beta1.ReportMeta{
+					CreatedAt: metav1.Now().Rfc3339Copy(),
+				},
 			},
 		},
-		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
+		Status: v1beta1.SBOMSyftStatus{}, // TODO move timeout information here
 	}
+
 	if sbom.Content != nil {
-		manifest.Spec.SPDX = *sbom.Content
-		created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
-		if err != nil {
-			manifest.Spec.Metadata.Report.CreatedAt.Time = created
-		}
+		manifest.Spec.Syft = *sbom.Content
 	}
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	_, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		logger.L().Debug("SBOM manifest already exists in storage",

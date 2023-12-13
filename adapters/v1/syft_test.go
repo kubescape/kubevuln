@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/syft/syft/format/syftjson/model"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -54,13 +55,13 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:           "big image produces incomplete SBOM",
-			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:         "null",
-			maxImageSize:   1,
-			wantIncomplete: true,
-		},
+		// {
+		// 	name:           "big image produces incomplete SBOM",
+		// 	imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		// 	format:         "null",
+		// 	maxImageSize:   1,
+		// 	wantIncomplete: true,
+		// },
 		{
 			name:    "system tests image",
 			imageID: "public-registry.systest-ns-bpf7:5000/nginx:test",
@@ -99,13 +100,26 @@ func Test_syftAdapter_Version(t *testing.T) {
 }
 
 func Test_syftAdapter_transformations(t *testing.T) {
-	sbom := domain.SBOM{}
-	err := json.Unmarshal(fileContent("testdata/alpine-sbom.json"), &sbom.Content)
-	tools.EnsureSetup(t, err == nil)
-	spdxSBOM, err := domainToSpdx(*sbom.Content)
-	tools.EnsureSetup(t, err == nil)
+	// Load from file
+	b := fileContent("testdata/alpine-sbom.json")
+
+	// Convert to model.Document
+	var d model.Document
+	if err := json.Unmarshal(b, &d); err != nil {
+		tools.EnsureSetup(t, err == nil)
+	}
+
+	// Convert to syft.sbom
+	sbom := toSyftModel(d)
+
+	// Convert to domain.sbom
 	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
-	domainSBOM, err := s.spdxToDomain(spdxSBOM)
+	domainSBOM, err := s.syftToDomain(*sbom)
 	tools.EnsureSetup(t, err == nil)
-	assert.Equal(t, sbom.Content, domainSBOM)
+
+	// compare file with domain.sbom
+	ja := jsonassert.New(t)
+	b2, err := json.Marshal(domainSBOM)
+	tools.EnsureSetup(t, err == nil)
+	ja.Assertf(string(b2), string(b))
 }

@@ -3,10 +3,8 @@ package repositories
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -18,15 +16,15 @@ import (
 const name = "k8s.gcr.io-kube-proxy-sha256-c1b13"
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incomplete bool) error {
-	manifest := v1beta1.SBOMSPDXv2p3Filtered{
+	manifest := v1beta1.SBOMSyftFiltered{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        sbom.Name,
 			Annotations: sbom.Annotations,
 		},
-		Spec: v1beta1.SBOMSPDXv2p3Spec{},
+		Spec: v1beta1.SBOMSyftSpec{},
 	}
 	if sbom.Content != nil {
-		manifest.Spec.SPDX = *sbom.Content
+		manifest.Spec.Syft = *sbom.Content
 	}
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
@@ -35,7 +33,7 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incom
 	if incomplete {
 		manifest.Annotations[instanceidhandler.StatusMetadataKey] = instanceidhandler.Incomplete
 	}
-	_, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
 }
 
@@ -183,12 +181,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				name: name,
 			},
 			domain.SBOM{
-				Name: name,
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Name:    name,
+				Content: &v1beta1.SyftDocument{},
 			},
 			false,
 		},
@@ -199,12 +193,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				name: name,
 			},
 			domain.SBOM{
-				Name: name,
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: "invalid timestamp",
-					},
-				},
+				Name:    name,
+				Content: &v1beta1.SyftDocument{},
 			},
 			false,
 		},
@@ -218,11 +208,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			domain.SBOM{
 				Name:               name,
 				SBOMCreatorVersion: "v1.0.0",
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Content:            &v1beta1.SyftDocument{},
 			},
 			true,
 		},
@@ -236,11 +222,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			domain.SBOM{
 				Name:               "",
 				SBOMCreatorVersion: "v1.0.0",
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Content:            &v1beta1.SyftDocument{},
 			},
 			true,
 		},
@@ -285,11 +267,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				Annotations: map[string]string{
 					"foo": "bar",
 				},
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Content: &v1beta1.SyftDocument{},
 			},
 		},
 		{
@@ -303,11 +281,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				Annotations: map[string]string{
 					"foo": "bar",
 				},
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: "invalid timestamp",
-					},
-				},
+				Content: &v1beta1.SyftDocument{},
 			},
 		},
 		{
@@ -323,11 +297,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 					"foo": "bar",
 				},
 				SBOMCreatorVersion: "v1.0.0",
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Content:            &v1beta1.SyftDocument{},
 			},
 			wantEmptySBOM: false, // SBOMp is not versioned
 		},
@@ -341,11 +311,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			sbom: domain.SBOM{
 				Name:               "",
 				SBOMCreatorVersion: "v1.0.0",
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Content:            &v1beta1.SyftDocument{},
 			},
 			wantEmptySBOM: true,
 		},
@@ -356,12 +322,8 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				name: name,
 			},
 			sbom: domain.SBOM{
-				Name: name,
-				Content: &v1beta1.Document{
-					CreationInfo: &v1beta1.CreationInfo{
-						Created: time.Now().Format(time.RFC3339),
-					},
-				},
+				Name:    name,
+				Content: &v1beta1.SyftDocument{},
 			},
 			incomplete:    true,
 			wantEmptySBOM: true,
@@ -583,27 +545,27 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels, true)
 		assert.Equal(t, err, nil)
 
-		val, exist := enrichedLabels[v1.ApiGroupMetadataKey]
+		val, exist := enrichedLabels[instanceidhandler.ApiGroupMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceGroup)
 
-		val, exist = enrichedLabels[v1.ApiVersionMetadataKey]
+		val, exist = enrichedLabels[instanceidhandler.ApiVersionMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceVersion)
 
-		val, exist = enrichedLabels[v1.KindMetadataKey]
+		val, exist = enrichedLabels[instanceidhandler.KindMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceType)
 
-		val, exist = enrichedLabels[v1.NameMetadataKey]
+		val, exist = enrichedLabels[instanceidhandler.NameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceName)
 
-		val, exist = enrichedLabels[v1.NamespaceMetadataKey]
+		val, exist = enrichedLabels[instanceidhandler.NamespaceMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceNamespace)
 
-		val, exist = enrichedLabels[v1.ContainerNameMetadataKey]
+		val, exist = enrichedLabels[instanceidhandler.ContainerNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
 	}
@@ -654,11 +616,11 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 		enrichedAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, tests[i].annotations)
 		assert.Equal(t, err, nil)
 
-		val, exist := enrichedAnnotations[v1.WlidMetadataKey]
+		val, exist := enrichedAnnotations[instanceidhandler.WlidMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.Wlid)
 
-		val, exist = enrichedAnnotations[v1.ContainerNameMetadataKey]
+		val, exist = enrichedAnnotations[instanceidhandler.ContainerNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
 	}
