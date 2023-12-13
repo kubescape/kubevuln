@@ -66,7 +66,7 @@ func main() {
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL)
 	var platform ports.Platform
 	if c.KeepLocal {
-		platform = adapters.NewMockPlatform()
+		platform = adapters.NewMockPlatform(true)
 	} else {
 		backendServices, err := config.LoadBackendServicesConfig("/etc/config")
 		if err != nil {
