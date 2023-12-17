@@ -30,7 +30,6 @@ require (
 	github.com/kubescape/k8s-interface v0.0.155
 	github.com/kubescape/storage v0.0.44
 	github.com/openvex/go-vex v0.2.5
-	github.com/qor/auth v0.0.0-20230128025119-e937b5370b79
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.44.0
@@ -97,7 +96,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.14.14 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.20.1 // indirect
 	github.com/aws/smithy-go v1.13.5 // indirect
-	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/becheran/wildmatch-go v1.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d // indirect
@@ -108,7 +106,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
-	github.com/chris-ramon/douceur v0.2.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/containerd/containerd v1.7.8 // indirect
@@ -176,12 +173,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
 	github.com/gookit/color v1.5.4 // indirect
-	github.com/gorilla/context v1.1.1 // indirect
-	github.com/gorilla/css v1.0.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/gorilla/securecookie v1.1.1 // indirect
-	github.com/gorilla/sessions v1.2.0 // indirect
-	github.com/gosimple/slug v1.9.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.18.0 // indirect
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -196,7 +188,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
-	github.com/jinzhu/gorm v1.9.16 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -223,7 +214,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mholt/archiver/v3 v3.5.1 // indirect
-	github.com/microcosm-cc/bluemonday v1.0.3 // indirect
 	github.com/microsoft/go-rustaudit v0.0.0-20220730194248-4b17361d90a5 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
@@ -261,15 +251,6 @@ require (
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.10.1 // indirect
-	github.com/qor/assetfs v0.0.0-20170713023933-ff57fdc13a14 // indirect
-	github.com/qor/mailer v0.0.0-20180329083248-0555e49f99ac // indirect
-	github.com/qor/middlewares v0.0.0-20170822143614-781378b69454 // indirect
-	github.com/qor/qor v0.0.0-20200729071734-d587cffbbb93 // indirect
-	github.com/qor/redirect_back v0.0.0-20170907030740-b4161ed6f848 // indirect
-	github.com/qor/render v1.1.1 // indirect
-	github.com/qor/responder v0.0.0-20171031032654-b6def473574f // indirect
-	github.com/qor/session v0.0.0-20170907035918-8206b0adab70 // indirect
-	github.com/rainycape/unidecode v0.0.0-20150907023854-cb7f23ec59be // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
