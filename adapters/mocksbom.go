@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
@@ -53,12 +52,8 @@ func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID string, _ d
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,
 		},
-		Labels: tools.LabelsFromImageID(imageID),
-		Content: &v1beta1.Document{
-			CreationInfo: &v1beta1.CreationInfo{
-				Created: time.Now().Format(time.RFC3339),
-			},
-		},
+		Labels:  tools.LabelsFromImageID(imageID),
+		Content: &v1beta1.SyftDocument{},
 	}
 	if m.timeout {
 		sbom.Status = instanceidhandler.Incomplete
