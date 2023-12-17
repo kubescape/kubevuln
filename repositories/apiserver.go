@@ -752,7 +752,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		logger.L().Debug("empty name provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("SBOM manifest not found in storage",
@@ -776,7 +776,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
-		Content:            &manifest.Spec.SPDX,
+		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
@@ -786,7 +786,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	return result, nil
 }
 
-func validateSBOMp(manifest *v1beta1.SBOMSPDXv2p3Filtered) error {
+func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered) error {
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok && status == instanceidhandler.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
@@ -800,7 +800,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		logger.L().Debug("empty name provided, skipping relevant SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSPDXv2p3Filtereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("relevant SBOM manifest not found in storage",
@@ -822,7 +822,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
-		Content:            &manifest.Spec.SPDX,
+		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		result.Status = status
@@ -840,13 +840,13 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 		logger.L().Debug("skipping storing SBOM with empty name")
 		return nil
 	}
-	manifest := v1beta1.SBOMSPDXv2p3{
+	manifest := v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        sbom.Name,
 			Annotations: sbom.Annotations,
 			Labels:      sbom.Labels,
 		},
-		Spec: v1beta1.SBOMSPDXv2p3Spec{
+		Spec: v1beta1.SBOMSyftSpec{
 			Metadata: v1beta1.SPDXMeta{
 				Tool: v1beta1.ToolMeta{
 					Name:    sbom.SBOMCreatorName,
@@ -854,20 +854,22 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 				},
 			},
 		},
-		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
+		Status: v1beta1.SBOMSyftStatus{}, // TODO move timeout information here
 	}
-	if sbom.Content != nil {
-		manifest.Spec.SPDX = *sbom.Content
-		created, err := time.Parse(time.RFC3339, sbom.Content.CreationInfo.Created)
-		if err != nil {
-			manifest.Spec.Metadata.Report.CreatedAt.Time = created
-		}
-	}
+
+	// @matthyx TODO: Why do we manually add the creation time
+	// if sbom.Content != nil {
+	// 	manifest.Spec.Syft = *sbom.Content
+	// 	created, err := time.Parse(time.RFC3339, sbom.Content)
+	// 	if err != nil {
+	// 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
+	// 	}
+	// }
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	_, err := a.StorageClient.SBOMSPDXv2p3s(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		logger.L().Debug("SBOM manifest already exists in storage",
