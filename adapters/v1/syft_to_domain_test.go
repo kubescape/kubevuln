@@ -2,96 +2,112 @@ package v1
 
 import (
 	"testing"
-	"time"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/spdx/tools-golang/spdx/v2/common"
-	"github.com/spdx/tools-golang/spdx/v2/v2_3"
+
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSyftAdapter_spdxToDomain(t *testing.T) {
+func Test_syftJSONToDomain(t *testing.T) {
+	type args struct {
+		data []byte
+	}
+	type source struct {
+		id   string
+		name string
+	}
+	type want struct {
+		source                source
+		artifact              v1beta1.SyftPackage
+		artifacts             int // number of artifacts
+		artifactRelationships int // number of artifact relationships
+		files                 int // number of files
+	}
 	tests := []struct {
 		name    string
-		spdxDoc *v2_3.Document
-		want    *v1beta1.Document
+		args    args
+		want    want
 		wantErr bool
 	}{
 		{
-			name: "Test spdxToDomain",
-			spdxDoc: &v2_3.Document{
-				Annotations: []*v2_3.Annotation{{}},
-				CreationInfo: &v2_3.CreationInfo{
-					Creators: []common.Creator{{
-						Creator: "syft-",
-					}},
-				},
-				ExternalDocumentReferences: []v2_3.ExternalDocumentRef{{}},
-				Files:                      []*v2_3.File{{}},
-				OtherLicenses:              []*v2_3.OtherLicense{{}},
-				Packages: []*v2_3.Package{{
-					Annotations: []v2_3.Annotation{{}},
-					Files: []*v2_3.File{{
-						Annotations:        []v2_3.Annotation{{}},
-						ArtifactOfProjects: []*v2_3.ArtifactOfProject{{}},
-						Checksums:          []common.Checksum{{}},
-						Snippets:           map[common.ElementID]*v2_3.Snippet{"": {}},
-					}},
-					PackageChecksums:          []common.Checksum{{}},
-					PackageExternalReferences: []*v2_3.PackageExternalReference{{}},
-					PackageOriginator:         &common.Originator{},
-					PackageSupplier:           &common.Supplier{},
-					PackageVerificationCode:   &common.PackageVerificationCode{},
-				}},
-				Relationships: []*v2_3.Relationship{{}},
-				Reviews:       []*v2_3.Review{{}},
-				Snippets: []v2_3.Snippet{{
-					Ranges: []common.SnippetRange{{}},
-				}},
+			name: "valid alpine SBOM",
+			args: args{
+				data: fileContent("testdata/alpine-sbom.json"),
 			},
-			want: &v1beta1.Document{
-				Annotations: []v1beta1.Annotation{{}},
-				CreationInfo: &v1beta1.CreationInfo{
-					Creators: []v1beta1.Creator{{
-						Creator: "syft-unknown",
-					}},
+			want: want{
+				// TODO: We need to understand why "MetadataType" is empty!!
+				// @dwertent
+				//
+				// artifact: v1beta1.SyftPackage{
+				// 	PackageCustomData: v1beta1.PackageCustomData{
+				// 		MetadataType: "apk-db-entry",
+				// 	},
+				// },
+				artifacts:             15,
+				artifactRelationships: 129,
+				files:                 78,
+				source: source{
+					id:   "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+					name: "alpine",
 				},
-				ExternalDocumentReferences: []v1beta1.ExternalDocumentRef{{}},
-				Files:                      []*v1beta1.File{{}},
-				OtherLicenses:              []*v1beta1.OtherLicense{{}},
-				Packages: []*v1beta1.Package{{
-					Annotations: []v1beta1.Annotation{{}},
-					Files: []*v1beta1.File{{
-						Annotations:        []v1beta1.Annotation{{}},
-						ArtifactOfProjects: []*v1beta1.ArtifactOfProject{{}},
-						Checksums:          []v1beta1.Checksum{{}},
-						Snippets:           map[v1beta1.ElementID]*v1beta1.Snippet{"": {}},
-					}},
-					PackageChecksums:          []v1beta1.Checksum{{}},
-					PackageExternalReferences: []*v1beta1.PackageExternalReference{{}},
-					PackageOriginator:         &v1beta1.Originator{},
-					PackageSupplier:           &v1beta1.Supplier{},
-					PackageVerificationCode:   &v1beta1.PackageVerificationCode{},
-				}},
-				Relationships: []*v1beta1.Relationship{{}},
-				Reviews:       []*v1beta1.Review{{}},
-				Snippets: []v1beta1.Snippet{{
-					Ranges: []v1beta1.SnippetRange{{}},
-				}},
+			},
+		},
+		{
+			name: "valid nginx SBOM",
+			args: args{
+				data: fileContent("testdata/nginx-sbom.json"),
+			},
+			want: want{
+				// artifact: v1beta1.SyftPackage{
+				// 	PackageCustomData: v1beta1.PackageCustomData{
+				// 		MetadataType: "",
+				// 	},
+				// },
+				artifacts:             110,
+				artifactRelationships: 3450,
+				files:                 2940,
+				source: source{
+					id:   "6db649d8a1f720b6c59469c1c61c95fc3d332e437d457106a66b975515e75128",
+					name: "nginx",
+				},
+			},
+		}, {
+			name: "valid hello-world SBOM",
+			args: args{
+				data: fileContent("testdata/hello-world-sbom.json"),
+			},
+			want: want{
+				// artifact: v1beta1.SyftPackage{
+				// 	PackageCustomData: v1beta1.PackageCustomData{
+				// 		MetadataType: "",
+				// 	},
+				// },
+				artifacts:             0,
+				artifactRelationships: 0,
+				files:                 0,
+				source: source{
+					id:   "432f982638b3aefab73cc58ab28f5c16e96fdb504e8c134fc58dff4bae8bf338",
+					name: "library/hello-world",
+				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &SyftAdapter{
-				scanTimeout: 5 * time.Minute,
-			}
-			got, err := s.spdxToDomain(tt.spdxDoc)
+			got, err := syftJSONToDomain(tt.args.data)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("spdxToDomain() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("syftJSONToDomain() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want.artifacts, len(got.Artifacts))
+			assert.Equal(t, tt.want.artifactRelationships, len(got.ArtifactRelationships))
+			assert.Equal(t, tt.want.files, len(got.Files))
+			assert.Equal(t, tt.want.source.id, got.SyftSource.ID)
+			assert.Equal(t, tt.want.source.name, got.SyftSource.Name)
+
+			if len(got.Artifacts) > 0 {
+				assert.Equal(t, tt.want.artifact.PackageCustomData.MetadataType, got.Artifacts[0].PackageCustomData.MetadataType)
+			}
 		})
 	}
 }

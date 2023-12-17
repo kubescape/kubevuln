@@ -9,8 +9,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-const jsonEncoderName = "json"
-
 func syftJSONToDomain(data []byte) (*v1beta1.SyftDocument, error) {
 	var syftSBOM *v1beta1.SyftDocument
 	err := json.Unmarshal(data, &syftSBOM)
