@@ -127,7 +127,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 
 func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanCommand {
 	command := domain.ScanCommand{
-		Credentialslist:    c.Credentialslist,
+		CredentialsList:    c.Credentialslist,
 		ImageHash:          c.ImageHash,
 		Wlid:               c.Wlid,
 		ImageTag:           c.ImageTag,
@@ -194,7 +194,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
 	command := domain.ScanCommand{
-		Credentialslist:    c.Credentialslist,
+		CredentialsList:    c.Credentialslist,
 		ImageTag:           c.ImageTag,
 		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
 		JobID:              c.JobID,
