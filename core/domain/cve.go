@@ -18,6 +18,9 @@ type CVEExceptions []armotypes.VulnerabilityExceptionPolicy
 
 // CVEManifest contains a JSON CVE report manifest with some metadata
 type CVEManifest struct {
+	Content            *v1beta1.GrypeDocument
+	Annotations        map[string]string
+	Labels             map[string]string
 	Name               string
 	Wlid               string
 	SBOMCreatorName    string
@@ -25,7 +28,4 @@ type CVEManifest struct {
 	CVEScannerName     string
 	CVEScannerVersion  string
 	CVEDBVersion       string
-	Content            *v1beta1.GrypeDocument
-	Annotations        map[string]string
-	Labels             map[string]string
 }
