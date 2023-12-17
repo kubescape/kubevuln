@@ -3,11 +3,11 @@
     "artifactRelationships": [],
     "source": {
         "id": "432f982638b3aefab73cc58ab28f5c16e96fdb504e8c134fc58dff4bae8bf338",
-        "name": "hello-world",
+        "name": "library/hello-world",
         "version": "sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
         "type": "image",
         "metadata": {
-            "userInput": "hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
+            "userInput": "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
             "imageID": "sha256:46331d942d6350436f64e614d75725f6de3bb5c63e266e236e04389820a234c4",
             "manifestDigest": "sha256:432f982638b3aefab73cc58ab28f5c16e96fdb504e8c134fc58dff4bae8bf338",
             "mediaType": "application/vnd.docker.distribution.manifest.v2+json",

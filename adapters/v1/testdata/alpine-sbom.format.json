@@ -44,7 +44,6 @@
         "cpe:2.3:a:alpine:alpine_baselayout:3.4.0-r0:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/alpine-baselayout@3.4.0-r0?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "alpine-baselayout",
         "originPackage": "alpine-baselayout",
@@ -436,7 +435,6 @@
         "cpe:2.3:a:alpine:alpine_baselayout_data:3.4.0-r0:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/alpine-baselayout-data@3.4.0-r0?arch=x86_64&upstream=alpine-baselayout&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "alpine-baselayout-data",
         "originPackage": "alpine-baselayout",
@@ -613,7 +611,6 @@
         "cpe:2.3:a:alpine:alpine_keys:2.4-r1:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "alpine-keys",
         "originPackage": "alpine-keys",
@@ -1068,7 +1065,6 @@
         "cpe:2.3:a:apk:apk_tools:2.12.10-r1:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/apk-tools@2.12.10-r1?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "apk-tools",
         "originPackage": "apk-tools",
@@ -1189,7 +1185,6 @@
         "cpe:2.3:a:busybox:busybox:1.35.0-r29:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/busybox@1.35.0-r29?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "busybox",
         "originPackage": "busybox",
@@ -1373,7 +1368,6 @@
         "cpe:2.3:a:busybox:busybox_binsh:1.35.0-r29:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/busybox-binsh@1.35.0-r29?arch=x86_64&upstream=busybox&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "busybox-binsh",
         "originPackage": "busybox",
@@ -1460,7 +1454,6 @@
         "cpe:2.3:a:ca:ca_certificates_bundle:20220614-r4:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/ca-certificates-bundle@20220614-r4?arch=x86_64&upstream=ca-certificates&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "ca-certificates-bundle",
         "originPackage": "ca-certificates",
@@ -1574,7 +1567,6 @@
         "cpe:2.3:a:libc:libc_utils:0.7.2-r3:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64&upstream=libc-dev&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libc-utils",
         "originPackage": "libc-dev",
@@ -1636,7 +1628,6 @@
         "cpe:2.3:a:libcrypto:libcrypto:3.0.8-r0:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/libcrypto3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libcrypto3",
         "originPackage": "openssl",
@@ -1859,7 +1850,6 @@
         "cpe:2.3:a:libssl:libssl:3.0.8-r0:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/libssl3@3.0.8-r0?arch=x86_64&upstream=openssl&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libssl3",
         "originPackage": "openssl",
@@ -1953,7 +1943,6 @@
         "cpe:2.3:a:musl:musl:1.2.3-r4:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/musl@1.2.3-r4?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "musl",
         "originPackage": "musl",
@@ -2043,7 +2032,6 @@
         "cpe:2.3:a:musl:musl_utils:1.2.3-r4:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/musl-utils@1.2.3-r4?arch=x86_64&upstream=musl&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "musl-utils",
         "originPackage": "musl",
@@ -2169,7 +2157,6 @@
         "cpe:2.3:a:scanelf:scanelf:1.3.5-r1:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/scanelf@1.3.5-r1?arch=x86_64&upstream=pax-utils&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "scanelf",
         "originPackage": "pax-utils",
@@ -2252,7 +2239,6 @@
         "cpe:2.3:a:ssl:ssl_client:1.35.0-r29:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/ssl_client@1.35.0-r29?arch=x86_64&upstream=busybox&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "ssl_client",
         "originPackage": "busybox",
@@ -2332,7 +2318,6 @@
         "cpe:2.3:a:zlib:zlib:1.2.13-r0:*:*:*:*:*:*:*"
       ],
       "purl": "pkg:apk/alpine/zlib@1.2.13-r0?arch=x86_64&distro=alpine-3.17.2",
-      "metadataType": "apk-db-entry",
       "metadata": {
         "package": "zlib",
         "originPackage": "zlib",
@@ -3576,11 +3561,11 @@
   ],
   "source": {
     "id": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-    "name": "alpine",
+    "name": "library/alpine",
     "version": "sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
     "type": "image",
     "metadata": {
-      "userInput": "alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "userInput": "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
       "imageID": "sha256:b2aa39c304c27b96c1fef0c06bee651ac9241d49c4fe34381cab8453f9a89c7d",
       "manifestDigest": "sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
       "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
@@ -3611,8 +3596,8 @@
     "bugReportURL": "https://gitlab.alpinelinux.org/alpine/aports/-/issues"
   },
   "descriptor": {
-    "name": "syft",
-    "version": "0.98.0",
+    "name": "<<PRESENCE>>",
+    "version": "<<PRESENCE>>",
     "configuration": {
       "catalogers": null,
       "package": {
@@ -3664,7 +3649,7 @@
         "auth": null,
         "ca-cert": ""
       },
-      "exclude": [],
+      "exclude": null,
       "platform": "",
       "name": "",
       "source": {
@@ -3676,7 +3661,7 @@
           ]
         }
       },
-      "parallelism": 1,
+      "parallelism": "<<PRESENCE>>",
       "default-image-pull-source": "",
       "base-path": "",
       "exclude-binary-overlap-by-ownership": true

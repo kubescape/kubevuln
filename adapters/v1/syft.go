@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/file"
@@ -16,7 +16,6 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -93,13 +92,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	}(t)
 
 	// download image
-	logger.L().Debug("downloading image",
-		helpers.String("imageID", imageID))
+	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
+
+	// TODO: support maxImageSize
+	// @matthyx: I removed the support for maxImageSize because it's not supported by Syft, it looks like you developed the image download mechanism, I want to find a better solution.
 	src, err := detectSource(imageID, syftOpts, &registryOptions)
 
-	// check for 401 error and retry without credentials
-	var transportError *transport.Error
-	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusUnauthorized {
+	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		logger.L().Debug("got 401, retrying without credentials",
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
@@ -145,7 +144,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	// convert SBOM
 	logger.L().Debug("converting SBOM",
 		helpers.String("imageID", imageID))
-	domainSBOM.Content, err = s.syftToDomain(syftSBOM)
+	domainSBOM.Content, err = s.syftToDomain(*syftSBOM)
 
 	// return SBOM
 	logger.L().Debug("returning SBOM",
@@ -182,7 +181,7 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("could not deteremine source: %w", err)
+		return nil, fmt.Errorf("could not determine source: %w", err)
 	}
 
 	var platform *image.Platform
@@ -215,7 +214,7 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 		},
 	)
 
-	return src, nil
+	return src, err
 }
 
 func generateSBOM(toolName string, toolVersion string, src source.Source, opts *options.Catalog) (*sbom.SBOM, error) {
