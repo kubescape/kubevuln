@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
+
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
-	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/uuid"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -162,14 +163,14 @@ func Test_parseLayersPayload(t *testing.T) {
 	config := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
 	base64.StdEncoding.Encode(config, data)
 	tests := []struct {
-		name    string
-		target  source.ImageMetadata
+		target  source.StereoscopeImageSourceMetadata
 		want    map[string]containerscan.ESLayer
+		name    string
 		wantErr bool
 	}{
 		{
 			name: "Test parseLayersPayload",
-			target: source.ImageMetadata{
+			target: source.StereoscopeImageSourceMetadata{
 				RawConfig: config,
 			},
 			want: map[string]containerscan.ESLayer{
