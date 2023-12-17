@@ -362,7 +362,7 @@ func generateScanID(workload domain.ScanCommand) string {
 
 func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
-	for _, cred := range workload.Credentialslist {
+	for _, cred := range workload.CredentialsList {
 		if cred.Auth != "" {
 			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Authority: cred.Auth})
 		}
