@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -26,7 +25,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -47,9 +45,10 @@ var _ ports.SBOMRepository = (*APIServerStore)(nil)
 
 // NewAPIServerStorage initializes the APIServerStore struct
 func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
+
+	config := k8sinterface.GetK8sConfig()
+	if config == nil {
+		return nil, fmt.Errorf("failed to get k8s config")
 	}
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
@@ -124,9 +123,9 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 
 	if withRelevancy {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
 	} else {
-		cve.Labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
 	}
 
 	manifest := v1beta1.VulnerabilityManifest{
@@ -272,8 +271,8 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrCastingWorkload
 	}
-	enrichedAnnotations[v1.WlidMetadataKey] = workload.Wlid
-	enrichedAnnotations[v1.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedAnnotations[instanceidhandler.WlidMetadataKey] = workload.Wlid
+	enrichedAnnotations[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedAnnotations, nil
 }
@@ -283,9 +282,9 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		labels = make(map[string]string)
 	}
 	if withRelevancy {
-		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyFiltered
+		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
 	} else {
-		labels[v1.ContextMetadataKey] = v1.ContextMetadataKeyNonFiltered
+		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
 	}
 	enrichedLabels := labels
 
@@ -300,12 +299,12 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		return nil, err
 	}
 
-	enrichedLabels[v1.ApiGroupMetadataKey] = groupVersionScheme.Group
-	enrichedLabels[v1.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[v1.KindMetadataKey] = strings.ToLower(workloadKind)
-	enrichedLabels[v1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
-	enrichedLabels[v1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
-	enrichedLabels[v1.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedLabels[instanceidhandler.ApiGroupMetadataKey] = groupVersionScheme.Group
+	enrichedLabels[instanceidhandler.ApiVersionMetadataKey] = groupVersionScheme.Version
+	enrichedLabels[instanceidhandler.KindMetadataKey] = strings.ToLower(workloadKind)
+	enrichedLabels[instanceidhandler.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+	enrichedLabels[instanceidhandler.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	enrichedLabels[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedLabels, nil
 }
@@ -495,7 +494,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
 
 	// Timestamp
 	timestamp := time.Now().Format(time.RFC3339)
@@ -576,7 +575,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[v1.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
 	vexDoc := vexContainer.Spec
