@@ -16,7 +16,7 @@ import (
 const name = "k8s.gcr.io-kube-proxy-sha256-c1b13"
 
 func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incomplete bool) error {
-	manifest := v1beta1.SBOMSyft{
+	manifest := v1beta1.SBOMSyftFiltered{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        sbom.Name,
 			Annotations: sbom.Annotations,
@@ -33,7 +33,7 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incom
 	if incomplete {
 		manifest.Annotations[instanceidhandler.StatusMetadataKey] = instanceidhandler.Incomplete
 	}
-	_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
 }
 
@@ -270,64 +270,64 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				Content: &v1beta1.SyftDocument{},
 			},
 		},
-		// {
-		// 	name: "invalid timestamp, SBOMp is still retrieved",
-		// 	args: args{
-		// 		ctx:  context.TODO(),
-		// 		name: name,
-		// 	},
-		// 	sbom: domain.SBOM{
-		// 		Name: name,
-		// 		Annotations: map[string]string{
-		// 			"foo": "bar",
-		// 		},
-		// 		Content: &v1beta1.SyftDocument{},
-		// 	},
-		// },
-		// {
-		// 	name: "SBOMCreatorVersion mismatch",
-		// 	args: args{
-		// 		ctx:                context.TODO(),
-		// 		name:               name,
-		// 		SBOMCreatorVersion: "v1.1.0",
-		// 	},
-		// 	sbom: domain.SBOM{
-		// 		Name: name,
-		// 		Annotations: map[string]string{
-		// 			"foo": "bar",
-		// 		},
-		// 		SBOMCreatorVersion: "v1.0.0",
-		// 		Content:            &v1beta1.SyftDocument{},
-		// 	},
-		// 	wantEmptySBOM: false, // SBOMp is not versioned
-		// },
-		// {
-		// 	name: "empty name",
-		// 	args: args{
-		// 		ctx:                context.TODO(),
-		// 		name:               "",
-		// 		SBOMCreatorVersion: "v1.1.0",
-		// 	},
-		// 	sbom: domain.SBOM{
-		// 		Name:               "",
-		// 		SBOMCreatorVersion: "v1.0.0",
-		// 		Content:            &v1beta1.SyftDocument{},
-		// 	},
-		// 	wantEmptySBOM: true,
-		// },
-		// {
-		// 	name: "incomplete SBOMp is retrieved",
-		// 	args: args{
-		// 		ctx:  context.TODO(),
-		// 		name: name,
-		// 	},
-		// 	sbom: domain.SBOM{
-		// 		Name:    name,
-		// 		Content: &v1beta1.SyftDocument{},
-		// 	},
-		// 	incomplete:    true,
-		// 	wantEmptySBOM: true,
-		// },
+		{
+			name: "invalid timestamp, SBOMp is still retrieved",
+			args: args{
+				ctx:  context.TODO(),
+				name: name,
+			},
+			sbom: domain.SBOM{
+				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
+				Content: &v1beta1.SyftDocument{},
+			},
+		},
+		{
+			name: "SBOMCreatorVersion mismatch",
+			args: args{
+				ctx:                context.TODO(),
+				name:               name,
+				SBOMCreatorVersion: "v1.1.0",
+			},
+			sbom: domain.SBOM{
+				Name: name,
+				Annotations: map[string]string{
+					"foo": "bar",
+				},
+				SBOMCreatorVersion: "v1.0.0",
+				Content:            &v1beta1.SyftDocument{},
+			},
+			wantEmptySBOM: false, // SBOMp is not versioned
+		},
+		{
+			name: "empty name",
+			args: args{
+				ctx:                context.TODO(),
+				name:               "",
+				SBOMCreatorVersion: "v1.1.0",
+			},
+			sbom: domain.SBOM{
+				Name:               "",
+				SBOMCreatorVersion: "v1.0.0",
+				Content:            &v1beta1.SyftDocument{},
+			},
+			wantEmptySBOM: true,
+		},
+		{
+			name: "incomplete SBOMp is retrieved",
+			args: args{
+				ctx:  context.TODO(),
+				name: name,
+			},
+			sbom: domain.SBOM{
+				Name:    name,
+				Content: &v1beta1.SyftDocument{},
+			},
+			incomplete:    true,
+			wantEmptySBOM: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -336,8 +336,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			tools.EnsureSetup(t, err == nil)
 			err = a.storeSBOMp(tt.args.ctx, tt.sbom, tt.incomplete)
 			tools.EnsureSetup(t, err == nil)
-			gotSbom, err := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
-			tools.EnsureSetup(t, err == nil)
+			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			if !tt.wantEmptySBOM {
 				assert.NotNil(t, gotSbom.Content)
 				assert.Equal(t, "bar", gotSbom.Annotations["foo"])
