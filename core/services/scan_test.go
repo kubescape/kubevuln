@@ -187,7 +187,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			cveManifest:     true,
 			sbom:            true,
 			workload:        true,
-			wantEmptyReport: true,
+			wantEmptyReport: false,
 			wantErr:         false,
 		},
 		{

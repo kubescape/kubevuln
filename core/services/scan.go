@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -251,7 +252,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	// if CVE was retrieved from storage, and we don't have a CVE', we send an empty report
 	if cveRetrievedFromStorage && cvep.Content == nil {
-		cve.Content = nil
+		cve.Content = &v1beta1.GrypeDocument{}
 	}
 
 	// report scan success to platform
