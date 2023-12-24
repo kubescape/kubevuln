@@ -2,7 +2,7 @@ module github.com/kubescape/kubevuln
 
 go 1.21.3
 
-replace github.com/kubescape/storage => /Users/davidwertenteil/github.com/kubescape/storage
+// replace github.com/kubescape/storage => /Users/davidwertenteil/github.com/kubescape/storage
 
 require (
 	github.com/adrg/xdg v0.4.0
@@ -14,7 +14,7 @@ require (
 	github.com/aquilax/truncate v1.0.0
 	github.com/armosec/armoapi-go v0.0.254
 	github.com/armosec/utils-go v0.0.40
-	github.com/armosec/utils-k8s-go v0.0.20
+	github.com/armosec/utils-k8s-go v0.0.23
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/eapache/go-resiliency v1.3.0
@@ -29,12 +29,13 @@ require (
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.155
 	github.com/kubescape/storage v0.0.44
+	github.com/kubescape/storage v0.0.48-0.20231220083733-77c05196c95c
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.44.0
-	go.opentelemetry.io/otel v1.19.0
-	go.opentelemetry.io/otel/trace v1.19.0
+	go.opentelemetry.io/otel v1.20.0
+	go.opentelemetry.io/otel/trace v1.20.0
 	k8s.io/apimachinery v0.28.4
 	k8s.io/client-go v0.28.4
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
@@ -230,6 +231,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nwaples/rardecode v1.1.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/open-policy-agent/opa v0.55.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc4 // indirect
@@ -298,11 +300,11 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.44.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric v0.41.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v0.41.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.19.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.19.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.20.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.20.0 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.18.0 // indirect
-	go.opentelemetry.io/otel/metric v1.19.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.19.0 // indirect
+	go.opentelemetry.io/otel/metric v1.20.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.20.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v0.41.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

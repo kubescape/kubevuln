@@ -54,6 +54,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	domainSBOM := domain.SBOM{
 		Name:               name,
 		SBOMCreatorVersion: s.Version(),
+		SBOMCreatorName:    "syft",
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,
 		},

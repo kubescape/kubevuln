@@ -852,6 +852,7 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 					Version: sbom.SBOMCreatorVersion,
 				},
 			},
+			Syft: *sbom.Content,
 		},
 		Status: v1beta1.SBOMSyftStatus{}, // TODO move timeout information here
 	}

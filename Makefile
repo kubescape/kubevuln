@@ -1,12 +1,13 @@
-.PHONY: test all build clean
+DOCKERFILE_PATH=./build/Dockerfile
+BINARY_NAME=kubevuln
 
-all: build
+IMAGE?=quay.io/dwertent/$(BINARY_NAME)
+
 
 build:
-	go build -v -o kubevuln ./cmd/http
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
 
-test:
-	go test -v ./...
-
-clean:
-	-rm -rf kubevuln
+docker-build:
+	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) .
+docker-push:
+	docker push $(IMAGE):$(TAG)
