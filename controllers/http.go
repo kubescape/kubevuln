@@ -62,7 +62,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.GenerateSBOM(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
+			logger.L().Ctx(ctx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
 				helpers.String("imageHash", newScan.ImageHash))
@@ -116,7 +116,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCVE(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
+			logger.L().Ctx(ctx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
@@ -184,7 +184,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanRegistry(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error", helpers.Error(err),
+			logger.L().Ctx(ctx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTag", newScan.ImageTag),
 				helpers.String("imageHash", newScan.ImageHash))

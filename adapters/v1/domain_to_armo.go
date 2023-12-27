@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -177,8 +176,7 @@ func parseLayersPayload(target source.StereoscopeImageSourceMetadata) (map[strin
 	}
 
 	jsonConfig := &v1.ConfigFile{}
-	valueConfig, _ := base64.StdEncoding.DecodeString(string(target.RawConfig))
-	err := json.Unmarshal(valueConfig, jsonConfig)
+	err := json.Unmarshal(target.RawConfig, jsonConfig)
 	if err != nil {
 		return nil, err
 	}
