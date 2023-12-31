@@ -26,14 +26,14 @@ import (
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
-		clusterConfig        armometadata.ClusterConfig
 		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+		clusterConfig        armometadata.ClusterConfig
 	}
 	tests := []struct {
-		name     string
-		workload bool
 		fields   fields
+		name     string
 		want     domain.CVEExceptions
+		workload bool
 		wantErr  bool
 	}{
 		{
@@ -98,12 +98,12 @@ func fileToCVEManifest(path string) domain.CVEManifest {
 func TestBackendAdapter_SubmitCVE(t *testing.T) {
 	ja := jsonassert.New(t)
 	tests := []struct {
-		name                       string
 		cve                        domain.CVEManifest
 		cvep                       domain.CVEManifest
+		name                       string
+		exceptions                 []armotypes.VulnerabilityExceptionPolicy
 		checkFullBody              bool
 		checkFullBodyWithException bool
-		exceptions                 []armotypes.VulnerabilityExceptionPolicy
 		wantErr                    bool
 	}{
 		{
