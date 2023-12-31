@@ -2,9 +2,6 @@ module github.com/kubescape/kubevuln
 
 go 1.21.3
 
-// replace github.com/kubescape/storage => /Users/davidwertenteil/github.com/kubescape/storage
-// replace github.com/kubescape/backend => /Users/davidwertenteil/armo/repos/backend
-
 require (
 	github.com/adrg/xdg v0.4.0
 	github.com/akyoto/cache v1.0.6
