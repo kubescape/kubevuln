@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -40,7 +39,7 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		parentLayer := map[string]string{
 			dummyLayer: parentLayerHash,
 		}
-		var target source.ImageMetadata
+		var target source.StereoscopeImageSourceMetadata
 		err := json.Unmarshal(grypeDocument.Source.Target, &target)
 		if err != nil {
 			return vulnerabilityResults, err
@@ -170,15 +169,14 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 	return vulnerabilityResults, nil
 }
 
-func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {
+func parseLayersPayload(target source.StereoscopeImageSourceMetadata) (map[string]containerscan.ESLayer, error) {
 	layerMap := make(map[string]containerscan.ESLayer)
 	if target.RawConfig == nil {
 		return layerMap, nil
 	}
 
 	jsonConfig := &v1.ConfigFile{}
-	valueConfig, _ := base64.StdEncoding.DecodeString(string(target.RawConfig))
-	err := json.Unmarshal(valueConfig, jsonConfig)
+	err := json.Unmarshal(target.RawConfig, jsonConfig)
 	if err != nil {
 		return nil, err
 	}

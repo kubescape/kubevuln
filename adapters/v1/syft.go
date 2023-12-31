@@ -2,29 +2,21 @@ package v1
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net/http"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/file"
-	"github.com/anchore/stereoscope/pkg/filetree"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/cmd/syft/cli/eventloop"
+	"github.com/anchore/syft/cmd/syft/cli/options"
 	"github.com/anchore/syft/syft/artifact"
-	"github.com/anchore/syft/syft/linux"
-	"github.com/anchore/syft/syft/pkg"
-	"github.com/anchore/syft/syft/pkg/cataloger"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	containerregistryV1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -53,14 +45,16 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter 
 
 // CreateSBOM creates an SBOM for a given imageID, restrict parallelism to prevent disk space issues,
 // a timeout prevents the process from hanging for too long.
-// Format is SPDX JSON and the resulting SBOM is tagged with the Syft version.
+// Format is syft JSON and the resulting SBOM is tagged with the Syft version.
 func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, options domain.RegistryOptions) (domain.SBOM, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.CreateSBOM")
 	defer span.End()
+
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
 		Name:               name,
 		SBOMCreatorVersion: s.Version(),
+		SBOMCreatorName:    "syft",
 		Annotations: map[string]string{
 			instanceidhandler.ImageIDMetadataKey: imageID,
 		},
@@ -69,10 +63,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	// translate business models into Syft models
 	if options.Platform == "" {
 		options.Platform = runtime.GOARCH
-	}
-	sourceInput, err := source.ParseInput(imageID, options.Platform)
-	if err != nil {
-		return domainSBOM, err
 	}
 	credentials := make([]image.RegistryCredentials, len(options.Credentials))
 	for i, v := range options.Credentials {
@@ -87,8 +77,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		InsecureSkipTLSVerify: options.InsecureSkipTLSVerify,
 		InsecureUseHTTP:       options.InsecureUseHTTP,
 		Credentials:           credentials,
-		Platform:              options.Platform,
 	}
+
+	syftOpts := defaultPackagesOptions()
+
 	// prepare temporary directory for image download
 	t := file.NewTempDirGenerator("stereoscope")
 	defer func(t *file.TempDirGenerator) {
@@ -98,17 +90,19 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 				helpers.String("imageID", imageID))
 		}
 	}(t)
+
 	// download image
-	logger.L().Debug("downloading image",
-		helpers.String("imageID", imageID))
-	src, err := newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
-	// check for 401 error and retry without credentials
-	var transportError *transport.Error
-	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusUnauthorized {
+	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
+
+	// TODO: support maxImageSize
+	// @matthyx: I removed the support for maxImageSize because it's not supported by Syft, it looks like you developed the image download mechanism, I want to find a better solution.
+	src, err := detectSource(imageID, syftOpts, &registryOptions)
+
+	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		logger.L().Debug("got 401, retrying without credentials",
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
-		src, err = newFromRegistry(t, sourceInput, registryOptions, s.maxImageSize)
+		src, err = detectSource(imageID, syftOpts, &registryOptions)
 	}
 	switch {
 	case errors.Is(err, ErrImageTooLarge):
@@ -120,21 +114,17 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	case err != nil:
 		return domainSBOM, err
 	}
-	// extract packages
+
+	// generate SBOM
 	// use a deadline to prevent the process from hanging for too long
 	// TODO check memory usage and see if we can kill the goroutine
-	var pkgCatalog *pkg.Catalog
-	var relationships []artifact.Relationship
-	var actualDistro *linux.Release
+	var syftSBOM *sbom.SBOM
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
-		logger.L().Debug("extracting packages",
+		// generate SBOM
+		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
-		catalogOptions := cataloger.Config{
-			Search:      cataloger.DefaultSearchConfig(),
-			Parallelism: 4, // TODO assess this value
-		}
-		pkgCatalog, relationships, actualDistro, err = syft.CatalogPackages(&src, catalogOptions)
+		syftSBOM, err = generateSBOM(name, s.Version(), src, &syftOpts.Catalog)
 		return err
 	})
 	switch err {
@@ -150,221 +140,131 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		domainSBOM.Status = instanceidhandler.Incomplete
 		return domainSBOM, err
 	}
-	// generate SBOM
-	logger.L().Debug("generating SBOM",
-		helpers.String("imageID", imageID))
-	syftSBOM := sbom.SBOM{
-		Source:        src.Metadata,
-		Relationships: relationships,
-		Artifacts: sbom.Artifacts{
-			PackageCatalog:    pkgCatalog,
-			LinuxDistribution: actualDistro,
-		},
-	}
+
 	// convert SBOM
 	logger.L().Debug("converting SBOM",
 		helpers.String("imageID", imageID))
-	domainSBOM.Content, err = s.syftToDomain(syftSBOM)
+	domainSBOM.Content, err = s.syftToDomain(*syftSBOM)
+
 	// return SBOM
 	logger.L().Debug("returning SBOM",
 		helpers.String("imageID", imageID),
-		helpers.Int("packages", len(domainSBOM.Content.Packages)))
+		helpers.Int("packages", len(domainSBOM.Content.Artifacts)))
 	return domainSBOM, err
 }
 
-func newFromRegistry(t *file.TempDirGenerator, sourceInput *source.Input, registryOptions image.RegistryOptions, maxImageSize int64) (source.Source, error) {
-	imageTempDir, err := t.NewDirectory("oci-registry-image")
-	if err != nil {
-		return source.Source{}, err
-	}
-	// download image
-	ref, err := name.ParseReference(sourceInput.UserInput, prepareReferenceOptions(registryOptions)...)
-	if err != nil {
-		return source.Source{}, fmt.Errorf("unable to parse registry reference=%q: %w", sourceInput.UserInput, err)
-	}
-	platform, err := image.NewPlatform(registryOptions.Platform)
-	if err != nil {
-		return source.Source{}, fmt.Errorf("unable to create platform reference=%q: %w", sourceInput.UserInput, err)
-	}
-	descriptor, err := remote.Get(ref, prepareRemoteOptions(ref, registryOptions, platform)...)
-	if err != nil {
-		return source.Source{}, fmt.Errorf("failed to get image descriptor from registry: %w", err)
-	}
-
-	imgRemote, err := descriptor.Image()
-	if err != nil {
-		return source.Source{}, fmt.Errorf("failed to get image from registry: %w", err)
-	}
-
-	// craft a repo digest from the registry reference and the known digest
-	// note: the descriptor is fetched from the registry, and the descriptor digest is the same as the repo digest
-	repoDigest := fmt.Sprintf("%s/%s@%s", ref.Context().RegistryStr(), ref.Context().RepositoryStr(), descriptor.Digest.String())
-
-	metadata := []image.AdditionalMetadata{
-		image.WithRepoDigests(repoDigest),
-	}
-
-	// make a best effort to get the manifest, should not block getting an image though if it fails
-	if manifestBytes, err := imgRemote.RawManifest(); err == nil {
-		metadata = append(metadata, image.WithManifest(manifestBytes))
-	}
-
-	if platform != nil {
-		metadata = append(metadata,
-			image.WithArchitecture(platform.Architecture, platform.Variant),
-			image.WithOS(platform.OS),
-		)
-	}
-
-	img := image.New(imgRemote, t, imageTempDir, metadata...)
-
-	err = read(img, imgRemote, imageTempDir, maxImageSize)
-	if err != nil {
-		return source.Source{}, fmt.Errorf("could not read image: %w", err)
-	}
-
-	src, err := source.NewFromImageWithName(img, sourceInput.Location, sourceInput.Name)
-	if err != nil {
-		return source.Source{}, fmt.Errorf("could not populate source with image: %w", err)
-	}
-	return src, nil
+type packagesOptions struct {
+	options.Output      `yaml:",inline" mapstructure:",squash"`
+	options.Config      `yaml:",inline" mapstructure:",squash"`
+	options.Catalog     `yaml:",inline" mapstructure:",squash"`
+	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
 }
 
-func prepareReferenceOptions(registryOptions image.RegistryOptions) []name.Option {
-	var options []name.Option
-	if registryOptions.InsecureUseHTTP {
-		options = append(options, name.Insecure)
+func defaultPackagesOptions() *packagesOptions {
+	defaultCatalogOpts := options.DefaultCatalog()
+
+	// TODO(matthyx): assess this value
+	defaultCatalogOpts.Parallelism = 4
+
+	return &packagesOptions{
+		Output:      options.DefaultOutput(),
+		UpdateCheck: options.DefaultUpdateCheck(),
+		Catalog:     defaultCatalogOpts,
 	}
-	return options
 }
 
-func prepareRemoteOptions(ref name.Reference, registryOptions image.RegistryOptions, p *image.Platform) (options []remote.Option) {
-	options = append(options, remote.WithContext(context.TODO()))
-
-	if registryOptions.InsecureSkipTLSVerify {
-		t := &http.Transport{
-			//nolint: gosec
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		options = append(options, remote.WithTransport(t))
-	}
-
-	if p != nil {
-		options = append(options, remote.WithPlatform(containerregistryV1.Platform{
-			Architecture: p.Architecture,
-			OS:           p.OS,
-			Variant:      p.Variant,
-		}))
-	}
-
-	// note: the authn.Authenticator and authn.Keychain options are mutually exclusive, only one may be provided.
-	// If no explicit authenticator can be found, then fallback to the keychain.
-	authenticator := registryOptions.Authenticator(ref.Context().RegistryStr())
-	if authenticator != nil {
-		options = append(options, remote.WithAuth(authenticator))
-	} else {
-		// use the Keychain specified from a docker config file.
-		logger.L().Debug("no registry credentials configured, using the default keychain")
-		options = append(options, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-	}
-
-	return options
-}
-
-func read(i *image.Image, imgRemote containerregistryV1.Image, imageTempDir string, maxImageSize int64) error {
-	var layers = make([]*image.Layer, 0)
-	var err error
-	i.Metadata, err = readImageMetadata(imgRemote)
+func detectSource(userInput string, opts *packagesOptions, registryOptions *image.RegistryOptions) (source.Source, error) {
+	detection, err := source.Detect(
+		userInput,
+		source.DetectConfig{
+			DefaultImageSource: opts.DefaultImagePullSource,
+		},
+	)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("could not determine source: %w", err)
 	}
 
-	v1Layers, err := imgRemote.Layers()
-	if err != nil {
-		return err
-	}
+	var platform *image.Platform
 
-	fileCatalog := image.NewFileCatalog()
-
-	for idx, v1Layer := range v1Layers {
-		layer := image.NewLayer(v1Layer)
-		err := layer.Read(fileCatalog, i.Metadata, idx, imageTempDir)
+	if opts.Platform != "" {
+		platform, err = image.NewPlatform(opts.Platform)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("invalid platform: %w", err)
 		}
-		i.Metadata.Size += layer.Metadata.Size
-		// unfortunately we cannot check the size before we gunzip the layer
-		if i.Metadata.Size > maxImageSize {
-			return ErrImageTooLarge
-		}
-		layers = append(layers, layer)
 	}
 
-	i.Layers = layers
+	hashers, err := Hashers(opts.Source.File.Digests...)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hash: %w", err)
+	}
 
-	// in order to resolve symlinks all squashed trees must be available
-	err = squash(i, fileCatalog)
+	src, err := detection.NewSource(
+		source.DetectionSourceConfig{
+			Alias: source.Alias{
+				Name:    opts.Source.Name,
+				Version: opts.Source.Version,
+			},
+			RegistryOptions: registryOptions,
+			Platform:        platform,
+			Exclude: source.ExcludeConfig{
+				Paths: opts.Exclusions,
+			},
+			DigestAlgorithms: hashers,
+			BasePath:         opts.BasePath,
+		},
+	)
 
-	i.FileCatalog = fileCatalog
-	i.SquashedSearchContext = filetree.NewSearchContext(i.SquashedTree(), i.FileCatalog)
-
-	return err
+	return src, err
 }
 
-func readImageMetadata(img containerregistryV1.Image) (image.Metadata, error) {
-	id, err := img.ConfigName()
+func generateSBOM(toolName string, toolVersion string, src source.Source, opts *options.Catalog) (*sbom.SBOM, error) {
+	tasks, err := eventloop.Tasks(opts)
 	if err != nil {
-		return image.Metadata{}, err
+		return nil, err
 	}
 
-	config, err := img.ConfigFile()
-	if err != nil {
-		return image.Metadata{}, err
+	s := sbom.SBOM{
+		Source: src.Describe(),
+		Descriptor: sbom.Descriptor{
+			Name:          toolName,
+			Version:       toolVersion,
+			Configuration: opts,
+		},
 	}
 
-	mediaType, err := img.MediaType()
-	if err != nil {
-		return image.Metadata{}, err
-	}
+	err = buildRelationships(&s, src, tasks)
 
-	rawConfig, err := img.RawConfigFile()
-	if err != nil {
-		return image.Metadata{}, err
-	}
-
-	return image.Metadata{
-		ID:        id.String(),
-		Config:    *config,
-		MediaType: mediaType,
-		RawConfig: rawConfig,
-	}, nil
+	return &s, err
 }
 
-func squash(i *image.Image, catalog *image.FileCatalog) error {
-	var lastSquashTree filetree.ReadWriter
+func buildRelationships(s *sbom.SBOM, src source.Source, tasks []eventloop.Task) error {
+	var errs error
 
-	for idx, layer := range i.Layers {
-		if idx == 0 {
-			lastSquashTree = layer.Tree.(filetree.ReadWriter)
-			layer.SquashedTree = layer.Tree
-			layer.SquashedSearchContext = filetree.NewSearchContext(layer.SquashedTree, catalog.Index)
-			continue
-		}
-
-		var unionTree = filetree.NewUnionFileTree()
-		unionTree.PushTree(lastSquashTree)
-		unionTree.PushTree(layer.Tree.(filetree.ReadWriter))
-
-		squashedTree, err := unionTree.Squash()
-		if err != nil {
-			return fmt.Errorf("failed to squash tree %d: %w", idx, err)
-		}
-
-		layer.SquashedTree = squashedTree
-		layer.SquashedSearchContext = filetree.NewSearchContext(layer.SquashedTree, catalog.Index)
-		lastSquashTree = squashedTree
+	var relationships []<-chan artifact.Relationship
+	for _, task := range tasks {
+		c := make(chan artifact.Relationship)
+		relationships = append(relationships, c)
+		go func(task eventloop.Task) {
+			err := eventloop.RunTask(task, &s.Artifacts, src, c)
+			if err != nil {
+				errs = multierror.Append(errs, err)
+			}
+		}(task)
 	}
-	return nil
+
+	s.Relationships = append(s.Relationships, mergeRelationships(relationships...)...)
+
+	return errs
+}
+
+func mergeRelationships(cs ...<-chan artifact.Relationship) (relationships []artifact.Relationship) {
+	for _, c := range cs {
+		for n := range c {
+			relationships = append(relationships, n)
+		}
+	}
+
+	return relationships
 }
 
 // Version returns Syft's version which is used to tag SBOMs
