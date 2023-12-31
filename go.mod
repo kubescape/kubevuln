@@ -3,6 +3,7 @@ module github.com/kubescape/kubevuln
 go 1.21.3
 
 // replace github.com/kubescape/storage => /Users/davidwertenteil/github.com/kubescape/storage
+// replace github.com/kubescape/backend => /Users/davidwertenteil/armo/repos/backend
 
 require (
 	github.com/adrg/xdg v0.4.0
@@ -25,7 +26,7 @@ require (
 	github.com/google/uuid v1.4.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/backend v0.0.17
+	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.155
 	github.com/kubescape/storage v0.0.44

@@ -851,20 +851,17 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 					Name:    sbom.SBOMCreatorName,
 					Version: sbom.SBOMCreatorVersion,
 				},
+				Report: v1beta1.ReportMeta{
+					CreatedAt: metav1.Now().Rfc3339Copy(),
+				},
 			},
-			Syft: *sbom.Content,
 		},
 		Status: v1beta1.SBOMSyftStatus{}, // TODO move timeout information here
 	}
 
-	// @matthyx TODO: Why do we manually add the creation time
-	// if sbom.Content != nil {
-	// 	manifest.Spec.Syft = *sbom.Content
-	// 	created, err := time.Parse(time.RFC3339, sbom.Content)
-	// 	if err != nil {
-	// 		manifest.Spec.Metadata.Report.CreatedAt.Time = created
-	// 	}
-	// }
+	if sbom.Content != nil {
+		manifest.Spec.Syft = *sbom.Content
+	}
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}

@@ -155,10 +155,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 }
 
 type packagesOptions struct {
-	options.Config      `yaml:",inline" mapstructure:",squash"`
 	options.Output      `yaml:",inline" mapstructure:",squash"`
-	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
+	options.Config      `yaml:",inline" mapstructure:",squash"`
 	options.Catalog     `yaml:",inline" mapstructure:",squash"`
+	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
 }
 
 func defaultPackagesOptions() *packagesOptions {
