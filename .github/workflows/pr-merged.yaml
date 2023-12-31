@@ -30,7 +30,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.20"
+      GO_VERSION: "1.21.3"
       REQUIRED_TESTS: '[
               "vulnerability_scanning", 
               "vulnerability_scanning_cve_exceptions",
