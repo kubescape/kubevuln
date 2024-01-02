@@ -1,32 +1,109 @@
 {
- "documentDescribes": null,
- "spdxVersion": "SPDX-2.3",
- "dataLicense": "CC0-1.0",
- "SPDXID": "SPDXRef-DOCUMENT",
- "name": "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
- "documentNamespace": "<<PRESENCE>>",
- "externalDocumentRefs": null,
- "comment": "",
- "creationInfo": {
-  "licenseListVersion": "<<PRESENCE>>",
-  "creators": [
-   "Organization: Anchore, Inc",
-   "Tool: syft-unknown"
-  ],
-  "created": "<<PRESENCE>>",
-  "comment": ""
- },
- "packages": null,
- "files": null,
- "hasExtractedLicensingInfos": null,
- "relationships": [
-  {
-   "spdxElementId": "SPDXRef-DOCUMENT",
-   "relatedSpdxElement": "SPDXRef-DOCUMENT",
-   "relationshipType": "DESCRIBES",
-   "comment": ""
-  }
- ],
- "annotations": null,
- "snippets": null
+    "artifacts": [],
+    "artifactRelationships": [],
+    "source": {
+        "id": "d161151e9c4267e7c6fceec6468dfd0c4b2ad988d5dabfe415f360b742a043ce",
+        "name": "library/hello-world",
+        "version": "sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
+        "type": "image",
+        "metadata": {
+            "userInput": "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
+            "imageID": "sha256:46331d942d6350436f64e614d75725f6de3bb5c63e266e236e04389820a234c4",
+            "manifestDigest": "sha256:d161151e9c4267e7c6fceec6468dfd0c4b2ad988d5dabfe415f360b742a043ce",
+            "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+            "tags": [],
+            "imageSize": 9136,
+            "layers": [
+                {
+                    "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                    "digest": "sha256:efb53921da3394806160641b72a2cbd34ca1a9a8345ac670a85a04ad3d0e3507",
+                    "size": 9136
+                }
+            ],
+            "manifest": "eyJzY2hlbWFWZXJzaW9uIjoyLCJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmRpc3RyaWJ1dGlvbi5tYW5pZmVzdC52Mitqc29uIiwiY29uZmlnIjp7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuY29udGFpbmVyLmltYWdlLnYxK2pzb24iLCJzaXplIjoxNDg1LCJkaWdlc3QiOiJzaGEyNTY6NDYzMzFkOTQyZDYzNTA0MzZmNjRlNjE0ZDc1NzI1ZjZkZTNiYjVjNjNlMjY2ZTIzNmUwNDM4OTgyMGEyMzRjNCJ9LCJsYXllcnMiOlt7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuaW1hZ2Uucm9vdGZzLmRpZmYudGFyLmd6aXAiLCJzaXplIjoxMDc1MiwiZGlnZXN0Ijoic2hhMjU2OmVmYjUzOTIxZGEzMzk0ODA2MTYwNjQxYjcyYTJjYmQzNGNhMWE5YTgzNDVhYzY3MGE4NWEwNGFkM2QwZTM1MDcifV19",
+            "config": "eyJhcmNoaXRlY3R1cmUiOiJhcm02NCIsImNvbmZpZyI6eyJIb3N0bmFtZSI6IiIsIkRvbWFpbm5hbWUiOiIiLCJVc2VyIjoiIiwiQXR0YWNoU3RkaW4iOmZhbHNlLCJBdHRhY2hTdGRvdXQiOmZhbHNlLCJBdHRhY2hTdGRlcnIiOmZhbHNlLCJUdHkiOmZhbHNlLCJPcGVuU3RkaW4iOmZhbHNlLCJTdGRpbk9uY2UiOmZhbHNlLCJFbnYiOlsiUEFUSD0vdXNyL2xvY2FsL3NiaW46L3Vzci9sb2NhbC9iaW46L3Vzci9zYmluOi91c3IvYmluOi9zYmluOi9iaW4iXSwiQ21kIjpbIi9oZWxsbyJdLCJJbWFnZSI6InNoYTI1NjpjYzBmZmYyNGM0ZWNlNjNhZGU1ZDlmNTQ5ZTQyYzkyNmNmNTY5MTEyYzRmNWM0MzlhNGE1N2YzZjMzZjU1ODhiIiwiVm9sdW1lcyI6bnVsbCwiV29ya2luZ0RpciI6IiIsIkVudHJ5cG9pbnQiOm51bGwsIk9uQnVpbGQiOm51bGwsIkxhYmVscyI6bnVsbH0sImNvbnRhaW5lciI6ImIyYWY1MTQxOWNiZjUxNmYzYzk5Yjg3N2E2NDkwNmIyMWFmZWRjMTc1YmQzY2QwODJlYjU3OThlMmYyNzdiYjQiLCJjb250YWluZXJfY29uZmlnIjp7Ikhvc3RuYW1lIjoiYjJhZjUxNDE5Y2JmIiwiRG9tYWlubmFtZSI6IiIsIlVzZXIiOiIiLCJBdHRhY2hTdGRpbiI6ZmFsc2UsIkF0dGFjaFN0ZG91dCI6ZmFsc2UsIkF0dGFjaFN0ZGVyciI6ZmFsc2UsIlR0eSI6ZmFsc2UsIk9wZW5TdGRpbiI6ZmFsc2UsIlN0ZGluT25jZSI6ZmFsc2UsIkVudiI6WyJQQVRIPS91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbiJdLCJDbWQiOlsiL2Jpbi9zaCIsIi1jIiwiIyhub3ApICIsIkNNRCBbXCIvaGVsbG9cIl0iXSwiSW1hZ2UiOiJzaGEyNTY6Y2MwZmZmMjRjNGVjZTYzYWRlNWQ5ZjU0OWU0MmM5MjZjZjU2OTExMmM0ZjVjNDM5YTRhNTdmM2YzM2Y1NTg4YiIsIlZvbHVtZXMiOm51bGwsIldvcmtpbmdEaXIiOiIiLCJFbnRyeXBvaW50IjpudWxsLCJPbkJ1aWxkIjpudWxsLCJMYWJlbHMiOnt9fSwiY3JlYXRlZCI6IjIwMjItMDMtMTlUMTY6MTI6NTguOTIzMzcxOTU0WiIsImRvY2tlcl92ZXJzaW9uIjoiMjAuMTAuMTIiLCJoaXN0b3J5IjpbeyJjcmVhdGVkIjoiMjAyMi0wMy0xOVQxNjoxMjo1OC44MzQwOTUxOThaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIENPUFkgZmlsZTphNzlkZDViZGExZTc3MjAzNDAxOTU2YTkzNDAxZDNhZWY0NTIyMWZjNzUwMjk1YTQyOTE4OTZmMzM4NmY0ZjU0IGluIC8gIn0seyJjcmVhdGVkIjoiMjAyMi0wMy0xOVQxNjoxMjo1OC45MjMzNzE5NTRaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApICBDTUQgW1wiL2hlbGxvXCJdIiwiZW1wdHlfbGF5ZXIiOnRydWV9XSwib3MiOiJsaW51eCIsInJvb3RmcyI6eyJ0eXBlIjoibGF5ZXJzIiwiZGlmZl9pZHMiOlsic2hhMjU2OmVmYjUzOTIxZGEzMzk0ODA2MTYwNjQxYjcyYTJjYmQzNGNhMWE5YTgzNDVhYzY3MGE4NWEwNGFkM2QwZTM1MDciXX0sInZhcmlhbnQiOiJ2OCJ9",
+            "repoDigests": [
+                "hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe"
+            ],
+            "architecture": "<<PRESENCE>>",
+            "os": "linux"
+        }
+    },
+    "distro": {},
+    "descriptor": {
+        "name": "name",
+        "version": "unknown",
+        "configuration": {
+            "catalogers": null,
+            "package": {
+                "cataloger": {
+                    "enabled": true,
+                    "scope": "squashed"
+                },
+                "search-unindexed-archives": false,
+                "search-indexed-archives": true
+            },
+            "golang": {
+                "search-local-mod-cache-licenses": false,
+                "local-mod-cache-dir": "",
+                "search-remote-licenses": false,
+                "proxy": "",
+                "no-proxy": ""
+            },
+            "java": {
+                "use-network": false,
+                "maven-url": "",
+                "max-parent-recursive-depth": 0
+            },
+            "linux-kernel": {
+                "catalog-modules": true
+            },
+            "python": {
+                "guess-unpinned-requirements": false
+            },
+            "file-metadata": {
+                "cataloger": {
+                    "enabled": false,
+                    "scope": "squashed"
+                },
+                "digests": [
+                    "sha256"
+                ]
+            },
+            "file-contents": {
+                "cataloger": {
+                    "enabled": false,
+                    "scope": "squashed"
+                },
+                "skip-files-above-size": 1048576,
+                "globs": null
+            },
+            "registry": {
+                "insecure-skip-tls-verify": false,
+                "insecure-use-http": false,
+                "auth": null,
+                "ca-cert": ""
+            },
+            "exclude": null,
+            "platform": "",
+            "name": "",
+            "source": {
+                "name": "",
+                "version": "",
+                "file": {
+                    "digests": [
+                        "sha256"
+                    ]
+                }
+            },
+            "parallelism": 4,
+            "default-image-pull-source": "",
+            "base-path": "",
+            "exclude-binary-overlap-by-ownership": true
+        }
+    },
+    "schema": {
+        "version": "13.0.0",
+        "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-13.0.0.json"
+    }
 }
