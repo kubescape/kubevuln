@@ -65,7 +65,7 @@ func Test_domainJSONToSyft(t *testing.T) {
 				artifactRelationships: 0,
 				files:                 0,
 				source: source{
-					id:   "d161151e9c4267e7c6fceec6468dfd0c4b2ad988d5dabfe415f360b742a043ce",
+					id:   "03a75d703fcd471cc09ed0dfffde55b74d95598343411e7fa3bcebc18d91bb8b",
 					name: "library/hello-world",
 				},
 			},
