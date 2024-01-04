@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 )
 
@@ -28,6 +29,11 @@ func (b BrokenStore) GetSBOMp(ctx context.Context, _ string, _ string) (domain.S
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOMp")
 	defer span.End()
 	return domain.SBOM{}, domain.ErrExpectedError
+}
+func (b BrokenStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetCVESummary")
+	defer span.End()
+	return &v1beta1.VulnerabilityManifestSummary{}, nil
 }
 
 func (b BrokenStore) StoreSBOM(ctx context.Context, _ domain.SBOM) error {
