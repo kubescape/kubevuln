@@ -160,6 +160,7 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		ImageTag:         workload.ImageTagNormalized,
 		ClusterName:      report.Designators.Attributes[identifiers.AttributeCluster],
 		Namespace:        report.Designators.Attributes[identifiers.AttributeNamespace],
+		ApiVersion:       report.Designators.Attributes[identifiers.AttributeApiVersion],
 		ContainerName:    report.Designators.Attributes[identifiers.AttributeContainerName],
 		JobIDs:           workload.Session.JobIDs,
 		Timestamp:        report.Timestamp,

@@ -104,8 +104,10 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 							Version: version,
 						},
 					},
+					PackageType:      string(match.Artifact.Type),
 					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, match.Vulnerability.ID, isFixed == 1),
 					IsRelevant:       nil, // TODO add relevancy here?
+					Coordinates:      syftCoordinatesToCoordinates(match.Artifact.Locations),
 				},
 			}
 			// add RCE information
@@ -202,4 +204,16 @@ func parseLayersPayload(target source.StereoscopeImageSourceMetadata) (map[strin
 	}
 
 	return layerMap, nil
+}
+
+func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.Coordinates {
+	var coordinates []containerscan.Coordinates
+	for _, v := range c {
+		coordinates = append(coordinates, containerscan.Coordinates{
+			RealPath:     v.RealPath,
+			FileSystemID: v.FileSystemID,
+		})
+	}
+	return coordinates
+
 }

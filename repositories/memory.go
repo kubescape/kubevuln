@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 )
 
@@ -61,6 +62,13 @@ func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVES
 		return value, nil
 	}
 	return domain.CVEManifest{}, nil
+}
+
+// GetCVE returns a CVE manifest from an in-memory map
+func (m *MemoryStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVESummary")
+	defer span.End()
+	return nil, nil
 }
 
 // StoreCVE stores a CVE manifest to an in-memory map

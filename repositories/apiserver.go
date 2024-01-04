@@ -108,6 +108,33 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		Content:            &manifest.Spec.Payload,
 	}, nil
 }
+func (a *APIServerStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetCVESummary")
+	defer span.End()
+	name, err := GetCVESummaryK8sResourceName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping summary CVE retrieval")
+		return nil, nil
+	}
+	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	switch {
+	case errors.IsNotFound(err):
+		logger.L().Debug("summary CVE manifest not found in storage",
+			helpers.String("name", name))
+		return nil, nil
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to get summary CVE manifest from apiserver", helpers.Error(err),
+			helpers.String("name", name))
+		return nil, nil
+	}
+
+	logger.L().Debug("got summary CVE manifest from storage",
+		helpers.String("name", name))
+	return manifest, nil
+}
 
 func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVEWithFullContent")
@@ -374,10 +401,13 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
+			result.ResourceVersion = ""
+			result.UID = ""
+
 			// update the vulnerability manifest
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
@@ -401,7 +431,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
 		logger.L().Debug("stored CVE summary manifest in storage",
-			helpers.String("name", cve.Name),
+			helpers.String("name", manifest.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
