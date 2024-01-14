@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -596,4 +597,44 @@ func Test_generateScanID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_registryCredentialsFromCredentialsList(t *testing.T) {
+	creds := []registry.AuthConfig{
+		{
+			ServerAddress: "quay.io",
+			Auth:          "YXJtb3NlYyt0ZXN0cm9ib3QxOmR1bW15UGFzc3dvcmQ=",
+			Username:      "armosec+testrobot1",
+			Password:      "dummyPassword",
+		},
+		{
+			ServerAddress: "https://index.docker.io/v1/",
+			Username:      "test_user",
+			Password:      "dummyPassword",
+			Email:         "test_user@gmail.com",
+			Auth:          "dGVzdF91c2VyOmR1bW15UGFzc3dvcmQ=",
+		},
+		{
+			ServerAddress: "quay.io",
+			Auth:          "YXJtb3NlYyt0ZXN0cm9ib3QyOmR1bW15UGFzc3dvcmQxMTE=",
+			Username:      "armosec+testrobot2",
+			Password:      "dummyPassword111",
+		},
+	}
+	registryCredentials := registryCredentialsFromCredentialsList(creds)
+	assert.Equal(t, 3, len(registryCredentials))
+	assert.Equal(t, "quay.io", registryCredentials[0].Authority)
+	assert.Equal(t, "armosec+testrobot1", registryCredentials[0].Username)
+	assert.Equal(t, "dummyPassword", registryCredentials[0].Password)
+	assert.Equal(t, "index.docker.io", registryCredentials[1].Authority)
+	assert.Equal(t, "test_user", registryCredentials[1].Username)
+	assert.Equal(t, "dummyPassword", registryCredentials[1].Password)
+	assert.Equal(t, "quay.io", registryCredentials[2].Authority)
+	assert.Equal(t, "armosec+testrobot2", registryCredentials[2].Username)
+	assert.Equal(t, "dummyPassword111", registryCredentials[2].Password)
+}
+
+func Test_parseAuthorityFromServerAddress(t *testing.T) {
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("https://index.docker.io/v1/"))
+	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress("quay.io"))
 }
