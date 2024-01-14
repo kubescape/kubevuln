@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -362,24 +365,58 @@ func generateScanID(workload domain.ScanCommand) string {
 
 func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
-	for _, cred := range workload.Credentialslist {
-		if cred.Auth != "" {
-			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Authority: cred.Auth})
-		}
-		if cred.RegistryToken != "" {
-			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Token: cred.RegistryToken})
-		}
-		if cred.Username != "" && cred.Password != "" {
-			options.Credentials = append(options.Credentials, domain.RegistryCredentials{Username: cred.Username, Password: cred.Password})
-		}
-	}
+	options.Credentials = registryCredentialsFromCredentialsList(workload.Credentialslist)
+
 	if useHTTP, ok := workload.Args[domain.AttributeUseHTTP]; ok {
 		options.InsecureUseHTTP = useHTTP.(bool)
 	}
 	if skipTLSVerify, ok := workload.Args[domain.AttributeSkipTLSVerify]; ok {
 		options.InsecureSkipTLSVerify = skipTLSVerify.(bool)
 	}
+
+	logger.L().Debug("created registryOptions from workload",
+		helpers.String("imageTag", workload.ImageTag),
+		helpers.String("credentials", credentialsLog(options.Credentials)))
 	return options
+}
+
+// credentialsLog returns a string representation of the credentials without the password and token
+func credentialsLog(credentials []domain.RegistryCredentials) string {
+	var sb strings.Builder
+	for _, rc := range credentials {
+		sb.WriteString(fmt.Sprintf("[Authority: %s, Username: %s, Password: *** (%d), Token: *** (%d)]", rc.Authority, rc.Username, len(rc.Password), len(rc.Token)))
+	}
+
+	return sb.String()
+}
+
+func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) []domain.RegistryCredentials {
+	registryCredentials := make([]domain.RegistryCredentials, len(credentials))
+	for i, cred := range credentials {
+		rc := domain.RegistryCredentials{}
+		if cred.ServerAddress != "" {
+			rc.Authority = parseAuthorityFromServerAddress(cred.ServerAddress)
+		}
+		if cred.RegistryToken != "" {
+			rc.Token = cred.RegistryToken
+		}
+		if cred.Username != "" && cred.Password != "" {
+			rc.Username = cred.Username
+			rc.Password = cred.Password
+		}
+
+		registryCredentials[i] = rc
+	}
+	return registryCredentials
+}
+
+func parseAuthorityFromServerAddress(serverAddress string) string {
+	parsedURL, err := url.Parse(serverAddress)
+	if err != nil || parsedURL.Host == "" {
+		return serverAddress
+	}
+
+	return parsedURL.Host
 }
 
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
