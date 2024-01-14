@@ -157,12 +157,12 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	// get exceptions
 	exceptions, err := a.GetCVEExceptions(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
 	// convert to vulnerabilities
 	vulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to convert vulnerabilities to report: %w", err)
 	}
 	// merge cve and cvep
 	var hasRelevancy bool
@@ -171,7 +171,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		// convert to relevantVulnerabilities
 		relevantVulnerabilities, err := domainToArmo(ctx, *cvep.Content, exceptions)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to convert filtered vulnerabilities to report: %w", err)
 		}
 		// index relevantVulnerabilities
 		cvepIndices := map[string]struct{}{}

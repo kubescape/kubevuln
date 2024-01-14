@@ -271,7 +271,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 	}
 	for i := range tests {
 		scanComm := registryScanCommandToScanCommand(tests[i].RegistryScanCommand)
-		assert.Equal(t, tests[i].Credentialslist, scanComm.Credentialslist)
+		assert.Equal(t, tests[i].Credentialslist, scanComm.CredentialsList)
 		assert.Equal(t, tests[i].ImageTag, scanComm.ImageTag)
 		assert.Equal(t, tools.NormalizeReference(tests[i].ImageTag), scanComm.ImageTagNormalized)
 		assert.Equal(t, tests[i].JobID, scanComm.JobID)

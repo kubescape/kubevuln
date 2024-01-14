@@ -170,7 +170,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, optionsFromWorkload(workload))
 			s.checkCreateSBOM(err, workload.ImageHash)
 			if err != nil {
-				return err
+				return fmt.Errorf("error creating SBOM: %w", err)
 			}
 			// store SBOM
 			if s.storage {
@@ -190,7 +190,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
-			return err
+			return fmt.Errorf("error scanning SBOM: %w", err)
 		}
 
 		// store CVE
@@ -224,7 +224,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// scan for CVE'
 		cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
 		if err != nil {
-			return err
+			return fmt.Errorf("error scanning filtered SBOM: %w", err)
 		}
 		// store CVE'
 		if s.storage {
@@ -258,7 +258,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// submit CVE manifest to platform
 	err = s.platform.SubmitCVE(ctx, cve, cvep)
 	if err != nil {
-		return err
+		return fmt.Errorf("error submitting CVEs: %w", err)
 	}
 	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
@@ -365,7 +365,7 @@ func generateScanID(workload domain.ScanCommand) string {
 
 func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
-	options.Credentials = registryCredentialsFromCredentialsList(workload.Credentialslist)
+	options.Credentials = registryCredentialsFromCredentialsList(workload.CredentialsList)
 
 	if useHTTP, ok := workload.Args[domain.AttributeUseHTTP]; ok {
 		options.InsecureUseHTTP = useHTTP.(bool)

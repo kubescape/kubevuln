@@ -37,7 +37,7 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 		Name:               "name",
 		SBOMCreatorVersion: "",
 		Status:             "",
-		Content:            &v1beta1.Document{},
+		Content:            &v1beta1.SyftDocument{},
 	}
 	_ = m.StoreSBOM(ctx, sbom)
 	got, _ = m.GetSBOM(ctx, "name", "")

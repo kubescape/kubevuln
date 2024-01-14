@@ -4,15 +4,15 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-// SBOM contains an SPDX SBOM in JSON format with some metadata
+// SBOM contains an syft SBOM in JSON format with some metadata
 type SBOM struct {
+	Content            *v1beta1.SyftDocument
+	Annotations        map[string]string
+	Labels             map[string]string
 	Name               string
 	SBOMCreatorName    string
 	SBOMCreatorVersion string
 	Status             string
-	Content            *v1beta1.Document
-	Annotations        map[string]string
-	Labels             map[string]string
 }
 
 // RegistryCredentials contains OCI registry credentials required for connection

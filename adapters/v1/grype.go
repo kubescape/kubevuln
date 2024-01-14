@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/matcher"
@@ -126,9 +127,8 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
-	logger.L().Debug("reading packages from SBOM",
-		helpers.String("name", sbom.Name))
-	packages := pkg.FromCatalog(s.Artifacts.PackageCatalog, pkg.SynthesisConfig{})
+	logger.L().Debug("reading packages from SBOM", helpers.String("name", sbom.Name))
+	packages := pkg.FromCollection(s.Artifacts.Packages, pkg.SynthesisConfig{})
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
@@ -137,8 +137,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Distro: s.Artifacts.LinuxDistribution,
 	}
 	vulnMatcher := grype.VulnerabilityMatcher{
-		Store:    *g.store,
-		Matchers: getMatchers(),
+		Store:          *g.store,
+		Matchers:       getMatchers(),
+		NormalizeByCVE: true,
 	}
 
 	logger.L().Debug("finding vulnerabilities",
@@ -150,7 +151,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	logger.L().Debug("compiling results",
 		helpers.String("name", sbom.Name))
-	doc, err := models.NewDocument(packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
+	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}

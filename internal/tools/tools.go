@@ -73,8 +73,8 @@ func FileContent(path string) []byte {
 	return b
 }
 
-func FileToSBOM(path string) *v1beta1.Document {
-	sbom := v1beta1.Document{}
+func FileToSBOM(path string) *v1beta1.SyftDocument {
+	sbom := v1beta1.SyftDocument{}
 	_ = json.Unmarshal(FileContent(path), &sbom)
 	return &sbom
 }
