@@ -411,6 +411,15 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 }
 
 func parseAuthorityFromServerAddress(serverAddress string) string {
+	if serverAddress == "" {
+		return ""
+	}
+
+	// server address has no scheme
+	if !strings.HasPrefix(serverAddress, "http") {
+		res, _, _ := strings.Cut(serverAddress, "/")
+		return res
+	}
 	parsedURL, err := url.Parse(serverAddress)
 	if err != nil || parsedURL.Host == "" {
 		return serverAddress
