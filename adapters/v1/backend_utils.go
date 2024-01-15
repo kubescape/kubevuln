@@ -98,8 +98,11 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Vulnerabilities post to event receiver failed", helpers.Error(err),
-			helpers.String("body", body))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report due to rate limiting (429 Too Many Requests). Please ask your vendor for support", helpers.Error(err), helpers.String("body", body))
+		} else {
+			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
+		}
 		errorChan <- err
 		return
 	}
