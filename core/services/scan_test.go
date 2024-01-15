@@ -635,6 +635,9 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 }
 
 func Test_parseAuthorityFromServerAddress(t *testing.T) {
+	assert.Equal(t, "", parseAuthorityFromServerAddress(""))
 	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("https://index.docker.io/v1/"))
 	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress("quay.io"))
+	assert.Equal(t, "x.quay.io", parseAuthorityFromServerAddress("https://x.quay.io"))
+	assert.Equal(t, "europe-docker.pkg.dev", parseAuthorityFromServerAddress("europe-docker.pkg.dev/xxx/xxx"))
 }
