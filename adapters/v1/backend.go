@@ -24,7 +24,6 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type BackendAdapter struct {
@@ -211,7 +210,9 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val.(string)
 	}
 	if val, ok := finalReport.Designators.Attributes[identifiers.AttributeKind]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeApiVersion] = k8sinterface.GroupVersionResourceToString(&schema.GroupVersionResource{Resource: val})
+		if s, err := k8sinterface.GetGroupVersionResource(val); err == nil {
+			finalReport.Designators.Attributes[identifiers.AttributeApiVersion] = k8sinterface.JoinGroupVersion(s.Group, s.Version)
+		}
 	}
 	// fill context and designators into vulnerabilities
 	armoContext := identifiers.DesignatorToArmoContext(&finalReport.Designators, "designators")
