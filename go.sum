@@ -877,8 +877,8 @@ github.com/kubescape/opa-utils v0.0.268 h1:mIsAbpIW0aIk8xr0ECuf8q9gUntGQqJQIJACt
 github.com/kubescape/opa-utils v0.0.268/go.mod h1:95JkuIOfClgLc+DyGb2mDvefRW0STkZe4L2z6AaZJlQ=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
 github.com/kubescape/rbac-utils v0.0.20/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
-github.com/kubescape/storage v0.0.48-0.20231220083733-77c05196c95c h1:BTtIYOv9a5ojJ8whNYFkv9aZTcWK+dU0Dn/Pj9Noh9A=
-github.com/kubescape/storage v0.0.48-0.20231220083733-77c05196c95c/go.mod h1:YYoMvVq7iHIfFhDgRFF1yQ0ItaSKtl5483fLJehZ6Wk=
+github.com/kubescape/storage v0.0.58 h1:sxte8GBWpumUupQkb+aPT9//jqZjcO4CI5N0sSf/OT8=
+github.com/kubescape/storage v0.0.58/go.mod h1:5kcKeBpmkIL4gN6lLUmM2mB9BRJ/0uGSe/cz+oDMdzA=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leodido/go-urn v1.2.4 h1:XlAE/cm/ms7TE/VMVoduSpNBoyc2dOxHs5MZSwAN63Q=

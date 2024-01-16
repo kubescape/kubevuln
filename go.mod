@@ -26,7 +26,7 @@ require (
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.155
-	github.com/kubescape/storage v0.0.48-0.20231220083733-77c05196c95c
+	github.com/kubescape/storage v0.0.58
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.8.4
