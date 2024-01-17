@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -50,13 +51,13 @@ func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID string, _ d
 		Name:               name,
 		SBOMCreatorVersion: m.Version(),
 		Annotations: map[string]string{
-			instanceidhandler.ImageIDMetadataKey: imageID,
+			helpersv1.ImageIDMetadataKey: imageID,
 		},
 		Labels:  tools.LabelsFromImageID(imageID),
 		Content: &v1beta1.SyftDocument{},
 	}
 	if m.timeout {
-		sbom.Status = instanceidhandler.Incomplete
+		sbom.Status = helpersv1.Incomplete
 	}
 	return sbom, nil
 }

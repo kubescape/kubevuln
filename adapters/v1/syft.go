@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/cmd/syft/cli/eventloop"
@@ -19,7 +21,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -56,7 +57,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		SBOMCreatorVersion: s.Version(),
 		SBOMCreatorName:    "syft",
 		Annotations: map[string]string{
-			instanceidhandler.ImageIDMetadataKey: imageID,
+			helpersv1.ImageIDMetadataKey: imageID,
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 	}
@@ -109,8 +110,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
-		domainSBOM.Status = instanceidhandler.Incomplete
+		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, nil
+	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
+		domainSBOM.Status = helpersv1.Unauthorize
+		return domainSBOM, err
 	case err != nil:
 		return domainSBOM, err
 	}
@@ -131,15 +135,18 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	case deadline.ErrTimedOut:
 		logger.L().Ctx(ctx).Warning("Syft timed out",
 			helpers.String("imageID", imageID))
-		domainSBOM.Status = instanceidhandler.Incomplete
+		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, nil
 	case nil:
 		// continue
 	default:
 		// also mark as incomplete if we failed to extract packages
-		domainSBOM.Status = instanceidhandler.Incomplete
+		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, err
 	}
+
+	// mark SBOM as ready
+	domainSBOM.Status = helpersv1.Ready
 
 	// convert SBOM
 	logger.L().Debug("converting SBOM",

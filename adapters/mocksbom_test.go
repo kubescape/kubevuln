@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
 )
@@ -24,7 +25,7 @@ func TestMockSBOMAdapter_CreateSBOM_Error(t *testing.T) {
 func TestMockSBOMAdapter_CreateSBOM_Timeout(t *testing.T) {
 	m := NewMockSBOMAdapter(false, true, false)
 	sbom, _ := m.CreateSBOM(context.TODO(), "name", "image", domain.RegistryOptions{})
-	assert.Equal(t, instanceidhandler.Incomplete, sbom.Status)
+	assert.Equal(t, helpersv1.Incomplete, sbom.Status)
 }
 
 func TestMockSBOMAdapter_Version(t *testing.T) {

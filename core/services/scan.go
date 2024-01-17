@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/docker/docker/api/types/registry"
@@ -18,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -183,7 +184,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// do not process timed out SBOM
-		if sbom.Status == instanceidhandler.Incomplete {
+		if sbom.Status == helpersv1.Incomplete {
 			return domain.ErrIncompleteSBOM
 		}
 
@@ -315,7 +316,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// do not process timed out SBOM
-	if sbom.Status == instanceidhandler.Incomplete {
+	if sbom.Status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
 

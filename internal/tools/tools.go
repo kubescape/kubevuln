@@ -8,9 +8,10 @@ import (
 	"runtime/debug"
 	"testing"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/aquilax/truncate"
 	"github.com/distribution/distribution/reference"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -53,11 +54,11 @@ func LabelsFromImageID(imageID string) map[string]string {
 		return labels
 	}
 	if named, ok := ref.(reference.Named); ok {
-		labels[instanceidhandler.ImageIDMetadataKey] = sanitize(named.String())
-		labels[instanceidhandler.ImageNameMetadataKey] = sanitize(named.Name())
+		labels[helpersv1.ImageIDMetadataKey] = sanitize(named.String())
+		labels[helpersv1.ImageNameMetadataKey] = sanitize(named.Name())
 	}
 	if tagged, ok := ref.(reference.Tagged); ok {
-		labels[instanceidhandler.ImageTagMetadataKey] = sanitize(tagged.Tag())
+		labels[helpersv1.ImageTagMetadataKey] = sanitize(tagged.Tag())
 	}
 	// prune invalid labels
 	for key, value := range labels {
