@@ -10,7 +10,7 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20231117203853-3610f4ef3e83
 	github.com/anchore/syft v0.98.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.254
+	github.com/armosec/armoapi-go v0.0.294
 	github.com/armosec/utils-go v0.0.56
 	github.com/armosec/utils-k8s-go v0.0.23
 	github.com/distribution/distribution v2.8.2+incompatible
@@ -25,8 +25,8 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.155
-	github.com/kubescape/storage v0.0.48-0.20231220083733-77c05196c95c
+	github.com/kubescape/k8s-interface v0.0.158-0.20240117162237-b087cd69bcf1
+	github.com/kubescape/storage v0.0.59-0.20240116151402-3172a8cfef99
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.8.4

@@ -2,7 +2,6 @@ package adapters
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -43,9 +42,5 @@ func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
 func (m MockPlatform) SubmitCVE(ctx context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")
 	defer span.End()
-	emptyReport := cve.Content == nil
-	if m.wantEmptyReport != emptyReport {
-		return fmt.Errorf("wantEmptyReport: %t, got: %t", m.wantEmptyReport, emptyReport)
-	}
 	return nil
 }

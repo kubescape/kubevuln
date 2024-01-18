@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -108,6 +109,33 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		Content:            &manifest.Spec.Payload,
 	}, nil
 }
+func (a *APIServerStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetCVESummary")
+	defer span.End()
+	name, err := GetCVESummaryK8sResourceName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping summary CVE retrieval")
+		return nil, nil
+	}
+	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	switch {
+	case errors.IsNotFound(err):
+		logger.L().Debug("summary CVE manifest not found in storage",
+			helpers.String("name", name))
+		return nil, nil
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to get summary CVE manifest from apiserver", helpers.Error(err),
+			helpers.String("name", name))
+		return nil, nil
+	}
+
+	logger.L().Debug("got summary CVE manifest from storage",
+		helpers.String("name", name))
+	return manifest, nil
+}
 
 func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVEWithFullContent")
@@ -123,9 +151,9 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 
 	if withRelevancy {
-		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
+		cve.Labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
 	} else {
-		cve.Labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
+		cve.Labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
 	}
 
 	manifest := v1beta1.VulnerabilityManifest{
@@ -271,8 +299,8 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrCastingWorkload
 	}
-	enrichedAnnotations[instanceidhandler.WlidMetadataKey] = workload.Wlid
-	enrichedAnnotations[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedAnnotations[helpersv1.WlidMetadataKey] = workload.Wlid
+	enrichedAnnotations[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedAnnotations, nil
 }
@@ -282,9 +310,9 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		labels = make(map[string]string)
 	}
 	if withRelevancy {
-		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyFiltered
+		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
 	} else {
-		labels[instanceidhandler.ContextMetadataKey] = instanceidhandler.ContextMetadataKeyNonFiltered
+		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
 	}
 	enrichedLabels := labels
 
@@ -299,12 +327,12 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 		return nil, err
 	}
 
-	enrichedLabels[instanceidhandler.ApiGroupMetadataKey] = groupVersionScheme.Group
-	enrichedLabels[instanceidhandler.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[instanceidhandler.KindMetadataKey] = strings.ToLower(workloadKind)
-	enrichedLabels[instanceidhandler.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
-	enrichedLabels[instanceidhandler.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
-	enrichedLabels[instanceidhandler.ContainerNameMetadataKey] = workload.ContainerName
+	enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
+	enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
+	enrichedLabels[helpersv1.KindMetadataKey] = strings.ToLower(workloadKind)
+	enrichedLabels[helpersv1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+	enrichedLabels[helpersv1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	enrichedLabels[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedLabels, nil
 }
@@ -374,10 +402,13 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
+			result.ResourceVersion = ""
+			result.UID = ""
+
 			// update the vulnerability manifest
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
@@ -401,7 +432,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	default:
 		logger.L().Debug("stored CVE summary manifest in storage",
-			helpers.String("name", cve.Name),
+			helpers.String("name", manifest.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 	}
 	return nil
@@ -494,7 +525,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[helpersv1.ImageIDMetadataKey]
 
 	// Timestamp
 	timestamp := time.Now().Format(time.RFC3339)
@@ -575,7 +606,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
 
-	imagePullable := cve.Annotations[instanceidhandler.ImageIDMetadataKey]
+	imagePullable := cve.Annotations[helpersv1.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
 	vexDoc := vexContainer.Spec
@@ -777,7 +808,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.Syft,
 	}
-	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
+	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got SBOM from storage",
@@ -786,7 +817,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 }
 
 func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered) error {
-	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok && status == instanceidhandler.Incomplete {
+	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
 	return nil
@@ -823,7 +854,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		SBOMCreatorVersion: SBOMCreatorVersion,
 		Content:            &manifest.Spec.Syft,
 	}
-	if status, ok := manifest.Annotations[instanceidhandler.StatusMetadataKey]; ok {
+	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
 		result.Status = status
 	}
 	logger.L().Debug("got relevant SBOM from storage",
@@ -865,7 +896,7 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
-	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
+	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -901,7 +932,7 @@ func (a *APIServerStore) storeSBOMWithoutContent(ctx context.Context, sbom domai
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
-	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
+	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	_, err := a.StorageClient.SBOMSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):

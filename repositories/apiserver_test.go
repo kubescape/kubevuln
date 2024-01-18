@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -29,9 +29,9 @@ func (a *APIServerStore) storeSBOMp(ctx context.Context, sbom domain.SBOM, incom
 	if manifest.Annotations == nil {
 		manifest.Annotations = map[string]string{}
 	}
-	manifest.Annotations[instanceidhandler.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
+	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	if incomplete {
-		manifest.Annotations[instanceidhandler.StatusMetadataKey] = instanceidhandler.Incomplete
+		manifest.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Incomplete
 	}
 	_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	return err
@@ -545,27 +545,27 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels, true)
 		assert.Equal(t, err, nil)
 
-		val, exist := enrichedLabels[instanceidhandler.ApiGroupMetadataKey]
+		val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceGroup)
 
-		val, exist = enrichedLabels[instanceidhandler.ApiVersionMetadataKey]
+		val, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceVersion)
 
-		val, exist = enrichedLabels[instanceidhandler.KindMetadataKey]
+		val, exist = enrichedLabels[helpersv1.KindMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceType)
 
-		val, exist = enrichedLabels[instanceidhandler.NameMetadataKey]
+		val, exist = enrichedLabels[helpersv1.NameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceName)
 
-		val, exist = enrichedLabels[instanceidhandler.NamespaceMetadataKey]
+		val, exist = enrichedLabels[helpersv1.NamespaceMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceNamespace)
 
-		val, exist = enrichedLabels[instanceidhandler.ContainerNameMetadataKey]
+		val, exist = enrichedLabels[helpersv1.ContainerNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
 	}
@@ -616,11 +616,11 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 		enrichedAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, tests[i].annotations)
 		assert.Equal(t, err, nil)
 
-		val, exist := enrichedAnnotations[instanceidhandler.WlidMetadataKey]
+		val, exist := enrichedAnnotations[helpersv1.WlidMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.Wlid)
 
-		val, exist = enrichedAnnotations[instanceidhandler.ContainerNameMetadataKey]
+		val, exist = enrichedAnnotations[helpersv1.ContainerNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
 	}

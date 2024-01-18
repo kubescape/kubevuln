@@ -20,6 +20,7 @@ import (
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -208,7 +209,11 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	if val, ok := workload.Args[identifiers.AttributeSensor]; ok {
 		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val.(string)
 	}
-
+	if val, ok := finalReport.Designators.Attributes[identifiers.AttributeKind]; ok {
+		if s, err := k8sinterface.GetGroupVersionResource(val); err == nil {
+			finalReport.Designators.Attributes[identifiers.AttributeApiVersion] = k8sinterface.JoinGroupVersion(s.Group, s.Version)
+		}
+	}
 	// fill context and designators into vulnerabilities
 	armoContext := identifiers.DesignatorToArmoContext(&finalReport.Designators, "designators")
 	for i := range vulnerabilities {

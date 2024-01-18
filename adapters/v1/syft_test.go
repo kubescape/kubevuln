@@ -9,7 +9,7 @@ import (
 
 	"github.com/anchore/syft/syft/format/syftjson/model"
 	"github.com/kinbiko/jsonassert"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
@@ -81,7 +81,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantIncomplete && got.Status != instanceidhandler.Incomplete {
+			if tt.wantIncomplete && got.Status != helpersv1.Incomplete {
 				t.Errorf("CreateSBOM() want incomplete SBOM, got %v", got.Status)
 				return
 			}

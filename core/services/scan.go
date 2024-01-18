@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/docker/docker/api/types/registry"
@@ -18,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -183,7 +184,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// do not process timed out SBOM
-		if sbom.Status == instanceidhandler.Incomplete {
+		if sbom.Status == helpersv1.Incomplete {
 			return domain.ErrIncompleteSBOM
 		}
 
@@ -204,6 +205,17 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
+			}
+		}
+	} else {
+		if s.storage {
+			// store summary CVE if does not exist
+			if cveSumm, err := s.cveRepository.GetCVESummary(ctx); err != nil || cveSumm == nil {
+				err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
 			}
 		}
 	}
@@ -269,6 +281,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	logger.L().Info("scan complete",
 		helpers.String("imageSlug", workload.ImageSlug),
+		helpers.String("instanceID", workload.InstanceID),
 		helpers.String("jobID", workload.JobID))
 	return nil
 }
@@ -303,7 +316,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// do not process timed out SBOM
-	if sbom.Status == instanceidhandler.Incomplete {
+	if sbom.Status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
 
