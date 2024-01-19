@@ -10,15 +10,14 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
+	"github.com/anchore/clio"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/cmd/syft/cli/eventloop"
 	"github.com/anchore/syft/cmd/syft/cli/options"
-	"github.com/anchore/syft/syft/artifact"
+	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -128,7 +127,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		// generate SBOM
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
-		syftSBOM, err = generateSBOM(name, s.Version(), src, &syftOpts.Catalog)
+		id := clio.Identification{
+			Name:    name,
+			Version: s.Version(),
+		}
+		syftSBOM, err = syft.CreateSBOM(ctx, src, syftOpts.Catalog.ToSBOMConfig(id))
 		return err
 	})
 	switch err {
@@ -184,7 +187,7 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 	detection, err := source.Detect(
 		userInput,
 		source.DetectConfig{
-			DefaultImageSource: opts.DefaultImagePullSource,
+			DefaultImageSource: opts.Source.Image.DefaultPullSource,
 		},
 	)
 	if err != nil {
@@ -217,61 +220,11 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 				Paths: opts.Exclusions,
 			},
 			DigestAlgorithms: hashers,
-			BasePath:         opts.BasePath,
+			BasePath:         opts.Source.BasePath,
 		},
 	)
 
 	return src, err
-}
-
-func generateSBOM(toolName string, toolVersion string, src source.Source, opts *options.Catalog) (*sbom.SBOM, error) {
-	tasks, err := eventloop.Tasks(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	s := sbom.SBOM{
-		Source: src.Describe(),
-		Descriptor: sbom.Descriptor{
-			Name:          toolName,
-			Version:       toolVersion,
-			Configuration: opts,
-		},
-	}
-
-	err = buildRelationships(&s, src, tasks)
-
-	return &s, err
-}
-
-func buildRelationships(s *sbom.SBOM, src source.Source, tasks []eventloop.Task) error {
-	var errs error
-
-	var relationships []<-chan artifact.Relationship
-	for _, task := range tasks {
-		c := make(chan artifact.Relationship)
-		relationships = append(relationships, c)
-		go func(task eventloop.Task) {
-			err := eventloop.RunTask(task, &s.Artifacts, src, c)
-			if err != nil {
-				errs = multierror.Append(errs, err)
-			}
-		}(task)
-	}
-
-	s.Relationships = append(s.Relationships, mergeRelationships(relationships...)...)
-
-	return errs
-}
-
-func mergeRelationships(cs ...<-chan artifact.Relationship) (relationships []artifact.Relationship) {
-	for _, c := range cs {
-		for n := range c {
-			relationships = append(relationships, n)
-		}
-	}
-
-	return relationships
 }
 
 // Version returns Syft's version which is used to tag SBOMs

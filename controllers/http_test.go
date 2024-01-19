@@ -1,13 +1,13 @@
 package controllers
 
 import (
+	"github.com/docker/docker/api/types/registry"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
 	wssc "github.com/armosec/armoapi-go/apis"
-	"github.com/docker/docker/api/types"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -221,7 +221,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		{
 			wssc.RegistryScanCommand{
 				ImageScanParams: wssc.ImageScanParams{
-					Credentialslist: []types.AuthConfig{},
+					Credentialslist: []registry.AuthConfig{},
 					ImageTag:        "docker.io/library/nginx:1.14.1",
 					JobID:           "some Job ID for nginx",
 					ParentJobID:     "some Parent Job ID for nginx",
@@ -231,7 +231,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		{
 			wssc.RegistryScanCommand{
 				ImageScanParams: wssc.ImageScanParams{
-					Credentialslist: []types.AuthConfig{},
+					Credentialslist: []registry.AuthConfig{},
 					ImageTag:        "nginx@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
 					JobID:           "some Job ID for nginx sha",
 					ParentJobID:     "some Parent Job ID for nginx sha",
@@ -241,7 +241,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		{
 			wssc.RegistryScanCommand{
 				ImageScanParams: wssc.ImageScanParams{
-					Credentialslist: []types.AuthConfig{},
+					Credentialslist: []registry.AuthConfig{},
 					ImageTag:        "nginx:latest",
 					JobID:           "some Job ID for nginx latest",
 					ParentJobID:     "some Parent Job ID for nginx latest",
@@ -251,7 +251,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		{
 			wssc.RegistryScanCommand{
 				ImageScanParams: wssc.ImageScanParams{
-					Credentialslist: []types.AuthConfig{},
+					Credentialslist: []registry.AuthConfig{},
 					ImageTag:        "docker.io/library/nginx:latest",
 					JobID:           "some Job ID for nginx latest with docker hub",
 					ParentJobID:     "some Parent Job ID for nginx latest with docker hub",
@@ -261,7 +261,7 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		{
 			wssc.RegistryScanCommand{
 				ImageScanParams: wssc.ImageScanParams{
-					Credentialslist: []types.AuthConfig{},
+					Credentialslist: []registry.AuthConfig{},
 					ImageTag:        "docker.io/library/nginx:latest@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
 					JobID:           "some Job ID for nginx latest with docker hub library",
 					ParentJobID:     "some Parent Job ID for nginx latest with docker hub library",
