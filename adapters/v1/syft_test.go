@@ -36,6 +36,11 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:  string(fileContent("testdata/hello-world-sbom.format.json")),
 		},
 		{
+			name:    "schema v1 image produces well-formed SBOM",
+			imageID: "quay.io/jitesoft/debian:stretch-slim",
+			format:  string(fileContent("testdata/stretch-slim-sbom.format.json")),
+		},
+		{
 			name:    "valid image produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  string(fileContent("testdata/alpine-sbom.format.json")),

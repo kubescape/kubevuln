@@ -1,13 +1,13 @@
 package controllers
 
 import (
-	"github.com/docker/docker/api/types/registry"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/kubevuln/core/ports"
