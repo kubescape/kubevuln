@@ -124,6 +124,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	var syftSBOM *sbom.SBOM
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
+		// make sure we clean the temp dir
+		defer func(src source.Source) {
+			if err := src.Close(); err != nil {
+				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
+					helpers.String("imageID", imageID))
+			}
+		}(src)
 		// generate SBOM
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
@@ -132,7 +139,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 			Version: s.Version(),
 		}
 		syftSBOM, err = syft.CreateSBOM(ctx, src, syftOpts.Catalog.ToSBOMConfig(id))
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", err)
+		}
+		return nil
 	})
 	switch err {
 	case deadline.ErrTimedOut:
