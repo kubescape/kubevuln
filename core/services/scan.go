@@ -367,8 +367,12 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVers
 }
 
 func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
+
 	scannerVersion = strings.ReplaceAll(scannerVersion, ".", "-")
 	if workload.InstanceID != "" && armotypes.ValidateContainerScanID(workload.InstanceID) {
+		if scannerVersion == "" {
+			return workload.InstanceID
+		}
 		return fmt.Sprintf("%s-%s", workload.InstanceID, scannerVersion)
 	}
 

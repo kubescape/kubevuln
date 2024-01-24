@@ -564,6 +564,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 func Test_generateScanID(t *testing.T) {
 	type args struct {
 		workload domain.ScanCommand
+		version  string
 	}
 	tests := []struct {
 		name string
@@ -586,13 +587,24 @@ func Test_generateScanID(t *testing.T) {
 				workload: domain.ScanCommand{
 					InstanceID: "InstanceID",
 				},
+				version: "1.0.0",
+			},
+			want: "InstanceID-1-0-0",
+		},
+		{
+			name: "generate scanID with instanceID without version",
+			args: args{
+				workload: domain.ScanCommand{
+					InstanceID: "InstanceID",
+				},
+				version: "",
 			},
 			want: "InstanceID",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := generateScanID(tt.args.workload, ""); got != tt.want {
+			if got := generateScanID(tt.args.workload, tt.args.version); got != tt.want {
 				t.Errorf("generateScanID() = %v, want %v", got, tt.want)
 			}
 		})
