@@ -33,7 +33,6 @@ type SyftAdapter struct {
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
-var ErrImageTooLarge = fmt.Errorf("image size exceeds maximum allowed size")
 
 // NewSyftAdapter initializes the SyftAdapter struct
 func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter {
@@ -77,6 +76,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		InsecureSkipTLSVerify: options.InsecureSkipTLSVerify,
 		InsecureUseHTTP:       options.InsecureUseHTTP,
 		Credentials:           credentials,
+		MaxImageSize:          s.maxImageSize,
 	}
 
 	syftOpts := defaultPackagesOptions()
@@ -105,7 +105,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		src, err = detectSource(imageID, syftOpts, &registryOptions)
 	}
 	switch {
-	case errors.Is(err, ErrImageTooLarge):
+	case errors.Is(err, image.ErrImageTooLarge):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
@@ -184,16 +184,7 @@ func defaultPackagesOptions() *packagesOptions {
 }
 
 func detectSource(userInput string, opts *packagesOptions, registryOptions *image.RegistryOptions) (source.Source, error) {
-	detection, err := source.Detect(
-		userInput,
-		source.DetectConfig{
-			DefaultImageSource: opts.Source.Image.DefaultPullSource,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("could not determine source: %w", err)
-	}
-
+	var err error
 	var platform *image.Platform
 
 	if opts.Platform != "" {
@@ -203,13 +194,8 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 		}
 	}
 
-	hashers, err := Hashers(opts.Source.File.Digests...)
-	if err != nil {
-		return nil, fmt.Errorf("invalid hash: %w", err)
-	}
-
-	src, err := detection.NewSource(
-		source.DetectionSourceConfig{
+	src, err := source.NewFromStereoscopeImage(
+		source.StereoscopeImageConfig{
 			Alias: source.Alias{
 				Name:    opts.Source.Name,
 				Version: opts.Source.Version,
@@ -219,8 +205,8 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 			Exclude: source.ExcludeConfig{
 				Paths: opts.Exclusions,
 			},
-			DigestAlgorithms: hashers,
-			BasePath:         opts.Source.BasePath,
+			Reference: userInput,
+			From:      image.DetermineDefaultImagePullSource(userInput),
 		},
 	)
 

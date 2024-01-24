@@ -60,13 +60,13 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name:           "big image produces incomplete SBOM",
-		// 	imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-		// 	format:         "null",
-		// 	maxImageSize:   1,
-		// 	wantIncomplete: true,
-		// },
+		{
+			name:           "big image produces incomplete SBOM",
+			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:         "null",
+			maxImageSize:   1,
+			wantIncomplete: true,
+		},
 		{
 			name:    "system tests image",
 			imageID: "public-registry.systest-ns-bpf7:5000/nginx:test",

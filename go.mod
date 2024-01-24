@@ -347,3 +347,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20240124133739-1f15a5d360d1
