@@ -11,7 +11,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
 	"github.com/anchore/clio"
-	"github.com/anchore/stereoscope/pkg/file"
+	stereoscopeFile "github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/cmd/syft/cli/options"
 	"github.com/anchore/syft/syft"
@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/pkg/secretdetector"
 	"go.opentelemetry.io/otel"
 )
 
@@ -82,8 +83,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	syftOpts := defaultPackagesOptions()
 
 	// prepare temporary directory for image download
-	t := file.NewTempDirGenerator("stereoscope")
-	defer func(t *file.TempDirGenerator) {
+	t := stereoscopeFile.NewTempDirGenerator("stereoscope")
+	defer func(t *stereoscopeFile.TempDirGenerator) {
 		err := t.Cleanup()
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to cleanup temp dir", helpers.Error(err),
@@ -142,6 +143,22 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
 		}
+		// scan for secrets
+		resolver, err := src.FileResolver(source.SquashedScope)
+		if err != nil {
+			return fmt.Errorf("unable to get file resolver: %w", err)
+		}
+		fileDetectionConfig := &secretdetector.FileDetectionConfig{
+			SkipBinaryFiles: false,
+			SizeThreshold:   0,
+		}
+		result, err := secretdetector.SearchDirectoryForSecrets(resolver, fileDetectionConfig)
+		if err != nil {
+			return fmt.Errorf("failed to search directory for secrets: %w", err)
+		}
+		logger.L().Info("searched directory for secrets",
+			helpers.String("imageID", imageID),
+			helpers.Interface("result", result))
 		return nil
 	})
 	switch err {

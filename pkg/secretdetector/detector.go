@@ -2,8 +2,8 @@ package secretdetector
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	stereoscopeFile "github.com/anchore/stereoscope/pkg/file"
+	syftFile "github.com/anchore/syft/syft/file"
 )
 
 const (
@@ -11,7 +11,7 @@ const (
 )
 
 // SearchDirectoryForSecrets searches a directory for files containing secrets
-func SearchDirectoryForSecrets(directoryPath string, config *FileDetectionConfig) ([]FileDetectionResult, error) {
+func SearchDirectoryForSecrets(resolver syftFile.Resolver, config *FileDetectionConfig) ([]FileDetectionResult, error) {
 	var results []FileDetectionResult
 
 	detectionRules, err := CompileDefaultRegexpRules()
@@ -20,70 +20,56 @@ func SearchDirectoryForSecrets(directoryPath string, config *FileDetectionConfig
 	}
 
 	// Iterate over files in directory and its subdirectories
-	err = filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
-		// Skip directories
-		if info == nil ||
-			info.IsDir() ||
-			info.Mode()&os.ModeSymlink != 0 ||
-			info.Mode()&os.ModeNamedPipe != 0 ||
-			info.Mode()&os.ModeSocket != 0 ||
-			info.Mode()&os.ModeDevice != 0 ||
-			info.Mode()&os.ModeCharDevice != 0 ||
-			info.Mode()&os.ModeIrregular != 0 {
-			return nil
-		}
-
+	for location := range resolver.AllLocations() {
+		resolvedLocations, err := resolver.FilesByPath(location.RealPath)
 		if err != nil {
-			return err
+			continue
 		}
+		for _, resolvedLocation := range resolvedLocations {
+			metadata, err := resolver.FileMetadataByLocation(resolvedLocation)
+			if err != nil {
+				continue
+			}
+			if metadata.Type != stereoscopeFile.TypeRegular {
+				continue
+			}
 
-		// fmt.Printf("Scanning file %s\n", path)
+			fmt.Printf("Scanning file %s\n", resolvedLocation.Path())
 
-		// For each file, check if it contains a secret
-		detectionResult, err := SearchFileForSecrets(path, config, detectionRules)
-		if err != nil {
-			results = append(results, FileDetectionResult{
-				Path: path,
-				Err:  err,
-			})
+			// For each file, check if it contains a secret
+			detectionResult, err := SearchFileForSecrets(resolver, resolvedLocation, metadata, config, detectionRules)
+			if err != nil {
+				results = append(results, FileDetectionResult{
+					Path: resolvedLocation.Path(),
+					Err:  err,
+				})
+			}
+
+			// If it does, add it to the results
+			if detectionResult != nil {
+				results = append(results, *detectionResult)
+			}
 		}
-
-		// If it does, add it to the results
-		if detectionResult != nil {
-			results = append(results, *detectionResult)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	// Return the results
 	return results, nil
 }
 
-func SearchFileForSecrets(filePath string, config *FileDetectionConfig, detectors []CompiledRegexpDetectionRule) (*FileDetectionResult, error) {
+func SearchFileForSecrets(resolver syftFile.Resolver, location syftFile.Location, fileInfo syftFile.Metadata, config *FileDetectionConfig, detectors []CompiledRegexpDetectionRule) (*FileDetectionResult, error) {
 
-	file, err := os.Open(filePath)
+	if config != nil && config.SizeThreshold > 0 && fileInfo.Size() > config.SizeThreshold {
+		return nil, nil
+	}
+
+	file, err := resolver.FileContentsByLocation(location)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	if config != nil && config.SizeThreshold > 0 {
-		fileInfo, err := file.Stat()
-		if err != nil {
-			return nil, err
-		}
-
-		if fileInfo.Size() > config.SizeThreshold {
-			return nil, nil
-		}
-	}
-
 	result := &FileDetectionResult{
-		Path: filePath,
+		Path: location.Path(),
 		Err:  nil,
 	}
 
