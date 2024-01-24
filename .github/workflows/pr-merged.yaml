@@ -15,8 +15,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  reset-run-number:
+    runs-on: ubuntu-latest
+    name: reset github.run_number
+    outputs:
+      run-number: ${{ steps.get-build.outputs.build-number }}
+    steps:
+    - name: Get build number
+      id: get-build
+      uses: mlilback/build-number@v1
+      with:
+        base: -149
+        run-id: ${{ github.run_number }}
+
   pr-merged:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
+    needs: reset-run-number
     permissions:
       id-token: write
       packages: write
@@ -25,7 +39,7 @@ jobs:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
-      IMAGE_TAG: v0.2.${{ github.run_number }}
+      IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}
       COMPONENT_NAME: kubevuln
       CGO_ENABLED: 0
       GO111MODULE: "on"

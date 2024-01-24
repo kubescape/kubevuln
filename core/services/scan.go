@@ -153,6 +153,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
+	// if cve.
+
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
 		// check if SBOM is already available
@@ -354,21 +356,23 @@ func addTimestamp(ctx context.Context) context.Context {
 	return context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 }
 
-func enrichContext(ctx context.Context, workload domain.ScanCommand) context.Context {
+func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVersion string) context.Context {
 	// generate unique scanID and add to context
-	scanID := generateScanID(workload)
+
+	scanID := generateScanID(workload, scannerVersion)
 	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID)
 	// add workload to context
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	return ctx
 }
 
-func generateScanID(workload domain.ScanCommand) string {
+func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 	if workload.InstanceID != "" && armotypes.ValidateContainerScanID(workload.InstanceID) {
 		return workload.InstanceID
 	}
+
 	if workload.ImageTag != "" && workload.ImageHash != "" {
-		sum := sha256.Sum256([]byte(workload.ImageTag + workload.ImageHash))
+		sum := sha256.Sum256([]byte(workload.ImageTag + workload.ImageHash + scannerVersion))
 		if scanID := fmt.Sprintf("%x", sum); armotypes.ValidateContainerScanID(scanID) {
 			return scanID
 		}
@@ -445,7 +449,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload)
+	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
 	// validate inputs
 	if workload.ImageHash == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
@@ -467,7 +471,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload)
+	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
 	// validate inputs
 	if workload.ImageHash == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
@@ -498,7 +502,7 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanRegistry")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload)
+	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
 	// validate inputs
 	if workload.ImageTag == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
