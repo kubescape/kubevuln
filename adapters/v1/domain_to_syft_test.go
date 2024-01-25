@@ -37,8 +37,8 @@ func Test_domainJSONToSyft(t *testing.T) {
 				artifactRelationships: 129,
 				files:                 78,
 				source: source{
-					id:   "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-					name: "alpine",
+					id:   "fd6275a37d2472b9d3be70c3261087b8d65e441c21342ae7313096312bcda2b3",
+					name: "library/alpine",
 				},
 			},
 		}, {

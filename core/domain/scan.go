@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/armosec/armoapi-go/identifiers"
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/registry"
 )
 
 const (
@@ -40,7 +40,7 @@ type ScanCommand struct {
 	ContainerName      string
 	ParentJobID        string
 	ImageHash          string
-	CredentialsList    []types.AuthConfig
+	CredentialsList    []registry.AuthConfig
 	Session            Session
 	LastAction         int
 }

@@ -10,15 +10,14 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
+	"github.com/anchore/clio"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/cmd/syft/cli/eventloop"
 	"github.com/anchore/syft/cmd/syft/cli/options"
-	"github.com/anchore/syft/syft/artifact"
+	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/hashicorp/go-multierror"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -34,7 +33,6 @@ type SyftAdapter struct {
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
-var ErrImageTooLarge = fmt.Errorf("image size exceeds maximum allowed size")
 
 // NewSyftAdapter initializes the SyftAdapter struct
 func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter {
@@ -78,6 +76,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		InsecureSkipTLSVerify: options.InsecureSkipTLSVerify,
 		InsecureUseHTTP:       options.InsecureUseHTTP,
 		Credentials:           credentials,
+		MaxImageSize:          s.maxImageSize,
 	}
 
 	syftOpts := defaultPackagesOptions()
@@ -106,7 +105,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 		src, err = detectSource(imageID, syftOpts, &registryOptions)
 	}
 	switch {
-	case errors.Is(err, ErrImageTooLarge):
+	case errors.Is(err, image.ErrImageTooLarge):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
@@ -125,11 +124,25 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID string, opti
 	var syftSBOM *sbom.SBOM
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
+		// make sure we clean the temp dir
+		defer func(src source.Source) {
+			if err := src.Close(); err != nil {
+				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
+					helpers.String("imageID", imageID))
+			}
+		}(src)
 		// generate SBOM
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
-		syftSBOM, err = generateSBOM(name, s.Version(), src, &syftOpts.Catalog)
-		return err
+		id := clio.Identification{
+			Name:    name,
+			Version: s.Version(),
+		}
+		syftSBOM, err = syft.CreateSBOM(ctx, src, syftOpts.Catalog.ToSBOMConfig(id))
+		if err != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", err)
+		}
+		return nil
 	})
 	switch err {
 	case deadline.ErrTimedOut:
@@ -181,16 +194,7 @@ func defaultPackagesOptions() *packagesOptions {
 }
 
 func detectSource(userInput string, opts *packagesOptions, registryOptions *image.RegistryOptions) (source.Source, error) {
-	detection, err := source.Detect(
-		userInput,
-		source.DetectConfig{
-			DefaultImageSource: opts.DefaultImagePullSource,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("could not determine source: %w", err)
-	}
-
+	var err error
 	var platform *image.Platform
 
 	if opts.Platform != "" {
@@ -200,13 +204,8 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 		}
 	}
 
-	hashers, err := Hashers(opts.Source.File.Digests...)
-	if err != nil {
-		return nil, fmt.Errorf("invalid hash: %w", err)
-	}
-
-	src, err := detection.NewSource(
-		source.DetectionSourceConfig{
+	src, err := source.NewFromStereoscopeImage(
+		source.StereoscopeImageConfig{
 			Alias: source.Alias{
 				Name:    opts.Source.Name,
 				Version: opts.Source.Version,
@@ -216,62 +215,12 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 			Exclude: source.ExcludeConfig{
 				Paths: opts.Exclusions,
 			},
-			DigestAlgorithms: hashers,
-			BasePath:         opts.BasePath,
+			Reference: userInput,
+			From:      image.DetermineDefaultImagePullSource(userInput),
 		},
 	)
 
 	return src, err
-}
-
-func generateSBOM(toolName string, toolVersion string, src source.Source, opts *options.Catalog) (*sbom.SBOM, error) {
-	tasks, err := eventloop.Tasks(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	s := sbom.SBOM{
-		Source: src.Describe(),
-		Descriptor: sbom.Descriptor{
-			Name:          toolName,
-			Version:       toolVersion,
-			Configuration: opts,
-		},
-	}
-
-	err = buildRelationships(&s, src, tasks)
-
-	return &s, err
-}
-
-func buildRelationships(s *sbom.SBOM, src source.Source, tasks []eventloop.Task) error {
-	var errs error
-
-	var relationships []<-chan artifact.Relationship
-	for _, task := range tasks {
-		c := make(chan artifact.Relationship)
-		relationships = append(relationships, c)
-		go func(task eventloop.Task) {
-			err := eventloop.RunTask(task, &s.Artifacts, src, c)
-			if err != nil {
-				errs = multierror.Append(errs, err)
-			}
-		}(task)
-	}
-
-	s.Relationships = append(s.Relationships, mergeRelationships(relationships...)...)
-
-	return errs
-}
-
-func mergeRelationships(cs ...<-chan artifact.Relationship) (relationships []artifact.Relationship) {
-	for _, c := range cs {
-		for n := range c {
-			relationships = append(relationships, n)
-		}
-	}
-
-	return relationships
 }
 
 // Version returns Syft's version which is used to tag SBOMs
