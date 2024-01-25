@@ -1,0 +1,186 @@
+{
+  "artifacts": "<<PRESENCE>>",
+  "artifactRelationships": "<<PRESENCE>>",
+  "files": "<<PRESENCE>>",
+  "source": {
+    "id": "0839f8a5953c84602733cc22e08cc58fff197230394c0f53e16ebe4b1f82bebc",
+    "name": "quay.io/jitesoft/debian",
+    "version": "stretch-slim",
+    "type": "image",
+    "metadata": {
+      "userInput": "quay.io/jitesoft/debian:stretch-slim",
+      "imageID": "sha256:79fa621e5e02554e75cc49e33ec6e7a0ce97a1d6ccb955dc23a13966cc9b09d8",
+      "manifestDigest": "sha256:0839f8a5953c84602733cc22e08cc58fff197230394c0f53e16ebe4b1f82bebc",
+      "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+      "tags": [
+        "quay.io/jitesoft/debian:stretch-slim"
+      ],
+      "imageSize": 55294181,
+      "layers": [
+        {
+          "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:ddae06c659b4e2c0761685617730fe3e4d5cb864a868a4b2be677c8533dc0426",
+          "size": 55294181
+        }
+      ],
+      "manifest": "eyJzY2hlbWFWZXJzaW9uIjoyLCJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmRpc3RyaWJ1dGlvbi5tYW5pZmVzdC52Mitqc29uIiwiY29uZmlnIjp7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuY29udGFpbmVyLmltYWdlLnYxK2pzb24iLCJzaXplIjozNzA0LCJkaWdlc3QiOiJzaGEyNTY6NzlmYTYyMWU1ZTAyNTU0ZTc1Y2M0OWUzM2VjNmU3YTBjZTk3YTFkNmNjYjk1NWRjMjNhMTM5NjZjYzliMDlkOCJ9LCJsYXllcnMiOlt7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuaW1hZ2Uucm9vdGZzLmRpZmYudGFyLmd6aXAiLCJzaXplIjo1ODQ3OTYxNiwiZGlnZXN0Ijoic2hhMjU2OmRkYWUwNmM2NTliNGUyYzA3NjE2ODU2MTc3MzBmZTNlNGQ1Y2I4NjRhODY4YTRiMmJlNjc3Yzg1MzNkYzA0MjYifV19",
+      "config": "eyJhcmNoaXRlY3R1cmUiOiJhbWQ2NCIsImNvbmZpZyI6eyJIb3N0bmFtZSI6IiIsIkRvbWFpbm5hbWUiOiIiLCJVc2VyIjoiIiwiQXR0YWNoU3RkaW4iOmZhbHNlLCJBdHRhY2hTdGRvdXQiOmZhbHNlLCJBdHRhY2hTdGRlcnIiOmZhbHNlLCJUdHkiOmZhbHNlLCJPcGVuU3RkaW4iOmZhbHNlLCJTdGRpbk9uY2UiOmZhbHNlLCJFbnYiOlsiUEFUSD0vdXNyL2xvY2FsL3NiaW46L3Vzci9sb2NhbC9iaW46L3Vzci9zYmluOi91c3IvYmluOi9zYmluOi9iaW4iLCJMQU5HPUMuVVRGLTgiXSwiQ21kIjpbImJhc2giXSwiSW1hZ2UiOiJzaGEyNTY6ZWY0M2YwMGVmOTU2YzZjNDBkZDBlZWY4NDI2NGQ4NDY1ZjhlZGNlNzYwZjgyYzVkNmUzMWRjYWZiMzUwOTNlMCIsIlZvbHVtZXMiOm51bGwsIldvcmtpbmdEaXIiOiIiLCJFbnRyeXBvaW50IjpudWxsLCJPbkJ1aWxkIjpudWxsLCJMYWJlbHMiOnsiY29tLmppdGVzb2Z0LmFwcC5kZWJpYW4udmVyc2lvbiI6IjkuMTEiLCJjb20uaml0ZXNvZnQuYXBwLmRlYmlhbi52ZXJzaW9uLm5hbWUiOiJzdHJldGNoIiwiY29tLmppdGVzb2Z0LmJ1aWxkLmFyY2giOiJ4ODZfNjQiLCJjb20uaml0ZXNvZnQucHJvamVjdC5yZWdpc3RyeS51cmkiOiJyZWdpc3RyeS5naXRsYWIuY29tL2ppdGVzb2Z0L2RvY2tlcmZpbGVzL2RlYmlhbiIsImNvbS5qaXRlc29mdC5wcm9qZWN0LnJlcG8uaXNzdWVzIjoiaHR0cHM6Ly9naXRsYWIuY29tL2ppdGVzb2Z0L2RvY2tlcmZpbGVzL2RlYmlhbi9pc3N1ZXMiLCJjb20uaml0ZXNvZnQucHJvamVjdC5yZXBvLnR5cGUiOiJnaXQiLCJjb20uaml0ZXNvZnQucHJvamVjdC5yZXBvLnVyaSI6Imh0dHBzOi8vZ2l0bGFiLmNvbS9qaXRlc29mdC9kb2NrZXJmaWxlcy9kZWJpYW4iLCJtYWludGFpbmVyIjoiSm9oYW5uZXMgVGVnbsOpciBcdTAwM2Nqb2hhbm5lc0BqaXRlc29mdC5jb21cdTAwM2UiLCJtYWludGFpbmVyLm9yZyI6IkppdGVzb2Z0IiwibWFpbnRhaW5lci5vcmcudXJpIjoiaHR0cHM6Ly9qaXRlc29mdC5jb20ifX0sImNvbnRhaW5lciI6ImY5MjBlOTA4MjgyMWI3MzBlYjBkYWI1YTA3YTNlN2VhNmU5OGZhNmRhN2ViMzRiNGQxZDQzOWFlNmM2Y2U2ZjEiLCJjb250YWluZXJfY29uZmlnIjp7Ikhvc3RuYW1lIjoiZjkyMGU5MDgyODIxIiwiRG9tYWlubmFtZSI6IiIsIlVzZXIiOiIiLCJBdHRhY2hTdGRpbiI6ZmFsc2UsIkF0dGFjaFN0ZG91dCI6ZmFsc2UsIkF0dGFjaFN0ZGVyciI6ZmFsc2UsIlR0eSI6ZmFsc2UsIk9wZW5TdGRpbiI6ZmFsc2UsIlN0ZGluT25jZSI6ZmFsc2UsIkVudiI6WyJQQVRIPS91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbiIsIkxBTkc9Qy5VVEYtOCJdLCJDbWQiOlsiL2Jpbi9zaCIsIi1jIiwiIyhub3ApICIsIkxBQkVMIGNvbS5qaXRlc29mdC5hcHAuZGViaWFuLnZlcnNpb24ubmFtZT1zdHJldGNoIl0sIkltYWdlIjoic2hhMjU2OmVmNDNmMDBlZjk1NmM2YzQwZGQwZWVmODQyNjRkODQ2NWY4ZWRjZTc2MGY4MmM1ZDZlMzFkY2FmYjM1MDkzZTAiLCJWb2x1bWVzIjpudWxsLCJXb3JraW5nRGlyIjoiIiwiRW50cnlwb2ludCI6bnVsbCwiT25CdWlsZCI6bnVsbCwiTGFiZWxzIjp7ImNvbS5qaXRlc29mdC5hcHAuZGViaWFuLnZlcnNpb24iOiI5LjExIiwiY29tLmppdGVzb2Z0LmFwcC5kZWJpYW4udmVyc2lvbi5uYW1lIjoic3RyZXRjaCIsImNvbS5qaXRlc29mdC5idWlsZC5hcmNoIjoieDg2XzY0IiwiY29tLmppdGVzb2Z0LnByb2plY3QucmVnaXN0cnkudXJpIjoicmVnaXN0cnkuZ2l0bGFiLmNvbS9qaXRlc29mdC9kb2NrZXJmaWxlcy9kZWJpYW4iLCJjb20uaml0ZXNvZnQucHJvamVjdC5yZXBvLmlzc3VlcyI6Imh0dHBzOi8vZ2l0bGFiLmNvbS9qaXRlc29mdC9kb2NrZXJmaWxlcy9kZWJpYW4vaXNzdWVzIiwiY29tLmppdGVzb2Z0LnByb2plY3QucmVwby50eXBlIjoiZ2l0IiwiY29tLmppdGVzb2Z0LnByb2plY3QucmVwby51cmkiOiJodHRwczovL2dpdGxhYi5jb20vaml0ZXNvZnQvZG9ja2VyZmlsZXMvZGViaWFuIiwibWFpbnRhaW5lciI6IkpvaGFubmVzIFRlZ27DqXIgXHUwMDNjam9oYW5uZXNAaml0ZXNvZnQuY29tXHUwMDNlIiwibWFpbnRhaW5lci5vcmciOiJKaXRlc29mdCIsIm1haW50YWluZXIub3JnLnVyaSI6Imh0dHBzOi8vaml0ZXNvZnQuY29tIn19LCJjcmVhdGVkIjoiMjAxOS0wOS0xN1QwNDoyNDowNy4zNTI0MzkwOTdaIiwiZG9ja2VyX3ZlcnNpb24iOiIxOS4wMy4yIiwiaGlzdG9yeSI6W3siY3JlYXRlZCI6IjIwMTktMDgtMzFUMTU6Mzk6MDguNTgxMDg2MTY1WiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSAgQVJHIEFSQz14ODZfNjQiLCJlbXB0eV9sYXllciI6dHJ1ZX0seyJjcmVhdGVkIjoiMjAxOS0wOC0zMVQxNTozOTowOC44NTc1NjM1NDNaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApICBMQUJFTCBtYWludGFpbmVyPUpvaGFubmVzIFRlZ27DqXIgXHUwMDNjam9oYW5uZXNAaml0ZXNvZnQuY29tXHUwMDNlIG1haW50YWluZXIub3JnPUppdGVzb2Z0IG1haW50YWluZXIub3JnLnVyaT1odHRwczovL2ppdGVzb2Z0LmNvbSBjb20uaml0ZXNvZnQucHJvamVjdC5yZXBvLnR5cGU9Z2l0IGNvbS5qaXRlc29mdC5wcm9qZWN0LnJlcG8udXJpPWh0dHBzOi8vZ2l0bGFiLmNvbS9qaXRlc29mdC9kb2NrZXJmaWxlcy9kZWJpYW4gY29tLmppdGVzb2Z0LnByb2plY3QucmVwby5pc3N1ZXM9aHR0cHM6Ly9naXRsYWIuY29tL2ppdGVzb2Z0L2RvY2tlcmZpbGVzL2RlYmlhbi9pc3N1ZXMgY29tLmppdGVzb2Z0LnByb2plY3QucmVnaXN0cnkudXJpPXJlZ2lzdHJ5LmdpdGxhYi5jb20vaml0ZXNvZnQvZG9ja2VyZmlsZXMvZGViaWFuIGNvbS5qaXRlc29mdC5idWlsZC5hcmNoPXg4Nl82NCIsImVtcHR5X2xheWVyIjp0cnVlfSx7ImNyZWF0ZWQiOiIyMDE5LTA4LTMxVDE1OjM5OjA5LjAxODI0NjYzMVoiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIEVOViBMQU5HPUMuVVRGLTgiLCJlbXB0eV9sYXllciI6dHJ1ZX0seyJjcmVhdGVkIjoiMjAxOS0wOS0xN1QwNDoyNDowNi40NDE5MjEzNThaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIEFERCBmaWxlOjBjMjJhYTA1NjVjNTU3YTU4MDU2NGE3NWEwZDFiN2M0NWE0ODdlNzMwMDEzODYyZWJkMDNlOTgzNmI3Yzc5M2UgaW4gLyAifSx7ImNyZWF0ZWQiOiIyMDE5LTA5LTE3VDA0OjI0OjA2Ljg3NDQ4MjI2MVoiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIENNRCBbXCJiYXNoXCJdIiwiZW1wdHlfbGF5ZXIiOnRydWV9LHsiY3JlYXRlZCI6IjIwMTktMDktMTdUMDQ6MjQ6MDcuMTM1NzQ5MTYxWiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSAgTEFCRUwgY29tLmppdGVzb2Z0LmFwcC5kZWJpYW4udmVyc2lvbj05LjExIiwiZW1wdHlfbGF5ZXIiOnRydWV9LHsiY3JlYXRlZCI6IjIwMTktMDktMTdUMDQ6MjQ6MDcuMzUyNDM5MDk3WiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSAgTEFCRUwgY29tLmppdGVzb2Z0LmFwcC5kZWJpYW4udmVyc2lvbi5uYW1lPXN0cmV0Y2giLCJlbXB0eV9sYXllciI6dHJ1ZX1dLCJvcyI6ImxpbnV4Iiwicm9vdGZzIjp7InR5cGUiOiJsYXllcnMiLCJkaWZmX2lkcyI6WyJzaGEyNTY6ZGRhZTA2YzY1OWI0ZTJjMDc2MTY4NTYxNzczMGZlM2U0ZDVjYjg2NGE4NjhhNGIyYmU2NzdjODUzM2RjMDQyNiJdfX0=",
+      "repoDigests": [
+        "quay.io/jitesoft/debian@sha256:aa12141fb9e387cdc9f933d5048ab58ba0aa4f3eb2c4d5fe804efce52e0b14eb"
+      ],
+      "architecture": "amd64",
+      "os": "linux",
+      "labels": {
+        "com.jitesoft.app.debian.version": "9.11",
+        "com.jitesoft.app.debian.version.name": "stretch",
+        "com.jitesoft.build.arch": "x86_64",
+        "com.jitesoft.project.registry.uri": "registry.gitlab.com/jitesoft/dockerfiles/debian",
+        "com.jitesoft.project.repo.issues": "https://gitlab.com/jitesoft/dockerfiles/debian/issues",
+        "com.jitesoft.project.repo.type": "git",
+        "com.jitesoft.project.repo.uri": "https://gitlab.com/jitesoft/dockerfiles/debian",
+        "maintainer": "Johannes Tegnér \u003cjohannes@jitesoft.com\u003e",
+        "maintainer.org": "Jitesoft",
+        "maintainer.org.uri": "https://jitesoft.com"
+      }
+    }
+  },
+  "distro": {
+    "prettyName": "Debian GNU/Linux 9 (stretch)",
+    "name": "Debian GNU/Linux",
+    "id": "debian",
+    "version": "9 (stretch)",
+    "versionID": "9",
+    "versionCodename": "stretch",
+    "homeURL": "https://www.debian.org/",
+    "supportURL": "https://www.debian.org/support",
+    "bugReportURL": "https://bugs.debian.org/"
+  },
+  "descriptor": {
+    "name": "name",
+    "version": "unknown",
+    "configuration": {
+      "catalogers": {
+        "requested": {
+          "default": [
+            "image"
+          ]
+        },
+        "used": [
+          "alpm-db-cataloger",
+          "apk-db-cataloger",
+          "binary-cataloger",
+          "cargo-auditable-binary-cataloger",
+          "conan-info-cataloger",
+          "dotnet-portable-executable-cataloger",
+          "dpkg-db-cataloger",
+          "go-module-binary-cataloger",
+          "graalvm-native-image-cataloger",
+          "java-archive-cataloger",
+          "javascript-package-cataloger",
+          "nix-store-cataloger",
+          "php-composer-installed-cataloger",
+          "portage-cataloger",
+          "python-installed-package-cataloger",
+          "r-package-cataloger",
+          "rpm-db-cataloger",
+          "ruby-installed-gemspec-cataloger",
+          "sbom-cataloger"
+        ]
+      },
+      "data-generation": {
+        "generate-cpes": true
+      },
+      "files": {
+        "content": {
+          "globs": null,
+          "skip-files-above-size": 0
+        },
+        "hashers": [
+          "sha-1",
+          "sha-256"
+        ],
+        "selection": "owned-by-package"
+      },
+      "packages": {
+        "binary": [
+          "python-binary",
+          "python-binary-lib",
+          "pypy-binary-lib",
+          "go-binary",
+          "julia-binary",
+          "helm",
+          "redis-binary",
+          "java-binary-openjdk",
+          "java-binary-ibm",
+          "java-binary-oracle",
+          "nodejs-binary",
+          "go-binary-hint",
+          "busybox-binary",
+          "haproxy-binary",
+          "perl-binary",
+          "php-cli-binary",
+          "php-fpm-binary",
+          "php-apache-binary",
+          "php-composer-binary",
+          "httpd-binary",
+          "memcached-binary",
+          "traefik-binary",
+          "postgresql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "xtrabackup-binary",
+          "mariadb-binary",
+          "rust-standard-library-linux",
+          "rust-standard-library-macos",
+          "ruby-binary",
+          "erlang-binary",
+          "consul-binary",
+          "nginx-binary",
+          "bash-binary",
+          "openssl-binary",
+          "gcc-binary",
+          "wordpress-cli-binary"
+        ],
+        "golang": {
+          "local-mod-cache-dir": "<<PRESENCE>>",
+          "proxies": [
+            "https://proxy.golang.org",
+            "direct"
+          ],
+          "search-local-mod-cache-licenses": false,
+          "search-remote-licenses": false
+        },
+        "java-archive": {
+          "include-indexed-archives": true,
+          "include-unindexed-archives": false,
+          "maven-base-url": "https://repo1.maven.org/maven2",
+          "max-parent-recursive-depth": 5,
+          "use-network": false
+        },
+        "javascript": {
+          "npm-base-url": "https://registry.npmjs.org",
+          "search-remote-licenses": false
+        },
+        "linux-kernel": {
+          "catalog-modules": true
+        },
+        "python": {
+          "guess-unpinned-requirements": false
+        }
+      },
+      "relationships": {
+        "exclude-binary-packages-with-file-ownership-overlap": true,
+        "package-file-ownership": true,
+        "package-file-ownership-overlap": true
+      },
+      "search": {
+        "scope": "squashed"
+      }
+    }
+  },
+  "schema": {
+    "version": "13.0.0",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-13.0.0.json"
+  }
+}
