@@ -197,6 +197,11 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	finalReport.Designators.Attributes[identifiers.AttributeContainerName] = workload.ContainerName
 	finalReport.Designators.Attributes[identifiers.AttributeWorkloadHash] = cs.GenerateWorkloadHash(finalReport.Designators.Attributes)
 	finalReport.Designators.Attributes[identifiers.AttributeCustomerGUID] = a.clusterConfig.AccountID
+
+	// FIXME: use identifiers.AttributeSBOMToolVersion instead of "sbomToolVersion"
+	finalReport.Designators.Attributes["sbomToolVersion"] = cve.SBOMCreatorVersion
+	finalReport.Designators.Attributes["sbomToolName"] = cve.SBOMCreatorName
+
 	if val, ok := workload.Args[identifiers.AttributeRegistryName]; ok {
 		finalReport.Designators.Attributes[identifiers.AttributeRegistryName] = val.(string)
 	}
