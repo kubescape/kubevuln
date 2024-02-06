@@ -35,7 +35,7 @@ func NewMockSBOMAdapter(error, timeout, toomanyrequests bool) *MockSBOMAdapter {
 }
 
 // CreateSBOM returns a dummy SBOM for the given imageID
-func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID string, _ domain.RegistryOptions) (domain.SBOM, error) {
+func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID, imageTag string, _ domain.RegistryOptions) (domain.SBOM, error) {
 	logger.L().Info("CreateSBOM")
 	if m.error {
 		return domain.SBOM{}, domain.ErrMockError
@@ -51,7 +51,8 @@ func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID string, _ d
 		Name:               name,
 		SBOMCreatorVersion: m.Version(),
 		Annotations: map[string]string{
-			helpersv1.ImageIDMetadataKey: imageID,
+			helpersv1.ImageIDMetadataKey:  imageID,
+			helpersv1.ImageTagMetadataKey: imageTag,
 		},
 		Labels:  tools.LabelsFromImageID(imageID),
 		Content: &v1beta1.SyftDocument{},

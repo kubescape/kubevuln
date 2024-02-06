@@ -97,7 +97,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, optionsFromWorkload(workload))
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			return err
@@ -170,7 +170,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
 			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, optionsFromWorkload(workload))
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
 			s.checkCreateSBOM(err, workload.ImageHash)
 			if err != nil {
 				return fmt.Errorf("error creating SBOM: %w", err)
@@ -311,7 +311,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageTag, optionsFromWorkload(workload))
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageTag, workload.ImageTag, optionsFromWorkload(workload))
 	s.checkCreateSBOM(err, workload.ImageTag)
 	if err != nil {
 		return err

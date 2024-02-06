@@ -271,7 +271,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 				tools.EnsureSetup(t, err == nil)
 			}
 			if tt.sbom {
-				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, domain.RegistryOptions{})
+				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, "", domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
 				_ = storageSBOM.StoreSBOM(ctx, sbom)
 				if tt.cveManifest {
@@ -283,7 +283,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			var sbomp domain.SBOM
 			if tt.instanceID != "" {
 				var err error
-				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, tt.instanceID, domain.RegistryOptions{})
+				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, tt.instanceID, "", domain.RegistryOptions{})
 				tools.EnsureSetup(t, err == nil)
 				sbomp.Labels = map[string]string{"foo": "bar"}
 				_ = storageSBOM.StoreSBOM(ctx, sbomp)

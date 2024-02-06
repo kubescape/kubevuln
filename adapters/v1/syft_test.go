@@ -81,7 +81,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				maxImageSize = tt.maxImageSize
 			}
 			s := NewSyftAdapter(5*time.Minute, maxImageSize)
-			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, tt.options)
+			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, "", tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
