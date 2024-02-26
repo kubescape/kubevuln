@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
@@ -87,7 +88,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultR
 		return
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload)
+	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),

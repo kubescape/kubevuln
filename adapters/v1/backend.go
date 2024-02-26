@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
@@ -31,7 +32,7 @@ type BackendAdapter struct {
 	apiServerRestURL     string
 	clusterConfig        pkgcautils.ClusterConfig
 	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
+	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
 	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool)
 	accessKey            string
 }
@@ -46,7 +47,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		eventReceiverRestURL: eventReceiverRestURL,
 		apiServerRestURL:     apiServerRestURL,
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
-		httpPostFunc:         httputils.HttpPost,
+		httpPostFunc:         httputils.HttpPostWithRetry,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
@@ -265,5 +266,5 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 //lint:ignore U1000 Ignore unused function temporarily for debugging
 func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
 	logger.L().Debug("httpPostDebug", helpers.String("fullURL", fullURL), helpers.Interface("headers", headers), helpers.String("body", string(body)))
-	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body)
+	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
 }

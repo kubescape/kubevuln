@@ -10,11 +10,11 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20240118133533-eb656fc71793
 	github.com/anchore/syft v0.101.1
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.308
-	github.com/armosec/utils-go v0.0.56
-	github.com/armosec/utils-k8s-go v0.0.23
+	github.com/armosec/armoapi-go v0.0.330
+	github.com/armosec/utils-go v0.0.57
+	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/distribution/distribution v2.8.2+incompatible
-	github.com/docker/docker v25.0.0+incompatible
+	github.com/docker/docker v25.0.1+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.9.1
@@ -25,7 +25,7 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.158-0.20240117162237-b087cd69bcf1
+	github.com/kubescape/k8s-interface v0.0.160
 	github.com/kubescape/storage v0.0.59-0.20240116151402-3172a8cfef99
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.17.0
@@ -101,6 +101,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/briandowns/spinner v1.23.0 // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect

@@ -135,7 +135,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mu := &sync.Mutex{}
 			seenCVE := map[string]struct{}{}
-			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
+			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
 				var report v1.ScanResultReport
 				err := json.Unmarshal(body, &report)
 				if err != nil {
