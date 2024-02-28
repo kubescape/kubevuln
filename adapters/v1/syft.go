@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/opencontainers/go-digest"
 	"runtime"
 	"strings"
 	"time"
@@ -42,6 +44,33 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter 
 	}
 }
 
+const digestDelim = "@"
+
+func normalizeImageID(imageID, imageTag string) string {
+	// try to parse imageID as a full digest
+	if newDigest, err := name.NewDigest(imageID); err == nil {
+		return newDigest.String()
+	}
+	// if it's not a full digest, we need to use imageTag as a reference
+	tag, err := name.ParseReference(imageTag)
+	if err != nil {
+		return ""
+	}
+	// and append imageID as a digest
+	parts := strings.Split(imageID, digestDelim)
+	// filter garbage
+	if len(parts) > 1 {
+		imageID = parts[len(parts)-1]
+	}
+	prefix := digest.Canonical.String() + ":"
+	if !strings.HasPrefix(imageID, prefix) {
+		// add missing prefix
+		imageID = prefix + imageID
+	}
+	// we don't validate the digest, assuming it's correct
+	return tag.Context().String() + "@" + imageID
+}
+
 // CreateSBOM creates an SBOM for a given imageID, restrict parallelism to prevent disk space issues,
 // a timeout prevents the process from hanging for too long.
 // Format is syft JSON and the resulting SBOM is tagged with the Syft version.
@@ -60,6 +89,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		Labels: tools.LabelsFromImageID(imageID),
 	}
 	if imageTag != "" {
+		imageID = normalizeImageID(imageID, imageTag)
 		domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
 	}
 	// translate business models into Syft models
@@ -97,8 +127,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
-	// TODO: support maxImageSize
-	// @matthyx: I removed the support for maxImageSize because it's not supported by Syft, it looks like you developed the image download mechanism, I want to find a better solution.
 	src, err := detectSource(imageID, syftOpts, &registryOptions)
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {

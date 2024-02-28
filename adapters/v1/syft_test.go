@@ -24,6 +24,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	tests := []struct {
 		name           string
 		imageID        string
+		imageTag       string
 		format         string
 		maxImageSize   int64
 		options        domain.RegistryOptions
@@ -73,6 +74,18 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:  "null",
 			wantErr: true,
 		},
+		{
+			name:     "digest as imageID",
+			imageID:  "9ccc948e83b22cd3fc6919b4e3e44536530cc9426a13b8d5e07bf3b2bd1b0f22",
+			imageTag: "quay.io/kubescape/kubescape:v3.0.3",
+			wantErr:  false,
+		},
+		{
+			name:     "digest as imageID 2",
+			imageID:  "sha256:335bba9e861b88fa8b7bb9250bcd69b7a33f83da4fee93f9fc0eedc6f34e28ba",
+			imageTag: "registry.k8s.io/kube-scheduler:v1.28.4",
+			wantErr:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,7 +94,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				maxImageSize = tt.maxImageSize
 			}
 			s := NewSyftAdapter(5*time.Minute, maxImageSize)
-			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, "", tt.options)
+			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, tt.imageTag, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -91,10 +104,11 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				return
 			}
 			content, err := json.Marshal(got.Content)
-			// t.Errorf(string(content))
 			tools.EnsureSetup(t, err == nil)
-			ja := jsonassert.New(t)
-			ja.Assertf(string(content), tt.format)
+			if tt.format != "" {
+				ja := jsonassert.New(t)
+				ja.Assertf(string(content), tt.format)
+			}
 		})
 	}
 }
@@ -128,4 +142,55 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	b2, err := json.Marshal(domainSBOM)
 	tools.EnsureSetup(t, err == nil)
 	ja.Assertf(string(b2), string(b))
+}
+
+func TestNormalizeImageID(t *testing.T) {
+	tests := []struct {
+		name     string
+		imageID  string
+		imageTag string
+		want     string
+	}{
+		{
+			name:     "replicaset-kubevuln-666dbffc4f-kubevuln-ca1b-6f47",
+			imageID:  "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			imageTag: "quay.io/kubescape/kubevuln:v0.3.2",
+			want:     "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+		},
+		{
+			name:     "trap",
+			imageID:  "sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			imageTag: "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			want:     "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+		},
+		{
+			name:     "trap 2",
+			imageID:  "@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			imageTag: "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			want:     "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+		},
+		{
+			name:     "trap 3",
+			imageID:  "titi@toto@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			imageTag: "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+			want:     "quay.io/kubescape/kubevuln@sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a",
+		},
+		{
+			name:     "quay.io-kubescape-kubescape-v3.0.3-88a469",
+			imageID:  "86413975e2d0330176894e4f3f5987505ed27b1191f2537797fbbf345b88a469",
+			imageTag: "quay.io/kubescape/kubescape:v3.0.3",
+			want:     "quay.io/kubescape/kubescape@sha256:86413975e2d0330176894e4f3f5987505ed27b1191f2537797fbbf345b88a469",
+		},
+		{
+			name:     "registry.k8s.io-kube-scheduler-v1.28.4-3d2c54",
+			imageID:  "sha256:05c284c929889d88306fdb3dd14ee2d0132543740f9e247685243214fc3d2c54",
+			imageTag: "registry.k8s.io/kube-scheduler:v1.28.4",
+			want:     "registry.k8s.io/kube-scheduler@sha256:05c284c929889d88306fdb3dd14ee2d0132543740f9e247685243214fc3d2c54",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, normalizeImageID(tt.imageID, tt.imageTag), "normalizeImageID(%v, %v)", tt.imageID, tt.imageTag)
+		})
+	}
 }
