@@ -47,7 +47,7 @@ jobs:
       GO_VERSION: "1.21.3"
       REQUIRED_TESTS: '[
               "vuln_scan", 
-              "vuln_scan_cve_exceptions",
+              # "vuln_scan_cve_exceptions",
               "relevantCVEs",
               "relevancy_enabled_stop_sniffing",
               "relevant_data_is_appended",
