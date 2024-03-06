@@ -311,9 +311,14 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageTag, workload.ImageTag, optionsFromWorkload(workload))
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
 	s.checkCreateSBOM(err, workload.ImageTag)
 	if err != nil {
+		repErr := s.platform.ReportError(ctx, err)
+		if repErr != nil {
+			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 		return err
 	}
 
@@ -325,6 +330,11 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// scan for CVE
 	cve, err := s.cveScanner.ScanSBOM(ctx, sbom)
 	if err != nil {
+		repErr := s.platform.ReportError(ctx, err)
+		if repErr != nil {
+			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 		return err
 	}
 

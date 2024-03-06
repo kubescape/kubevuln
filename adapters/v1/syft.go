@@ -47,6 +47,10 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter 
 const digestDelim = "@"
 
 func normalizeImageID(imageID, imageTag string) string {
+	// registry scanning doesn't provide imageID, so we use imageTag as a reference
+	if imageID == "" {
+		return imageTag
+	}
 	// try to parse imageID as a full digest
 	if newDigest, err := name.NewDigest(imageID); err == nil {
 		return newDigest.String()
