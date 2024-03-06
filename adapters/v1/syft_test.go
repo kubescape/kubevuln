@@ -86,6 +86,12 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			imageTag: "registry.k8s.io/kube-scheduler:v1.28.4",
 			wantErr:  false,
 		},
+		{
+			name:     "registry scan",
+			imageID:  "",
+			imageTag: "quay.io/matthiasb_1/kubevuln:latest",
+			wantErr:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

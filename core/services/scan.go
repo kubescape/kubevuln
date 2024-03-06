@@ -311,7 +311,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageTag, workload.ImageTag, optionsFromWorkload(workload))
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
 	s.checkCreateSBOM(err, workload.ImageTag)
 	if err != nil {
 		return err
