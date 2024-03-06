@@ -31,6 +31,12 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	return domain.CVEExceptions{}, nil
 }
 
+func (m MockPlatform) ReportError(ctx context.Context, _ error) error {
+	_, span := otel.Tracer("").Start(ctx, "MockPlatform.ReportError")
+	defer span.End()
+	return nil
+}
+
 // SendStatus logs the given status and details
 func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SendStatus")
@@ -39,7 +45,7 @@ func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
 }
 
 // SubmitCVE logs the given ID for CVE calculation
-func (m MockPlatform) SubmitCVE(ctx context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
+func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")
 	defer span.End()
 	return nil

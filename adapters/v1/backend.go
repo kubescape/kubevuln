@@ -60,16 +60,16 @@ const ReporterName = "ca-vuln-scan"
 const maxBodySize int = 30000
 
 var details = []string{
-	sysreport.JobStarted,
-	sysreport.JobStarted,
-	sysreport.JobSuccess,
-	sysreport.JobDone,
-}
-var statuses = []string{
 	"Inqueueing",
 	"Dequeueing",
 	"Dequeueing",
 	"Dequeueing",
+}
+var statuses = []string{
+	sysreport.JobStarted,
+	sysreport.JobStarted,
+	sysreport.JobSuccess,
+	sysreport.JobDone,
 }
 
 func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
@@ -101,14 +101,46 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	return vulnExceptionList, nil
 }
 
+// ReportError reports the given error to the platform
+func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
+	defer span.End()
+
+	report, err2 := a.reportFromContext(ctx)
+	if err2 != nil {
+		return err2
+	}
+	report.Details = fmt.Sprintf("Error: %s", err.Error())
+	report.Errors = append(report.Errors, err.Error())
+	report.Status = sysreport.JobFailed
+
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	a.sendStatusFunc(sender, sysreport.JobFailed, true)
+	return nil
+}
+
 // SendStatus sends the given status and details to the platform
 func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
 	defer span.End()
+
+	report, err := a.reportFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	report.Details = details[step]
+	report.Status = statuses[step]
+
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
+	return nil
+}
+
+func (a *BackendAdapter) reportFromContext(ctx context.Context) (*sysreport.BaseReport, error) {
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.ErrCastingWorkload
+		return nil, domain.ErrCastingWorkload
 	}
 
 	lastAction := workload.LastAction + 1
@@ -116,7 +148,6 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 		a.clusterConfig.AccountID,
 		ReporterName,
 	)
-	report.Status = statuses[step]
 	report.Target = fmt.Sprintf("vuln scan:: scanning wlid: %v , container: %v imageTag: %v imageHash: %s",
 		workload.Wlid, workload.ContainerName, workload.ImageTagNormalized, workload.ImageHash)
 	report.ActionID = strconv.Itoa(lastAction)
@@ -124,11 +155,8 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.ActionName = ActionName
 	report.JobID = workload.JobID
 	report.ParentAction = workload.ParentJobID
-	report.Details = details[step]
-
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
-	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
-	return nil
+	report.Timestamp = time.Now()
+	return report, nil
 }
 
 // SubmitCVE submits the given CVE to the platform
