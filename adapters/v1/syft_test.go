@@ -28,6 +28,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		format         string
 		maxImageSize   int64
 		options        domain.RegistryOptions
+		scanTimeout    time.Duration
 		wantErr        bool
 		wantIncomplete bool
 	}{
@@ -62,10 +63,17 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			},
 		},
 		{
-			name:           "big image produces incomplete SBOM",
+			name:           "big image produces incomplete SBOM because of maxImageSize",
 			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:         "null",
 			maxImageSize:   1,
+			wantIncomplete: true,
+		},
+		{
+			name:           "big image produces incomplete SBOM because of scanTimeout",
+			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:         "null",
+			scanTimeout:    1 * time.Millisecond,
 			wantIncomplete: true,
 		},
 		{
@@ -99,7 +107,11 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			if tt.maxImageSize > 0 {
 				maxImageSize = tt.maxImageSize
 			}
-			s := NewSyftAdapter(5*time.Minute, maxImageSize)
+			scanTimeout := 5 * time.Minute
+			if tt.scanTimeout > 0 {
+				scanTimeout = tt.scanTimeout
+			}
+			s := NewSyftAdapter(scanTimeout, maxImageSize)
 			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, tt.imageTag, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
