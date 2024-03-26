@@ -862,7 +862,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 	return result, nil
 }
 
-func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.SBOM) error {
+func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOMWithContent")
 	defer span.End()
 
@@ -909,58 +909,5 @@ func (a *APIServerStore) storeSBOMWithContent(ctx context.Context, sbom domain.S
 		logger.L().Debug("stored SBOM in storage",
 			helpers.String("name", sbom.Name))
 	}
-	return nil
-}
-
-func (a *APIServerStore) storeSBOMWithoutContent(ctx context.Context, sbom domain.SBOM) error {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOMWithoutContent")
-	defer span.End()
-
-	if sbom.Name == "" {
-		logger.L().Debug("skipping storing SBOM with empty name")
-		return nil
-	}
-	manifest := v1beta1.SBOMSummary{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        sbom.Name,
-			Annotations: sbom.Annotations,
-			Labels:      sbom.Labels,
-		},
-		Spec:   v1beta1.SBOMSummarySpec{},
-		Status: v1beta1.SBOMSPDXv2p3Status{}, // TODO move timeout information here
-	}
-	if manifest.Annotations == nil {
-		manifest.Annotations = map[string]string{}
-	}
-	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	_, err := a.StorageClient.SBOMSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
-	switch {
-	case errors.IsAlreadyExists(err):
-		logger.L().Debug("SBOM summary manifest already exists in storage",
-			helpers.String("name", sbom.Name))
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store SBOM summary into apiserver", helpers.Error(err),
-			helpers.String("name", sbom.Name))
-	default:
-		logger.L().Debug("stored SBOM summary in storage",
-			helpers.String("name", sbom.Name))
-	}
-	return nil
-}
-
-func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
-	innerCtx, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOM")
-	defer span.End()
-
-	err := a.storeSBOMWithContent(innerCtx, sbom)
-	if err != nil {
-		return err
-	}
-
-	err = a.storeSBOMWithoutContent(innerCtx, sbom)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
