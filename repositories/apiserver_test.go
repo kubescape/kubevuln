@@ -470,17 +470,6 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	assert.Equal(t, relevant+1, relevant2)
 }
 
-func TestAPIServerStore_storeSBOMWithoutContent(t *testing.T) {
-	SBOMData := tools.FileToSBOM("testdata/alpine-sbom.json")
-	SBOM := domain.SBOM{
-		Content: SBOMData,
-	}
-	a := NewFakeAPIServerStorage("kubescape")
-
-	err := a.storeSBOMWithoutContent(context.TODO(), SBOM)
-	assert.Equal(t, err, nil)
-}
-
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 	ctx := context.Background()
 

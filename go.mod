@@ -25,8 +25,8 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.160
-	github.com/kubescape/storage v0.0.69
+	github.com/kubescape/k8s-interface v0.0.162
+	github.com/kubescape/storage v0.0.74
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.17.0
@@ -34,8 +34,8 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.44.0
 	go.opentelemetry.io/otel v1.20.0
 	go.opentelemetry.io/otel/trace v1.20.0
-	k8s.io/apimachinery v0.28.4
-	k8s.io/client-go v0.28.4
+	k8s.io/apimachinery v0.29.0
+	k8s.io/client-go v0.29.0
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 	schneider.vip/problem v1.8.1
 )
@@ -310,14 +310,14 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
-	golang.org/x/crypto v0.18.0 // indirect
+	golang.org/x/crypto v0.19.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/oauth2 v0.15.0 // indirect
 	golang.org/x/sync v0.5.0 // indirect
-	golang.org/x/sys v0.16.0 // indirect
-	golang.org/x/term v0.16.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
+	golang.org/x/term v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
@@ -336,7 +336,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.25.5 // indirect
-	k8s.io/api v0.28.4 // indirect
+	k8s.io/api v0.29.0 // indirect
 	k8s.io/klog/v2 v2.110.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20231010175941-2dd684a91f00 // indirect
 	modernc.org/libc v1.29.0 // indirect
