@@ -1,14 +1,24 @@
 package v1
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/armosec/utils-go/httputils"
+	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/pointer"
@@ -506,6 +516,144 @@ func Test_summarize(t *testing.T) {
 				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
 			})
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func fileToReport(path string) *v1.ScanResultReport {
+	var report *v1.ScanResultReport
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	err = json.Unmarshal(b, &report)
+	if err != nil {
+		panic(err)
+	}
+	return report
+}
+
+func Test_sendSummaryAndVulnerabilities(t *testing.T) {
+	ctx := context.Background()
+	report := fileToReport("testdata/report.json")
+	errChan := make(chan error)
+	testCases := []struct {
+		name                      string
+		firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult
+		expectedPaginationMarks   []apis.PaginationMarks
+		totalVulnerabilities      int
+		expectedNextPartNum       int
+	}{
+		{
+			name:                      "No vulnerabilities in first chunk",
+			firstVulnerabilitiesChunk: []containerscan.CommonContainerVulnerabilityResult{},
+			totalVulnerabilities:      0,
+			expectedNextPartNum:       1,
+			expectedPaginationMarks: []apis.PaginationMarks{
+				{
+					ReportNumber: 0,
+					IsLastReport: true,
+				},
+			},
+		},
+		{
+			name:                      "Vulnerabilities in first chunk, total size does not exceed maxBodySize",
+			firstVulnerabilitiesChunk: report.Vulnerabilities[:2],
+			expectedNextPartNum:       1,
+			totalVulnerabilities:      2,
+			expectedPaginationMarks: []apis.PaginationMarks{
+				{
+					ReportNumber: 0,
+					IsLastReport: true,
+				},
+			},
+		},
+		{
+			name:                      "Vulnerabilities in first chunk, total size does not exceed maxBodySize, but not all vulnerabilities are sent in first chunk",
+			firstVulnerabilitiesChunk: report.Vulnerabilities[:2],
+			expectedNextPartNum:       1,
+			totalVulnerabilities:      len(report.Vulnerabilities),
+			expectedPaginationMarks: []apis.PaginationMarks{
+				{
+					ReportNumber: 0,
+					IsLastReport: false,
+				},
+			},
+		},
+		{
+			name:                      "Vulnerabilities in first chunk, total size exceeds maxBodySize",
+			firstVulnerabilitiesChunk: report.Vulnerabilities,
+			totalVulnerabilities:      len(report.Vulnerabilities),
+			expectedNextPartNum:       2,
+			expectedPaginationMarks: []apis.PaginationMarks{
+				{
+					ReportNumber: 0,
+					IsLastReport: false,
+				},
+				{
+					ReportNumber: 1,
+					IsLastReport: true,
+				},
+			},
+		},
+		{
+			name:                      "Vulnerabilities in first chunk, total size exceeds maxBodySize, but not all vulnerabilities are sent in first chunk",
+			firstVulnerabilitiesChunk: report.Vulnerabilities,
+			totalVulnerabilities:      len(report.Vulnerabilities) + 1,
+			expectedNextPartNum:       2,
+			expectedPaginationMarks: []apis.PaginationMarks{
+				{
+					ReportNumber: 0,
+					IsLastReport: false,
+				},
+				{
+					ReportNumber: 1,
+					IsLastReport: false,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sendWG := &sync.WaitGroup{}
+			sendWG.Add(len(tc.expectedPaginationMarks))
+			var reports []v1.ScanResultReport
+			mu := &sync.Mutex{}
+			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
+				mu.Lock()
+				var report v1.ScanResultReport
+				err := json.Unmarshal(body, &report)
+				if err != nil {
+					t.Errorf("failed to unmarshal report: %v", err)
+				}
+				reportNumber := report.PaginationInfo.ReportNumber
+
+				if reportNumber >= len(tc.expectedPaginationMarks) {
+					t.Errorf("unexpected number of reports sent: %d", reportNumber)
+				}
+				reports = append(reports, report)
+
+				assert.Equal(t, tc.expectedPaginationMarks[reportNumber].ReportNumber, reportNumber)
+				assert.Equal(t, tc.expectedPaginationMarks[reportNumber].IsLastReport, report.PaginationInfo.IsLastReport)
+
+				sendWG.Done()
+				mu.Unlock()
+
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(bytes.NewBuffer([]byte{})),
+				}, nil
+			}
+			a := &BackendAdapter{
+				clusterConfig: armometadata.ClusterConfig{},
+				httpPostFunc:  httpPostFunc,
+			}
+			report.Vulnerabilities = []containerscan.CommonContainerVulnerabilityResult{}
+			actualNextPartNum := a.sendSummaryAndVulnerabilities(ctx, report, "", tc.totalVulnerabilities, "1234", tc.firstVulnerabilitiesChunk, errChan, sendWG)
+			sendWG.Wait()
+			assert.Equal(t, tc.expectedNextPartNum, actualNextPartNum)
+			assert.Equal(t, len(tc.expectedPaginationMarks), len(reports))
 		})
 	}
 }
