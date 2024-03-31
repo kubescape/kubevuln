@@ -58,10 +58,10 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 
 func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 	wg.Add(1)
-	go func(report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+	go func(report v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
 		a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
-	}(report, eventReceiverURL, imagetag, wlid, errorChan, wg)
+	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
 func (a *BackendAdapter) getRequestHeaders() map[string]string {
@@ -71,7 +71,7 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	}
 }
 
-func (a *BackendAdapter) postResults(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
+func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),

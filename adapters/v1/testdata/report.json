@@ -1,0 +1,906 @@
+{
+    "designators": {
+        "designatorType": "Attributes",
+        "attributes": {
+            "cluster": "arm-rogeliodh-dev",
+            "containerName": "otel-collector",
+            "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+            "kind": "deployment",
+            "name": "otel-collector",
+            "namespace": "kubescape",
+            "workloadHash": "11686041291323602851"
+        }
+    },
+    "summary": {
+        "designators": {
+            "designatorType": "Attributes",
+            "attributes": {
+                "cluster": "arm-rogeliodh-dev",
+                "containerName": "otel-collector",
+                "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                "kind": "deployment",
+                "name": "otel-collector",
+                "namespace": "kubescape",
+                "workloadHash": "11686041291323602851"
+            }
+        },
+        "healthStatus": "",
+        "total": 16,
+        "rceFixCount": 0,
+        "relevantFixCount": 0,
+        "fixedTotal": 15,
+        "relevantTotal": 0,
+        "rceTotal": 0,
+        "urgent": 0,
+        "neglected": 0,
+        "relevancyScanCount": 0,
+        "version": "opentelemetry-collector:0.70.0",
+        "registry": "otel",
+        "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+        "containersScanID": "1234",
+        "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+        "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+        "imageTag": "otel/opentelemetry-collector:0.70.0",
+        "cluster": "arm-rogeliodh-dev",
+        "namespace": "kubescape",
+        "containerName": "otel-collector",
+        "versionImage": "",
+        "status": "Success",
+        "packages": [],
+        "severitiesStats": [
+            {
+                "severity": "Medium",
+                "healthStatus": "",
+                "total": 9,
+                "rceFixCount": 0,
+                "relevantFixCount": 0,
+                "fixedTotal": 8,
+                "relevantTotal": 0,
+                "rceTotal": 0,
+                "urgent": 0,
+                "neglected": 0,
+                "relevancyScanCount": 0
+            },
+            {
+                "severity": "High",
+                "healthStatus": "",
+                "total": 7,
+                "rceFixCount": 0,
+                "relevantFixCount": 0,
+                "fixedTotal": 7,
+                "relevantTotal": 0,
+                "rceTotal": 0,
+                "urgent": 0,
+                "neglected": 0,
+                "relevancyScanCount": 0
+            }
+        ],
+        "jobIDs": [
+            "6884ab12-f109-48ed-ae74-c6a17801d49c",
+            "58ada46e-a692-4c15-be01-e42cb1d80a67"
+        ],
+        "vulnerabilities": [
+            {
+                "name": "CVE-2019-3826"
+            },
+            {
+                "name": "GHSA-232p-vwff-86mp"
+            },
+            {
+                "name": "GHSA-2w8w-qhg4-f78j"
+            },
+            {
+                "name": "GHSA-2wrh-6pvc-2jm9"
+            },
+            {
+                "name": "GHSA-33pg-m6jh-5237"
+            },
+            {
+                "name": "GHSA-4374-p667-p6c8"
+            },
+            {
+                "name": "GHSA-45x7-px36-x8w8"
+            },
+            {
+                "name": "GHSA-6wrf-mxfj-pf5p"
+            },
+            {
+                "name": "GHSA-8pgv-569h-w5rw"
+            },
+            {
+                "name": "GHSA-hqxw-f8mx-cpmw"
+            },
+            {
+                "name": "GHSA-jq35-85cj-fj4p"
+            },
+            {
+                "name": "GHSA-m425-mq94-257g"
+            },
+            {
+                "name": "GHSA-qppj-fm5r-hxr3"
+            },
+            {
+                "name": "GHSA-qppj-fm5r-hxr3"
+            },
+            {
+                "name": "GHSA-rcjv-mgp8-qvmr"
+            },
+            {
+                "name": "GHSA-vvpx-j8f3-3w6h"
+            }
+        ],
+        "context": [
+            {
+                "attribute": "workloadHash",
+                "value": "11686041291323602851",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "customerGUID",
+                "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "cluster",
+                "value": "arm-rogeliodh-dev",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "namespace",
+                "value": "kubescape",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "kind",
+                "value": "deployment",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "name",
+                "value": "otel-collector",
+                "source": "designators.attributes"
+            },
+            {
+                "attribute": "containerName",
+                "value": "otel-collector",
+                "source": "designators.attributes"
+            }
+        ],
+        "timestamp": 1708498420,
+        "relevantLabel": "",
+        "hasRelevancyData": false
+    },
+    "containersScanID": "1234",
+    "vulnerabilities": [
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "github.com/prometheus/prometheus",
+            "packageVersion": "v0.41.0",
+            "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-3826",
+            "description": "",
+            "severity": "Medium",
+            "name": "CVE-2019-3826",
+            "fixedIn": [
+                {
+                    "name": "unknown",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": ""
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/CVE-2019-3826",
+                "https://nvd.nist.gov/vuln/detail/CVE-2019-3826"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 0,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "github.com/docker/docker",
+            "packageVersion": "v20.10.23+incompatible",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-232p-vwff-86mp",
+            "description": "Moby is an open source container framework developed by Docker Inc. that is distributed as Docker, Mirantis Container Runtime, and various other downstream projects/products. The Moby daemon component (dockerd), which is developed as moby/moby, is commonly referred to as *Docker*.\n\nSwarm Mode, which is compiled in and delivered by default in dockerd and is thus present in most major Moby downstreams, is a simple, built-in container orchestrator that is implemented through a combination of SwarmKit and supporting network code.\n\nThe overlay network driver is a core feature of Swarm Mode, providing isolated virtual LANs that allow communication between containers and services across the cluster. This driver is an implementation/user of VXLAN, which encapsulates link-layer (Ethernet) frames in UDP datagrams that tag the frame with a VXLAN Network ID (VNI) that identifies the originating overlay network. In addition, the overlay network driver supports an optional, off-by-default encrypted mode, which is especially useful when VXLAN packets traverses an untrusted network between nodes.\n\nEncrypted overlay networks function by encapsulating the VXLAN datagrams through the use of the IPsec Encapsulating Security Payload protocol in Transport mode. By deploying IPSec encapsulation, encrypted overlay networks gain the additional properties of source authentication through cryptographic proof, data integrity through check-summing, and confidentiality through encryption.\n\nWhen setting an endpoint up on an encrypted overlay network, Moby installs three iptables (Linux kernel firewall) rules that enforce both incoming and outgoing IPSec. These rules rely on the u32 iptables extension provided by the xt_u32 kernel module to directly filter on a VXLAN packet's VNI field, so that IPSec guarantees can be enforced on encrypted overlay networks without interfering with other overlay networks or other users of VXLAN.\n\nTwo iptables rules serve to filter incoming VXLAN datagrams with a VNI that corresponds to an encrypted network and discards unencrypted datagrams. The rules are appended to the end of the INPUT filter chain, following any rules that have been previously set by the system administrator. Administrator-set rules take precedence over the rules Moby sets to discard unencrypted VXLAN datagrams, which can potentially admit unencrypted datagrams that should have been discarded.\n\nThe injection of arbitrary Ethernet frames can enable a Denial of Service attack. A sophisticated attacker may be able to establish a UDP or TCP connection by way of the container’s outbound gateway that would otherwise be blocked by a stateful firewall, or carry out other escalations beyond simple injection by smuggling packets into the overlay network.\n\nPatches are available in Moby releases 23.0.3 and 20.10.24. As Mirantis Container Runtime's 20.10 releases are numbered differently, users of that platform should update to 20.10.16.\n\nSome workarounds are available. Close the VXLAN port (by default, UDP port 4789) to incoming traffic at the Internet boundary to prevent all VXLAN packet injection, and/or ensure that the xt_u32 kernel module is available on all nodes of the Swarm cluster.",
+            "severity": "High",
+            "name": "GHSA-232p-vwff-86mp",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "20.10.24"
+                }
+            ],
+            "severityScore": 400,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-232p-vwff-86mp",
+                "https://github.com/advisories/GHSA-232p-vwff-86mp"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "github.com/jaegertracing/jaeger",
+            "packageVersion": "v1.41.0",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-2w8w-qhg4-f78j",
+            "description": "",
+            "severity": "Medium",
+            "name": "GHSA-2w8w-qhg4-f78j",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "1.47.0"
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-2w8w-qhg4-f78j",
+                "https://github.com/advisories/GHSA-2w8w-qhg4-f78j"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "golang.org/x/net",
+            "packageVersion": "v0.5.0",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-2wrh-6pvc-2jm9",
+            "description": "Text nodes not in the HTML namespace are incorrectly literally rendered, causing text which should be escaped to not be. This could lead to an XSS attack.",
+            "severity": "Medium",
+            "name": "GHSA-2wrh-6pvc-2jm9",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "0.13.0"
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-2wrh-6pvc-2jm9",
+                "https://github.com/advisories/GHSA-2wrh-6pvc-2jm9"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "github.com/docker/docker",
+            "packageVersion": "v20.10.23+incompatible",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-33pg-m6jh-5237",
+            "description": "Moby is an open source container framework developed by Docker Inc. that is distributed as Docker, Mirantis Container Runtime, and various other downstream projects/products. The Moby daemon component (dockerd), which is developed as moby/moby is commonly referred to as *Docker*.\n\nSwarm Mode, which is compiled in and delivered by default in dockerd and is thus present in most major Moby downstreams, is a simple, built-in container orchestrator that is implemented through a combination of SwarmKit and supporting network code.\n\nThe overlay network driver is a core feature of Swarm Mode, providing isolated virtual LANs that allow communication between containers and services across the cluster. This driver is an implementation/user of VXLAN, which encapsulates link-layer (Ethernet) frames in UDP datagrams that tag the frame with the VXLAN metadata, including a VXLAN Network ID (VNI) that identifies the originating overlay network. In addition, the overlay network driver supports an optional, off-by-default encrypted mode, which is especially useful when VXLAN packets traverses an untrusted network between nodes.\n\nEncrypted overlay networks function by encapsulating the VXLAN datagrams through the use of the IPsec Encapsulating Security Payload protocol in Transport mode. By deploying IPSec encapsulation, encrypted overlay networks gain the additional properties of source authentication through cryptographic proof, data integrity through check-summing, and confidentiality through encryption.\n\nWhen setting an endpoint up on an encrypted overlay network, Moby installs three iptables (Linux kernel firewall) rules that enforce both incoming and outgoing IPSec. These rules rely on the u32 iptables extension provided by the xt_u32 kernel module to directly filter on a VXLAN packet's VNI field, so that IPSec guarantees can be enforced on encrypted overlay networks without interfering with other overlay networks or other users of VXLAN.\n\nAn iptables rule designates outgoing VXLAN datagrams with a VNI that corresponds to an encrypted overlay network for IPsec encapsulation.\n\nEncrypted overlay networks on affected platforms silently transmit unencrypted data. As a result, overlay networks may appear to be functional, passing traffic as expected, but without any of the expected confidentiality or data integrity guarantees.\n\nIt is possible for an attacker sitting in a trusted position on the network to read all of the application traffic that is moving across the overlay network, resulting in unexpected secrets or user data disclosure. Thus, because many database protocols, internal APIs, etc. are not protected by a second layer of encryption, a user may use Swarm encrypted overlay networks to provide confidentiality, which due to this vulnerability this is no longer guaranteed.\n\nPatches are available in Moby releases 23.0.3, and 20.10.24. As Mirantis Container Runtime's 20.10 releases are numbered differently, users of that platform should update to 20.10.16.\n\nSome workarounds are available. Close the VXLAN port (by default, UDP port 4789) to outgoing traffic at the Internet boundary in order to prevent unintentionally leaking unencrypted traffic over the Internet, and/or ensure that the xt_u32 kernel module is available on all nodes of the Swarm cluster.",
+            "severity": "Medium",
+            "name": "GHSA-33pg-m6jh-5237",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "20.10.24"
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-33pg-m6jh-5237",
+                "https://github.com/advisories/GHSA-33pg-m6jh-5237"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "golang.org/x/net",
+            "packageVersion": "v0.5.0",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-4374-p667-p6c8",
+            "description": "A malicious HTTP/2 client which rapidly creates requests and immediately resets them can cause excessive server resource consumption. While the total number of requests is bounded by the http2.Server.MaxConcurrentStreams setting, resetting an in-progress request allows the attacker to create a new request while the existing one is still executing. With the fix applied, HTTP/2 servers now bound the number of simultaneously executing handler goroutines to the stream concurrency limit (MaxConcurrentStreams). New requests arriving when at the limit (which can only happen after the client has reset an existing, in-flight request) will be queued until a handler exits. If the request queue grows too large, the server will terminate the connection. This issue is also fixed in golang.org/x/net/http2 for users manually configuring HTTP/2. The default stream concurrency limit is 250 streams (requests) per HTTP/2 connection. This value may be adjusted using the golang.org/x/net/http2 package; see the Server.MaxConcurrentStreams setting and the ConfigureServer function.",
+            "severity": "High",
+            "name": "GHSA-4374-p667-p6c8",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "0.17.0"
+                }
+            ],
+            "severityScore": 400,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-4374-p667-p6c8",
+                "https://github.com/advisories/GHSA-4374-p667-p6c8"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "golang.org/x/crypto",
+            "packageVersion": "v0.1.0",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-45x7-px36-x8w8",
+            "description": "The SSH transport protocol with certain OpenSSH extensions, found in OpenSSH before 9.6 and other products, allows remote attackers to bypass integrity checks such that some packets are omitted (from the extension negotiation message), and a client and server may consequently end up with a connection for which some security features have been downgraded or disabled, aka a Terrapin attack. This occurs because the SSH Binary Packet Protocol (BPP), implemented by these extensions, mishandles the handshake phase and mishandles use of sequence numbers. For example, there is an effective attack against SSH's use of ChaCha20-Poly1305 (and CBC with Encrypt-then-MAC). The bypass occurs in chacha20-poly1305@openssh.com and (if CBC is used) the -etm@openssh.com MAC algorithms. This also affects Maverick Synergy Java SSH API before 3.1.0-SNAPSHOT, Dropbear through 2022.83, Ssh before 5.1.1 in Erlang/OTP, PuTTY before 0.80, AsyncSSH before 2.14.2, golang.org/x/crypto before 0.17.0, libssh before 0.10.6, libssh2 through 1.11.0, Thorn Tech SFTP Gateway before 3.4.6, Tera Term before 5.1, Paramiko before 3.4.0, jsch before 0.2.15, SFTPGo before 2.5.6, Netgate pfSense Plus through 23.09.1, Netgate pfSense CE through 2.7.2, HPN-SSH through 18.2.0, ProFTPD before 1.3.8b (and before 1.3.9rc2), ORYX CycloneSSH before 2.3.4, NetSarang XShell 7 before Build 0144, CrushFTP before 10.6.0, ConnectBot SSH library before 2.2.22, Apache MINA sshd through 2.11.0, sshj through 0.37.0, TinySSH through 20230101, trilead-ssh2 6401, LANCOM LCOS and LANconfig, FileZilla before 3.66.4, Nova before 11.8, PKIX-SSH before 14.4, SecureCRT before 9.4.3, Transmit5 before 5.10.4, Win32-OpenSSH before 9.5.0.0p1-Beta, WinSCP before 6.2.2, Bitvise SSH Server before 9.32, Bitvise SSH Client before 9.33, KiTTY through 0.76.1.13, the net-ssh gem 7.2.0 for Ruby, the mscdex ssh2 module before 1.15.0 for Node.js, the thrussh library before 0.35.1 for Rust, and the Russh crate before 0.40.2 for Rust.",
+            "severity": "Medium",
+            "name": "GHSA-45x7-px36-x8w8",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "0.17.0"
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-45x7-px36-x8w8",
+                "https://github.com/advisories/GHSA-45x7-px36-x8w8"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        },
+        {
+            "designators": {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "arm-rogeliodh-dev",
+                    "containerName": "otel-collector",
+                    "customerGUID": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "kind": "deployment",
+                    "name": "otel-collector",
+                    "namespace": "kubescape",
+                    "workloadHash": "11686041291323602851"
+                }
+            },
+            "layerHash": "generatedlayer",
+            "wlid": "wlid://cluster-arm-rogeliodh-dev/namespace-kubescape/deployment-otel-collector",
+            "containersScanID": "1234",
+            "healthStatus": "",
+            "imageHash": "docker.io/otel/opentelemetry-collector@sha256:54f9e300089317cd4f90f9dee36c27cde25cc8b62670ce8d507de9597255f80d",
+            "imageTag": "otel/opentelemetry-collector:0.70.0",
+            "packageName": "github.com/docker/docker",
+            "packageVersion": "v20.10.23+incompatible",
+            "link": "https://nvd.nist.gov/vuln/detail/GHSA-6wrf-mxfj-pf5p",
+            "description": "Moby) is an open source container framework developed by Docker Inc. that is distributed as Docker, Mirantis Container Runtime, and various other downstream projects/products. The Moby daemon component (dockerd), which is developed as moby/moby is commonly referred to as *Docker*.\n\nSwarm Mode, which is compiled in and delivered by default in dockerd and is thus present in most major Moby downstreams, is a simple, built-in container orchestrator that is implemented through a combination of SwarmKit and supporting network code.\n\nThe overlay network driver is a core feature of Swarm Mode, providing isolated virtual LANs that allow communication between containers and services across the cluster. This driver is an implementation/user of VXLAN, which encapsulates link-layer (Ethernet) frames in UDP datagrams that tag the frame with the VXLAN metadata, including a VXLAN Network ID (VNI) that identifies the originating overlay network. In addition, the overlay network driver supports an optional, off-by-default encrypted mode, which is especially useful when VXLAN packets traverses an untrusted network between nodes.\n\nEncrypted overlay networks function by encapsulating the VXLAN datagrams through the use of the IPsec Encapsulating Security Payload protocol in Transport mode. By deploying IPSec encapsulation, encrypted overlay networks gain the additional properties of source authentication through cryptographic proof, data integrity through check-summing, and confidentiality through encryption.\n\nWhen setting an endpoint up on an encrypted overlay network, Moby installs three iptables (Linux kernel firewall) rules that enforce both incoming and outgoing IPSec. These rules rely on the u32 iptables extension provided by the xt_u32 kernel module to directly filter on a VXLAN packet's VNI field, so that IPSec guarantees can be enforced on encrypted overlay networks without interfering with other overlay networks or other users of VXLAN.\n\nThe overlay driver dynamically and lazily defines the kernel configuration for the VXLAN network on each node as containers are attached and detached. Routes and encryption parameters are only defined for destination nodes that participate in the network. The iptables rules that prevent encrypted overlay networks from accepting unencrypted packets are not created until a peer is available with which to communicate.\n\nEncrypted overlay networks silently accept cleartext VXLAN datagrams that are tagged with the VNI of an encrypted overlay network. As a result, it is possible to inject arbitrary Ethernet frames into the encrypted overlay network by encapsulating them in VXLAN datagrams. The implications of this can be quite dire, and GHSA-vwm3-crmr-xfxw should be referenced for a deeper exploration.\n\nPatches are available in Moby releases 23.0.3, and 20.10.24. As Mirantis Container Runtime's 20.10 releases are numbered differently, users of that platform should update to 20.10.16.\n\nSome workarounds are available. In multi-node clusters, deploy a global ‘pause’ container for each encrypted overlay network, on every node. For a single-node cluster, do not use overlay networks of any sort. Bridge networks provide the same connectivity on a single node and have no multi-node features. The Swarm ingress feature is implemented using an overlay network, but can be disabled by publishing ports in host mode instead of ingress mode (allowing the use of an external load balancer), and removing the ingress network. If encrypted overlay networks are in exclusive use, block UDP port 4789 from traffic that has not been validated by IPSec.",
+            "severity": "Medium",
+            "name": "GHSA-6wrf-mxfj-pf5p",
+            "fixedIn": [
+                {
+                    "name": "fixed",
+                    "imageTag": "otel/opentelemetry-collector:0.70.0",
+                    "version": "20.10.24"
+                }
+            ],
+            "severityScore": 300,
+            "neglected": 0,
+            "urgent": 0,
+            "categories": {
+                "isRce": false
+            },
+            "layers": [
+                {
+                    "layerHash": "generatedlayer",
+                    "parentLayerHash": ""
+                }
+            ],
+            "layersNested": null,
+            "context": [
+                {
+                    "attribute": "workloadHash",
+                    "value": "11686041291323602851",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "customerGUID",
+                    "value": "fb2a2e59-2f96-4966-8ec2-92c3ba5cad18",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "cluster",
+                    "value": "arm-rogeliodh-dev",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "namespace",
+                    "value": "kubescape",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "kind",
+                    "value": "deployment",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "name",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                },
+                {
+                    "attribute": "containerName",
+                    "value": "otel-collector",
+                    "source": "designators.attributes"
+                }
+            ],
+            "links": [
+                "https://nvd.nist.gov/vuln/detail/GHSA-6wrf-mxfj-pf5p",
+                "https://github.com/advisories/GHSA-6wrf-mxfj-pf5p"
+            ],
+            "timestamp": 1708498420,
+            "isLastScan": 1,
+            "isFixed": 1,
+            "relevantLabel": ""
+        }
+    ],
+    "paginationInfo": {},
+    "timestamp": 1708498420
+}
