@@ -196,5 +196,11 @@ func getMatchers() []matcher.Matcher {
 
 // Version returns Grype's version which is used to tag CVE manifests
 func (g *GrypeAdapter) Version(context.Context) string {
-	return tools.PackageVersion("github.com/anchore/grype")
+	v := tools.PackageVersion("github.com/anchore/grype")
+	if v == "unknown" || v == "" {
+		return v
+	}
+	// we added a hotfix in the storage, so we need to append it to the version so the SBOM will be re-created
+	// remove the hotfix suffix next upgrade of the syft version
+	return v + "-hotfix"
 }

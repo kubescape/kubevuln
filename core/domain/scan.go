@@ -16,6 +16,7 @@ var (
 	ErrExpectedError    = errors.New("expected error")
 	ErrInitVulnDB       = errors.New("vulnerability DB is not initialized, run readiness probe")
 	ErrIncompleteSBOM   = errors.New("incomplete SBOM, skipping CVE scan")
+	ErrOutdatedSBOM     = errors.New("SBOM is outdated")
 	ErrInvalidScanID    = errors.New("invalid scanID")
 	ErrMissingImageInfo = errors.New("missing image information")
 	ErrMissingScanID    = errors.New("missing scanID")
