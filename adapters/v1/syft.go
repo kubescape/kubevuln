@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/opencontainers/go-digest"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/opencontainers/go-digest"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
@@ -260,5 +261,11 @@ func detectSource(userInput string, opts *packagesOptions, registryOptions *imag
 
 // Version returns Syft's version which is used to tag SBOMs
 func (s *SyftAdapter) Version() string {
-	return tools.PackageVersion("github.com/anchore/syft")
+	v := tools.PackageVersion("github.com/anchore/syft")
+	if v == "unknown" || v == "" {
+		return v
+	}
+	// we added a hotfix in the storage, so we need to append it to the version so the SBOM will be re-created
+	// remove the hotfix suffix next upgrade of the syft version
+	return v + "-hotfix"
 }
