@@ -87,7 +87,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		return domain.CVEManifest{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
-	// TODO: also check SBOMCreatorVersion ?
+	// TODO: also check SBOMCreatorVersion ? - we should, but we don't have the version in the manifest
 	if manifest.Spec.Metadata.Tool.Version != CVEScannerVersion || manifest.Spec.Metadata.Tool.DatabaseVersion != CVEDBVersion {
 		logger.L().Debug("discarding CVE manifest with outdated scanner version",
 			helpers.String("name", name),
@@ -816,14 +816,17 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	return result, nil
 }
 
-func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered) error {
+func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered, sbomCreatorVersion string) error {
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
+	}
+	if manifest.Spec.Metadata.Tool.Version != sbomCreatorVersion {
+		return domain.ErrOutdatedSBOM
 	}
 	return nil
 }
 
-func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
+func (a *APIServerStore) GetSBOMp(ctx context.Context, name, sbomCreatorVersion string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
 	defer span.End()
 	if name == "" {
@@ -842,7 +845,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		return domain.SBOM{}, nil
 	}
 	// validate SBOMp manifest
-	if err := validateSBOMp(manifest); err != nil {
+	if err := validateSBOMp(manifest, sbomCreatorVersion); err != nil {
 		logger.L().Debug("discarding relevant SBOM", helpers.Error(err),
 			helpers.String("name", name))
 		return domain.SBOM{}, nil
@@ -851,7 +854,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, SBOMCreatorVersion 
 		Name:               name,
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
-		SBOMCreatorVersion: SBOMCreatorVersion,
+		SBOMCreatorVersion: sbomCreatorVersion,
 		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {

@@ -153,8 +153,6 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
-	// if cve.
-
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
 		// check if SBOM is already available
