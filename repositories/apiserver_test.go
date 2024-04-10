@@ -299,7 +299,7 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 				SBOMCreatorVersion: "v1.0.0",
 				Content:            &v1beta1.SyftDocument{},
 			},
-			wantEmptySBOM: false, // SBOMp is not versioned
+			wantEmptySBOM: true,
 		},
 		{
 			name: "empty name",
