@@ -153,10 +153,10 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
+	sbom := domain.SBOM{}
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
 		// check if SBOM is already available
-		sbom := domain.SBOM{}
 		if s.storage {
 			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
@@ -225,9 +225,23 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if s.storage && workload.InstanceID != "" {
 		sbomp, err = s.sbomRepository.GetSBOMp(ctx, workload.InstanceID, s.sbomCreator.Version())
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err),
-				helpers.String("instanceID", workload.InstanceID))
+			if errors.Is(err, domain.ErrSBOMWithPartialArtifacts) {
+				// sometimes the SBOM' is not complete, so we need to update it
+				// this is a workaround so users will not need to restart
+				for i := range sbomp.Content.Artifacts {
+					for j := range sbom.Content.Artifacts {
+						if sbomp.Content.Artifacts[i].ID == sbom.Content.Artifacts[j].ID {
+							sbomp.Content.Artifacts[i] = sbom.Content.Artifacts[j]
+							break
+						}
+					}
+				}
+			} else {
+				logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err),
+					helpers.String("instanceID", workload.InstanceID))
+			}
 		}
+
 	}
 
 	// with SBOM' we can scan for CVE'

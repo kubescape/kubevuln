@@ -12,6 +12,8 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
+	serrors "errors"
+
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -820,9 +822,13 @@ func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered, sbomCreatorVersion string
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
+	if manifest.Spec.Metadata.Tool.Version == "v0.101.1" { // hard coded version. We have a specific workaround for this version
+		return domain.ErrSBOMWithPartialArtifacts
+	}
 	if manifest.Spec.Metadata.Tool.Version != sbomCreatorVersion {
 		return domain.ErrOutdatedSBOM
 	}
+
 	return nil
 }
 
@@ -845,10 +851,13 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, sbomCreatorVersion 
 		return domain.SBOM{}, nil
 	}
 	// validate SBOMp manifest
-	if err := validateSBOMp(manifest, sbomCreatorVersion); err != nil {
-		logger.L().Debug("discarding relevant SBOM", helpers.Error(err),
-			helpers.String("name", name))
-		return domain.SBOM{}, nil
+	vErr := validateSBOMp(manifest, sbomCreatorVersion)
+	if vErr != nil {
+		if !serrors.Is(vErr, domain.ErrSBOMWithPartialArtifacts) {
+			logger.L().Debug("discarding relevant SBOM", helpers.Error(vErr),
+				helpers.String("name", name))
+			return domain.SBOM{}, nil
+		}
 	}
 	result := domain.SBOM{
 		Name:               name,
@@ -862,7 +871,7 @@ func (a *APIServerStore) GetSBOMp(ctx context.Context, name, sbomCreatorVersion 
 	}
 	logger.L().Debug("got relevant SBOM from storage",
 		helpers.String("name", name))
-	return result, nil
+	return result, vErr
 }
 
 func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
