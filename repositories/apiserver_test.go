@@ -689,3 +689,73 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		assert.Equal(t, name, "")
 	}
 }
+
+func Test_validateSBOMp(t *testing.T) {
+	sbomCreatorVersion := "v0.101.2"
+
+	testCases := []struct {
+		wantError error
+		manifest  *v1beta1.SBOMSyftFiltered
+		name      string
+	}{
+		{
+			name: "Incomplete SBOM",
+			manifest: &v1beta1.SBOMSyftFiltered{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						helpersv1.StatusMetadataKey: helpersv1.Incomplete,
+					},
+				},
+			},
+			wantError: domain.ErrIncompleteSBOM,
+		},
+		{
+			name: "SBOM with partial artifacts",
+			manifest: &v1beta1.SBOMSyftFiltered{
+				Spec: v1beta1.SBOMSyftSpec{
+					Metadata: v1beta1.SPDXMeta{
+						Tool: v1beta1.ToolMeta{
+							Version: "v0.101.1",
+						},
+					},
+				},
+			},
+			wantError: domain.ErrSBOMWithPartialArtifacts,
+		},
+		{
+			name: "Outdated SBOM",
+			manifest: &v1beta1.SBOMSyftFiltered{
+				Spec: v1beta1.SBOMSyftSpec{
+					Metadata: v1beta1.SPDXMeta{
+						Tool: v1beta1.ToolMeta{
+							Version: "v0.101.0",
+						},
+					},
+				},
+			},
+			wantError: domain.ErrOutdatedSBOM,
+		},
+		{
+			name: "Valid SBOM",
+			manifest: &v1beta1.SBOMSyftFiltered{
+				Spec: v1beta1.SBOMSyftSpec{
+					Metadata: v1beta1.SPDXMeta{
+						Tool: v1beta1.ToolMeta{
+							Version: sbomCreatorVersion,
+						},
+					},
+				},
+			},
+			wantError: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotError := validateSBOMp(tc.manifest, sbomCreatorVersion)
+			if gotError != tc.wantError {
+				t.Errorf("validateSBOMp() error = %v, wantError %v", gotError, tc.wantError)
+			}
+		})
+	}
+}
