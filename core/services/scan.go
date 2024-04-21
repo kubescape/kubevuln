@@ -228,11 +228,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if errors.Is(err, domain.ErrSBOMWithPartialArtifacts) {
 				// sometimes the SBOM' is not complete, so we need to update it
 				// this is a workaround so users will not need to restart
-				for i := range sbomp.Content.Artifacts {
-					for j := range sbom.Content.Artifacts {
-						if sbomp.Content.Artifacts[i].ID == sbom.Content.Artifacts[j].ID {
-							sbomp.Content.Artifacts[i] = sbom.Content.Artifacts[j]
-							break
+				if sbomp.Content != nil && sbom.Content != nil {
+					for i := range sbomp.Content.Artifacts {
+						for j := range sbom.Content.Artifacts {
+							if sbomp.Content.Artifacts[i].ID == sbom.Content.Artifacts[j].ID {
+								sbomp.Content.Artifacts[i] = sbom.Content.Artifacts[j]
+								break
+							}
 						}
 					}
 				}
