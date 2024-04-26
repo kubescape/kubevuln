@@ -11,9 +11,9 @@ import (
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/services"
-	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScan(t *testing.T) {
@@ -112,7 +112,7 @@ func TestScan(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			file, err := os.Open(test.yamlFile)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			req, _ = http.NewRequest("POST", test.url, file)
 			w = httptest.NewRecorder()
 			router.ServeHTTP(w, req)

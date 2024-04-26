@@ -11,10 +11,10 @@ import (
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScanService_GenerateSBOM(t *testing.T) {
@@ -268,15 +268,15 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.workload {
 				var err error
 				ctx, err = s.ValidateScanCVE(ctx, workload)
-				tools.EnsureSetup(t, err == nil)
+				require.NoError(t, err)
 			}
 			if tt.sbom {
 				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, "", domain.RegistryOptions{})
-				tools.EnsureSetup(t, err == nil)
+				require.NoError(t, err)
 				_ = storageSBOM.StoreSBOM(ctx, sbom)
 				if tt.cveManifest {
 					cve, err := cveAdapter.ScanSBOM(ctx, sbom)
-					tools.EnsureSetup(t, err == nil)
+					require.NoError(t, err)
 					_ = storageCVE.StoreCVE(ctx, cve, false)
 				}
 			}
@@ -284,7 +284,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.instanceID != "" {
 				var err error
 				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, tt.instanceID, "", domain.RegistryOptions{})
-				tools.EnsureSetup(t, err == nil)
+				require.NoError(t, err)
 				sbomp.Labels = map[string]string{"foo": "bar"}
 				_ = storageSBOM.StoreSBOM(ctx, sbomp)
 			}
@@ -297,7 +297,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, sbomp.Name, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
-				tools.EnsureSetup(t, err == nil)
+				require.NoError(t, err)
 				assert.NotNil(t, cvep.Labels)
 			}
 		})
@@ -345,18 +345,18 @@ func TestScanService_NginxTest(t *testing.T) {
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
 	err := storageSBOM.StoreSBOM(ctx, sbom)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	sbomp := domain.SBOM{
 		Name:               instanceID,
 		Content:            fileToSyftDocument("../../adapters/v1/testdata/nginx-filtered-sbom.json"),
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
 	err = storageSBOM.StoreSBOM(ctx, sbomp)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	err = s.ScanCVE(ctx)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	cvep, err := storageCVE.GetCVE(ctx, sbomp.Name, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	assert.NotNil(t, cvep.Content)
 }
 
@@ -510,7 +510,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			if tt.workload {
 				var err error
 				ctx, _ = s.ValidateScanRegistry(ctx, workload)
-				tools.EnsureSetup(t, err == nil)
+				require.NoError(t, err)
 			}
 			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanRegistry() error = %v, wantErr %v", err, tt.wantErr)

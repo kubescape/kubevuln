@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_grypeAdapter_DBVersion(t *testing.T) {
@@ -76,7 +76,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 				return
 			}
 			content, err := json.Marshal(got.Content)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			ja := jsonassert.New(t)
 			ja.Assertf(string(content), tt.format)
 		})

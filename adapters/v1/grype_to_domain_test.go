@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/syft/syft/source"
+	"github.com/anchore/syft/syft/file"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
@@ -24,7 +24,7 @@ func Test_grypeToDomain(t *testing.T) {
 				}},
 				Matches: []models.Match{{
 					Artifact: models.Package{
-						Locations: []source.Coordinates{{}},
+						Locations: []file.Coordinates{{}},
 						Upstreams: []models.UpstreamPackage{{}},
 					},
 					MatchDetails:           []models.MatchDetails{{}},
