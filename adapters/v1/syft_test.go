@@ -11,8 +11,8 @@ import (
 	"github.com/kinbiko/jsonassert"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func fileContent(path string) []byte {
@@ -122,7 +122,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				return
 			}
 			content, err := json.Marshal(got.Content)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			if tt.format != "" {
 				ja := jsonassert.New(t)
 				ja.Assertf(string(content), tt.format)
@@ -143,9 +143,8 @@ func Test_syftAdapter_transformations(t *testing.T) {
 
 	// Convert to model.Document
 	var d model.Document
-	if err := json.Unmarshal(b, &d); err != nil {
-		tools.EnsureSetup(t, err == nil)
-	}
+	err := json.Unmarshal(b, &d)
+	require.NoError(t, err)
 
 	// Convert to syft.sbom
 	sbom := toSyftModel(d)
@@ -153,12 +152,12 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	// Convert to domain.sbom
 	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
 	domainSBOM, err := s.syftToDomain(*sbom)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 
 	// compare file with domain.sbom
 	ja := jsonassert.New(t)
 	b2, err := json.Marshal(domainSBOM)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	ja.Assertf(string(b2), string(b))
 }
 

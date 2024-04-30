@@ -47,11 +47,11 @@ func Test_domainJSONToSyft(t *testing.T) {
 				data: fileContent("testdata/nginx-sbom.json"),
 			},
 			want: want{
-				artifacts:             110,
-				artifactRelationships: 3450,
-				files:                 2940,
+				artifacts:             109,
+				artifactRelationships: 3361,
+				files:                 2859,
 				source: source{
-					id:   "6db649d8a1f720b6c59469c1c61c95fc3d332e437d457106a66b975515e75128",
+					id:   "de6550380fa1f872aa5f4174fa66d0e364becb92958afba192ea9437a53ade89",
 					name: "nginx",
 				},
 			},

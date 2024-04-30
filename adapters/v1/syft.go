@@ -13,10 +13,8 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
-	"github.com/anchore/clio"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/cmd/syft/cli/options"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
@@ -114,10 +112,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		InsecureSkipTLSVerify: options.InsecureSkipTLSVerify,
 		InsecureUseHTTP:       options.InsecureUseHTTP,
 		Credentials:           credentials,
-		MaxImageSize:          s.maxImageSize,
 	}
-
-	syftOpts := defaultPackagesOptions()
 
 	// prepare temporary directory for image download
 	t := file.NewTempDirGenerator("stereoscope")
@@ -132,16 +127,17 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
-	src, err := detectSource(imageID, syftOpts, &registryOptions)
+	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
+	src, err := syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		logger.L().Debug("got 401, retrying without credentials",
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
-		src, err = detectSource(imageID, syftOpts, &registryOptions)
+		src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 	}
 	switch {
-	case errors.Is(err, image.ErrImageTooLarge):
+	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
@@ -170,23 +166,22 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// generate SBOM
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
-		id := clio.Identification{
-			Name:    name,
-			Version: s.Version(),
-		}
-		syftSBOM, err = syft.CreateSBOM(ctx, src, syftOpts.Catalog.ToSBOMConfig(id))
+		cfg := syft.DefaultCreateSBOMConfig()
+		cfg.ToolName = name
+		cfg.ToolVersion = s.Version()
+		syftSBOM, err = syft.CreateSBOM(ctx, src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
 		}
 		return nil
 	})
-	switch err {
-	case deadline.ErrTimedOut:
+	switch {
+	case errors.Is(err, deadline.ErrTimedOut):
 		logger.L().Ctx(ctx).Warning("Syft timed out",
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, nil
-	case nil:
+	case err == nil:
 		// continue
 	default:
 		// also mark as incomplete if we failed to extract packages
@@ -207,56 +202,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		helpers.String("imageID", imageID),
 		helpers.Int("packages", len(domainSBOM.Content.Artifacts)))
 	return domainSBOM, err
-}
-
-type packagesOptions struct {
-	options.Output      `yaml:",inline" mapstructure:",squash"`
-	options.Config      `yaml:",inline" mapstructure:",squash"`
-	options.Catalog     `yaml:",inline" mapstructure:",squash"`
-	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
-}
-
-func defaultPackagesOptions() *packagesOptions {
-	defaultCatalogOpts := options.DefaultCatalog()
-
-	// TODO(matthyx): assess this value
-	defaultCatalogOpts.Parallelism = 4
-
-	return &packagesOptions{
-		Output:      options.DefaultOutput(),
-		UpdateCheck: options.DefaultUpdateCheck(),
-		Catalog:     defaultCatalogOpts,
-	}
-}
-
-func detectSource(userInput string, opts *packagesOptions, registryOptions *image.RegistryOptions) (source.Source, error) {
-	var err error
-	var platform *image.Platform
-
-	if opts.Platform != "" {
-		platform, err = image.NewPlatform(opts.Platform)
-		if err != nil {
-			return nil, fmt.Errorf("invalid platform: %w", err)
-		}
-	}
-
-	src, err := source.NewFromStereoscopeImage(
-		source.StereoscopeImageConfig{
-			Alias: source.Alias{
-				Name:    opts.Source.Name,
-				Version: opts.Source.Version,
-			},
-			RegistryOptions: registryOptions,
-			Platform:        platform,
-			Exclude: source.ExcludeConfig{
-				Paths: opts.Exclusions,
-			},
-			Reference: userInput,
-			From:      image.DetermineDefaultImagePullSource(userInput),
-		},
-	)
-
-	return src, err
 }
 
 // Version returns Syft's version which is used to tag SBOMs

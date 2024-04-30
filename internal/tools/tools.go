@@ -6,7 +6,6 @@ import (
 	"path"
 	"regexp"
 	"runtime/debug"
-	"testing"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
@@ -14,13 +13,8 @@ import (
 	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
-
-func EnsureSetup(t *testing.T, errored bool) {
-	assert.True(t, errored, "Error during test setup")
-}
 
 func PackageVersion(name string) string {
 	bi, ok := debug.ReadBuildInfo()

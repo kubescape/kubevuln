@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/syft/syft/source"
+	"github.com/anchore/syft/syft/file"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -138,7 +138,7 @@ func grypeToDomainMatchesMatchDetails(matchDetails []models.MatchDetails) []v1be
 	return result
 }
 
-func grypeToDomainMatchesLocations(locations []source.Coordinates) []v1beta1.SyftCoordinates {
+func grypeToDomainMatchesLocations(locations []file.Coordinates) []v1beta1.SyftCoordinates {
 	var result []v1beta1.SyftCoordinates
 	for _, l := range locations {
 		result = append(result, v1beta1.SyftCoordinates{

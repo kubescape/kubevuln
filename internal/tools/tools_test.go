@@ -7,10 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEnsureSetup(t *testing.T) {
-	EnsureSetup(t, true)
-}
-
 func TestPackageVersion(t *testing.T) {
 	assert.True(t, PackageVersion("github.com/anchore/syft") == "unknown") // only works on compiled binaries
 }

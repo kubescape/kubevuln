@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPController_Alive(t *testing.T) {
@@ -68,7 +69,7 @@ func TestHTTPController_GenerateSBOM(t *testing.T) {
 			path := "/v1/generateSBOM"
 			router.POST(path, c.GenerateSBOM)
 			file, err := os.Open(tt.yamlFile)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
@@ -153,7 +154,7 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 			path := "/v1/scanImage"
 			router.POST(path, c.ScanCVE)
 			file, err := os.Open(tt.yamlFile)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
@@ -203,7 +204,7 @@ func TestHTTPController_ScanRegistry(t *testing.T) {
 			path := "/v1/scanRegistryImage"
 			router.POST(path, c.ScanRegistry)
 			file, err := os.Open(tt.yamlFile)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			req, _ := http.NewRequest("POST", path, file)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)

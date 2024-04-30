@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -120,10 +121,10 @@ func TestAPIServerStore_GetCVE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetCVE(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			tt.args.ctx = context.WithValue(tt.args.ctx, domain.WorkloadKey{}, workload)
 			err = a.StoreCVE(tt.args.ctx, tt.cve, false)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			gotCve, _ := a.GetCVE(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion, tt.args.CVEScannerVersion, tt.args.CVEDBVersion)
 			if !tt.wantEmptyCVE {
 				assert.NotNil(t, gotCve.Content)
@@ -153,12 +154,12 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	}
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	err := a.StoreCVE(ctx, cvep, true)
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	cvep.Content.Descriptor.Version = "v1.1.0"
 	err = a.StoreCVE(ctx, cvep, true)
 	assert.NoError(t, err)
 	got, err := a.GetCVE(ctx, name, "", "", "")
-	tools.EnsureSetup(t, err == nil)
+	require.NoError(t, err)
 	assert.Equal(t, got.Content.Descriptor.Version, "v1.1.0")
 }
 
@@ -231,9 +232,9 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			err = a.StoreSBOM(tt.args.ctx, tt.sbom)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			gotSbom, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
@@ -333,9 +334,9 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			err = a.storeSBOMp(tt.args.ctx, tt.sbom, tt.incomplete)
-			tools.EnsureSetup(t, err == nil)
+			require.NoError(t, err)
 			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			if !tt.wantEmptySBOM {
 				assert.NotNil(t, gotSbom.Content)

@@ -68,23 +68,26 @@
         "used": [
           "alpm-db-cataloger",
           "apk-db-cataloger",
-          "binary-cataloger",
+          "binary-classifier-cataloger",
           "cargo-auditable-binary-cataloger",
           "conan-info-cataloger",
           "dotnet-portable-executable-cataloger",
           "dpkg-db-cataloger",
+          "elf-binary-package-cataloger",
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
           "java-archive-cataloger",
           "javascript-package-cataloger",
+          "linux-kernel-cataloger",
           "nix-store-cataloger",
           "php-composer-installed-cataloger",
+          "php-pecl-serialized-cataloger",
           "portage-cataloger",
           "python-installed-package-cataloger",
           "r-package-cataloger",
           "rpm-db-cataloger",
           "ruby-installed-gemspec-cataloger",
-          "sbom-cataloger"
+          "wordpress-plugins-cataloger"
         ]
       },
       "data-generation": {
@@ -96,7 +99,6 @@
           "skip-files-above-size": 0
         },
         "hashers": [
-          "sha-1",
           "sha-256"
         ],
         "selection": "owned-by-package"
@@ -113,6 +115,8 @@
           "java-binary-openjdk",
           "java-binary-ibm",
           "java-binary-oracle",
+          "java-binary-graalvm",
+          "java-binary-jdk",
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
@@ -144,6 +148,11 @@
         ],
         "golang": {
           "local-mod-cache-dir": "<<PRESENCE>>",
+          "main-module-version": {
+            "from-build-settings": true,
+            "from-contents": true,
+            "from-ld-flags": true
+          },
           "proxies": [
             "https://proxy.golang.org",
             "direct"
@@ -159,7 +168,7 @@
           "use-network": false
         },
         "javascript": {
-          "npm-base-url": "https://registry.npmjs.org",
+          "npm-base-url": "",
           "search-remote-licenses": false
         },
         "linux-kernel": {
@@ -180,7 +189,7 @@
     }
   },
   "schema": {
-    "version": "13.0.0",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-13.0.0.json"
+    "version": "16.0.7",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.7.json"
   }
 }

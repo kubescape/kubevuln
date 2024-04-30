@@ -160,14 +160,14 @@ func Test_parseLayersPayload(t *testing.T) {
 	}
 	config, _ := json.Marshal(c)
 	tests := []struct {
-		target  source.StereoscopeImageSourceMetadata
+		target  source.ImageMetadata
 		want    map[string]containerscan.ESLayer
 		name    string
 		wantErr bool
 	}{
 		{
 			name: "Test parseLayersPayload",
-			target: source.StereoscopeImageSourceMetadata{
+			target: source.ImageMetadata{
 				RawConfig: config,
 			},
 			want: map[string]containerscan.ESLayer{

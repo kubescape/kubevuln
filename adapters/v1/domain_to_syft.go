@@ -3,6 +3,8 @@ package v1
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -56,12 +58,33 @@ func toSyftModel(doc model.Document) *sbom.SBOM {
 			FileDigests:       fileArtifacts.FileDigests,
 			FileContents:      fileArtifacts.FileContents,
 			FileLicenses:      fileArtifacts.FileLicenses,
+			Executables:       fileArtifacts.Executables,
 			LinuxDistribution: toSyftLinuxRelease(doc.Distro),
 		},
 		Source:        *toSyftSourceData(doc.Source),
 		Descriptor:    toSyftDescriptor(doc.Descriptor),
-		Relationships: toSyftRelationships(&doc, catalog, doc.ArtifactRelationships, idAliases),
+		Relationships: warnConversionErrors(toSyftRelationships(&doc, catalog, doc.ArtifactRelationships, idAliases)),
 	}
+}
+
+func warnConversionErrors[T any](converted []T, errors []error) []T {
+	//errorMessages := deduplicateErrors(errors)
+	//for _, msg := range errorMessages {
+	//	log.Warn(msg)
+	//}
+	return converted
+}
+
+func deduplicateErrors(errors []error) []string {
+	errorCounts := make(map[string]int)
+	var errorMessages []string
+	for _, e := range errors {
+		errorCounts[e.Error()] = errorCounts[e.Error()] + 1
+	}
+	for msg, count := range errorCounts {
+		errorMessages = append(errorMessages, fmt.Sprintf("%q occurred %d time(s)", msg, count))
+	}
+	return errorMessages
 }
 
 func toSyftFiles(files []model.File) sbom.Artifacts {
@@ -70,18 +93,17 @@ func toSyftFiles(files []model.File) sbom.Artifacts {
 		FileDigests:  make(map[file.Coordinates][]file.Digest),
 		FileContents: make(map[file.Coordinates]string),
 		FileLicenses: make(map[file.Coordinates][]file.License),
+		Executables:  make(map[file.Coordinates]file.Executable),
 	}
 
 	for _, f := range files {
 		coord := f.Location
 		if f.Metadata != nil {
-			mode, err := strconv.ParseInt(strconv.Itoa(f.Metadata.Mode), 8, 64)
+			fm, err := safeFileModeConvert(f.Metadata.Mode)
 			if err != nil {
-				// todo: handle error
-				mode = 0
+				//log.Warnf("invalid mode found in file catalog @ location=%+v mode=%q: %+v", coord, f.Metadata.Mode, err)
+				fm = 0
 			}
-
-			fm := os.FileMode(mode)
 
 			ret.FileMetadata[coord] = file.Metadata{
 				FileInfo: stereoscopeFile.ManualInfo{
@@ -125,9 +147,27 @@ func toSyftFiles(files []model.File) sbom.Artifacts {
 				LicenseEvidence: evidence,
 			})
 		}
+
+		if f.Executable != nil {
+			ret.Executables[coord] = *f.Executable
+		}
 	}
 
 	return ret
+}
+
+func safeFileModeConvert(val int) (fs.FileMode, error) {
+	if val < math.MinInt32 || val > math.MaxInt32 {
+		// Value is out of the range that int32 can represent
+		return 0, fmt.Errorf("value %d is out of the range that int32 can represent", val)
+	}
+
+	// Safe to convert to os.FileMode
+	mode, err := strconv.ParseInt(strconv.Itoa(val), 8, 64)
+	if err != nil {
+		return 0, err
+	}
+	return os.FileMode(mode), nil
 }
 
 func toSyftLicenses(m []model.License) (p []pkg.License) {
@@ -194,7 +234,7 @@ func toSyftLinuxRelease(d model.LinuxRelease) *linux.Release {
 	}
 }
 
-func toSyftRelationships(doc *model.Document, catalog *pkg.Collection, relationships []model.Relationship, idAliases map[string]string) []artifact.Relationship {
+func toSyftRelationships(doc *model.Document, catalog *pkg.Collection, relationships []model.Relationship, idAliases map[string]string) ([]artifact.Relationship, []error) {
 	idMap := make(map[string]interface{})
 
 	for _, p := range catalog.Sorted() {
@@ -213,18 +253,18 @@ func toSyftRelationships(doc *model.Document, catalog *pkg.Collection, relations
 	}
 
 	var out []artifact.Relationship
+	var conversionErrors []error
 	for _, r := range relationships {
 		syftRelationship, err := toSyftRelationship(idMap, r, idAliases)
 		if err != nil {
-			// TODO handle error
-			continue
+			conversionErrors = append(conversionErrors, err)
 		}
 		if syftRelationship != nil {
 			out = append(out, *syftRelationship)
 		}
 	}
 
-	return out
+	return out, conversionErrors
 }
 
 func toSyftSource(s model.Source) source.Source {
@@ -263,6 +303,7 @@ func toSyftRelationship(idMap map[string]interface{}, relationship model.Relatio
 			return nil, fmt.Errorf("unknown relationship type: %s", string(typ))
 		}
 		// lets try to stay as compatible as possible with similar relationship types without dropping the relationship
+		//log.Warnf("assuming %q for relationship type %q", artifact.DependencyOfRelationship, typ)
 		typ = artifact.DependencyOfRelationship
 	}
 	return &artifact.Relationship{
@@ -301,8 +342,9 @@ func toSyftCatalog(pkgs []model.Package, idAliases map[string]string) *pkg.Colle
 func toSyftPackage(p model.Package, idAliases map[string]string) pkg.Package {
 	var cpes []cpe.CPE
 	for _, c := range p.CPEs {
-		value, err := cpe.New(c)
+		value, err := cpe.New(c.Value, cpe.Source(c.Source))
 		if err != nil {
+			//log.Warnf("excluding invalid Attributes %q: %v", c, err)
 			continue
 		}
 
