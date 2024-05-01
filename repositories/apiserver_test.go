@@ -619,8 +619,8 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 
 func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	tests := []struct {
-		workload domain.ScanCommand
 		expRes   string
+		workload domain.ScanCommand
 	}{
 		{
 			workload: domain.ScanCommand{
