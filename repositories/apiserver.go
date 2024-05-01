@@ -456,7 +456,7 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create VEX
-			err = a.createVEX(ctx, cve, cvep, withRelevancy)
+			err = a.createVEX(ctx, cve, cvep)
 			if err != nil {
 				return err
 			}
@@ -465,7 +465,7 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 		}
 	} else {
 		// Update VEX
-		err = a.updateVEX(ctx, cve, cvep, withRelevancy, vexContainer)
+		err = a.updateVEX(ctx, cve, cvep, vexContainer)
 		if err != nil {
 			return err
 		}
@@ -523,7 +523,7 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 	return nil
 }
 
-func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
 
@@ -604,7 +604,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	return err
 }
 
-func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool, vexContainer *v1beta1.OpenVulnerabilityExchangeContainer) error {
+func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, vexContainer *v1beta1.OpenVulnerabilityExchangeContainer) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
 

@@ -32,12 +32,12 @@ import (
 
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	mu           sync.RWMutex
+	lastDbUpdate time.Time
 	dbCloser     *db.Closer
 	dbStatus     *db.Status
 	store        *store.Store
 	dbConfig     db.Config
-	lastDbUpdate time.Time
+	mu           sync.RWMutex
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -129,9 +129,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	logger.L().Debug("reading packages from SBOM", helpers.String("name", sbom.Name))
 	packages := pkg.FromCollection(s.Artifacts.Packages, pkg.SynthesisConfig{})
-	if err != nil {
-		return domain.CVEManifest{}, err
-	}
+
 	pkgContext := pkg.Context{
 		Source: &s.Source,
 		Distro: s.Artifacts.LinuxDistribution,
