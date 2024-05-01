@@ -822,7 +822,7 @@ func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered, sbomCreatorVersion string
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && status == helpersv1.Incomplete {
 		return domain.ErrIncompleteSBOM
 	}
-	if manifest.Spec.Metadata.Tool.Version == "v0.101.1" { // hard coded version. We have a specific workaround for this version
+	if manifest.Spec.Metadata.Tool.Version == "v0.101.1" || manifest.Spec.Metadata.Tool.Version == "v0.101.1-hotfix" { // hard coded version. We have a specific workaround for this version
 		return domain.ErrSBOMWithPartialArtifacts
 	}
 	if manifest.Spec.Metadata.Tool.Version != sbomCreatorVersion {

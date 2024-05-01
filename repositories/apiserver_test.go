@@ -737,6 +737,19 @@ func Test_validateSBOMp(t *testing.T) {
 			wantError: domain.ErrOutdatedSBOM,
 		},
 		{
+			name: "Outdated SBOM",
+			manifest: &v1beta1.SBOMSyftFiltered{
+				Spec: v1beta1.SBOMSyftSpec{
+					Metadata: v1beta1.SPDXMeta{
+						Tool: v1beta1.ToolMeta{
+							Version: "v0.101.0-hotfix",
+						},
+					},
+				},
+			},
+			wantError: domain.ErrOutdatedSBOM,
+		},
+		{
 			name: "Valid SBOM",
 			manifest: &v1beta1.SBOMSyftFiltered{
 				Spec: v1beta1.SBOMSyftSpec{
