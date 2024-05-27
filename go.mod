@@ -3,6 +3,7 @@ module github.com/kubescape/kubevuln
 go 1.21.3
 
 require (
+	github.com/DmitriyVTitov/size v1.5.0
 	github.com/adrg/xdg v0.4.0
 	github.com/akyoto/cache v1.0.6
 	github.com/anchore/clio v0.0.0-20240209204744-cb94e40a4f65

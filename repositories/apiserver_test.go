@@ -235,9 +235,9 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			require.NoError(t, err)
 			err = a.StoreSBOM(tt.args.ctx, tt.sbom)
 			require.NoError(t, err)
-			gotSbom, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
-			if (gotSbom.Content == nil) != tt.wantEmptySBOM {
-				t.Errorf("GetSBOM() gotSbom.Content = %v, wantEmptySBOM %v", gotSbom.Content, tt.wantEmptySBOM)
+			gotSBOM, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			if (gotSBOM.Content == nil) != tt.wantEmptySBOM {
+				t.Errorf("GetSBOM() gotSBOM.Content = %v, wantEmptySBOM %v", gotSBOM.Content, tt.wantEmptySBOM)
 				return
 			}
 		})
@@ -337,10 +337,10 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 			require.NoError(t, err)
 			err = a.storeSBOMp(tt.args.ctx, tt.sbom, tt.incomplete)
 			require.NoError(t, err)
-			gotSbom, _ := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			gotSBOM, _ := a.GetSBOMp(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			if !tt.wantEmptySBOM {
-				assert.NotNil(t, gotSbom.Content)
-				assert.Equal(t, "bar", gotSbom.Annotations["foo"])
+				assert.NotNil(t, gotSBOM.Content)
+				assert.Equal(t, "bar", gotSBOM.Annotations["foo"])
 			}
 		})
 	}

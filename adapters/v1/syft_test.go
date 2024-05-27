@@ -22,15 +22,16 @@ func fileContent(path string) []byte {
 
 func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	tests := []struct {
-		name           string
-		imageID        string
-		imageTag       string
-		format         string
-		maxImageSize   int64
-		options        domain.RegistryOptions
-		scanTimeout    time.Duration
-		wantErr        bool
-		wantIncomplete bool
+		name         string
+		imageID      string
+		imageTag     string
+		format       string
+		maxImageSize int64
+		maxSBOMSize  int
+		options      domain.RegistryOptions
+		scanTimeout  time.Duration
+		wantErr      bool
+		wantStatus   string
 	}{
 		{
 			name:    "empty image produces empty SBOM",
@@ -63,18 +64,25 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			},
 		},
 		{
-			name:           "big image produces incomplete SBOM because of maxImageSize",
-			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:         "null",
-			maxImageSize:   1,
-			wantIncomplete: true,
+			name:         "big image produces incomplete SBOM because of maxImageSize",
+			imageID:      "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:       "null",
+			maxImageSize: 1,
+			wantStatus:   helpersv1.Incomplete,
 		},
 		{
-			name:           "big image produces incomplete SBOM because of scanTimeout",
-			imageID:        "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:         "null",
-			scanTimeout:    1 * time.Millisecond,
-			wantIncomplete: true,
+			name:        "big image produces too large SBOM because of maxSBOMSize",
+			imageID:     "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:      "null",
+			maxSBOMSize: 1,
+			wantStatus:  helpersv1.TooLarge,
+		},
+		{
+			name:        "big image produces incomplete SBOM because of scanTimeout",
+			imageID:     "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:      "null",
+			scanTimeout: 1 * time.Millisecond,
+			wantStatus:  helpersv1.Incomplete,
 		},
 		{
 			name:    "system tests image",
@@ -107,18 +115,22 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			if tt.maxImageSize > 0 {
 				maxImageSize = tt.maxImageSize
 			}
+			maxSBOMSize := 20 * 1024 * 1024
+			if tt.maxSBOMSize > 0 {
+				maxSBOMSize = tt.maxSBOMSize
+			}
 			scanTimeout := 5 * time.Minute
 			if tt.scanTimeout > 0 {
 				scanTimeout = tt.scanTimeout
 			}
-			s := NewSyftAdapter(scanTimeout, maxImageSize)
+			s := NewSyftAdapter(scanTimeout, maxImageSize, maxSBOMSize)
 			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, tt.imageTag, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantIncomplete && got.Status != helpersv1.Incomplete {
-				t.Errorf("CreateSBOM() want incomplete SBOM, got %v", got.Status)
+			if tt.wantStatus != "" && got.Status != tt.wantStatus {
+				t.Errorf("CreateSBOM() want %v SBOM, got %v", tt.wantStatus, got.Status)
 				return
 			}
 			content, err := json.Marshal(got.Content)
@@ -132,7 +144,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 }
 
 func Test_syftAdapter_Version(t *testing.T) {
-	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024)
 	version := s.Version()
 	assert.NotEqual(t, version, "")
 }
@@ -150,7 +162,7 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	sbom := toSyftModel(d)
 
 	// Convert to domain.sbom
-	s := NewSyftAdapter(5*time.Minute, 512*1024*1024)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024)
 	domainSBOM, err := s.syftToDomain(*sbom)
 	require.NoError(t, err)
 

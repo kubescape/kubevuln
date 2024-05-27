@@ -13,6 +13,7 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
+	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
@@ -30,15 +31,17 @@ import (
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
 	maxImageSize int64
+	maxSBOMSize  int
 	scanTimeout  time.Duration
 }
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
-func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64) *SyftAdapter {
+func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize int) *SyftAdapter {
 	return &SyftAdapter{
 		maxImageSize: maxImageSize,
+		maxSBOMSize:  maxSBOMSize,
 		scanTimeout:  scanTimeout,
 	}
 }
@@ -187,6 +190,16 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// also mark as incomplete if we failed to extract packages
 		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, err
+	}
+
+	// check the size of the SBOM
+	if sz := size.Of(syftSBOM); sz > s.maxSBOMSize {
+		logger.L().Ctx(ctx).Warning("SBOM exceeds size limit",
+			helpers.Int("maxImageSize", s.maxSBOMSize),
+			helpers.Int("size", sz),
+			helpers.String("imageID", imageID))
+		domainSBOM.Status = helpersv1.TooLarge
+		return domainSBOM, nil
 	}
 
 	// mark SBOM as ready
