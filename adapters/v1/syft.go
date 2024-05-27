@@ -193,7 +193,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	// check the size of the SBOM
-	if sz := size.Of(syftSBOM); sz > s.maxSBOMSize {
+	sz := size.Of(syftSBOM)
+	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
+	if sz > s.maxSBOMSize {
 		logger.L().Ctx(ctx).Warning("SBOM exceeds size limit",
 			helpers.Int("maxImageSize", s.maxSBOMSize),
 			helpers.Int("size", sz),
