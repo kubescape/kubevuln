@@ -62,7 +62,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize)
+	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize)
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL)
 	var platform ports.Platform
 	if c.KeepLocal {
