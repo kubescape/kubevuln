@@ -184,7 +184,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// do not process timed out SBOM
-		if sbom.Status == helpersv1.Incomplete {
+		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 			return domain.ErrIncompleteSBOM
 		}
 
@@ -337,7 +337,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// do not process timed out SBOM
-	if sbom.Status == helpersv1.Incomplete {
+	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 		return domain.ErrIncompleteSBOM
 	}
 
