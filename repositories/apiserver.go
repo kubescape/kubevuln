@@ -819,7 +819,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 }
 
 func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered, sbomCreatorVersion string) error {
-	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && status == helpersv1.Incomplete {
+	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && (status == helpersv1.Incomplete || status == helpersv1.TooLarge) {
 		return domain.ErrIncompleteSBOM
 	}
 	if manifest.Spec.Metadata.Tool.Version == "v0.101.1" || manifest.Spec.Metadata.Tool.Version == "v0.101.1-hotfix" { // hard coded version. We have a specific workaround for this version
