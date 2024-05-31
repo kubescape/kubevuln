@@ -53,6 +53,9 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
+	// force GRPC
+	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	config.ContentType = "application/vnd.kubernetes.protobuf"
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
 		return nil, err
