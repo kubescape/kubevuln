@@ -53,6 +53,9 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
+	// force GRPC
+	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	config.ContentType = "application/vnd.kubernetes.protobuf"
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -233,18 +236,18 @@ func parseVulnerabilitiesComponents(cve domain.CVEManifest, cvep domain.CVEManif
 }
 
 func parseSeverities(cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) v1beta1.SeveritySummary {
-	critical := 0
-	criticalRelevant := 0
-	high := 0
-	highRelevant := 0
-	medium := 0
-	mediumRelevant := 0
-	low := 0
-	lowRelevant := 0
-	negligible := 0
-	negligibleRelevant := 0
-	unknown := 0
-	unknownRelevant := 0
+	var critical int64
+	var criticalRelevant int64
+	var high int64
+	var highRelevant int64
+	var medium int64
+	var mediumRelevant int64
+	var low int64
+	var lowRelevant int64
+	var negligible int64
+	var negligibleRelevant int64
+	var unknown int64
+	var unknownRelevant int64
 
 	for i := range cve.Content.Matches {
 		switch cve.Content.Matches[i].Vulnerability.Severity {

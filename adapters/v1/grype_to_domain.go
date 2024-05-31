@@ -17,7 +17,7 @@ func grypeToDomain(grypeDoc models.Document) (*v1beta1.GrypeDocument, error) {
 			Version: grypeDoc.Distro.Version,
 			IDLike:  grypeDoc.Distro.IDLike,
 		},
-		Descriptor: v1beta1.Descriptor{
+		Descriptor_: v1beta1.Descriptor{
 			Name:                  grypeDoc.Descriptor.Name,
 			Version:               grypeDoc.Descriptor.Version,
 			Configuration:         toRawMessage(grypeDoc.Descriptor.Configuration),
