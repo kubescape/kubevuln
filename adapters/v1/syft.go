@@ -38,7 +38,7 @@ type SyftAdapter struct {
 
 const digestDelim = "@"
 
-var hashPattern = regexp.MustCompile(`^.*@sha256:[a-f0-9]{64}$`)
+var hashPattern = regexp.MustCompile(`^(.*@)?sha256:[a-f0-9]{64}$`)
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
