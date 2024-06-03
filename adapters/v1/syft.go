@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -35,6 +36,10 @@ type SyftAdapter struct {
 	scanTimeout  time.Duration
 }
 
+const digestDelim = "@"
+
+var hashPattern = regexp.MustCompile(`^.*@sha256:[a-f0-9]{64}$`)
+
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
@@ -46,22 +51,25 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 	}
 }
 
-const digestDelim = "@"
-
 func normalizeImageID(imageID, imageTag string) string {
 	// registry scanning doesn't provide imageID, so we use imageTag as a reference
 	if imageID == "" {
 		return imageTag
 	}
+
+	if !hashPattern.MatchString(imageID) {
+		return imageTag
+	}
 	// try to parse imageID as a full digest
-	if newDigest, err := name.NewDigest(imageID); err == nil {
+	if newDigest, err := name.NewDigest(imageTag); err == nil {
 		return newDigest.String()
 	}
 	// if it's not a full digest, we need to use imageTag as a reference
 	tag, err := name.ParseReference(imageTag)
 	if err != nil {
-		return ""
+		return imageTag
 	}
+
 	// and append imageID as a digest
 	parts := strings.Split(imageID, digestDelim)
 	// filter garbage
@@ -84,6 +92,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.CreateSBOM")
 	defer span.End()
 
+	if imageTag != "" {
+		imageID = normalizeImageID(imageID, imageTag)
+	}
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
 		Name:               name,
@@ -94,10 +105,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 	}
-	if imageTag != "" {
-		imageID = normalizeImageID(imageID, imageTag)
-		domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
-	}
+	domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
+
 	// translate business models into Syft models
 	if options.Platform == "" {
 		options.Platform = runtime.GOARCH
