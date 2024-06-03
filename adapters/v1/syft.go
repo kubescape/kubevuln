@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -38,8 +37,6 @@ type SyftAdapter struct {
 
 const digestDelim = "@"
 
-var hashPattern = regexp.MustCompile(`^(.*@)?sha256:[a-f0-9]{64}$`)
-
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
@@ -57,9 +54,6 @@ func normalizeImageID(imageID, imageTag string) string {
 		return imageTag
 	}
 
-	if !hashPattern.MatchString(imageID) {
-		return imageTag
-	}
 	// try to parse imageID as a full digest
 	if newDigest, err := name.NewDigest(imageTag); err == nil {
 		return newDigest.String()
@@ -142,12 +136,20 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
 	src, err := syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 
+	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
+			helpers.String("imageTag", imageTag),
+			helpers.String("imageID", imageID))
+		src, err = syft.GetSource(ctxWithSize, imageTag, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
+	}
+
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		logger.L().Debug("got 401, retrying without credentials",
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
 		src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 	}
+
 	switch {
 	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",

@@ -208,7 +208,7 @@ func TestNormalizeImageID(t *testing.T) {
 			name:     "quay.io-kubescape-kubescape-v3.0.3-88a469",
 			imageID:  "86413975e2d0330176894e4f3f5987505ed27b1191f2537797fbbf345b88a469",
 			imageTag: "quay.io/kubescape/kubescape:v3.0.3",
-			want:     "quay.io/kubescape/kubescape:v3.0.3",
+			want:     "quay.io/kubescape/kubescape@sha256:86413975e2d0330176894e4f3f5987505ed27b1191f2537797fbbf345b88a469",
 		},
 		{
 			name:     "registry.k8s.io-kube-scheduler-v1.28.4-3d2c54",
