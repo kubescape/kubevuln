@@ -35,6 +35,8 @@ type SyftAdapter struct {
 	scanTimeout  time.Duration
 }
 
+const digestDelim = "@"
+
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
@@ -46,13 +48,12 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 	}
 }
 
-const digestDelim = "@"
-
 func normalizeImageID(imageID, imageTag string) string {
 	// registry scanning doesn't provide imageID, so we use imageTag as a reference
 	if imageID == "" {
 		return imageTag
 	}
+
 	// try to parse imageID as a full digest
 	if newDigest, err := name.NewDigest(imageID); err == nil {
 		return newDigest.String()
@@ -62,6 +63,7 @@ func normalizeImageID(imageID, imageTag string) string {
 	if err != nil {
 		return ""
 	}
+
 	// and append imageID as a digest
 	parts := strings.Split(imageID, digestDelim)
 	// filter garbage
@@ -84,6 +86,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	ctx, span := otel.Tracer("").Start(ctx, "SyftAdapter.CreateSBOM")
 	defer span.End()
 
+	if imageTag != "" {
+		imageID = normalizeImageID(imageID, imageTag)
+	}
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{
 		Name:               name,
@@ -94,10 +99,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 	}
-	if imageTag != "" {
-		imageID = normalizeImageID(imageID, imageTag)
-		domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
-	}
+	domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
+
 	// translate business models into Syft models
 	if options.Platform == "" {
 		options.Platform = runtime.GOARCH
@@ -133,12 +136,20 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
 	src, err := syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 
+	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
+			helpers.String("imageTag", imageTag),
+			helpers.String("imageID", imageID))
+		src, err = syft.GetSource(ctxWithSize, imageTag, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
+	}
+
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		logger.L().Debug("got 401, retrying without credentials",
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
 		src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions))
 	}
+
 	switch {
 	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
