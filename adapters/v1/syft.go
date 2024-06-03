@@ -55,13 +55,13 @@ func normalizeImageID(imageID, imageTag string) string {
 	}
 
 	// try to parse imageID as a full digest
-	if newDigest, err := name.NewDigest(imageTag); err == nil {
+	if newDigest, err := name.NewDigest(imageID); err == nil {
 		return newDigest.String()
 	}
 	// if it's not a full digest, we need to use imageTag as a reference
 	tag, err := name.ParseReference(imageTag)
 	if err != nil {
-		return imageTag
+		return ""
 	}
 
 	// and append imageID as a digest
