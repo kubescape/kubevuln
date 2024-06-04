@@ -160,7 +160,7 @@ func (a *BackendAdapter) reportFromContext(ctx context.Context) (*sysreport.Base
 }
 
 // SubmitCVE submits the given CVE to the platform
-func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
+func (a *BackendAdapter) SubmitCVE(ctx context.Context, sbom domain.SBOM, cve domain.CVEManifest, cvep domain.CVEManifest) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SubmitCVE")
 	defer span.End()
 	// retrieve timestamp from context
@@ -255,8 +255,12 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		vulnerabilities[i].Designators = finalReport.Designators
 	}
 
+	imageManifest, err := parseImageManifest(sbom)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to parse image manifest from sbom", helpers.Error(err))
+	}
 	// add summary
-	finalReport.Summary, vulnerabilities = summarize(finalReport, vulnerabilities, workload, hasRelevancy)
+	finalReport.Summary, vulnerabilities = summarize(finalReport, vulnerabilities, workload, hasRelevancy, imageManifest)
 	finalReport.Summary.Context = armoContext
 
 	// split vulnerabilities to chunks

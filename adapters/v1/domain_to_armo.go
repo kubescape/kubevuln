@@ -217,3 +217,44 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 	return coordinates
 
 }
+
+func parseImageManifest(sbom domain.SBOM) (*containerscan.ImageManifest, error) {
+	if sbom.Content == nil {
+		return nil, nil
+	}
+	var rawManifest source.ImageMetadata
+	if err := json.Unmarshal(sbom.Content.SyftSource.Metadata, &rawManifest); err != nil {
+		return nil, err
+	}
+
+	var config v1.ConfigFile
+	err := json.Unmarshal(rawManifest.RawConfig, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	imageManifest := containerscan.ImageManifest{
+		Architecture: config.Architecture,
+		OS:           config.OS,
+		Size:         rawManifest.Size,
+		Layers:       []containerscan.ESLayer{},
+	}
+
+	layerIndex := 0
+	for i, historyLayer := range config.History {
+		layerInfo := containerscan.ESLayer{
+			LayerInfo: &containerscan.LayerInfo{
+				CreatedBy:   historyLayer.CreatedBy,
+				CreatedTime: &historyLayer.Created.Time,
+				LayerOrder:  i,
+			},
+		}
+		if !historyLayer.EmptyLayer && layerIndex < len(rawManifest.Layers) {
+			layerInfo.LayerHash = rawManifest.Layers[layerIndex].Digest
+			layerInfo.Size = rawManifest.Layers[layerIndex].Size
+			layerIndex++
+		}
+		imageManifest.Layers = append(imageManifest.Layers, layerInfo)
+	}
+	return &imageManifest, nil
+}

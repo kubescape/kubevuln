@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -174,7 +175,12 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 	}
 }
 
+//go:embed testdata/nginx-image-manifest.json
+var nginxImageManifest []byte
+
 func Test_summarize(t *testing.T) {
+	var imageManifest containerscan.ImageManifest
+	assert.NoError(t, json.Unmarshal(nginxImageManifest, &imageManifest))
 	containerScanID := "9711c327-1a08-487e-b24a-72128712ef2d"
 	designators := identifiers.PortalDesignator{
 		DesignatorType: "Attributes",
@@ -201,6 +207,7 @@ func Test_summarize(t *testing.T) {
 		vulnerabilities []containerscan.CommonContainerVulnerabilityResult
 		workload        domain.ScanCommand
 		hasRelevancy    bool
+		imageManifest   *containerscan.ImageManifest
 	}
 	tests := []struct {
 		name string
@@ -338,7 +345,8 @@ func Test_summarize(t *testing.T) {
 						JobIDs: jobIDs,
 					},
 				},
-				hasRelevancy: false,
+				hasRelevancy:  false,
+				imageManifest: &imageManifest,
 			},
 			want: &containerscan.CommonContainerScanSummaryResult{
 				ClusterName:     designators.Attributes["cluster"],
@@ -372,7 +380,8 @@ func Test_summarize(t *testing.T) {
 					{Name: "CVE-2017-18269"},
 					{Name: "CVE-2022-1292"},
 				},
-				WLID: wlid,
+				WLID:          wlid,
+				ImageManifest: &imageManifest,
 			},
 		},
 		{
@@ -467,7 +476,8 @@ func Test_summarize(t *testing.T) {
 						JobIDs: jobIDs,
 					},
 				},
-				hasRelevancy: true,
+				hasRelevancy:  true,
+				imageManifest: &imageManifest,
 			},
 			want: &containerscan.CommonContainerScanSummaryResult{
 				ClusterName:      designators.Attributes["cluster"],
@@ -505,13 +515,14 @@ func Test_summarize(t *testing.T) {
 					{Name: "CVE-2017-18269"},
 					{Name: "CVE-2022-1292"},
 				},
-				WLID: wlid,
+				WLID:          wlid,
+				ImageManifest: &imageManifest,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy)
+			got, _ := summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy, tt.args.imageManifest)
 			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
 				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
 			})

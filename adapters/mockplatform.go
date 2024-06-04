@@ -45,7 +45,7 @@ func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
 }
 
 // SubmitCVE logs the given ID for CVE calculation
-func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest) error {
+func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.SBOM, _ domain.CVEManifest, _ domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")
 	defer span.End()
 	return nil
