@@ -13,9 +13,10 @@ require (
 	github.com/anchore/stereoscope v0.0.3
 	github.com/anchore/syft v1.13.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.481
+	github.com/armosec/armoapi-go v0.0.496
 	github.com/armosec/utils-go v0.0.57
 	github.com/armosec/utils-k8s-go v0.0.30
+	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/docker/docker v27.3.1+incompatible
 	github.com/eapache/go-resiliency v1.3.0
@@ -28,8 +29,8 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.162
-	github.com/kubescape/storage v0.0.111
+	github.com/kubescape/k8s-interface v0.0.178
+	github.com/kubescape/storage v0.0.127
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.19.0
@@ -84,23 +85,23 @@ require (
 	github.com/aquasecurity/go-version v0.0.0-20210121072130-637058cfe492 // indirect
 	github.com/armosec/gojay v1.2.17 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
-	github.com/aws/aws-sdk-go v1.44.312 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.30.0 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.27.21 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.21 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.8 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.12 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.12 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ecr v1.18.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/eks v1.28.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/iam v1.19.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.2 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.14 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.21.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.25.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.29.1 // indirect
-	github.com/aws/smithy-go v1.20.2 // indirect
+	github.com/aws/aws-sdk-go v1.55.5 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.30.5 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.27.35 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.33 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.13 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ecr v1.34.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/eks v1.48.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/iam v1.35.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.19 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.22.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.30.8 // indirect
+	github.com/aws/smithy-go v1.20.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/becheran/wildmatch-go v1.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -372,6 +373,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.25.12 // indirect
 	k8s.io/api v0.30.2 // indirect
+	k8s.io/apiextensions-apiserver v0.30.2 // indirect
 	k8s.io/apiserver v0.30.2 // indirect
 	k8s.io/component-base v0.30.2 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect

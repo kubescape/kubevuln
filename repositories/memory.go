@@ -9,6 +9,11 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+type apID struct {
+	Namespace string
+	Name      string
+}
+
 type cveID struct {
 	Name               string
 	SBOMCreatorVersion string
@@ -23,11 +28,14 @@ type sbomID struct {
 
 // MemoryStore implements both CVERepository and SBOMRepository with in-memory storage (maps) to be used for tests
 type MemoryStore struct {
+	aps          map[apID]v1beta1.ApplicationProfile
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
 	getError     bool
 	storeError   bool
 }
+
+var _ ports.ApplicationProfileRepository = (*MemoryStore)(nil)
 
 var _ ports.CVERepository = (*MemoryStore)(nil)
 
@@ -36,11 +44,46 @@ var _ ports.SBOMRepository = (*MemoryStore)(nil)
 // NewMemoryStorage initializes the MemoryStore struct and its maps
 func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 	return &MemoryStore{
+		aps:          map[apID]v1beta1.ApplicationProfile{},
 		cveManifests: map[cveID]domain.CVEManifest{},
 		sboms:        map[sbomID]domain.SBOM{},
 		getError:     getError,
 		storeError:   storeError,
 	}
+}
+
+func (m *MemoryStore) GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetApplicationProfile")
+	defer span.End()
+
+	if m.getError {
+		return v1beta1.ApplicationProfile{}, domain.ErrMockError
+	}
+
+	id := apID{
+		Namespace: namespace,
+		Name:      name,
+	}
+	if value, ok := m.aps[id]; ok {
+		return value, nil
+	}
+	return v1beta1.ApplicationProfile{}, nil
+}
+
+func (m *MemoryStore) StoreApplicationProfile(ctx context.Context, ap v1beta1.ApplicationProfile) error {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreApplicationProfile")
+	defer span.End()
+
+	if m.storeError {
+		return domain.ErrMockError
+	}
+
+	id := apID{
+		Namespace: ap.Namespace,
+		Name:      ap.Name,
+	}
+	m.aps[id] = ap
+	return nil
 }
 
 // GetCVE returns a CVE manifest from an in-memory map
@@ -131,25 +174,6 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 
 	id := sbomID{
 		Name:               name,
-		SBOMCreatorVersion: SBOMCreatorVersion,
-	}
-	if value, ok := m.sboms[id]; ok {
-		return value, nil
-	}
-	return domain.SBOM{}, nil
-}
-
-// GetSBOMp returns a SBOM' from an in-memory map
-func (m *MemoryStore) GetSBOMp(ctx context.Context, instanceID, SBOMCreatorVersion string) (domain.SBOM, error) {
-	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetSBOMp")
-	defer span.End()
-
-	if m.getError {
-		return domain.SBOM{}, domain.ErrMockError
-	}
-
-	id := sbomID{
-		Name:               instanceID,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 	}
 	if value, ok := m.sboms[id]; ok {

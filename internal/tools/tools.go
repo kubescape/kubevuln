@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"runtime/debug"
+	"strings"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
@@ -107,4 +108,12 @@ func NormalizeReference(ref string) string {
 		return ref
 	}
 	return reference.TagNameOnly(n).String()
+}
+
+func RemoveContainerFromSlug(slug, container string) string {
+	i := strings.LastIndex(slug, container)
+	if i == -1 {
+		return slug
+	}
+	return slug[:i-1]
 }

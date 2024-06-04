@@ -103,7 +103,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 // ReportError reports the given error to the platform
 func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
-	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportError")
 	defer span.End()
 
 	report, err2 := a.reportFromContext(ctx)

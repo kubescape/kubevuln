@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	ArgsName               = "name"
+	ArgsNamespace          = "namespace"
 	AttributeUseHTTP       = identifiers.AttributeUseHTTP
 	AttributeSkipTLSVerify = identifiers.AttributeSkipTLSVerify
 )
@@ -19,6 +21,7 @@ var (
 	ErrOutdatedSBOM             = errors.New("SBOM is outdated")
 	ErrSBOMWithPartialArtifacts = errors.New("SBOM having partial artifacts")
 	ErrInvalidScanID            = errors.New("invalid scanID")
+	ErrMissingApInfo            = errors.New("missing application profile information")
 	ErrMissingImageInfo         = errors.New("missing image information")
 	ErrMissingSBOM              = errors.New("missing SBOM")
 	ErrMissingScanID            = errors.New("missing scanID")

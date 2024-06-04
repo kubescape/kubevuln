@@ -12,8 +12,6 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
-	serrors "errors"
-
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -41,6 +39,8 @@ type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
 	Namespace     string
 }
+
+var _ ports.ApplicationProfileRepository = (*APIServerStore)(nil)
 
 var _ ports.CVERepository = (*APIServerStore)(nil)
 
@@ -71,6 +71,27 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		Namespace:     namespace,
 	}
+}
+
+func (a *APIServerStore) GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetApplicationProfile")
+	defer span.End()
+	if name == "" {
+		logger.L().Debug("empty name provided, skipping application profile retrieval")
+		return v1beta1.ApplicationProfile{}, nil
+	}
+	profile, err := a.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	switch {
+	case errors.IsNotFound(err):
+		logger.L().Debug("application profile not found in storage",
+			helpers.String("name", name))
+		return v1beta1.ApplicationProfile{}, nil
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to get application profile from apiserver", helpers.Error(err),
+			helpers.String("name", name))
+		return v1beta1.ApplicationProfile{}, fmt.Errorf("failed to get application profile from apiserver: %w", err)
+	}
+	return *profile, nil
 }
 
 func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (domain.CVEManifest, error) {
@@ -820,62 +841,6 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	logger.L().Debug("got SBOM from storage",
 		helpers.String("name", name))
 	return result, nil
-}
-
-func validateSBOMp(manifest *v1beta1.SBOMSyftFiltered, sbomCreatorVersion string) error {
-	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok && (status == helpersv1.Incomplete || status == helpersv1.TooLarge) {
-		return domain.ErrIncompleteSBOM
-	}
-	if manifest.Spec.Metadata.Tool.Version == "v0.101.1" || manifest.Spec.Metadata.Tool.Version == "v0.101.1-hotfix" { // hard coded version. We have a specific workaround for this version
-		return domain.ErrSBOMWithPartialArtifacts
-	}
-	if manifest.Spec.Metadata.Tool.Version != sbomCreatorVersion {
-		return domain.ErrOutdatedSBOM
-	}
-
-	return nil
-}
-
-func (a *APIServerStore) GetSBOMp(ctx context.Context, name, sbomCreatorVersion string) (domain.SBOM, error) {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetSBOMp")
-	defer span.End()
-	if name == "" {
-		logger.L().Debug("empty name provided, skipping relevant SBOM retrieval")
-		return domain.SBOM{}, nil
-	}
-	manifest, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
-	switch {
-	case errors.IsNotFound(err):
-		logger.L().Debug("relevant SBOM manifest not found in storage",
-			helpers.String("name", name))
-		return domain.SBOM{}, nil
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get relevant SBOM from apiserver", helpers.Error(err),
-			helpers.String("name", name))
-		return domain.SBOM{}, nil
-	}
-	// validate SBOMp manifest
-	vErr := validateSBOMp(manifest, sbomCreatorVersion)
-	if vErr != nil {
-		if !serrors.Is(vErr, domain.ErrSBOMWithPartialArtifacts) {
-			logger.L().Debug("discarding relevant SBOM", helpers.Error(vErr),
-				helpers.String("name", name))
-			return domain.SBOM{}, nil
-		}
-	}
-	result := domain.SBOM{
-		Name:               name,
-		Annotations:        manifest.Annotations,
-		Labels:             manifest.Labels,
-		SBOMCreatorVersion: sbomCreatorVersion,
-		Content:            &manifest.Spec.Syft,
-	}
-	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
-		result.Status = status
-	}
-	logger.L().Debug("got relevant SBOM from storage",
-		helpers.String("name", name))
-	return result, vErr
 }
 
 func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {

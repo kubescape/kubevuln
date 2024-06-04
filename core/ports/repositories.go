@@ -7,6 +7,10 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+type ApplicationProfileRepository interface {
+	GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error)
+}
+
 // CVERepository is the port implemented by adapters to be used in ScanService to store CVE manifests
 type CVERepository interface {
 	GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (domain.CVEManifest, error)
@@ -19,6 +23,5 @@ type CVERepository interface {
 // SBOMRepository is the port implemented by adapters to be used in ScanService to store SBOMs
 type SBOMRepository interface {
 	GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error)
-	GetSBOMp(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error)
 	StoreSBOM(ctx context.Context, sbom domain.SBOM) error
 }

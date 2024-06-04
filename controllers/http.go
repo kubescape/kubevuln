@@ -85,6 +85,47 @@ func (h HTTPController) Ready(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
+// ScanAP unmarshalls the payload and calls scanService.ScanAP
+func (h HTTPController) ScanAP(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var websocketScanCommand wssc.WebsocketScanCommand
+	err := c.ShouldBindJSON(&websocketScanCommand)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
+		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		return
+	}
+
+	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
+	name := newScan.Args[domain.ArgsName].(string)
+	namespace := newScan.Args[domain.ArgsNamespace].(string)
+
+	details := problem.Detailf("Wlid=%s, Name=%s, Namespace=%s", newScan.Wlid, name, namespace)
+
+	ctx, err = h.scanService.ValidateScanAP(ctx, newScan)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
+			helpers.String("wlid", newScan.Wlid),
+			helpers.String("name", name),
+			helpers.String("namespace", namespace))
+		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		return
+	}
+
+	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+
+	h.workerPool.Submit(func() {
+		err = h.scanService.ScanAP(ctx)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("service error - ScanAP", helpers.Error(err),
+				helpers.String("wlid", newScan.Wlid),
+				helpers.String("name", name),
+				helpers.String("namespace", namespace))
+		}
+	})
+}
+
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
 func (h HTTPController) ScanCVE(c *gin.Context) {
 	ctx := c.Request.Context()
