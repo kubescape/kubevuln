@@ -3,7 +3,10 @@ package v1
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
+	"github.com/armosec/armoapi-go/containerscan"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"io"
 	"net/http"
 	"os"
@@ -82,17 +85,17 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	}
 }
 
-func fileToCVEManifest(path string) domain.CVEManifest {
-	var cve domain.CVEManifest
+func fileToType[T any](path string) *T {
+	var t *T
 	b, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
 	}
-	err = json.Unmarshal(b, &cve)
+	err = json.Unmarshal(b, &t)
 	if err != nil {
 		panic(err)
 	}
-	return cve
+	return t
 }
 
 func TestBackendAdapter_SubmitCVE(t *testing.T) {
@@ -108,21 +111,21 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 	}{
 		{
 			name:          "submit small cve",
-			cve:           fileToCVEManifest("testdata/nginx-cve-small.json"),
+			cve:           *fileToType[domain.CVEManifest]("testdata/nginx-cve-small.json"),
 			checkFullBody: true,
 		},
 		{
 			name: "submit big cve",
-			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
+			cve:  *fileToType[domain.CVEManifest]("testdata/nginx-cve.json"),
 		},
 		{
 			name: "submit big cve with relevancy",
-			cve:  fileToCVEManifest("testdata/nginx-cve.json"),
-			cvep: fileToCVEManifest("testdata/nginx-filtered-cve.json"),
+			cve:  *fileToType[domain.CVEManifest]("testdata/nginx-cve.json"),
+			cvep: *fileToType[domain.CVEManifest]("testdata/nginx-filtered-cve.json"),
 		},
 		{
 			name:                       "submit small cve with exceptions",
-			cve:                        fileToCVEManifest("testdata/nginx-cve-small.json"),
+			cve:                        *fileToType[domain.CVEManifest]("testdata/nginx-cve-small.json"),
 			checkFullBodyWithException: true,
 			exceptions: []armotypes.VulnerabilityExceptionPolicy{{
 				PolicyType:            "vulnerabilityExceptionPolicy",
@@ -190,8 +193,61 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-			if err := a.SubmitCVE(ctx, tt.cve, tt.cvep); (err != nil) != tt.wantErr {
+			if err := a.SubmitCVE(ctx, domain.SBOM{}, tt.cve, tt.cvep); (err != nil) != tt.wantErr {
 				t.Errorf("SubmitCVE() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+//go:embed testdata/nginx-sbom-metadata.json
+var nginxSBOMMetadata []byte
+
+func TestParseImageManifest(t *testing.T) {
+	tests := []struct {
+		name     string
+		sbom     domain.SBOM
+		expected *containerscan.ImageManifest
+		wantErr  bool
+	}{
+		{
+			name:     "empty sbom",
+			sbom:     domain.SBOM{},
+			expected: nil,
+		},
+		{
+			name: "malformed metadata base64 config",
+			sbom: domain.SBOM{
+				Content: &v1beta1.SyftDocument{
+					SyftSource: v1beta1.SyftSource{
+						Metadata: []byte(`{
+									"config": "eyJhcmNoaXRlY3R1cmUiOiJhcm02NCIs"
+									}`),
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid sbom",
+			sbom: domain.SBOM{
+				Content: &v1beta1.SyftDocument{
+					SyftSource: v1beta1.SyftSource{
+						Metadata: nginxSBOMMetadata,
+					},
+				},
+			},
+			expected: fileToType[containerscan.ImageManifest]("testdata/nginx-image-manifest.json"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imageManifest, err := parseImageManifest(tt.sbom)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, imageManifest)
 			}
 		})
 	}

@@ -25,6 +25,6 @@ func TestMockPlatform_SendStatus(t *testing.T) {
 func TestMockPlatform_SubmitCVE(t *testing.T) {
 	m := NewMockPlatform(true)
 	ctx := context.TODO()
-	err := m.SubmitCVE(ctx, domain.CVEManifest{}, domain.CVEManifest{})
+	err := m.SubmitCVE(ctx, domain.SBOM{}, domain.CVEManifest{}, domain.CVEManifest{})
 	assert.NoError(t, err)
 }

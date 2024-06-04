@@ -1,6 +1,8 @@
 module github.com/kubescape/kubevuln
 
-go 1.21.3
+go 1.22.2
+
+toolchain go1.22.3
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0
@@ -11,7 +13,7 @@ require (
 	github.com/anchore/stereoscope v0.0.3-0.20240423181235-8b297badafd5
 	github.com/anchore/syft v1.3.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.330
+	github.com/armosec/armoapi-go v0.0.416
 	github.com/armosec/utils-go v0.0.57
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/distribution/distribution v2.8.2+incompatible

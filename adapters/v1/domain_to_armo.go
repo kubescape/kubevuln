@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -216,4 +217,50 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 	}
 	return coordinates
 
+}
+
+func parseImageManifest(sbom domain.SBOM) (*containerscan.ImageManifest, error) {
+	if sbom.Content == nil {
+		return nil, nil
+	}
+
+	var rawManifest domain.RawImageManifest
+	if err := json.Unmarshal(sbom.Content.SyftSource.Metadata, &rawManifest); err != nil {
+		return nil, err
+	}
+
+	configData, err := base64.StdEncoding.DecodeString(rawManifest.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	var config domain.ImageConfig
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return nil, err
+	}
+
+	imageManifest := containerscan.ImageManifest{
+		Architecture: config.Architecture,
+		OS:           config.OS,
+		Size:         rawManifest.ImageSize,
+		Layers:       []containerscan.ESLayer{},
+	}
+
+	layerIndex := 0
+	for i, historyLayer := range config.History {
+		layerInfo := containerscan.ESLayer{
+			LayerInfo: &containerscan.LayerInfo{
+				CreatedBy:   historyLayer.CreatedBy,
+				CreatedTime: &historyLayer.Created,
+				LayerOrder:  i,
+			},
+		}
+		if !historyLayer.EmptyLayer && layerIndex < len(rawManifest.Layers) {
+			layerInfo.LayerHash = rawManifest.Layers[layerIndex].Digest
+			layerInfo.Size = rawManifest.Layers[layerIndex].Size
+			layerIndex++
+		}
+		imageManifest.Layers = append(imageManifest.Layers, layerInfo)
+	}
+	return &imageManifest, nil
 }

@@ -150,7 +150,7 @@ func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
 	*counter++
 }
 
-func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.CommonContainerVulnerabilityResult, workload domain.ScanCommand, hasRelevancy bool) (*containerscan.CommonContainerScanSummaryResult, []containerscan.CommonContainerVulnerabilityResult) {
+func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.CommonContainerVulnerabilityResult, workload domain.ScanCommand, hasRelevancy bool, imageManifest *containerscan.ImageManifest) (*containerscan.CommonContainerScanSummaryResult, []containerscan.CommonContainerVulnerabilityResult) {
 	summary := containerscan.CommonContainerScanSummaryResult{
 		Designators:      report.Designators,
 		SeverityStats:    containerscan.SeverityStats{},
@@ -166,6 +166,7 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		JobIDs:           workload.Session.JobIDs,
 		Timestamp:        report.Timestamp,
 		HasRelevancyData: hasRelevancy,
+		ImageManifest:    imageManifest,
 	}
 
 	imageInfo, err := armometadata.ImageTagToImageInfo(workload.ImageTagNormalized)
