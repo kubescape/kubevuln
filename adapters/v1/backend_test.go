@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"github.com/armosec/armoapi-go/containerscan"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/armosec/utils-go/httputils"
@@ -24,6 +23,7 @@ import (
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
