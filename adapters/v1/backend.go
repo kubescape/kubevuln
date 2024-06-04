@@ -257,7 +257,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, sbom domain.SBOM, cve do
 
 	imageManifest, err := parseImageManifest(sbom)
 	if err != nil {
-		return fmt.Errorf("failed to parse image manifest from sbom: %w", err)
+		logger.L().Ctx(ctx).Warning("failed to parse image manifest from sbom", helpers.Error(err))
 	}
 	// add summary
 	finalReport.Summary, vulnerabilities = summarize(finalReport, vulnerabilities, workload, hasRelevancy, imageManifest)
