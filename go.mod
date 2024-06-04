@@ -16,6 +16,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.416
 	github.com/armosec/utils-go v0.0.57
 	github.com/armosec/utils-k8s-go v0.0.26
+	github.com/deckarep/golang-set/v2 v2.5.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/docker/docker v26.1.0+incompatible
 	github.com/eapache/go-resiliency v1.3.0
