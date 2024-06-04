@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"strings"
 
@@ -223,26 +222,21 @@ func parseImageManifest(sbom domain.SBOM) (*containerscan.ImageManifest, error) 
 	if sbom.Content == nil {
 		return nil, nil
 	}
-
-	var rawManifest domain.RawImageManifest
+	var rawManifest source.ImageMetadata
 	if err := json.Unmarshal(sbom.Content.SyftSource.Metadata, &rawManifest); err != nil {
 		return nil, err
 	}
 
-	configData, err := base64.StdEncoding.DecodeString(rawManifest.Config)
+	var config v1.ConfigFile
+	err := json.Unmarshal(rawManifest.RawConfig, &config)
 	if err != nil {
-		return nil, err
-	}
-
-	var config domain.ImageConfig
-	if err := json.Unmarshal(configData, &config); err != nil {
 		return nil, err
 	}
 
 	imageManifest := containerscan.ImageManifest{
 		Architecture: config.Architecture,
 		OS:           config.OS,
-		Size:         rawManifest.ImageSize,
+		Size:         rawManifest.Size,
 		Layers:       []containerscan.ESLayer{},
 	}
 
@@ -251,7 +245,7 @@ func parseImageManifest(sbom domain.SBOM) (*containerscan.ImageManifest, error) 
 		layerInfo := containerscan.ESLayer{
 			LayerInfo: &containerscan.LayerInfo{
 				CreatedBy:   historyLayer.CreatedBy,
-				CreatedTime: &historyLayer.Created,
+				CreatedTime: &historyLayer.Created.Time,
 				LayerOrder:  i,
 			},
 		}
