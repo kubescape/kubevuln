@@ -20,12 +20,6 @@ func TestBrokenStore_GetSBOM(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestBrokenStore_GetSBOMp(t *testing.T) {
-	b := NewBrokenStorage()
-	_, err := b.GetSBOMp(context.TODO(), "", "")
-	assert.Error(t, err)
-}
-
 func TestBrokenStore_StoreCVE(t *testing.T) {
 	b := NewBrokenStorage()
 	err := b.StoreCVE(context.TODO(), domain.CVEManifest{}, false)
