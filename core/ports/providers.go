@@ -25,5 +25,5 @@ type Platform interface {
 	GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error)
 	ReportError(ctx context.Context, err error) error
 	SendStatus(ctx context.Context, step int) error
-	SubmitCVE(ctx context.Context, sbom domain.SBOM, cve domain.CVEManifest, cvep domain.CVEManifest) error
+	SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error
 }

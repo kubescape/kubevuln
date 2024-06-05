@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/anchore/grype/grype/search"
@@ -218,12 +219,13 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 
 }
 
-func parseImageManifest(sbom domain.SBOM) (*containerscan.ImageManifest, error) {
-	if sbom.Content == nil {
-		return nil, nil
+func parseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
+	if grypeDocument == nil || grypeDocument.Source == nil {
+		return nil, fmt.Errorf("empty grype document")
 	}
+
 	var rawManifest source.ImageMetadata
-	if err := json.Unmarshal(sbom.Content.SyftSource.Metadata, &rawManifest); err != nil {
+	if err := json.Unmarshal(grypeDocument.Source.Target, &rawManifest); err != nil {
 		return nil, err
 	}
 

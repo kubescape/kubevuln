@@ -284,7 +284,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			helpers.String("imageSlug", workload.ImageSlug))
 	}
 	// submit CVE manifest to platform
-	err = s.platform.SubmitCVE(ctx, sbom, cve, cvep)
+	err = s.platform.SubmitCVE(ctx, cve, cvep)
 	if err != nil {
 		return fmt.Errorf("error submitting CVEs: %w", err)
 	}
@@ -359,7 +359,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			helpers.String("imageSlug", workload.ImageSlug))
 	}
 	// submit CVE manifest to platform
-	err = s.platform.SubmitCVE(ctx, sbom, cve, domain.CVEManifest{})
+	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 	if err != nil {
 		return err
 	}

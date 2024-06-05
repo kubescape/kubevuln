@@ -193,48 +193,44 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-			if err := a.SubmitCVE(ctx, domain.SBOM{}, tt.cve, tt.cvep); (err != nil) != tt.wantErr {
+			if err := a.SubmitCVE(ctx, tt.cve, tt.cvep); (err != nil) != tt.wantErr {
 				t.Errorf("SubmitCVE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-//go:embed testdata/nginx-sbom-metadata.json
+//go:embed testdata/nginx-document-source.json
 var nginxSBOMMetadata []byte
 
 func TestParseImageManifest(t *testing.T) {
 	tests := []struct {
 		name     string
-		sbom     domain.SBOM
+		document *v1beta1.GrypeDocument
 		expected *containerscan.ImageManifest
 		wantErr  bool
 	}{
 		{
-			name:     "empty sbom",
-			sbom:     domain.SBOM{},
-			expected: nil,
+			name:     "empty document",
+			document: nil,
+			wantErr:  true,
 		},
 		{
 			name: "malformed metadata base64 config",
-			sbom: domain.SBOM{
-				Content: &v1beta1.SyftDocument{
-					SyftSource: v1beta1.SyftSource{
-						Metadata: []byte(`{
+			document: &v1beta1.GrypeDocument{
+				Source: &v1beta1.Source{
+					Target: []byte(`{
 									"config": "eyJhcmNoaXRlY3R1cmUiOiJhcm02NCIs"
 									}`),
-					},
 				},
 			},
 			wantErr: true,
 		},
 		{
-			name: "valid sbom",
-			sbom: domain.SBOM{
-				Content: &v1beta1.SyftDocument{
-					SyftSource: v1beta1.SyftSource{
-						Metadata: nginxSBOMMetadata,
-					},
+			name: "valid document",
+			document: &v1beta1.GrypeDocument{
+				Source: &v1beta1.Source{
+					Target: nginxSBOMMetadata,
 				},
 			},
 			expected: fileToType[containerscan.ImageManifest]("testdata/nginx-image-manifest.json"),
@@ -242,7 +238,7 @@ func TestParseImageManifest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			imageManifest, err := parseImageManifest(tt.sbom)
+			imageManifest, err := parseImageManifest(tt.document)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
