@@ -88,6 +88,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				tt.storage,
 				false)
 			ctx := context.TODO()
@@ -252,6 +253,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 				cveAdapter,
 				storageCVE,
 				adapters.NewMockPlatform(tt.wantEmptyReport),
+				adapters.NewMockRelevancyAdapter(),
 				tt.storage,
 				false)
 			ctx := context.TODO()
@@ -328,7 +330,8 @@ func TestScanService_NginxTest(t *testing.T) {
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true, false)
+	relevancyProvider := adapters.NewMockRelevancyAdapter()
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		ContainerName: "nginx",
@@ -387,6 +390,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
@@ -432,6 +436,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
@@ -489,6 +494,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
@@ -550,6 +556,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
