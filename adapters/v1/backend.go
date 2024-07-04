@@ -86,11 +86,11 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
-			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
-			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
-			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
-			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
-			"scope.containerName": workload.ContainerName,
+			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid) + ",*/*",
+			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid) + ",*/*",
+			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)) + ",*/*",
+			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid) + ",*/*",
+			"scope.containerName": workload.ContainerName + ",*/*",
 		},
 	}
 
