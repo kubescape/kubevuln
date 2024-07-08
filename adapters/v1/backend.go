@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +31,7 @@ type BackendAdapter struct {
 	eventReceiverRestURL string
 	apiServerRestURL     string
 	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc func(string, string, *url.Values, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
 	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool)
 	accessKey            string
@@ -46,7 +46,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		},
 		eventReceiverRestURL: eventReceiverRestURL,
 		apiServerRestURL:     apiServerRestURL,
-		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
+		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByRawQuery,
 		httpPostFunc:         httputils.HttpPostWithRetry,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
@@ -58,6 +58,8 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 const ActionName = "vuln scan"
 const ReporterName = "ca-vuln-scan"
 const maxBodySize int = 30000
+
+const globalRegex = "*/*"
 
 var details = []string{
 	"Inqueueing",
@@ -82,19 +84,15 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		return nil, domain.ErrCastingWorkload
 	}
 
-	designator := identifiers.PortalDesignator{
-		DesignatorType: identifiers.DesignatorAttribute,
-		Attributes: map[string]string{
-			"customerGUID":        a.clusterConfig.AccountID,
-			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid) + ",*/*",
-			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid) + ",*/*",
-			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)) + ",*/*",
-			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid) + ",*/*",
-			"scope.containerName": workload.ContainerName + ",*/*",
-		},
+	urlQuery := &url.Values{
+		"scope.cluster":       []string{wlidpkg.GetClusterFromWlid(workload.Wlid), globalRegex},
+		"scope.namespace":     []string{workload.Wlid, globalRegex},
+		"scope.kind":          []string{wlidpkg.GetKindFromWlid(workload.Wlid), globalRegex},
+		"scope.name":          []string{wlidpkg.GetNameFromWlid(workload.Wlid), globalRegex},
+		"scope.containerName": []string{workload.ContainerName, globalRegex},
 	}
-
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
+	urlQuery.Add("customerGUID", a.clusterConfig.AccountID)
+	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, urlQuery, a.getRequestHeaders())
 	if err != nil {
 		return nil, err
 	}
