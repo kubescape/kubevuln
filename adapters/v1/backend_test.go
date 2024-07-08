@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
-	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/google/uuid"
@@ -29,7 +29,7 @@ import (
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
-		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+		getCVEExceptionsFunc func(string, string, *url.Values, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 		clusterConfig        armometadata.ClusterConfig
 	}
 	tests := []struct {
@@ -184,7 +184,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				getCVEExceptionsFunc: func(s, a string, designator *url.Values, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 					return tt.exceptions, nil
 				},
 				httpPostFunc: httpPostFunc,
