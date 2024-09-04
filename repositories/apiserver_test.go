@@ -140,7 +140,7 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	cvep := domain.CVEManifest{
 		Name: name,
 		Content: &v1beta1.GrypeDocument{
-			Descriptor: v1beta1.Descriptor{
+			Descriptor_: v1beta1.Descriptor{
 				Version: "v1.0.0",
 			},
 		},
@@ -155,12 +155,12 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 	err := a.StoreCVE(ctx, cvep, true)
 	require.NoError(t, err)
-	cvep.Content.Descriptor.Version = "v1.1.0"
+	cvep.Content.Descriptor_.Version = "v1.1.0"
 	err = a.StoreCVE(ctx, cvep, true)
 	assert.NoError(t, err)
 	got, err := a.GetCVE(ctx, name, "", "", "")
 	require.NoError(t, err)
-	assert.Equal(t, got.Content.Descriptor.Version, "v1.1.0")
+	assert.Equal(t, got.Content.Descriptor_.Version, "v1.1.0")
 }
 
 func TestAPIServerStore_GetSBOM(t *testing.T) {
@@ -347,12 +347,12 @@ func TestAPIServerStore_GetSBOMp(t *testing.T) {
 }
 
 func TestAPIServerStore_parseSeverities(t *testing.T) {
-	var nginxCVECriticalSeveritiesNumber = 72
-	var nginxCVEHighSeveritiesNumber = 128
-	var nginxCVEMediumSeveritiesNumber = 98
-	var nginxCVELowSeveritiesNumber = 56
-	var nginxCVENegligibleSeveritiesNumber = 102
-	var nginxCVEUnknownSeveritiesNumber = 0
+	nginxCVECriticalSeveritiesNumber := int64(72)
+	nginxCVEHighSeveritiesNumber := int64(128)
+	nginxCVEMediumSeveritiesNumber := int64(98)
+	nginxCVELowSeveritiesNumber := int64(56)
+	nginxCVENegligibleSeveritiesNumber := int64(102)
+	nginxCVEUnknownSeveritiesNumber := int64(0)
 
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	severities := parseSeverities(cveManifest, cveManifest, false)
@@ -363,12 +363,12 @@ func TestAPIServerStore_parseSeverities(t *testing.T) {
 	assert.Equal(t, nginxCVENegligibleSeveritiesNumber, severities.Negligible.All)
 	assert.Equal(t, nginxCVEUnknownSeveritiesNumber, severities.Unknown.All)
 
-	assert.Equal(t, 0, severities.Critical.Relevant)
-	assert.Equal(t, 0, severities.High.Relevant)
-	assert.Equal(t, 0, severities.Medium.Relevant)
-	assert.Equal(t, 0, severities.Low.Relevant)
-	assert.Equal(t, 0, severities.Negligible.Relevant)
-	assert.Equal(t, 0, severities.Unknown.Relevant)
+	assert.Equal(t, int64(0), severities.Critical.Relevant)
+	assert.Equal(t, int64(0), severities.High.Relevant)
+	assert.Equal(t, int64(0), severities.Medium.Relevant)
+	assert.Equal(t, int64(0), severities.Low.Relevant)
+	assert.Equal(t, int64(0), severities.Negligible.Relevant)
+	assert.Equal(t, int64(0), severities.Unknown.Relevant)
 
 	severities = parseSeverities(cveManifest, cveManifest, true)
 	assert.Equal(t, nginxCVECriticalSeveritiesNumber, severities.Critical.All)
