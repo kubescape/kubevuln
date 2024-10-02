@@ -11,7 +11,13 @@ import (
 	"strings"
 	"time"
 
+	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
@@ -35,29 +41,31 @@ const (
 // ScanService implements ScanService from ports, this is the business component
 // business logic should be independent of implementations
 type ScanService struct {
-	sbomCreator     ports.SBOMCreator
-	sbomRepository  ports.SBOMRepository
-	cveScanner      ports.CVEScanner
-	cveRepository   ports.CVERepository
-	platform        ports.Platform
-	storage         bool
-	vexGeneration   bool
-	tooManyRequests *cache.Cache
+	sbomCreator       ports.SBOMCreator
+	sbomRepository    ports.SBOMRepository
+	cveScanner        ports.CVEScanner
+	cveRepository     ports.CVERepository
+	platform          ports.Platform
+	relevancyProvider ports.Relevancy
+	storage           bool
+	vexGeneration     bool
+	tooManyRequests   *cache.Cache
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool, vexGeneration bool) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, relevancyProvider ports.Relevancy, storage bool, vexGeneration bool) *ScanService {
 	return &ScanService{
-		sbomCreator:     sbomCreator,
-		sbomRepository:  sbomRepository,
-		cveScanner:      cveScanner,
-		cveRepository:   cveRepository,
-		platform:        platform,
-		storage:         storage,
-		vexGeneration:   vexGeneration,
-		tooManyRequests: cache.New(cleaningInterval),
+		sbomCreator:       sbomCreator,
+		sbomRepository:    sbomRepository,
+		cveScanner:        cveScanner,
+		cveRepository:     cveRepository,
+		platform:          platform,
+		relevancyProvider: relevancyProvider,
+		storage:           storage,
+		vexGeneration:     vexGeneration,
+		tooManyRequests:   cache.New(cleaningInterval),
 	}
 }
 
@@ -154,8 +162,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	}
 
 	sbom := domain.SBOM{}
-	// if CVE manifest is not available, create it
-	if cve.Content == nil {
+	// check if we need SBOM
+	if cve.Content == nil || (s.storage && workload.InstanceID != "") {
 		// check if SBOM is already available
 		if s.storage {
 			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
@@ -187,7 +195,10 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 			return domain.ErrIncompleteSBOM
 		}
+	}
 
+	// if CVE manifest is not available, create it
+	if cve.Content == nil {
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
@@ -220,30 +231,29 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
-	// check if SBOM' is already available
+	// generate SBOM' from SBOM and relevant files
 	sbomp := domain.SBOM{}
 	if s.storage && workload.InstanceID != "" {
-		sbomp, err = s.sbomRepository.GetSBOMp(ctx, workload.InstanceID, s.sbomCreator.Version())
+		instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(workload.InstanceID)
 		if err != nil {
-			if errors.Is(err, domain.ErrSBOMWithPartialArtifacts) {
-				// sometimes the SBOM' is not complete, so we need to update it
-				// this is a workaround so users will not need to restart
-				if sbomp.Content != nil && sbom.Content != nil {
-					for i := range sbomp.Content.Artifacts {
-						for j := range sbom.Content.Artifacts {
-							if sbomp.Content.Artifacts[i].ID == sbom.Content.Artifacts[j].ID {
-								sbomp.Content.Artifacts[i] = sbom.Content.Artifacts[j]
-								break
-							}
-						}
-					}
-				}
-			} else {
-				logger.L().Ctx(ctx).Warning("error getting relevant SBOM", helpers.Error(err),
-					helpers.String("instanceID", workload.InstanceID))
-			}
+			logger.L().Ctx(ctx).Warning("error generating instance id from string", helpers.Error(err),
+				helpers.String("instanceID", workload.InstanceID))
 		}
-
+		apName, err := instanceID.GetSlug(true)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error getting slug from instance id", helpers.Error(err),
+				helpers.String("instanceID", workload.InstanceID))
+		}
+		relevantFiles, labels, err := s.relevancyProvider.GetRelevantFiles(ctx, wlidpkg.GetNamespaceFromWlid(workload.Wlid), apName, workload.ContainerName)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error getting relevant files", helpers.Error(err),
+				helpers.String("instanceID", workload.InstanceID))
+		}
+		sbomp, err = filterSBOM(sbom, instanceID, workload.Wlid, relevantFiles, labels)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("error filtering SBOM", helpers.Error(err),
+				helpers.String("instanceID", workload.InstanceID))
+		}
 	}
 
 	// with SBOM' we can scan for CVE'
@@ -472,6 +482,100 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 	}
 
 	return parsedURL.Host
+}
+
+func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string) (domain.SBOM, error) {
+	name, err := instanceID.GetSlug(false)
+	if err != nil {
+		return domain.SBOM{}, fmt.Errorf("error getting slug from instance id: %w", err)
+	}
+	filteredSBOM := domain.SBOM{
+		Name: name,
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:       sbom.Annotations[helpersv1.ImageIDMetadataKey],
+			helpersv1.ImageTagMetadataKey:      sbom.Annotations[helpersv1.ImageTagMetadataKey],
+			helpersv1.InstanceIDMetadataKey:    instanceID.GetStringFormatted(),
+			helpersv1.StatusMetadataKey:        sbom.Annotations[helpersv1.StatusMetadataKey],
+			helpersv1.WlidMetadataKey:          wlid,
+			helpersv1.ContainerNameMetadataKey: labels[helpersv1.ContainerNameMetadataKey],
+		},
+		Labels:             labels,
+		SBOMCreatorName:    sbom.SBOMCreatorName,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		Status:             sbom.Status,
+		Content: &v1beta1.SyftDocument{
+			SyftSource:     sbom.Content.SyftSource,
+			Distro:         sbom.Content.Distro,
+			SyftDescriptor: sbom.Content.SyftDescriptor,
+			Schema:         sbom.Content.Schema,
+		},
+	}
+	addedArtifactIDs := mapset.NewSet[string]()
+	addedFileIDs := mapset.NewSet[string]()
+	addedRelationshipIDs := mapset.NewSet[string]()
+
+	// filter relevant files with dynamic paths
+	var dynamicPaths []string
+	relevantFiles.Each(func(file string) bool {
+		if strings.Contains(file, dynamicpathdetector.DynamicIdentifier) {
+			dynamicPaths = append(dynamicPaths, file)
+		}
+		return false
+	})
+
+	// filter relevant file list
+	for _, f := range sbom.Content.Files {
+		// the .location.realPath is not the ID of the file, that's why the map identifier is the ID and not the path
+		if !addedFileIDs.Contains(f.ID) {
+			// try direct match first
+			if relevantFiles.Contains(f.Location.RealPath) {
+				addedFileIDs.Add(f.ID)
+				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
+				continue
+			}
+			// then try dynamic match (expensive lookup)
+			for _, dynamicPath := range dynamicPaths {
+				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
+					addedFileIDs.Add(f.ID)
+					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
+					break
+				}
+			}
+		}
+	}
+
+	// filter relevant relationships. A relationship is relevant if the child is a relevant file
+	relationshipsArtifacts := mapset.NewSet[string]()
+	for _, relationship := range sbom.Content.ArtifactRelationships {
+		if addedFileIDs.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) { // if the child is a relevant file
+			relationshipsArtifacts.Add(relationship.Parent)
+			addedRelationshipIDs.Add(getRelationshipID(relationship))
+			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
+		}
+	}
+
+	// Add children of relevant relationships (that the parent is not relevant)
+	for _, relationship := range sbom.Content.ArtifactRelationships {
+		if relationshipsArtifacts.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
+			relationshipsArtifacts.Add(relationship.Parent)
+			addedRelationshipIDs.Add(getRelationshipID(relationship))
+			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
+		}
+	}
+
+	// filter relevant artifacts. An artifact is relevant if it is in the relevant relationships
+	for _, artifact := range sbom.Content.Artifacts {
+		if relationshipsArtifacts.Contains(artifact.ID) && !addedArtifactIDs.Contains(artifact.ID) {
+			addedArtifactIDs.Add(artifact.ID)
+			filteredSBOM.Content.Artifacts = append(filteredSBOM.Content.Artifacts, artifact)
+		}
+	}
+
+	return filteredSBOM, nil
+}
+
+func getRelationshipID(relationship v1beta1.SyftRelationship) string {
+	return fmt.Sprintf("%s/%s/%s", relationship.Parent, relationship.Child, relationship.Type)
 }
 
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
