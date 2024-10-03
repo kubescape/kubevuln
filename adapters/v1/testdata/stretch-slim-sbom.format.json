@@ -77,8 +77,10 @@
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
           "java-archive-cataloger",
+          "java-jvm-cataloger",
           "javascript-package-cataloger",
           "linux-kernel-cataloger",
+          "lua-rock-cataloger",
           "nix-store-cataloger",
           "php-composer-installed-cataloger",
           "php-pecl-serialized-cataloger",
@@ -120,6 +122,7 @@
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
+          "util-linux-binary",
           "haproxy-binary",
           "perl-binary",
           "php-cli-binary",
@@ -129,6 +132,7 @@
           "httpd-binary",
           "memcached-binary",
           "traefik-binary",
+          "arangodb-binary",
           "postgresql-binary",
           "mysql-binary",
           "mysql-binary",
@@ -139,12 +143,28 @@
           "rust-standard-library-macos",
           "ruby-binary",
           "erlang-binary",
+          "erlang-alpine-binary",
+          "erlang-library",
+          "swipl-binary",
+          "dart-binary",
+          "haskell-ghc-binary",
+          "haskell-cabal-binary",
+          "haskell-stack-binary",
           "consul-binary",
           "nginx-binary",
           "bash-binary",
           "openssl-binary",
           "gcc-binary",
-          "wordpress-cli-binary"
+          "fluent-bit-binary",
+          "wordpress-cli-binary",
+          "curl-binary",
+          "lighttpd-binary",
+          "proftpd-binary",
+          "zstd-binary",
+          "xz-binary",
+          "gzip-binary",
+          "sqlcipher-binary",
+          "jq-binary"
         ],
         "golang": {
           "local-mod-cache-dir": "<<PRESENCE>>",
@@ -164,7 +184,9 @@
           "include-indexed-archives": true,
           "include-unindexed-archives": false,
           "maven-base-url": "https://repo1.maven.org/maven2",
-          "max-parent-recursive-depth": 5,
+          "maven-localrepository-dir": "<<PRESENCE>>",
+          "max-parent-recursive-depth": 0,
+          "use-maven-localrepository": false,
           "use-network": false
         },
         "javascript": {
@@ -189,7 +211,7 @@
     }
   },
   "schema": {
-    "version": "16.0.7",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.7.json"
+    "version": "16.0.17",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.17.json"
   }
 }

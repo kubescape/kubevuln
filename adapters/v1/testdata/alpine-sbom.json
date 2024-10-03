@@ -5366,7 +5366,7 @@
     }
   },
   "schema": {
-    "version": "16.0.7",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.7.json"
+    "version": "16.0.17",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.17.json"
   }
 }
