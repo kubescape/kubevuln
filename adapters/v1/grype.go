@@ -57,8 +57,8 @@ func NewGrypeAdapter(listingURL string) *GrypeAdapter {
 func NewGrypeAdapterFixedDB() *GrypeAdapter {
 	g := &GrypeAdapter{
 		dbConfig: db.Config{
-			DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
-			ListingURL: "http://localhost:8000/listing.json",
+			DBRootDir:  path.Join(xdg.CacheHome, "grype-fixed", "db"),
+			ListingURL: "http://localhost:80/listing.json",
 		},
 	}
 	return g

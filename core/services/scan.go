@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,7 +48,7 @@ type ScanService struct {
 	cveRepository     ports.CVERepository
 	platform          ports.Platform
 	relevancyProvider ports.Relevancy
-	sbomGeneration  bool
+	sbomGeneration    bool
 	storage           bool
 	vexGeneration     bool
 	tooManyRequests   *cache.Cache
@@ -64,7 +65,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		cveRepository:     cveRepository,
 		platform:          platform,
 		relevancyProvider: relevancyProvider,
-		sbomGeneration:  sbomGeneration,
+		sbomGeneration:    sbomGeneration,
 		storage:           storage,
 		vexGeneration:     vexGeneration,
 		tooManyRequests:   cache.New(cleaningInterval),
@@ -253,6 +254,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			logger.L().Ctx(ctx).Warning("error getting slug from instance id", helpers.Error(err),
 				helpers.String("instanceID", workload.InstanceID))
 		}
+		// FIXME retry if error?
 		relevantFiles, labels, err := s.relevancyProvider.GetRelevantFiles(ctx, wlidpkg.GetNamespaceFromWlid(workload.Wlid), apName, workload.ContainerName)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting relevant files", helpers.Error(err),
@@ -263,6 +265,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			logger.L().Ctx(ctx).Warning("error filtering SBOM", helpers.Error(err),
 				helpers.String("instanceID", workload.InstanceID))
 		}
+		b, _ := json.Marshal(sbomp.Content)
+		os.WriteFile("/tmp/sbomp.json", b, 0644)
 	}
 
 	// with SBOM' we can scan for CVE'
@@ -547,6 +551,9 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
 					addedFileIDs.Add(f.ID)
 					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
+					if strings.Contains(f.Location.RealPath, "node-fetch") {
+						fmt.Println(f.Location.RealPath)
+					}
 					break
 				}
 			}

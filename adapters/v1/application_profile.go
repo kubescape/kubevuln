@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -23,11 +24,17 @@ func NewApplicationProfileAdapter(repository ports.ApplicationProfileRepository)
 }
 
 func (a *ApplicationProfileAdapter) GetRelevantFiles(ctx context.Context, namespace, name, container string) (mapset.Set[string], map[string]string, error) {
+	// we have to return non-nil mapset.Set[string] and map[string]string
+	files := mapset.NewSet[string]()
+	labels := map[string]string{}
 	applicationProfile, err := a.repository.GetApplicationProfile(ctx, namespace, name)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetApplicationProfile: %w", err)
+		return files, labels, fmt.Errorf("GetApplicationProfile: %w", err)
 	}
-	files := mapset.NewSet[string]()
+	maps.Insert(labels, maps.All(applicationProfile.Labels))
+	if status, ok := labels[helpersv1.StatusMetadataKey]; !ok || status != helpersv1.Ready {
+		return files, labels, fmt.Errorf("application profile %s/%s is not ready", namespace, name)
+	}
 	for _, c := range slices.Concat(applicationProfile.Spec.Containers, applicationProfile.Spec.InitContainers, applicationProfile.Spec.EphemeralContainers) {
 		if c.Name == container {
 			for _, f := range c.Execs {
@@ -39,7 +46,6 @@ func (a *ApplicationProfileAdapter) GetRelevantFiles(ctx context.Context, namesp
 			break
 		}
 	}
-	labels := applicationProfile.Labels
 	labels[helpersv1.ContainerNameMetadataKey] = container
 	return files, labels, nil
 }

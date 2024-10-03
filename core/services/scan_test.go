@@ -333,10 +333,10 @@ func fileToApplicationProfile(path string) v1beta1.ApplicationProfile {
 }
 
 func TestScanService_NginxTest(t *testing.T) {
-	imageHash := "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+	imageHash := "docker.io/requarks/wiki@sha256:dd83fff15e77843ff934b25c28c865ac000edf7653e5d11adad1dd51df87439d"
 	imageSlug := "name"
-	instanceID := "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-nginx-bf5d5cf98/containerName-nginx"
-	slug := "replicaset-nginx-bf5d5cf98-nginx-b532-f893"
+	instanceID := "apiVersion-apps/v1/namespace-default/kind-ReplicaSet/name-wikijs-7c6fb4c46d/containerName-wikijs"
+	slug := "replicaset-wikijs-7c6fb4c46d-wikijs-6cf3-4c39"
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	go func() {
@@ -351,7 +351,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
-		ContainerName: "nginx",
+		ContainerName: "wikijs",
 		ImageHash:     imageHash,
 		ImageSlug:     imageSlug,
 		ImageTag:      "docker.io/library/nginx:1.14.1",
