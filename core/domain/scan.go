@@ -20,6 +20,7 @@ var (
 	ErrSBOMWithPartialArtifacts = errors.New("SBOM having partial artifacts")
 	ErrInvalidScanID            = errors.New("invalid scanID")
 	ErrMissingImageInfo         = errors.New("missing image information")
+	ErrMissingSBOM              = errors.New("missing SBOM")
 	ErrMissingScanID            = errors.New("missing scanID")
 	ErrMissingTimestamp         = errors.New("missing timestamp")
 	ErrCastingWorkload          = errors.New("casting workload")
@@ -37,14 +38,15 @@ type ScanCommand struct {
 	ImageSlug          string
 	InstanceID         string
 	Wlid               string
-	ImageTag           string
-	JobID              string
-	ContainerName      string
-	ParentJobID        string
-	ImageHash          string
-	CredentialsList    []registry.AuthConfig
-	Session            Session
-	LastAction         int
+	// deprecated
+	ImageTag        string
+	JobID           string
+	ContainerName   string
+	ParentJobID     string
+	ImageHash       string
+	CredentialsList []registry.AuthConfig
+	Session         Session
+	LastAction      int
 }
 
 type Session struct {

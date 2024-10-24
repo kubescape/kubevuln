@@ -51,7 +51,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTag", newScan.ImageTag),
+			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
@@ -64,7 +64,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 		if err != nil {
 			logger.L().Ctx(ctx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTag", newScan.ImageTag),
+				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
 	})
@@ -105,7 +105,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTag", newScan.ImageTag),
+			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
@@ -119,19 +119,20 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			logger.L().Ctx(ctx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
 				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTag", newScan.ImageTag),
+				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
 	})
 }
 
 func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanCommand {
+	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
 		ImageHash:          c.ImageHash,
 		Wlid:               c.Wlid,
 		ImageTag:           c.ImageTag,
-		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		ImageTagNormalized: imageTagNormalized,
 		JobID:              c.JobID,
 		ContainerName:      c.ContainerName,
 		LastAction:         c.LastAction,
@@ -139,7 +140,7 @@ func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanC
 		Args:               c.Args,
 		Session:            sessionChainToSession(c.Session),
 	}
-	if slug, err := names.ImageInfoToSlug(c.ImageTag, c.ImageHash); err == nil {
+	if slug, err := names.ImageInfoToSlug(imageTagNormalized, c.ImageHash); err == nil {
 		command.ImageSlug = slug
 	}
 	if c.InstanceID != nil {
@@ -173,7 +174,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTag", newScan.ImageTag),
+			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
 		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
 		return
@@ -186,7 +187,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 		if err != nil {
 			logger.L().Ctx(ctx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTag", newScan.ImageTag),
+				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 				helpers.String("imageHash", newScan.ImageHash))
 		}
 	})

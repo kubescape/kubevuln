@@ -67,6 +67,13 @@ func TestNormalizeReference(t *testing.T) {
 		want string
 	}{
 		{
+			name: "image tag only - assuming latest",
+			args: args{
+				ref: "nginx",
+			},
+			want: "docker.io/library/nginx:latest",
+		},
+		{
 			name: "image tag",
 			args: args{
 				ref: "nginx:latest",

@@ -40,6 +40,7 @@ type ScanService struct {
 	cveScanner      ports.CVEScanner
 	cveRepository   ports.CVERepository
 	platform        ports.Platform
+	sbomGeneration  bool
 	storage         bool
 	vexGeneration   bool
 	tooManyRequests *cache.Cache
@@ -48,13 +49,14 @@ type ScanService struct {
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool, vexGeneration bool) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, storage bool, vexGeneration bool, sbomGeneration bool) *ScanService {
 	return &ScanService{
 		sbomCreator:     sbomCreator,
 		sbomRepository:  sbomRepository,
 		cveScanner:      cveScanner,
 		cveRepository:   cveRepository,
 		platform:        platform,
+		sbomGeneration:  sbomGeneration,
 		storage:         storage,
 		vexGeneration:   vexGeneration,
 		tooManyRequests: cache.New(cleaningInterval),
@@ -71,6 +73,7 @@ func (s *ScanService) checkCreateSBOM(err error, key string) {
 }
 
 // GenerateSBOM implements the "Generate SBOM flow"
+// FIXME check if we still use this method
 func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
@@ -97,7 +100,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			return err
@@ -167,19 +170,25 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
-			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
-			s.checkCreateSBOM(err, workload.ImageHash)
-			if err != nil {
-				return fmt.Errorf("error creating SBOM: %w", err)
-			}
-			// store SBOM
-			if s.storage {
-				err = s.sbomRepository.StoreSBOM(ctx, sbom)
+			if s.sbomGeneration {
+				// create SBOM
+				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
+				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err),
-						helpers.String("imageSlug", workload.ImageSlug))
+					return fmt.Errorf("error creating SBOM: %w", err)
 				}
+				// store SBOM
+				if s.storage {
+					err = s.sbomRepository.StoreSBOM(ctx, sbom)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+				}
+			} else {
+				logger.L().Ctx(ctx).Warning("missing SBOM",
+					helpers.String("imageSlug", workload.ImageSlug))
+				return domain.ErrMissingSBOM
 			}
 		}
 
@@ -325,8 +334,8 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
-	s.checkCreateSBOM(err, workload.ImageTag)
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+	s.checkCreateSBOM(err, workload.ImageTagNormalized)
 	if err != nil {
 		repErr := s.platform.ReportError(ctx, err)
 		if repErr != nil {
@@ -400,8 +409,8 @@ func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 		return fmt.Sprintf("%s-%s", workload.InstanceID, scannerVersion)
 	}
 
-	if workload.ImageTag != "" && workload.ImageHash != "" {
-		sum := sha256.Sum256([]byte(workload.ImageTag + workload.ImageHash + scannerVersion))
+	if workload.ImageTagNormalized != "" && workload.ImageHash != "" {
+		sum := sha256.Sum256([]byte(workload.ImageTagNormalized + workload.ImageHash + scannerVersion))
 		if scanID := fmt.Sprintf("%x", sum); armotypes.ValidateContainerScanID(scanID) {
 			return scanID
 		}
@@ -421,7 +430,7 @@ func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
 	}
 
 	logger.L().Debug("created registryOptions from workload",
-		helpers.String("imageTag", workload.ImageTag),
+		helpers.String("imageTagNormalized", workload.ImageTagNormalized),
 		helpers.String("credentials", credentialsLog(options.Credentials)))
 	return options
 }
@@ -533,7 +542,7 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 
 	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
 	// validate inputs
-	if workload.ImageTag == "" || workload.ImageSlug == "" {
+	if workload.ImageTagNormalized == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
 	}
 	// add imageSlug to parent span
@@ -543,7 +552,7 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageTag); ok {
+	if _, ok := s.tooManyRequests.Get(workload.ImageTagNormalized); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
