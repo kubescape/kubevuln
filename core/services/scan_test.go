@@ -492,8 +492,8 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				false, false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
-				ImageSlug: "imageSlug",
-				ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
 			}
 			workload.CredentialsList = []registry.AuthConfig{
 				{
@@ -537,8 +537,8 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 		{
 			name: "with imageID",
 			workload: domain.ScanCommand{
-				ImageSlug: "imageSlug",
-				ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
 			},
 			wantErr: false,
 		},
@@ -574,8 +574,8 @@ func Test_generateScanID(t *testing.T) {
 			name: "generate scanID with imageHash",
 			args: args{
 				workload: domain.ScanCommand{
-					ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
-					ImageHash: "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
+					ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+					ImageHash:          "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
 				},
 			},
 			want: "2d0ee020566e8ff66542c5cd9e324111731c6a49d237fea3bd880448dac1a37f",
