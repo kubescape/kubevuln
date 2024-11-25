@@ -187,7 +187,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 			if getErr != nil {
 				return getErr
 			}
@@ -389,6 +389,10 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
+	if workloadNamespace == "" {
+		// fallback to default namespace
+		workloadNamespace = a.Namespace
+	}
 
 	manifest := v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
@@ -407,13 +411,10 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 			if getErr != nil {
 				return getErr
 			}
-			result.ResourceVersion = ""
-			result.UID = ""
-
 			// update the vulnerability manifest
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
