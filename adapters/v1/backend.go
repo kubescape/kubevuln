@@ -249,6 +249,12 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	if val, ok := workload.Args[identifiers.AttributeSensor]; ok {
 		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val.(string)
 	}
+	if val, ok := workload.Args[identifiers.AttributeRegistryID]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryID] = val.(string)
+	}
+	if val, ok := workload.Args[identifiers.AttributeRegistryScanID]; ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryScanID] = val.(string)
+	}
 	if val, ok := finalReport.Designators.Attributes[identifiers.AttributeKind]; ok {
 		if s, err := k8sinterface.GetGroupVersionResource(val); err == nil {
 			finalReport.Designators.Attributes[identifiers.AttributeApiVersion] = k8sinterface.JoinGroupVersion(s.Group, s.Version)
