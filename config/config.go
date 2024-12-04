@@ -11,17 +11,18 @@ import (
 )
 
 type Config struct {
-	AccountID       string        `mapstructure:"accountID"`
-	Namespace       string        `mapstructure:"namespace"`
-	ClusterName     string        `mapstructure:"clusterName"`
-	ListingURL      string        `mapstructure:"listingURL"`
-	MaxImageSize    int64         `mapstructure:"maxImageSize"`
-	MaxSBOMSize     int           `mapstructure:"maxSBOMSize"`
-	ScanConcurrency int           `mapstructure:"scanConcurrency"`
-	ScanTimeout     time.Duration `mapstructure:"scanTimeout"`
-	KeepLocal       bool          `mapstructure:"keepLocal"`
-	Storage         bool          `mapstructure:"storage"`
-	VexGeneration   bool          `mapstructure:"vexGeneration"`
+	AccountID          string        `mapstructure:"accountID"`
+	Namespace          string        `mapstructure:"namespace"`
+	ClusterName        string        `mapstructure:"clusterName"`
+	ListingURL         string        `mapstructure:"listingURL"`
+	MaxImageSize       int64         `mapstructure:"maxImageSize"`
+	MaxSBOMSize        int           `mapstructure:"maxSBOMSize"`
+	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
+	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
+	KeepLocal          bool          `mapstructure:"keepLocal"`
+	Storage            bool          `mapstructure:"storage"`
+	VexGeneration      bool          `mapstructure:"vexGeneration"`
+	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

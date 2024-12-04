@@ -89,7 +89,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				storage,
 				adapters.NewMockPlatform(false),
 				tt.storage,
-				false)
+				false, true)
 			ctx := context.TODO()
 
 			workload := domain.ScanCommand{
@@ -253,7 +253,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 				storageCVE,
 				adapters.NewMockPlatform(tt.wantEmptyReport),
 				tt.storage,
-				false)
+				false, true)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -328,7 +328,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true, false, true)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		ContainerName: "nginx",
@@ -387,7 +387,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
-				false, false)
+				false, false, true)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -432,7 +432,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
-				false, false)
+				false, false, true)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
@@ -489,11 +489,11 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(false),
-				false, false)
+				false, false, true)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
-				ImageSlug: "imageSlug",
-				ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
 			}
 			workload.CredentialsList = []registry.AuthConfig{
 				{
@@ -537,8 +537,8 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 		{
 			name: "with imageID",
 			workload: domain.ScanCommand{
-				ImageSlug: "imageSlug",
-				ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
 			},
 			wantErr: false,
 		},
@@ -550,7 +550,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
-				false, false)
+				false, false, true)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
@@ -574,8 +574,8 @@ func Test_generateScanID(t *testing.T) {
 			name: "generate scanID with imageHash",
 			args: args{
 				workload: domain.ScanCommand{
-					ImageTag:  "k8s.gcr.io/kube-proxy:v1.24.3",
-					ImageHash: "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
+					ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+					ImageHash:          "sha256:6f9c1c5b5b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b",
 				},
 			},
 			want: "2d0ee020566e8ff66542c5cd9e324111731c6a49d237fea3bd880448dac1a37f",

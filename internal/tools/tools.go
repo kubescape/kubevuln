@@ -106,5 +106,5 @@ func NormalizeReference(ref string) string {
 	if err != nil {
 		return ref
 	}
-	return n.String()
+	return reference.TagNameOnly(n).String()
 }
