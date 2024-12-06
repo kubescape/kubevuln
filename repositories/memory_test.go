@@ -31,8 +31,6 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 	ctx := context.TODO()
 	got, _ := m.GetSBOM(ctx, "name", "")
 	assert.Nil(t, got.Content)
-	got, _ = m.GetSBOMp(ctx, "name", "")
-	assert.Nil(t, got.Content)
 	sbom := domain.SBOM{
 		Name:               "name",
 		SBOMCreatorVersion: "",
@@ -41,7 +39,5 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 	}
 	_ = m.StoreSBOM(ctx, sbom)
 	got, _ = m.GetSBOM(ctx, "name", "")
-	assert.NotNil(t, got.Content)
-	got, _ = m.GetSBOMp(ctx, "name", "")
 	assert.NotNil(t, got.Content)
 }

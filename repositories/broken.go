@@ -11,6 +11,8 @@ import (
 
 type BrokenStore struct{}
 
+var _ ports.ApplicationProfileRepository = (*BrokenStore)(nil)
+
 var _ ports.CVERepository = (*BrokenStore)(nil)
 
 var _ ports.SBOMRepository = (*BrokenStore)(nil)
@@ -19,17 +21,18 @@ func NewBrokenStorage() *BrokenStore {
 	return &BrokenStore{}
 }
 
+func (b BrokenStore) GetApplicationProfile(ctx context.Context, _ string, _ string) (v1beta1.ApplicationProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetApplicationProfile")
+	defer span.End()
+	return v1beta1.ApplicationProfile{}, domain.ErrExpectedError
+}
+
 func (b BrokenStore) GetSBOM(ctx context.Context, _ string, _ string) (domain.SBOM, error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOM")
 	defer span.End()
 	return domain.SBOM{}, domain.ErrExpectedError
 }
 
-func (b BrokenStore) GetSBOMp(ctx context.Context, _ string, _ string) (domain.SBOM, error) {
-	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetSBOMp")
-	defer span.End()
-	return domain.SBOM{}, domain.ErrExpectedError
-}
 func (b BrokenStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetCVESummary")
 	defer span.End()

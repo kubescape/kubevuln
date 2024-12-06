@@ -150,3 +150,36 @@ func TestNormalizeReference(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveContainerFromSlug(t *testing.T) {
+	tests := []struct {
+		name      string
+		slug      string
+		container string
+		want      string
+	}{
+		{
+			name:      "naked pod",
+			slug:      "pod-nn-nn-7c1c-a197",
+			container: "nn",
+			want:      "pod-nn",
+		},
+		{
+			name:      "replicaset",
+			slug:      "replicaset-nginx-bf5d5cf98-nginx-b532-f893",
+			container: "nginx",
+			want:      "replicaset-nginx-bf5d5cf98",
+		},
+		{
+			name:      "tricky",
+			slug:      "replicaset-local-path-provisioner-988d74bc-local-path-provisioner-4b6b-20c0",
+			container: "local-path-provisioner",
+			want:      "replicaset-local-path-provisioner-988d74bc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, RemoveContainerFromSlug(tt.slug, tt.container))
+		})
+	}
+}

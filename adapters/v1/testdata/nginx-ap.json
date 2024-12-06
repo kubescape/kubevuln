@@ -1,0 +1,1365 @@
+{
+    "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+    "kind": "ApplicationProfile",
+    "metadata": {
+        "annotations": {
+            "kubescape.io/completion": "complete",
+            "kubescape.io/resource-size": "153",
+            "kubescape.io/status": "ready",
+            "kubescape.io/wlid": "wlid://cluster-kind-kind/namespace-default/deployment-wikijs"
+        },
+        "creationTimestamp": "2024-10-02T14:23:37Z",
+        "labels": {
+            "kubescape.io/instance-template-hash": "7c6fb4c46d",
+            "kubescape.io/workload-api-group": "apps",
+            "kubescape.io/workload-api-version": "v1",
+            "kubescape.io/workload-kind": "Deployment",
+            "kubescape.io/workload-name": "wikijs",
+            "kubescape.io/workload-namespace": "default",
+            "kubescape.io/workload-resource-version": "15984"
+        },
+        "name": "replicaset-wikijs-7c6fb4c46d",
+        "namespace": "default",
+        "resourceVersion": "2",
+        "uid": "3d172c4f-4afd-4dff-b7fd-e5112472cfb0"
+    },
+    "spec": {
+        "architectures": [
+            "amd64"
+        ],
+        "containers": [
+            {
+                "capabilities": [
+                    "DAC_OVERRIDE",
+                    "DAC_READ_SEARCH",
+                    "SETGID",
+                    "SETUID"
+                ],
+                "endpoints": null,
+                "execs": [
+                    {
+                        "args": [
+                            "/usr/local/bin/docker-entrypoint.sh",
+                            "node",
+                            "server"
+                        ],
+                        "path": "/usr/local/bin/docker-entrypoint.sh"
+                    },
+                    {
+                        "args": [
+                            "/usr/local/bin/node",
+                            "server"
+                        ],
+                        "path": "/usr/local/bin/node"
+                    }
+                ],
+                "imageID": "",
+                "imageTag": "",
+                "name": "wikijs",
+                "opens": [
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/dev/null"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/etc/hosts"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/etc/resolv.conf"
+                    },
+                    {
+                        "flags": [
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/etc/ssl/openssl.cnf"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_RDONLY"
+                        ],
+                        "path": "/proc/1/fd"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/proc/meminfo"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/usr/lib/libgcc_s.so.1"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/usr/lib/libstdc++.so.6.0.28"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/usr/local/bin/docker-entrypoint.sh"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/config.yml"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/CheckViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ConstraintViolationError/CheckViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ConstraintViolationError/ForeignKeyViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ConstraintViolationError/NotNullViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ConstraintViolationError/UniqueViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ConstraintViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/DataError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/EagerOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ForeignKeyViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphDelete.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphDeleteAction.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphInsert.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphInsertAction.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphPatch.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphPatchAction.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphRecursiveUpsert.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/GraphRecursiveUpsertAction.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/JoinEagerOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/JoinRowGraphInsertAction.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyDeleteOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyDeleteOperationBase.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyDeleteSqliteOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyFindOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyInsertOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyRelateOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUnrelateOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUnrelateOperationBase.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUnrelateSqliteOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUpdateOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUpdateOperationBase.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/ManyToManyUpdateSqliteOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/NaiveEagerOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/NotNullViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/SelectOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/Selection.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/UniqueViolationError/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereInCompositeMsSqlOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereInCompositeOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereInCompositeSqliteOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereInEagerOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereJsonHasPostgresOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereJsonNotObjectPostgresOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/WhereJsonPostgresOperation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/columncompiler.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/compiler.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/every-values-pair.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/find-component-in.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/function.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/has-inherit.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/index.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/is-component-of.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/is-mergeable-shorthand.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/decode.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/decode_codepoint.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/encode.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/index.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/maps/decode.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/maps/entities.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/maps/legacy.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/lib/maps/xml.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/merge-into-shorthands.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/optimize.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/override-properties.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/overrides-non-component-shorthand.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/package.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/parser.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/populate-components.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/postgresJsonApi.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/regexp.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/buffer_list.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/destroy.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/end-of-stream.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/pipeline.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/state.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/streams/stream.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/tablecompiler.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/undefined.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/understandable.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/util.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/node_modules/⋯/⋯/⋯/⋯/⋯/vendor-prefixes.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/package.json"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/app/data.yml"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/app/regex.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/core/config.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/core/db.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/core/kernel.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/core/logger.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/core/system.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/beta/index.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_DIRECTORY",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.0.0.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.1.85.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.2.17.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.2.3.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.3.10.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.3.23.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.4.13.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.4.14.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.4.36.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.4.61.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.1.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.108.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.118.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.12.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.122.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrations/2.5.128.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/db/migrator-source.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/helpers/asset.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/helpers/common.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/helpers/config.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/helpers/error.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/helpers/page.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/index.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_DIRECTORY",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/analytics.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/apiKeys.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/assetFolders.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/assets.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/authentication.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/commentProviders.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/comments.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/editors.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/groups.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/locales.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/loggers.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/navigation.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/pageHistory.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/pageLinks.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/pages.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/renderers.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/searchEngines.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/settings.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/storage.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/tags.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/userKeys.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/models/users.js"
+                    },
+                    {
+                        "flags": [
+                            "O_CLOEXEC",
+                            "O_LARGEFILE",
+                            "O_RDONLY"
+                        ],
+                        "path": "/wiki/server/setup.js"
+                    }
+                ],
+                "seccompProfile": {
+                    "spec": {
+                        "defaultAction": ""
+                    }
+                },
+                "syscalls": [
+                    "access",
+                    "arch_prctl",
+                    "bind",
+                    "brk",
+                    "capget",
+                    "capset",
+                    "chdir",
+                    "clock_getres",
+                    "clock_gettime",
+                    "clone",
+                    "close",
+                    "connect",
+                    "copy_file_range",
+                    "dup",
+                    "dup2",
+                    "epoll_create1",
+                    "epoll_ctl",
+                    "epoll_pwait",
+                    "eventfd2",
+                    "execve",
+                    "exit_group",
+                    "faccessat2",
+                    "fadvise64",
+                    "fchown",
+                    "fcntl",
+                    "fork",
+                    "fstat",
+                    "fstatfs",
+                    "futex",
+                    "getcwd",
+                    "getdents64",
+                    "getegid",
+                    "geteuid",
+                    "getgid",
+                    "getpgrp",
+                    "getpid",
+                    "getppid",
+                    "getrandom",
+                    "getsockopt",
+                    "gettid",
+                    "getuid",
+                    "ioctl",
+                    "listen",
+                    "lseek",
+                    "madvise",
+                    "membarrier",
+                    "mkdir",
+                    "mmap",
+                    "mount",
+                    "mprotect",
+                    "munmap",
+                    "nanosleep",
+                    "newfstatat",
+                    "open",
+                    "openat",
+                    "pipe",
+                    "pipe2",
+                    "poll",
+                    "prctl",
+                    "pread64",
+                    "prlimit64",
+                    "read",
+                    "readlink",
+                    "recvfrom",
+                    "rseq",
+                    "rt_sigaction",
+                    "rt_sigprocmask",
+                    "rt_sigreturn",
+                    "sendto",
+                    "set_robust_list",
+                    "set_tid_address",
+                    "setgid",
+                    "setgroups",
+                    "setsockopt",
+                    "setuid",
+                    "socket",
+                    "stat",
+                    "statfs",
+                    "statx",
+                    "sysinfo",
+                    "tgkill",
+                    "uname",
+                    "wait4",
+                    "write",
+                    "writev"
+                ]
+            }
+        ]
+    },
+    "status": {}
+}
