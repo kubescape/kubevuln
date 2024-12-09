@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
@@ -26,4 +27,9 @@ type Platform interface {
 	ReportError(ctx context.Context, err error) error
 	SendStatus(ctx context.Context, step int) error
 	SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error
+}
+
+// Relevancy is the port implemented by adapters to be used in ScanService to calculate filtered SBOMs
+type Relevancy interface {
+	GetRelevantFiles(ctx context.Context, namespace, name, container string) (mapset.Set[string], map[string]string, error)
 }
