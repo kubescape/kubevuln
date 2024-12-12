@@ -37,13 +37,6 @@ func (m MockPlatform) ReportError(ctx context.Context, _ error) error {
 	return nil
 }
 
-// SendStatus logs the given status and details
-func (m MockPlatform) SendStatus(ctx context.Context, _ int) error {
-	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SendStatus")
-	defer span.End()
-	return nil
-}
-
 // SubmitCVE logs the given ID for CVE calculation
 func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.SubmitCVE")

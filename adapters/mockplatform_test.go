@@ -14,14 +14,6 @@ func TestMockPlatform_GetCVEExceptions(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestMockPlatform_SendStatus(t *testing.T) {
-	m := NewMockPlatform(true)
-	ctx := context.TODO()
-	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-	err := m.SendStatus(ctx, domain.Done)
-	assert.NoError(t, err)
-}
-
 func TestMockPlatform_SubmitCVE(t *testing.T) {
 	m := NewMockPlatform(true)
 	ctx := context.TODO()
