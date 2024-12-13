@@ -33,24 +33,26 @@ import (
 
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	lastDbUpdate time.Time
-	dbCloser     *db.Closer
-	dbStatus     *db.Status
-	store        *store.Store
-	dbConfig     db.Config
-	mu           sync.RWMutex
+	lastDbUpdate       time.Time
+	dbCloser           *db.Closer
+	dbStatus           *db.Status
+	store              *store.Store
+	dbConfig           db.Config
+	mu                 sync.RWMutex
+	useDefaultMatchers bool
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
-func NewGrypeAdapter(listingURL string) *GrypeAdapter {
+func NewGrypeAdapter(listingURL string, useDefaultMatchers bool) *GrypeAdapter {
 	g := &GrypeAdapter{
 		dbConfig: db.Config{
 			DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
 			ListingURL: listingURL,
 		},
+		useDefaultMatchers: useDefaultMatchers,
 	}
 	return g
 }
@@ -137,7 +139,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	}
 	vulnMatcher := grype.VulnerabilityMatcher{
 		Store:          *g.store,
-		Matchers:       getMatchers(),
+		Matchers:       getMatchers(g.useDefaultMatchers),
 		NormalizeByCVE: true,
 	}
 
@@ -180,7 +182,10 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	}, nil
 }
 
-func getMatchers() []matcher.Matcher {
+func getMatchers(useDefaultMatchers bool) []matcher.Matcher {
+	if useDefaultMatchers {
+		return matcher.NewDefaultMatchers(defaultMatcherConfig())
+	}
 	return matcher.NewDefaultMatchers(
 		matcher.Config{
 			Java: java.MatcherConfig{
@@ -195,6 +200,25 @@ func getMatchers() []matcher.Matcher {
 			Stock:      stock.MatcherConfig{UseCPEs: true},
 		},
 	)
+}
+
+func defaultMatcherConfig() matcher.Config {
+	return matcher.Config{
+		Java: java.MatcherConfig{
+			ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
+			UseCPEs:              false,
+		},
+		Ruby:       ruby.MatcherConfig{UseCPEs: false},
+		Python:     python.MatcherConfig{UseCPEs: false},
+		Dotnet:     dotnet.MatcherConfig{UseCPEs: false},
+		Javascript: javascript.MatcherConfig{UseCPEs: false},
+		Golang: golang.MatcherConfig{
+			UseCPEs:                                false,
+			AlwaysUseCPEForStdlib:                  true,
+			AllowMainModulePseudoVersionComparison: false,
+		},
+		Stock: stock.MatcherConfig{UseCPEs: true},
+	}
 }
 
 // Version returns Grype's version which is used to tag CVE manifests

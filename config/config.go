@@ -23,6 +23,7 @@ type Config struct {
 	Storage            bool          `mapstructure:"storage"`
 	VexGeneration      bool          `mapstructure:"vexGeneration"`
 	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
+	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
