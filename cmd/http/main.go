@@ -63,7 +63,7 @@ func main() {
 		}
 	}
 	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize)
-	cveAdapter := v1.NewGrypeAdapter(c.ListingURL)
+	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform
 	if c.KeepLocal {
 		platform = adapters.NewMockPlatform(true)
