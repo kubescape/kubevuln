@@ -24,6 +24,7 @@ import (
 	"github.com/anchore/grype/grype/store"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -161,6 +162,10 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
+	// retrieve scanID from context and add it to the labels
+	scanID, _ := ctx.Value(domain.ScanIDKey{}).(string)
+	sbom.Labels[helpersv1.ScanIdMetadataKey] = scanID
+
 	logger.L().Debug("returning CVE manifest",
 		helpers.String("name", sbom.Name),
 		helpers.Int("vulnerabilities", len(vulnerabilityResults.Matches)))
@@ -170,7 +175,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		CVEScannerVersion:  g.Version(ctx),
 		CVEDBVersion:       g.DBVersion(ctx),
 		Annotations:        sbom.Annotations,
-		Labels:             sbom.Labels,
+		Labels:             sbom.Labels, // TODO add scanID
 		Content:            vulnerabilityResults,
 	}, nil
 }

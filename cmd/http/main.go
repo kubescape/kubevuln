@@ -75,7 +75,8 @@ func main() {
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
 		platform = v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey)
 	}
-	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, c.Storage, c.VexGeneration, !c.NodeSbomGeneration)
+	relevancyProvider := v1.NewApplicationProfileAdapter(storage)
+	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)
@@ -89,6 +90,7 @@ func main() {
 	{
 		group.Use(otelgin.Middleware("kubevuln-svc"))
 		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
+		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanAP)
 		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
 		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
 	}

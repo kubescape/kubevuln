@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types/registry"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestScanService_GenerateSBOM(t *testing.T) {
@@ -88,6 +90,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				tt.storage,
 				false, true)
 			ctx := context.TODO()
@@ -126,11 +129,186 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 	}
 }
 
+func TestScanService_ScanAP(t *testing.T) {
+	tests := []struct {
+		createSBOMError bool
+		name            string
+		slug            string
+		emptyWlid       bool
+		cveManifest     bool
+		sbom            bool
+		storage         bool
+		getErrorCVE     bool
+		getErrorSBOM    bool
+		storeErrorCVE   bool
+		storeErrorSBOM  bool
+		timeout         bool
+		workload        bool
+		wantCvep        bool
+		wantEmptyReport bool
+		wantErr         bool
+	}{
+		{
+			name:    "no workload",
+			wantErr: true,
+		},
+		{
+			name:     "no storage",
+			workload: true,
+		},
+		{
+			name:            "create SBOM error",
+			createSBOMError: true,
+			workload:        true,
+		},
+		{
+			name:      "empty wlid",
+			emptyWlid: true,
+			storage:   true,
+			workload:  true,
+		},
+		{
+			name:     "first scan",
+			storage:  true,
+			workload: true,
+		},
+		{
+			name:        "second scan",
+			storage:     true,
+			cveManifest: true,
+			sbom:        true,
+			workload:    true,
+		},
+		{
+			name:         "get SBOM failed",
+			getErrorSBOM: true,
+			storage:      true,
+			workload:     true,
+		},
+		{
+			name:           "store SBOM failed",
+			storeErrorSBOM: true,
+			storage:        true,
+			workload:       true,
+		},
+		{
+			name:        "get CVE failed",
+			getErrorCVE: true,
+			storage:     true,
+			workload:    true,
+		},
+		{
+			name:          "store CVE failed",
+			storeErrorCVE: true,
+			storage:       true,
+			workload:      true,
+		},
+		{
+			name:     "timeout SBOM",
+			sbom:     true,
+			storage:  true,
+			timeout:  true,
+			workload: true,
+		},
+		{
+			name:     "with SBOMp",
+			sbom:     true,
+			slug:     "daemonset-kube-proxy-kube-proxy-4e8b-ad45",
+			storage:  true,
+			workload: true,
+			wantCvep: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+			wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+			if tt.emptyWlid {
+				wlid = ""
+			}
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, false)
+			cveAdapter := adapters.NewMockCVEAdapter()
+			storageAP := repositories.NewMemoryStorage(false, false)
+			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
+			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
+			s := NewScanService(sbomAdapter,
+				storageSBOM,
+				cveAdapter,
+				storageCVE,
+				adapters.NewMockPlatform(tt.wantEmptyReport),
+				v1.NewApplicationProfileAdapter(storageAP),
+				tt.storage,
+				false, true)
+			ctx := context.TODO()
+			s.Ready(ctx)
+
+			workload := domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: "kube-system",
+				},
+				Wlid: wlid,
+			}
+			if tt.workload {
+				var err error
+				ctx, err = s.ValidateScanAP(ctx, workload)
+				require.NoError(t, err)
+			}
+			if tt.sbom {
+				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, "", domain.RegistryOptions{})
+				require.NoError(t, err)
+				_ = storageSBOM.StoreSBOM(ctx, sbom)
+				if tt.cveManifest {
+					cve, err := cveAdapter.ScanSBOM(ctx, sbom)
+					require.NoError(t, err)
+					_ = storageCVE.StoreCVE(ctx, cve, false)
+				}
+			}
+			ap := v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "daemonset-kube-proxy",
+					Namespace: "kube-system",
+					Annotations: map[string]string{
+						helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
+						helpersv1.StatusMetadataKey:     helpersv1.Ready,
+						helpersv1.WlidMetadataKey:       wlid,
+					},
+					Labels: map[string]string{"foo": "bar"},
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{{
+						Name: "kube-proxy",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/usr/local/bin/kube-proxy"},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/etc/kubernetes/kube-proxy.conf"},
+						},
+						ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+						ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+					}},
+				},
+			}
+			err := storageAP.StoreApplicationProfile(ctx, ap)
+			require.NoError(t, err)
+
+			if err := s.ScanAP(ctx); (err != nil) != tt.wantErr {
+				t.Errorf("ScanAP() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantCvep {
+				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+				require.NoError(t, err)
+				assert.NotNil(t, cvep.Labels)
+			}
+		})
+	}
+}
+
 func TestScanService_ScanCVE(t *testing.T) {
 	tests := []struct {
 		createSBOMError bool
 		name            string
-		instanceID      string
+		slug            string
 		emptyWlid       bool
 		cveManifest     bool
 		sbom            bool
@@ -142,7 +320,6 @@ func TestScanService_ScanCVE(t *testing.T) {
 		timeout         bool
 		toomanyrequests bool
 		workload        bool
-		wantCvep        bool
 		wantEmptyReport bool
 		wantErr         bool
 	}{
@@ -226,15 +403,6 @@ func TestScanService_ScanCVE(t *testing.T) {
 			workload: true,
 			wantErr:  true,
 		},
-		{
-			name:       "with SBOMp",
-			sbom:       true,
-			instanceID: "ee9bdd0adec9ce004572faf3492f583aa82042a8b3a9d5c7d9179dc03c531eef",
-			storage:    true,
-			workload:   true,
-			wantCvep:   true,
-			wantErr:    false,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,6 +413,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			}
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			cveAdapter := adapters.NewMockCVEAdapter()
+			storageAP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
 			s := NewScanService(sbomAdapter,
@@ -252,18 +421,17 @@ func TestScanService_ScanCVE(t *testing.T) {
 				cveAdapter,
 				storageCVE,
 				adapters.NewMockPlatform(tt.wantEmptyReport),
+				v1.NewApplicationProfileAdapter(storageAP),
 				tt.storage,
 				false, true)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
 			workload := domain.ScanCommand{
-				ImageSlug: "imageSlug",
-				ImageHash: imageHash,
-				Wlid:      wlid,
-			}
-			if tt.instanceID != "" {
-				workload.InstanceID = tt.instanceID
+				ImageSlug:     "imageSlug",
+				ContainerName: "kube-proxy",
+				ImageHash:     imageHash,
+				Wlid:          wlid,
 			}
 			if tt.workload {
 				var err error
@@ -280,25 +448,12 @@ func TestScanService_ScanCVE(t *testing.T) {
 					_ = storageCVE.StoreCVE(ctx, cve, false)
 				}
 			}
-			var sbomp domain.SBOM
-			if tt.instanceID != "" {
-				var err error
-				sbomp, err = sbomAdapter.CreateSBOM(ctx, tt.instanceID, tt.instanceID, "", domain.RegistryOptions{})
-				require.NoError(t, err)
-				sbomp.Labels = map[string]string{"foo": "bar"}
-				_ = storageSBOM.StoreSBOM(ctx, sbomp)
-			}
 			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
 				_, err := s.ValidateScanCVE(ctx, workload)
 				assert.Equal(t, domain.ErrTooManyRequests, err)
-			}
-			if tt.wantCvep {
-				cvep, err := storageCVE.GetCVE(ctx, sbomp.Name, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
-				require.NoError(t, err)
-				assert.NotNil(t, cvep.Labels)
 			}
 		})
 	}
@@ -315,47 +470,61 @@ func fileToSyftDocument(path string) *v1beta1.SyftDocument {
 	return &sbom
 }
 
+func fileToApplicationProfile(path string) v1beta1.ApplicationProfile {
+	ap := v1beta1.ApplicationProfile{}
+	_ = json.Unmarshal(fileContent(path), &ap)
+	return ap
+}
+
 func TestScanService_NginxTest(t *testing.T) {
-	imageHash := "docker.io/library/nginx@sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
-	imageSlug := "name"
-	instanceID := "1c83b589d90ba26957627525e08124b1a24732755a330924f7987e9d9e3952c1"
+	imageSlug := "docker.io-library-nginx-1.14.1-3dc228"
+	slug := "replicaset-nginx-75f48cbc54-nginx-10dc-2a65"
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	go func() {
 		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("../../adapters/v1/testdata")))
 	}()
 	cveAdapter := v1.NewGrypeAdapterFixedDB()
+	storageAP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, true, false, true)
+	relevancyProvider := v1.NewApplicationProfileAdapter(storageAP)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
-		ContainerName: "nginx",
-		ImageHash:     imageHash,
-		ImageSlug:     imageSlug,
-		ImageTag:      "docker.io/library/nginx:1.14.1",
-		InstanceID:    instanceID,
-		Wlid:          "wlid://cluster-minikube/namespace-default/deployment-nginx",
+		Args: map[string]interface{}{
+			domain.ArgsName:      "replicaset-nginx-75f48cbc54",
+			domain.ArgsNamespace: "default",
+		},
+		Wlid: "wlid://cluster-minikube/namespace-default/deployment-nginx",
 	}
-	ctx, _ = s.ValidateScanCVE(ctx, workload)
+	var err error
+	ctx, err = s.ValidateScanAP(ctx, workload)
+	require.NoError(t, err)
 	sbom := domain.SBOM{
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:      "docker.io/library/nginx@sha256:04ba374043ccd2fc5c593885c0eacddebabd5ca375f9323666f28dfd5a9710e3",
+			helpersv1.ImageTagMetadataKey:     "nginx",
+			helpersv1.ResourceSizeMetadataKey: "3896210",
+			helpersv1.StatusMetadataKey:       helpersv1.Ready,
+		},
+		Labels: map[string]string{
+			helpersv1.ImageIDMetadataKey:   "docker-io-library-nginx-sha256-04ba374043ccd2fc5c593885c0eacdde",
+			helpersv1.ImageNameMetadataKey: "docker-io-library-nginx",
+		},
 		Name:               imageSlug,
 		Content:            fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
-	err := storageSBOM.StoreSBOM(ctx, sbom)
+	err = storageSBOM.StoreSBOM(ctx, sbom)
 	require.NoError(t, err)
-	sbomp := domain.SBOM{
-		Name:               instanceID,
-		Content:            fileToSyftDocument("../../adapters/v1/testdata/nginx-filtered-sbom.json"),
-		SBOMCreatorVersion: sbomAdapter.Version(),
-	}
-	err = storageSBOM.StoreSBOM(ctx, sbomp)
+	ap := fileToApplicationProfile("../../adapters/v1/testdata/nginx-ap.json")
+	err = storageAP.StoreApplicationProfile(ctx, ap)
 	require.NoError(t, err)
-	err = s.ScanCVE(ctx)
+	err = s.ScanAP(ctx)
 	require.NoError(t, err)
-	cvep, err := storageCVE.GetCVE(ctx, sbomp.Name, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+	cvep, err := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
 	require.NoError(t, err)
 	assert.NotNil(t, cvep.Content)
 }
@@ -387,6 +556,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false, true)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
@@ -432,6 +602,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false, true)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
@@ -489,6 +660,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				storage,
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false, true)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
@@ -550,6 +722,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				adapters.NewMockCVEAdapter(),
 				repositories.NewMemoryStorage(false, false),
 				adapters.NewMockPlatform(false),
+				adapters.NewMockRelevancyAdapter(),
 				false, false, true)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
