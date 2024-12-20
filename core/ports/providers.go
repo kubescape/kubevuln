@@ -31,13 +31,14 @@ type Platform interface {
 }
 
 type ContainerRelevancyScan struct {
-	ContainerName string
-	ImageID       string
-	ImageTag      string
-	InstanceID    instanceidhandler.IInstanceID
-	Labels        map[string]string
-	RelevantFiles mapset.Set[string]
-	Wlid          string
+	ContainerName    string
+	ImageID          string
+	ImageTag         string
+	InstanceID       instanceidhandler.IInstanceID
+	InstanceIDString string
+	Labels           map[string]string
+	RelevantFiles    mapset.Set[string]
+	Wlid             string
 }
 
 // Relevancy is the port implemented by adapters to be used in ScanService to calculate filtered SBOMs

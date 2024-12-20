@@ -162,6 +162,19 @@ func (s *ScanService) ScanAP(ctx context.Context) error {
 			continue // we need the slug
 		}
 
+		// create a workload inside a new context
+		ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{
+			JobID:              uuid.NewString(),
+			ImageSlug:          slug,
+			ContainerName:      scan.ContainerName,
+			ImageHash:          scan.ImageID,
+			ImageTagNormalized: scan.ImageTag,
+			InstanceID:         scan.InstanceIDString,
+			Wlid:               scan.Wlid,
+			ParentJobID:        workload.ParentJobID,
+			Session:            workload.Session,
+		})
+
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
 		if s.storage {
