@@ -57,13 +57,14 @@ func (a *ApplicationProfileAdapter) GetContainerRelevancyScans(ctx context.Conte
 			instanceID.(*containerinstance.InstanceID).ContainerName = c.Name
 			instanceID.(*containerinstance.InstanceID).InstanceType = containerType
 			scan := ports.ContainerRelevancyScan{
-				ContainerName: c.Name,
-				ImageID:       c.ImageID,
-				ImageTag:      c.ImageTag,
-				InstanceID:    instanceID,
-				Labels:        applicationProfile.Labels,
-				RelevantFiles: mapset.NewSet[string](),
-				Wlid:          wlid,
+				ContainerName:    c.Name,
+				ImageID:          c.ImageID,
+				ImageTag:         c.ImageTag,
+				InstanceID:       instanceID,
+				InstanceIDString: instanceIDString,
+				Labels:           applicationProfile.Labels,
+				RelevantFiles:    mapset.NewSet[string](),
+				Wlid:             wlid,
 			}
 			// fill relevant files
 			for _, f := range c.Execs {
