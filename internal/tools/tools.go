@@ -31,7 +31,8 @@ func PackageVersion(name string) string {
 
 var offendingChars = regexp.MustCompile("[@:/ ._]")
 
-func sanitize(s string) string {
+// SanitizeLabel sanitizes a string to be a valid DNS1123 label.
+func SanitizeLabel(s string) string {
 	s2 := truncate.Truncate(offendingChars.ReplaceAllString(s, "-"), 63, "", truncate.PositionEnd)
 	// remove trailing dash
 	if len(s2) > 0 && s2[len(s2)-1] == '-' {
@@ -49,11 +50,11 @@ func LabelsFromImageID(imageID string) map[string]string {
 		return labels
 	}
 	if named, ok := ref.(reference.Named); ok {
-		labels[helpersv1.ImageIDMetadataKey] = sanitize(named.String())
-		labels[helpersv1.ImageNameMetadataKey] = sanitize(named.Name())
+		labels[helpersv1.ImageIDMetadataKey] = SanitizeLabel(named.String())
+		labels[helpersv1.ImageNameMetadataKey] = SanitizeLabel(named.Name())
 	}
 	if tagged, ok := ref.(reference.Tagged); ok {
-		labels[helpersv1.ImageTagMetadataKey] = sanitize(tagged.Tag())
+		labels[helpersv1.ImageTagMetadataKey] = SanitizeLabel(tagged.Tag())
 	}
 	// prune invalid labels
 	for key, value := range labels {
