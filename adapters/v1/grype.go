@@ -162,9 +162,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
-	// retrieve scanID from context and add it to the labels
+	// retrieve scanID from context and add it to the annotations
 	scanID, _ := ctx.Value(domain.ScanIDKey{}).(string)
-	sbom.Labels[helpersv1.ScanIdMetadataKey] = tools.SanitizeLabel(scanID)
+	sbom.Annotations[helpersv1.ScanIdMetadataKey] = scanID
 
 	logger.L().Debug("returning CVE manifest",
 		helpers.String("name", sbom.Name),

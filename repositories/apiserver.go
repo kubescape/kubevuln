@@ -325,6 +325,11 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrCastingWorkload
 	}
+	timestamp, ok := ctx.Value(domain.TimestampKey{}).(int64)
+	if !ok {
+		return nil, domain.ErrMissingTimestamp
+	}
+	enrichedAnnotations["kubescape.io/timestamp"] = strconv.FormatInt(timestamp, 10) // TODO: use a constant
 	enrichedAnnotations[helpersv1.WlidMetadataKey] = workload.Wlid
 	enrichedAnnotations[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 
