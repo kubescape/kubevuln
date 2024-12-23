@@ -13,7 +13,7 @@ require (
 	github.com/anchore/stereoscope v0.0.3
 	github.com/anchore/syft v1.13.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.496
+	github.com/armosec/armoapi-go v0.0.501
 	github.com/armosec/utils-go v0.0.57
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/deckarep/golang-set/v2 v2.6.0
