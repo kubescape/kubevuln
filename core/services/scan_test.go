@@ -269,6 +269,7 @@ func TestScanService_ScanAP(t *testing.T) {
 					Name:      "daemonset-kube-proxy",
 					Namespace: "kube-system",
 					Annotations: map[string]string{
+						helpersv1.CompletionMetadataKey: helpersv1.Complete,
 						helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
 						helpersv1.StatusMetadataKey:     helpersv1.Ready,
 						helpersv1.WlidMetadataKey:       wlid,
