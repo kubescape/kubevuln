@@ -48,7 +48,7 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 	}
 }
 
-func normalizeImageID(imageID, imageTag string) string {
+func NormalizeImageID(imageID, imageTag string) string {
 	// registry scanning doesn't provide imageID, so we use imageTag as a reference
 	if imageID == "" {
 		return imageTag
@@ -87,7 +87,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	defer span.End()
 
 	if imageTag != "" {
-		imageID = normalizeImageID(imageID, imageTag)
+		imageID = NormalizeImageID(imageID, imageTag)
 	}
 	// prepare an SBOM and fill it progressively
 	domainSBOM := domain.SBOM{

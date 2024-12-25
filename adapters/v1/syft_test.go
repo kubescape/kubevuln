@@ -219,7 +219,7 @@ func TestNormalizeImageID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, normalizeImageID(tt.imageID, tt.imageTag), "normalizeImageID(%v, %v)", tt.imageID, tt.imageTag)
+			assert.Equalf(t, tt.want, NormalizeImageID(tt.imageID, tt.imageTag), "normalizeImageID(%v, %v)", tt.imageID, tt.imageTag)
 		})
 	}
 }

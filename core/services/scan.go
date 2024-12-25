@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
@@ -130,14 +131,14 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 	return s.cveScanner.Ready(ctx)
 }
 
-func (s *ScanService) ScanAP(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanAP")
+func (s *ScanService) ScanAP(mainCtx context.Context) error {
+	mainCtx, span := otel.Tracer("").Start(mainCtx, "ScanService.ScanAP")
 	defer span.End()
 
-	ctx = addTimestamp(ctx)
+	mainCtx = addTimestamp(mainCtx)
 
 	// retrieve workload from context
-	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	workload, ok := mainCtx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return domain.ErrCastingWorkload
 	}
@@ -148,7 +149,7 @@ func (s *ScanService) ScanAP(ctx context.Context) error {
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
 
-	scans, err := s.relevancyProvider.GetContainerRelevancyScans(ctx, namespace, name)
+	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("error getting container relevancy scans: %w", err)
 	}
@@ -156,24 +157,28 @@ func (s *ScanService) ScanAP(ctx context.Context) error {
 	for _, scan := range scans {
 		slug, err := names.ImageInfoToSlug(scan.ImageTag, scan.ImageID)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting image slug", helpers.Error(err),
+			logger.L().Ctx(mainCtx).Warning("error getting image slug", helpers.Error(err),
 				helpers.String("imageTag", scan.ImageTag),
 				helpers.String("imageID", scan.ImageID))
 			continue // we need the slug
 		}
 
+		instanceIDSlug, _ := scan.InstanceID.GetSlug(false)
+
 		// create a workload inside a new context
-		ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{
+		ctx := enrichContext(mainCtx, domain.ScanCommand{
 			JobID:              uuid.NewString(),
 			ImageSlug:          slug,
 			ContainerName:      scan.ContainerName,
-			ImageHash:          scan.ImageID,
+			ImageHash:          v1.NormalizeImageID(scan.ImageID, scan.ImageTag),
 			ImageTagNormalized: scan.ImageTag,
-			InstanceID:         scan.InstanceIDString,
+			InstanceID:         instanceIDSlug,
 			Wlid:               scan.Wlid,
 			ParentJobID:        workload.ParentJobID,
 			Session:            workload.Session,
-		})
+			Args:               workload.Args,
+			CredentialsList:    workload.CredentialsList,
+		}, s.sbomCreator.Version())
 
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
