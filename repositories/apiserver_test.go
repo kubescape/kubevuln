@@ -478,7 +478,9 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 	}
 
 	for i := range tests {
+		var timestamp int64 = 1734957372
 		ctx = context.WithValue(ctx, domain.WorkloadKey{}, tests[i].workload)
+		ctx = context.WithValue(ctx, domain.TimestampKey{}, timestamp)
 		enrichedAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, tests[i].annotations)
 		assert.Equal(t, err, nil)
 
@@ -489,6 +491,10 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 		val, exist = enrichedAnnotations[helpersv1.ContainerNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
+
+		val, exist = enrichedAnnotations["kubescape.io/timestamp"]
+		assert.Equal(t, exist, true)
+		assert.Equal(t, val, "1734957372")
 	}
 
 }
