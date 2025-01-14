@@ -178,12 +178,12 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			Session:            workload.Session,
 			Args:               workload.Args,
 			CredentialsList:    workload.CredentialsList,
-		}, s.sbomCreator.Version())
+		}, s.Version())
 
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
 		if s.storage {
-			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
+			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
 					helpers.String("imageSlug", slug))
@@ -360,7 +360,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	var err error
 	cve := domain.CVEManifest{}
 	if s.storage {
-		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(ctx), s.cveScanner.DBVersion(ctx))
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
@@ -726,7 +726,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
+	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
 	if workload.ImageHash == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
@@ -747,7 +747,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 func (s *ScanService) ValidateScanAP(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanAP")
 	defer span.End()
-	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
+	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
 	name := workload.Args[domain.ArgsName].(string)
 	namespace := workload.Args[domain.ArgsNamespace].(string)
@@ -769,7 +769,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
+	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
 	if workload.ImageHash == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
@@ -795,7 +795,7 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanRegistry")
 	defer span.End()
 
-	ctx = enrichContext(ctx, workload, s.sbomCreator.Version())
+	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
 	if workload.ImageTagNormalized == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
@@ -811,4 +811,8 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
+}
+
+func (s *ScanService) Version() string {
+	return s.sbomCreator.Version() + "-" + s.cveScanner.Version()
 }

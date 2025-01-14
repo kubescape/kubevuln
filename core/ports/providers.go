@@ -13,7 +13,7 @@ type CVEScanner interface {
 	DBVersion(ctx context.Context) string
 	Ready(ctx context.Context) bool
 	ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error)
-	Version(ctx context.Context) string
+	Version() string
 }
 
 // SBOMCreator is the port implemented by adapters to be used in ScanService to generate SBOM
