@@ -233,10 +233,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 // Version returns Syft's version which is used to tag SBOMs
 func (s *SyftAdapter) Version() string {
 	v := tools.PackageVersion("github.com/anchore/syft")
-	if v == "unknown" || v == "" {
-		return v
-	}
-	// we added a hotfix in the storage, so we need to append it to the version so the SBOM will be re-created
-	// remove the hotfix suffix next upgrade of the syft version
+	// no more processing needed
 	return v
 }

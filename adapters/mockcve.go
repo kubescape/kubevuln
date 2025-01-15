@@ -39,7 +39,7 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.
 	return domain.CVEManifest{
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
-		CVEScannerVersion:  m.Version(ctx),
+		CVEScannerVersion:  m.Version(),
 		CVEDBVersion:       m.DBVersion(ctx),
 		Annotations:        sbom.Annotations,
 		Labels:             sbom.Labels,
@@ -57,7 +57,7 @@ func (m MockCVEAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.
 }
 
 // Version returns a static version
-func (m MockCVEAdapter) Version(_ context.Context) string {
+func (m MockCVEAdapter) Version() string {
 	logger.L().Info("MockCVEAdapter.Version")
 	return "Mock CVE 1.0"
 }

@@ -26,5 +26,5 @@ func TestMockCVEAdapter_ScanSBOM(t *testing.T) {
 
 func TestMockCVEAdapter_Version(t *testing.T) {
 	m := NewMockCVEAdapter()
-	assert.Equal(t, "Mock CVE 1.0", m.Version(context.TODO()))
+	assert.Equal(t, "Mock CVE 1.0", m.Version())
 }

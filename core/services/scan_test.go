@@ -297,7 +297,7 @@ func TestScanService_ScanAP(t *testing.T) {
 				t.Errorf("ScanAP() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantCvep {
-				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 				require.NoError(t, err)
 				assert.NotNil(t, cvep.Labels)
 			}
@@ -525,7 +525,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	require.NoError(t, err)
 	err = s.ScanAP(ctx)
 	require.NoError(t, err)
-	cvep, err := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(ctx), cveAdapter.DBVersion(ctx))
+	cvep, err := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 	require.NoError(t, err)
 	assert.NotNil(t, cvep.Content)
 }
