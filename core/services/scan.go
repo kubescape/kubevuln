@@ -100,7 +100,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if s.storage {
 		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
@@ -151,13 +151,13 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 
 	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name)
 	if err != nil {
-		return fmt.Errorf("error getting container relevancy scans: %w", err)
+		return fmt.Errorf("getting container relevancy scans: %w", err)
 	}
 
 	for _, scan := range scans {
 		slug, err := names.ImageInfoToSlug(scan.ImageTag, scan.ImageID)
 		if err != nil {
-			logger.L().Ctx(mainCtx).Warning("error getting image slug", helpers.Error(err),
+			logger.L().Ctx(mainCtx).Error("getting image slug, skipping scan", helpers.Error(err),
 				helpers.String("imageTag", scan.ImageTag),
 				helpers.String("imageID", scan.ImageID))
 			continue // we need the slug
@@ -185,7 +185,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		if s.storage {
 			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 					helpers.String("imageSlug", slug))
 				// no continue, we move on
 			}
@@ -198,7 +198,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			if s.storage {
 				sbom, err = s.sbomRepository.GetSBOM(ctx, slug, s.sbomCreator.Version())
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 						helpers.String("imageSlug", slug))
 					// no continue, we might create it
 				}
@@ -211,7 +211,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 					sbom, err = s.sbomCreator.CreateSBOM(ctx, slug, scan.ImageID, scan.ImageTag, optionsFromWorkload(workload))
 					s.checkCreateSBOM(err, scan.ImageID)
 					if err != nil {
-						logger.L().Ctx(ctx).Warning("error creating SBOM", helpers.Error(err),
+						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
 						continue // we need the SBOM
 					}
@@ -219,13 +219,13 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 					if s.storage {
 						err = s.sbomRepository.StoreSBOM(ctx, sbom)
 						if err != nil {
-							logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err),
+							logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
 								helpers.String("imageSlug", slug))
 							// no continue, storing the SBOM is not critical
 						}
 					}
 				} else {
-					logger.L().Ctx(ctx).Warning("missing SBOM",
+					logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
 						helpers.String("imageSlug", slug))
 					continue // we need the SBOM
 				}
@@ -233,7 +233,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 
 			// check SBOM status
 			if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
-				logger.L().Ctx(ctx).Warning("incomplete or too large SBOM",
+				logger.L().Ctx(ctx).Warning("incomplete or too large SBOM, skipping scan",
 					helpers.String("imageSlug", slug))
 				continue // do not process this SBOM
 			}
@@ -244,7 +244,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			// scan for CVE
 			cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error scanning SBOM", helpers.Error(err),
+				logger.L().Ctx(ctx).Error("scanning SBOM, skipping scan", helpers.Error(err),
 					helpers.String("imageSlug", slug))
 				continue // we need the CVE
 			}
@@ -253,13 +253,13 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			if s.storage {
 				err = s.cveRepository.StoreCVE(ctx, cve, false)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE is not critical
 				}
 				err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE summary is not critical
 				}
@@ -270,7 +270,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 				if cveSumm, err := s.cveRepository.GetCVESummary(ctx); err != nil || cveSumm == nil {
 					err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 					if err != nil {
-						logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+						logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 							helpers.String("imageSlug", slug))
 						// no continue, storing the CVE summary is not critical
 					}
@@ -283,7 +283,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		if s.storage {
 			sbomp, err = filterSBOM(sbom, scan.InstanceID, scan.Wlid, scan.RelevantFiles, scan.Labels)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error filtering SBOM", helpers.Error(err),
+				logger.L().Ctx(ctx).Error("filtering SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				continue // we need the SBOM'
 			}
@@ -295,7 +295,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			// scan for CVE'
 			cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error scanning filtered SBOM", helpers.Error(err),
+				logger.L().Ctx(ctx).Error("scanning filtered SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				continue // we need the CVE'
 			}
@@ -304,20 +304,20 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 				cvep.Wlid = scan.Wlid
 				err = s.cveRepository.StoreCVE(ctx, cvep, true)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing CVEp", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("storing CVEp", helpers.Error(err),
 						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 					// no continue, storing the CVE' is not critical
 				}
 				err = s.cveRepository.StoreCVESummary(ctx, cve, cvep, true)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE summary is not critical
 				}
 				if s.vexGeneration {
 					err = s.cveRepository.StoreVEX(ctx, cve, cvep, true)
 					if err != nil {
-						logger.L().Ctx(ctx).Warning("error storing VEX", helpers.Error(err),
+						logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
 							helpers.String("imageSlug", slug))
 						// no continue, storing the VEX is not critical
 					}
@@ -327,7 +327,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		// submit CVE manifest to platform
 		err = s.platform.SubmitCVE(ctx, cve, cvep)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error submitting CVEs", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),
 				helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 			continue // we need to submit the CVE
 		}
@@ -362,7 +362,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if s.storage {
 		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("error getting CVE", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
@@ -374,7 +374,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if s.storage {
 			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error getting SBOM", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
@@ -386,13 +386,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
-					return fmt.Errorf("error creating SBOM: %w", err)
+					return fmt.Errorf("creating SBOM: %w", err)
 				}
 				// store SBOM
 				if s.storage {
 					err = s.sbomRepository.StoreSBOM(ctx, sbom)
 					if err != nil {
-						logger.L().Ctx(ctx).Warning("error storing SBOM", helpers.Error(err),
+						logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
 							helpers.String("imageSlug", workload.ImageSlug))
 					}
 				}
@@ -414,19 +414,19 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
-			return fmt.Errorf("error scanning SBOM: %w", err)
+			return fmt.Errorf("scanning SBOM: %w", err)
 		}
 
 		// store CVE
 		if s.storage {
 			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error storing CVE", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
@@ -436,7 +436,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if cveSumm, err := s.cveRepository.GetCVESummary(ctx); err != nil || cveSumm == nil {
 				err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("error storing CVE summary", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", workload.ImageSlug))
 				}
 			}
@@ -446,7 +446,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// submit CVE manifest to platform
 	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 	if err != nil {
-		return fmt.Errorf("error submitting CVEs: %w", err)
+		return fmt.Errorf("submitting CVEs: %w", err)
 	}
 
 	logger.L().Info("scan complete",
@@ -631,7 +631,7 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string) (domain.SBOM, error) {
 	name, err := instanceID.GetSlug(false)
 	if err != nil {
-		return domain.SBOM{}, fmt.Errorf("error getting slug from instance id: %w", err)
+		return domain.SBOM{}, fmt.Errorf("getting slug from instance id: %w", err)
 	}
 	filteredSBOM := domain.SBOM{
 		Name: name,
