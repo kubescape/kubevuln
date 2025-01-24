@@ -10,11 +10,10 @@ import (
 	"strings"
 	"time"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -24,6 +23,7 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -826,7 +826,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		return domain.SBOM{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
-	if manifest.Spec.Metadata.Tool.Version != SBOMCreatorVersion {
+	if semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) == -1 {
 		logger.L().Debug("discarding SBOM with outdated scanner version",
 			helpers.String("name", name),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
