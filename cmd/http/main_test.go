@@ -54,7 +54,7 @@ func TestScan(t *testing.T) {
 			"../../api/v1/testdata/scan-incomplete.yaml",
 			"/v1/scanImage",
 			500,
-			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=k8s.gcr.io/coredns/coredns:v1.8.6\",\"status\":500,\"title\":\"Internal Server Error\"}",
 			false,
 		},
 		{
