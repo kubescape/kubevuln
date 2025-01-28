@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/names"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -170,7 +171,7 @@ func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanC
 	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
-		ImageHash:          c.ImageHash,
+		ImageHash:          v1.NormalizeImageID(c.ImageHash, c.ImageTag),
 		Wlid:               c.Wlid,
 		ImageTag:           c.ImageTag,
 		ImageTagNormalized: imageTagNormalized,
