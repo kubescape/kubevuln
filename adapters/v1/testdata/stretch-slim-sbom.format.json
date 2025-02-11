@@ -16,38 +16,38 @@
       "imageSize": 55294181,
       "layers": [
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         },
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         },
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         },
         {
+          "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
           "digest": "sha256:ddae06c659b4e2c0761685617730fe3e4d5cb864a868a4b2be677c8533dc0426",
-          "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
           "size": 55294181
         },
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         },
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         },
         {
-          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+          "digest": "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
           "size": 0
         }
       ],
@@ -202,10 +202,12 @@
           "maven-base-url": "https://repo1.maven.org/maven2",
           "maven-localrepository-dir": "<<PRESENCE>>",
           "max-parent-recursive-depth": 0,
+          "resolve-transitive-dependencies": false,
           "use-maven-localrepository": false,
           "use-network": false
         },
         "javascript": {
+          "include-dev-dependencies": false,
           "npm-base-url": "",
           "search-remote-licenses": false
         },
@@ -227,7 +229,7 @@
     }
   },
   "schema": {
-    "version": "16.0.17",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.17.json"
+    "version": "16.0.18",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
   }
 }

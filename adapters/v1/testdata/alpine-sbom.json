@@ -483,7 +483,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/alpine-baselayout-data@3.4.0-r0?arch=x86_64\u0026upstream=alpine-baselayout\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/alpine-baselayout-data@3.4.0-r0?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=alpine-baselayout",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "alpine-baselayout-data",
@@ -1477,7 +1477,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/busybox-binsh@1.35.0-r29?arch=x86_64\u0026upstream=busybox\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/busybox-binsh@1.35.0-r29?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=busybox",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "busybox-binsh",
@@ -1600,7 +1600,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/ca-certificates-bundle@20220614-r4?arch=x86_64\u0026upstream=ca-certificates\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/ca-certificates-bundle@20220614-r4?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=ca-certificates",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "ca-certificates-bundle",
@@ -1732,7 +1732,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026upstream=libc-dev\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=libc-dev",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libc-utils",
@@ -1806,7 +1806,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/libcrypto3@3.0.8-r0?arch=x86_64\u0026upstream=openssl\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/libcrypto3@3.0.8-r0?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=openssl",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libcrypto3",
@@ -2041,7 +2041,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/libssl3@3.0.8-r0?arch=x86_64\u0026upstream=openssl\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/libssl3@3.0.8-r0?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=openssl",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "libssl3",
@@ -2258,7 +2258,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/musl-utils@1.2.3-r4?arch=x86_64\u0026upstream=musl\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/musl-utils@1.2.3-r4?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=musl",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "musl-utils",
@@ -2387,7 +2387,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/scanelf@1.3.5-r1?arch=x86_64\u0026upstream=pax-utils\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/scanelf@1.3.5-r1?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=pax-utils",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "scanelf",
@@ -2488,7 +2488,7 @@
           "source": "syft-generated"
         }
       ],
-      "purl": "pkg:apk/alpine/ssl_client@1.35.0-r29?arch=x86_64\u0026upstream=busybox\u0026distro=alpine-3.17.2",
+      "purl": "pkg:apk/alpine/ssl_client@1.35.0-r29?arch=x86_64\u0026distro=alpine-3.17.2\u0026upstream=busybox",
       "metadataType": "apk-db-entry",
       "metadata": {
         "package": "ssl_client",
@@ -2673,7 +2673,10 @@
     {
       "parent": "008bcc1445f44203",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "008bcc1445f44203",
@@ -2748,7 +2751,10 @@
     {
       "parent": "0a3b4a9dae4049aa",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "0a3b4a9dae4049aa",
@@ -2763,7 +2769,10 @@
     {
       "parent": "0faf8749e7caad06",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "0faf8749e7caad06",
@@ -2783,7 +2792,10 @@
     {
       "parent": "10c99a42ed5bf9d4",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "4cb49698ca5c72c1",
@@ -2798,7 +2810,10 @@
     {
       "parent": "4cb49698ca5c72c1",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "544ec51c3fe9a624",
@@ -2813,7 +2828,10 @@
     {
       "parent": "544ec51c3fe9a624",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "6ad7c0b45a22318c",
@@ -2828,12 +2846,10 @@
     {
       "parent": "6ad7c0b45a22318c",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
-    },
-    {
-      "parent": "adaa708f703652d6",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "adaa708f703652d6",
@@ -2868,7 +2884,10 @@
     {
       "parent": "adaa708f703652d6",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "adaa708f703652d6",
@@ -2888,7 +2907,10 @@
     {
       "parent": "b37d6e2e45f66f33",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "b37d6e2e45f66f33",
@@ -2913,7 +2935,10 @@
     {
       "parent": "c0756f35a5e6d8b3",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "c0d6e0f3841a7244",
@@ -2933,7 +2958,10 @@
     {
       "parent": "c0d6e0f3841a7244",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "c0d6e0f3841a7244",
@@ -3003,7 +3031,10 @@
     {
       "parent": "e5d4a79033ba84db",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "e5d4a79033ba84db",
@@ -3053,7 +3084,10 @@
     {
       "parent": "edcf6e67eac04af0",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "edcf6e67eac04af0",
@@ -3153,7 +3187,10 @@
     {
       "parent": "f0def3051a26afc8",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "f0def3051a26afc8",
@@ -3188,7 +3225,10 @@
     {
       "parent": "f95be16d8615d51f",
       "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by"
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "fd6275a37d2472b9d3be70c3261087b8d65e441c21342ae7313096312bcda2b3",
@@ -4129,7 +4169,21 @@
       "location": {
         "path": "/lib/apk/db/installed",
         "layerID": "sha256:7cd52847ad775a5ddc4b58326cf884beee34544296402c6292ed76474c686d39"
-      }
+      },
+      "metadata": {
+        "mode": 644,
+        "type": "RegularFile",
+        "userID": 0,
+        "groupID": 0,
+        "mimeType": "text/plain",
+        "size": 14609
+      },
+      "digests": [
+        {
+          "algorithm": "sha256",
+          "value": "df48d54fe00fea973ad4422e1d9722f1d83fca0f38a2183f8214b18fcb9bfa76"
+        }
+      ]
     },
     {
       "id": "f45009f97952cd8e",
@@ -5254,8 +5308,10 @@
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
           "java-archive-cataloger",
+          "java-jvm-cataloger",
           "javascript-package-cataloger",
           "linux-kernel-cataloger",
+          "lua-rock-cataloger",
           "nix-store-cataloger",
           "php-composer-installed-cataloger",
           "php-pecl-serialized-cataloger",
@@ -5297,6 +5353,7 @@
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
+          "util-linux-binary",
           "haproxy-binary",
           "perl-binary",
           "php-cli-binary",
@@ -5306,6 +5363,7 @@
           "httpd-binary",
           "memcached-binary",
           "traefik-binary",
+          "arangodb-binary",
           "postgresql-binary",
           "mysql-binary",
           "mysql-binary",
@@ -5316,15 +5374,31 @@
           "rust-standard-library-macos",
           "ruby-binary",
           "erlang-binary",
+          "erlang-alpine-binary",
+          "erlang-library",
+          "swipl-binary",
+          "dart-binary",
+          "haskell-ghc-binary",
+          "haskell-cabal-binary",
+          "haskell-stack-binary",
           "consul-binary",
           "nginx-binary",
           "bash-binary",
           "openssl-binary",
           "gcc-binary",
-          "wordpress-cli-binary"
+          "fluent-bit-binary",
+          "wordpress-cli-binary",
+          "curl-binary",
+          "lighttpd-binary",
+          "proftpd-binary",
+          "zstd-binary",
+          "xz-binary",
+          "gzip-binary",
+          "sqlcipher-binary",
+          "jq-binary"
         ],
         "golang": {
-          "local-mod-cache-dir": "/home/matthiasbertschy/go/pkg/mod",
+          "local-mod-cache-dir": "/home/mbertschy/go/pkg/mod",
           "main-module-version": {
             "from-build-settings": true,
             "from-contents": true,
@@ -5341,10 +5415,14 @@
           "include-indexed-archives": true,
           "include-unindexed-archives": false,
           "maven-base-url": "https://repo1.maven.org/maven2",
-          "max-parent-recursive-depth": 5,
+          "maven-localrepository-dir": "/home/mbertschy/.m2/repository",
+          "max-parent-recursive-depth": 0,
+          "resolve-transitive-dependencies": false,
+          "use-maven-localrepository": false,
           "use-network": false
         },
         "javascript": {
+          "include-dev-dependencies": false,
           "npm-base-url": "",
           "search-remote-licenses": false
         },
@@ -5366,7 +5444,7 @@
     }
   },
   "schema": {
-    "version": "16.0.17",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.17.json"
+    "version": "16.0.18",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
   }
 }
