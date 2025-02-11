@@ -211,7 +211,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			a := NewFakeAPIServerStorage("kubescape")
 			_, err := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			require.NoError(t, err)
-			err = a.StoreSBOM(tt.args.ctx, tt.sbom)
+			err = a.StoreSBOM(tt.args.ctx, tt.sbom, false)
 			require.NoError(t, err)
 			gotSBOM, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
 			if (gotSBOM.Content == nil) != tt.wantEmptySBOM {
