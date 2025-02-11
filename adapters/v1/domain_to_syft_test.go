@@ -34,7 +34,7 @@ func Test_domainJSONToSyft(t *testing.T) {
 			},
 			want: want{
 				artifacts:             15,
-				artifactRelationships: 129,
+				artifactRelationships: 128,
 				files:                 78,
 				source: source{
 					id:   "fd6275a37d2472b9d3be70c3261087b8d65e441c21342ae7313096312bcda2b3",
