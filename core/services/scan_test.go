@@ -85,14 +85,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(tt.getError, tt.storeError)
-			s := NewScanService(sbomAdapter,
-				storage,
-				adapters.NewMockCVEAdapter(),
-				storage,
-				adapters.NewMockPlatform(false),
-				adapters.NewMockRelevancyAdapter(),
-				tt.storage,
-				false, true)
+			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), tt.storage, false, true, false)
 			ctx := context.TODO()
 
 			workload := domain.ScanCommand{
@@ -231,14 +224,7 @@ func TestScanService_ScanAP(t *testing.T) {
 			storageAP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter,
-				storageSBOM,
-				cveAdapter,
-				storageCVE,
-				adapters.NewMockPlatform(tt.wantEmptyReport),
-				v1.NewApplicationProfileAdapter(storageAP),
-				tt.storage,
-				false, true)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -257,7 +243,7 @@ func TestScanService_ScanAP(t *testing.T) {
 			if tt.sbom {
 				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, "", domain.RegistryOptions{})
 				require.NoError(t, err)
-				_ = storageSBOM.StoreSBOM(ctx, sbom)
+				_ = storageSBOM.StoreSBOM(ctx, sbom, false)
 				if tt.cveManifest {
 					cve, err := cveAdapter.ScanSBOM(ctx, sbom)
 					require.NoError(t, err)
@@ -417,14 +403,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			storageAP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter,
-				storageSBOM,
-				cveAdapter,
-				storageCVE,
-				adapters.NewMockPlatform(tt.wantEmptyReport),
-				v1.NewApplicationProfileAdapter(storageAP),
-				tt.storage,
-				false, true)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -442,7 +421,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			if tt.sbom {
 				sbom, err := sbomAdapter.CreateSBOM(ctx, "imageSlug", imageHash, "", domain.RegistryOptions{})
 				require.NoError(t, err)
-				_ = storageSBOM.StoreSBOM(ctx, sbom)
+				_ = storageSBOM.StoreSBOM(ctx, sbom, false)
 				if tt.cveManifest {
 					cve, err := cveAdapter.ScanSBOM(ctx, sbom)
 					require.NoError(t, err)
@@ -491,7 +470,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
 	relevancyProvider := v1.NewApplicationProfileAdapter(storageAP)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true, false)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		Args: map[string]interface{}{
@@ -518,7 +497,7 @@ func TestScanService_NginxTest(t *testing.T) {
 		Content:            fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
-	err = storageSBOM.StoreSBOM(ctx, sbom)
+	err = storageSBOM.StoreSBOM(ctx, sbom, false)
 	require.NoError(t, err)
 	ap := fileToApplicationProfile("../../adapters/v1/testdata/nginx-ap.json")
 	err = storageAP.StoreApplicationProfile(ctx, ap)
@@ -552,13 +531,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockPlatform(false),
-				adapters.NewMockRelevancyAdapter(),
-				false, false, true)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -598,13 +571,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockPlatform(false),
-				adapters.NewMockRelevancyAdapter(),
-				false, false, true)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
@@ -656,13 +623,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(false, false)
-			s := NewScanService(sbomAdapter,
-				storage,
-				adapters.NewMockCVEAdapter(),
-				storage,
-				adapters.NewMockPlatform(false),
-				adapters.NewMockRelevancyAdapter(),
-				false, false, true)
+			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
 				ImageSlug:          "imageSlug",
@@ -718,13 +679,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockCVEAdapter(),
-				repositories.NewMemoryStorage(false, false),
-				adapters.NewMockPlatform(false),
-				adapters.NewMockRelevancyAdapter(),
-				false, false, true)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)

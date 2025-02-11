@@ -28,6 +28,6 @@ func TestBrokenStore_StoreCVE(t *testing.T) {
 
 func TestBrokenStore_StoreSBOM(t *testing.T) {
 	b := NewBrokenStorage()
-	err := b.StoreSBOM(context.TODO(), domain.SBOM{})
+	err := b.StoreSBOM(context.TODO(), domain.SBOM{}, false)
 	assert.Error(t, err)
 }

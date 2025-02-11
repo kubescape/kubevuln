@@ -76,7 +76,7 @@ func main() {
 		platform = v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey)
 	}
 	relevancyProvider := v1.NewApplicationProfileAdapter(storage)
-	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration)
+	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
 	gin.SetMode(gin.ReleaseMode)

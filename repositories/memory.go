@@ -107,7 +107,7 @@ func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVES
 	return domain.CVEManifest{}, nil
 }
 
-// GetCVE returns a CVE manifest from an in-memory map
+// GetCVESummary returns a CVE summary from an in-memory map
 func (m *MemoryStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVESummary")
 	defer span.End()
@@ -133,7 +133,7 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 	return nil
 }
 
-// StoreCVE stores a CVE Summary to an in-memory map
+// StoreCVESummary stores a CVE summary to an in-memory map
 func (m *MemoryStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreCVESummary")
 	defer span.End()
@@ -183,7 +183,7 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 }
 
 // StoreSBOM stores an SBOM to an in-memory map
-func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
+func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
 
@@ -200,6 +200,6 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
 }
 
 // StoreVEX stores a VEX to an in-memory map
-func (m *MemoryStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+func (m *MemoryStore) StoreVEX(_ context.Context, _ domain.CVEManifest, _ domain.CVEManifest, _ bool) error {
 	return nil
 }

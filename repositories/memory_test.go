@@ -37,7 +37,7 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 		Status:             "",
 		Content:            &v1beta1.SyftDocument{},
 	}
-	_ = m.StoreSBOM(ctx, sbom)
+	_ = m.StoreSBOM(ctx, sbom, false)
 	got, _ = m.GetSBOM(ctx, "name", "")
 	assert.NotNil(t, got.Content)
 }

@@ -39,7 +39,7 @@ func (b BrokenStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityM
 	return &v1beta1.VulnerabilityManifestSummary{}, nil
 }
 
-func (b BrokenStore) StoreSBOM(ctx context.Context, _ domain.SBOM) error {
+func (b BrokenStore) StoreSBOM(ctx context.Context, _ domain.SBOM, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreSBOM")
 	defer span.End()
 	return domain.ErrExpectedError

@@ -24,6 +24,7 @@ type Config struct {
 	VexGeneration      bool          `mapstructure:"vexGeneration"`
 	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
 	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
+	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

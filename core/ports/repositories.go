@@ -23,5 +23,5 @@ type CVERepository interface {
 // SBOMRepository is the port implemented by adapters to be used in ScanService to store SBOMs
 type SBOMRepository interface {
 	GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error)
-	StoreSBOM(ctx context.Context, sbom domain.SBOM) error
+	StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error
 }
