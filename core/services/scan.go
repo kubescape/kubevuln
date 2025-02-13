@@ -48,6 +48,7 @@ type ScanService struct {
 	platform          ports.Platform
 	relevancyProvider ports.Relevancy
 	sbomGeneration    bool
+	storeFilteredSbom bool
 	storage           bool
 	vexGeneration     bool
 	tooManyRequests   *cache.Cache
@@ -56,7 +57,7 @@ type ScanService struct {
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, relevancyProvider ports.Relevancy, storage bool, vexGeneration bool, sbomGeneration bool) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, relevancyProvider ports.Relevancy, storage bool, vexGeneration bool, sbomGeneration bool, storeFilteredSbom bool) *ScanService {
 	return &ScanService{
 		sbomCreator:       sbomCreator,
 		sbomRepository:    sbomRepository,
@@ -65,6 +66,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		platform:          platform,
 		relevancyProvider: relevancyProvider,
 		sbomGeneration:    sbomGeneration,
+		storeFilteredSbom: storeFilteredSbom,
 		storage:           storage,
 		vexGeneration:     vexGeneration,
 		tooManyRequests:   cache.New(cleaningInterval),
@@ -117,7 +119,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 
 	// store SBOM
 	if s.storage {
-		err = s.sbomRepository.StoreSBOM(ctx, sbom)
+		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 		if err != nil {
 			return err
 		}
@@ -217,7 +219,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 					}
 					// store SBOM
 					if s.storage {
-						err = s.sbomRepository.StoreSBOM(ctx, sbom)
+						err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 						if err != nil {
 							logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
 								helpers.String("imageSlug", slug))
@@ -286,6 +288,14 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 				logger.L().Ctx(ctx).Error("filtering SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				continue // we need the SBOM'
+			}
+			if s.storeFilteredSbom {
+				err = s.sbomRepository.StoreSBOM(ctx, sbomp, true)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("storing filtered SBOM", helpers.Error(err),
+						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
+					// no continue, storing the SBOM' is not critical
+				}
 			}
 		}
 
@@ -390,7 +400,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				}
 				// store SBOM
 				if s.storage {
-					err = s.sbomRepository.StoreSBOM(ctx, sbom)
+					err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 					if err != nil {
 						logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
 							helpers.String("imageSlug", workload.ImageSlug))

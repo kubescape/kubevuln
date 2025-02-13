@@ -470,7 +470,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	return nil
 }
 
-func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreVEX")
 	defer span.End()
 
@@ -579,7 +579,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	for _, v := range cve.Content.Matches {
 		var aliases []string
 		for _, alias := range v.RelatedVulnerabilities {
-			aliases = append(aliases, string(alias.ID))
+			aliases = append(aliases, alias.ID)
 		}
 
 		product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
@@ -654,7 +654,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 			// Add the vulnerability to the VEX document
 			var aliases []string
 			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, string(alias.ID))
+				aliases = append(aliases, alias.ID)
 			}
 
 			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
@@ -736,7 +736,7 @@ func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
 			cString += fmt.Sprintf(":%d", ts.Unix())
 		}
 		// 5d. Sorted product strings
-		prods := []string{}
+		var prods []string
 		for _, p := range s.Products {
 			prodString := cstringFromComponent(p.Component)
 			if p.Subcomponents != nil && len(p.Subcomponents) > 0 {
@@ -760,7 +760,7 @@ func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
 func sortVexStatements(stmts []v1beta1.Statement, documentTimestamp time.Time) {
 	sort.SliceStable(stmts, func(i, j int) bool {
 		// TODO: Add methods for aliases
-		vulnComparison := strings.Compare(string(stmts[i].Vulnerability.Name), string(stmts[j].Vulnerability.Name))
+		vulnComparison := strings.Compare(stmts[i].Vulnerability.Name, stmts[j].Vulnerability.Name)
 		if vulnComparison != 0 {
 			// i.e. different vulnerabilities; sort by string comparison
 			return vulnComparison < 0
@@ -784,9 +784,9 @@ func sortVexStatements(stmts []v1beta1.Statement, documentTimestamp time.Time) {
 
 func cstringFromVulnerability(v v1beta1.VexVulnerability) string {
 	cString := fmt.Sprintf(":%s:%s", v.ID, v.Name)
-	list := []string{}
+	var list []string
 	for i := range v.Aliases {
-		list = append(list, string(v.Aliases[i]))
+		list = append(list, v.Aliases[i])
 	}
 	sort.Strings(list)
 	cString += strings.Join(list, ":")
@@ -848,8 +848,8 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	return result, nil
 }
 
-func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOMWithContent")
+func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreSBOM")
 	defer span.End()
 
 	if sbom.Name == "" {
@@ -883,7 +883,12 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	var err error
+	if isFiltered {
+		_, err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(context.Background(), convertToFilteredSBOM(&manifest), metav1.CreateOptions{})
+	} else {
+		_, err = a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	}
 	switch {
 	case errors.IsAlreadyExists(err):
 		logger.L().Debug("SBOM manifest already exists in storage",
@@ -896,4 +901,13 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM) error 
 			helpers.String("name", sbom.Name))
 	}
 	return nil
+}
+
+func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
+	return &v1beta1.SBOMSyftFiltered{
+		TypeMeta:   sbom.TypeMeta,
+		ObjectMeta: sbom.ObjectMeta,
+		Spec:       sbom.Spec,
+		Status:     sbom.Status,
+	}
 }
