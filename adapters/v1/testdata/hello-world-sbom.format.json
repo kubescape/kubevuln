@@ -161,10 +161,12 @@
           "maven-base-url": "https://repo1.maven.org/maven2",
           "maven-localrepository-dir": "<<PRESENCE>>",
           "max-parent-recursive-depth": 0,
+          "resolve-transitive-dependencies": false,
           "use-maven-localrepository": false,
           "use-network": false
         },
         "javascript": {
+          "include-dev-dependencies": false,
           "npm-base-url": "",
           "search-remote-licenses": false
         },
@@ -186,7 +188,7 @@
     }
   },
   "schema": {
-    "version": "16.0.17",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.17.json"
+    "version": "16.0.18",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
   }
 }
