@@ -11,6 +11,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -113,6 +115,11 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 			}
 			// add RCE information
 			vulnerabilityResult.Categories.IsRCE = vulnerabilityResult.IsRCE()
+
+			if vulnerabilityResult.Categories.IsRCE {
+				logger.L().Debug("domainToARMO: RCE vulnerability detected", helpers.String("vulnerability", vulnerabilityResult.Vulnerability.Name))
+			}
+
 			// add layer information
 			// make sure we have at least one location
 			if match.Artifact.Locations == nil || len(match.Artifact.Locations) < 1 {

@@ -212,6 +212,11 @@ func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		}
 		isRCE := vulnerabilities[i].IsRCE()
 		if isRCE {
+			logger.L().Debug("RCE vulnerability found",
+				helpers.String("vulnerability", vulnerabilities[i].Name),
+				helpers.String("description", vulnerabilities[i].Description),
+				helpers.String("severity", vulnerabilities[i].Severity),
+			)
 			vulnSeverityStats.RCECount++
 			incrementCounter(&summary.RCECount, true, isIgnored)
 			if isFixed {
