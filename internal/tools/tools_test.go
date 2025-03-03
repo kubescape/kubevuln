@@ -97,7 +97,7 @@ func TestNormalizeReference(t *testing.T) {
 		{
 			name: "repo image tag",
 			args: args{
-				ref: "docker.io/library/nginx:latest",
+				ref: "index.docker.io/library/nginx:latest",
 			},
 			want: "docker.io/library/nginx:latest",
 		},
