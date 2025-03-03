@@ -453,10 +453,12 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
-	// submit CVE manifest to platform
-	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
-	if err != nil {
-		return fmt.Errorf("submitting CVEs: %w", err)
+	// submit CVE manifest to platform, only if we have a wlid
+	if workload.Wlid != "" {
+		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
+		if err != nil {
+			return fmt.Errorf("submitting CVEs: %w", err)
+		}
 	}
 
 	logger.L().Info("scan complete",
