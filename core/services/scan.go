@@ -11,23 +11,23 @@ import (
 	"strings"
 	"time"
 
-	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/kubescape/k8s-interface/instanceidhandler"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/names"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
-
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/names"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -157,7 +157,8 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 	}
 
 	for _, scan := range scans {
-		slug, err := names.ImageInfoToSlug(scan.ImageTag, scan.ImageID)
+		imageTagNormalized := tools.NormalizeReference(scan.ImageTag)
+		slug, err := names.ImageInfoToSlug(imageTagNormalized, scan.ImageID)
 		if err != nil {
 			logger.L().Ctx(mainCtx).Error("getting image slug, skipping scan", helpers.Error(err),
 				helpers.String("imageTag", scan.ImageTag),
@@ -168,19 +169,21 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		instanceIDSlug, _ := scan.InstanceID.GetSlug(false)
 
 		// create a workload inside a new context
-		ctx := enrichContext(mainCtx, domain.ScanCommand{
-			JobID:              uuid.NewString(),
-			ImageSlug:          slug,
-			ContainerName:      scan.ContainerName,
-			ImageHash:          v1.NormalizeImageID(scan.ImageID, scan.ImageTag),
-			ImageTagNormalized: scan.ImageTag,
-			InstanceID:         instanceIDSlug,
-			Wlid:               scan.Wlid,
-			ParentJobID:        workload.ParentJobID,
-			Session:            workload.Session,
-			Args:               workload.Args,
+		subWorkload := domain.ScanCommand{
 			CredentialsList:    workload.CredentialsList,
-		}, s.Version())
+			ImageHash:          v1.NormalizeImageID(scan.ImageID, scan.ImageTag),
+			Wlid:               scan.Wlid,
+			ImageSlug:          slug,
+			ImageTag:           scan.ImageTag,
+			ImageTagNormalized: imageTagNormalized,
+			JobID:              uuid.NewString(),
+			ContainerName:      scan.ContainerName,
+			InstanceID:         instanceIDSlug,
+			ParentJobID:        workload.ParentJobID,
+			Args:               workload.Args,
+			Session:            workload.Session,
+		}
+		ctx := enrichContext(mainCtx, subWorkload, s.Version())
 
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
@@ -210,7 +213,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 			if sbom.Content == nil {
 				if s.sbomGeneration {
 					// create SBOM
-					sbom, err = s.sbomCreator.CreateSBOM(ctx, slug, scan.ImageID, scan.ImageTag, optionsFromWorkload(workload))
+					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(workload))
 					s.checkCreateSBOM(err, scan.ImageID)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
@@ -393,7 +396,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if sbom.Content == nil {
 			if s.sbomGeneration {
 				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTag, optionsFromWorkload(workload))
+				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
 					return fmt.Errorf("creating SBOM: %w", err)
