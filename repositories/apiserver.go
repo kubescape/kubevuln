@@ -113,12 +113,15 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		return domain.CVEManifest{}, nil
 	}
 	// discard the manifest if it was created by an older version of the scanner
-	// TODO: also check SBOMCreatorVersion ? - we should, but we don't have the version in the manifest
-	if manifest.Spec.Metadata.Tool.Version != CVEScannerVersion || manifest.Spec.Metadata.Tool.DatabaseVersion != CVEDBVersion {
+	if manifest.Annotations[helpersv1.ToolVersionMetadataKey] != SBOMCreatorVersion ||
+		manifest.Spec.Metadata.Tool.Version != CVEScannerVersion ||
+		manifest.Spec.Metadata.Tool.DatabaseVersion != CVEDBVersion {
 		logger.L().Debug("discarding CVE manifest with outdated scanner version",
 			helpers.String("name", name),
+			helpers.String("annotations sbom creator version", manifest.Annotations[helpersv1.ToolVersionMetadataKey]),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
 			helpers.String("manifest DB version", manifest.Spec.Metadata.Tool.DatabaseVersion),
+			helpers.String("wanted sbom creator version", SBOMCreatorVersion),
 			helpers.String("wanted scanner version", CVEScannerVersion),
 			helpers.String("wanted DB version", CVEDBVersion))
 		return domain.CVEManifest{}, nil
