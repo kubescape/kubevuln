@@ -216,8 +216,8 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 				return getErr
 			}
 			// update the vulnerability manifest
-			result.Annotations = manifest.Annotations
-			result.Labels = manifest.Labels
+			mergeMaps(result.Annotations, manifest.Annotations)
+			mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
 			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -445,8 +445,8 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 				return getErr
 			}
 			// update the vulnerability manifest
-			result.Annotations = manifest.Annotations
-			result.Labels = manifest.Labels
+			mergeMaps(result.Annotations, manifest.Annotations)
+			mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
 			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -912,5 +912,12 @@ func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
 		ObjectMeta: sbom.ObjectMeta,
 		Spec:       sbom.Spec,
 		Status:     sbom.Status,
+	}
+}
+
+// mergeMaps merges new into existing, overwriting existing keys with new values
+func mergeMaps(existing, new map[string]string) {
+	for k, v := range new {
+		existing[k] = v
 	}
 }
