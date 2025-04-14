@@ -29,7 +29,7 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.18-0.20231228073313-741ad2d0a7ad
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.188
+	github.com/kubescape/k8s-interface v0.0.191
 	github.com/kubescape/storage v0.0.146
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.5

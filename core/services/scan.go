@@ -669,6 +669,7 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 			Schema:         sbom.Content.Schema,
 		},
 	}
+	filteredSBOM.Labels[helpersv1.ArtifactTypeMetadataKey] = helpersv1.ContainerArtifactType
 	addedArtifactIDs := mapset.NewSet[string]()
 	addedFileIDs := mapset.NewSet[string]()
 	addedRelationshipIDs := mapset.NewSet[string]()

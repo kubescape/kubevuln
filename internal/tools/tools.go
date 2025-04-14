@@ -44,7 +44,9 @@ func SanitizeLabel(s string) string {
 // LabelsFromImageID returns a map of labels from an image ID.
 // Each label is sanitized and verified to be a valid DNS1123 label.
 func LabelsFromImageID(imageID string) map[string]string {
-	labels := map[string]string{}
+	labels := map[string]string{
+		helpersv1.ArtifactTypeMetadataKey: helpersv1.ImageArtifactType,
+	}
 	ref, err := reference.Parse(imageID)
 	if err != nil {
 		return labels
