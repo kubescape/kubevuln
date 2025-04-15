@@ -909,6 +909,8 @@ github.com/kubescape/go-logger v0.0.23 h1:5xh+Nm8eGImhFbtippRKLaFgsvlKE1ufvQhNM2
 github.com/kubescape/go-logger v0.0.23/go.mod h1:Ayg7g769c7sXVB+P3fkJmbsJpoEmMmaUf9jeo+XuC3U=
 github.com/kubescape/k8s-interface v0.0.188 h1:muG8qzXqA3dQ0myreg/V4DgxLx5A2S+Jj6Ur+OJCefc=
 github.com/kubescape/k8s-interface v0.0.188/go.mod h1:j9snZbH+RxOaa1yG/bWgTClj90q7To0rGgQepxy4b+k=
+github.com/kubescape/k8s-interface v0.0.191 h1:bKdN3HnxEk5c2ZUyAMmBRANzdREiZTprIlIKvbPEPO8=
+github.com/kubescape/k8s-interface v0.0.191/go.mod h1:j9snZbH+RxOaa1yG/bWgTClj90q7To0rGgQepxy4b+k=
 github.com/kubescape/opa-utils v0.0.268 h1:mIsAbpIW0aIk8xr0ECuf8q9gUntGQqJQIJACtn1hklk=
 github.com/kubescape/opa-utils v0.0.268/go.mod h1:95JkuIOfClgLc+DyGb2mDvefRW0STkZe4L2z6AaZJlQ=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
