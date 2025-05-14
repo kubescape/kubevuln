@@ -1,0 +1,1274 @@
+{
+  "artifacts": [
+    {
+      "id": "edeb12d644aed288",
+      "name": "alpine-baselayout",
+      "version": "3.2.0-r18",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "GPL-2.0-only",
+          "spdxExpression": "GPL-2.0-only",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:alpine-baselayout:alpine-baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine-baselayout:alpine_baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine_baselayout:alpine-baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine_baselayout:alpine_baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine:alpine-baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine:alpine_baselayout:3.2.0-r18:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "a6493773d0d3fb84",
+      "name": "alpine-keys",
+      "version": "2.4-r1",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "MIT",
+          "spdxExpression": "MIT",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:alpine-keys:alpine-keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine-keys:alpine_keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine_keys:alpine-keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine_keys:alpine_keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine:alpine-keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:alpine:alpine_keys:2.4-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "d1b90f47bb04d35f",
+      "name": "apk-tools",
+      "version": "2.12.7-r3",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "GPL-2.0-only",
+          "spdxExpression": "GPL-2.0-only",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:apk-tools:apk-tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:apk-tools:apk_tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:apk_tools:apk-tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:apk_tools:apk_tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:apk:apk-tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:apk:apk_tools:2.12.7-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "04e71f62ec0b21ef",
+      "name": "busybox",
+      "version": "1.34.1-r7",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "GPL-2.0-only",
+          "spdxExpression": "GPL-2.0-only",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:busybox:busybox:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "052a07799885b68d",
+      "name": "ca-certificates-bundle",
+      "version": "20230506-r0",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "MIT",
+          "spdxExpression": "MIT",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "MPL-2.0",
+          "spdxExpression": "MPL-2.0",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:ca-certificates-bundle:ca-certificates-bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca-certificates-bundle:ca_certificates_bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca_certificates_bundle:ca-certificates-bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca_certificates_bundle:ca_certificates_bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca-certificates:ca-certificates-bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca-certificates:ca_certificates_bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca_certificates:ca-certificates-bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca_certificates:ca_certificates_bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca:ca-certificates-bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ca:ca_certificates_bundle:20230506-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "0f83e0c56722c32e",
+      "name": "libc-utils",
+      "version": "0.7.2-r3",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "BSD-2-Clause",
+          "spdxExpression": "BSD-2-Clause",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "BSD-3-Clause",
+          "spdxExpression": "BSD-3-Clause",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:libc-utils:libc-utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:libc-utils:libc_utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:libc_utils:libc-utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:libc_utils:libc_utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:libc:libc-utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:libc:libc_utils:0.7.2-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "2012d31b8d3badde",
+      "name": "libcrypto1.1",
+      "version": "1.1.1w-r1",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "OpenSSL",
+          "spdxExpression": "OpenSSL",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:libcrypto1.1:libcrypto1.1:1.1.1w-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "16e6789d3e426bcd",
+      "name": "libretls",
+      "version": "3.3.4-r3",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "BSD-3-Clause",
+          "spdxExpression": "BSD-3-Clause",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "ISC",
+          "spdxExpression": "ISC",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "MIT",
+          "spdxExpression": "MIT",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:libretls:libretls:3.3.4-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "677d2014ac7ac0b8",
+      "name": "libssl1.1",
+      "version": "1.1.1w-r1",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "OpenSSL",
+          "spdxExpression": "OpenSSL",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:libssl1.1:libssl1.1:1.1.1w-r1:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "d09e00fb920bdab6",
+      "name": "musl",
+      "version": "1.2.2-r9",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "MIT",
+          "spdxExpression": "MIT",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:musl-libc:musl:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl:musl:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "44e8a389fd73f542",
+      "name": "musl-utils",
+      "version": "1.2.2-r9",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "BSD-3-Clause",
+          "spdxExpression": "BSD-3-Clause",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "GPL-2.0-or-later",
+          "spdxExpression": "GPL-2.0-or-later",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        },
+        {
+          "value": "MIT",
+          "spdxExpression": "MIT",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:musl-utils:musl-utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl-utils:musl_utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl_utils:musl-utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl_utils:musl_utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl:musl-utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:musl:musl_utils:1.2.2-r9:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "5c444639085f2a1c",
+      "name": "scanelf",
+      "version": "1.3.3-r0",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "GPL-2.0-only",
+          "spdxExpression": "GPL-2.0-only",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:scanelf:scanelf:1.3.3-r0:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "27a0780c2a3af2ad",
+      "name": "ssl_client",
+      "version": "1.34.1-r7",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "GPL-2.0-only",
+          "spdxExpression": "GPL-2.0-only",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:ssl-client:ssl-client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ssl-client:ssl_client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ssl_client:ssl-client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ssl_client:ssl_client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ssl:ssl-client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        },
+        {
+          "cpe": "cpe:2.3:a:ssl:ssl_client:1.34.1-r7:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    },
+    {
+      "id": "15d9d76f9d0a3874",
+      "name": "zlib",
+      "version": "1.2.12-r3",
+      "type": "apk",
+      "foundBy": "sbom-cataloger",
+      "locations": [
+        {
+          "path": "/opt/sbom.cdx.json",
+          "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "accessPath": "/opt/sbom.cdx.json",
+          "annotations": {
+            "evidence": "primary"
+          }
+        }
+      ],
+      "licenses": [
+        {
+          "value": "Zlib",
+          "spdxExpression": "Zlib",
+          "type": "declared",
+          "urls": [],
+          "locations": []
+        }
+      ],
+      "language": "",
+      "cpes": [
+        {
+          "cpe": "cpe:2.3:a:zlib:zlib:1.2.12-r3:*:*:*:*:*:*:*",
+          "source": "syft-generated"
+        }
+      ],
+      "purl": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
+      "metadata": null
+    }
+  ],
+  "artifactRelationships": [
+    {
+      "parent": "04e71f62ec0b21ef",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "04e71f62ec0b21ef",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "04e71f62ec0b21ef",
+      "child": "edeb12d644aed288",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "052a07799885b68d",
+      "child": "16e6789d3e426bcd",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "052a07799885b68d",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "052a07799885b68d",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "052a07799885b68d",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "0f83e0c56722c32e",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "0f83e0c56722c32e",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "15d9d76f9d0a3874",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "15d9d76f9d0a3874",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "15d9d76f9d0a3874",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "16e6789d3e426bcd",
+      "child": "27a0780c2a3af2ad",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "16e6789d3e426bcd",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "16e6789d3e426bcd",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "16e6789d3e426bcd",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "677d2014ac7ac0b8",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "27a0780c2a3af2ad",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "27a0780c2a3af2ad",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "04e71f62ec0b21ef",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "052a07799885b68d",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "0f83e0c56722c32e",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "15d9d76f9d0a3874",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "16e6789d3e426bcd",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "2012d31b8d3badde",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "27a0780c2a3af2ad",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "44e8a389fd73f542",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "5c444639085f2a1c",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "677d2014ac7ac0b8",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "a6493773d0d3fb84",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "d09e00fb920bdab6",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "d1b90f47bb04d35f",
+      "type": "contains"
+    },
+    {
+      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "child": "edeb12d644aed288",
+      "type": "contains"
+    },
+    {
+      "parent": "44e8a389fd73f542",
+      "child": "0f83e0c56722c32e",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "44e8a389fd73f542",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "44e8a389fd73f542",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "5c444639085f2a1c",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "5c444639085f2a1c",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "5c444639085f2a1c",
+      "child": "44e8a389fd73f542",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "677d2014ac7ac0b8",
+      "child": "16e6789d3e426bcd",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "677d2014ac7ac0b8",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "677d2014ac7ac0b8",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "677d2014ac7ac0b8",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "a6493773d0d3fb84",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "a6493773d0d3fb84",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "04e71f62ec0b21ef",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "15d9d76f9d0a3874",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "16e6789d3e426bcd",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "2012d31b8d3badde",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "27a0780c2a3af2ad",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "44e8a389fd73f542",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "5c444639085f2a1c",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "677d2014ac7ac0b8",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d09e00fb920bdab6",
+      "child": "edeb12d644aed288",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "d1b90f47bb04d35f",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "d1b90f47bb04d35f",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "edeb12d644aed288",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "edeb12d644aed288",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    }
+  ],
+  "files": [
+    {
+      "id": "41d7e3ec829df079",
+      "location": {
+        "path": "/opt/sbom.cdx.json",
+        "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a"
+      },
+      "metadata": {
+        "mode": 644,
+        "type": "RegularFile",
+        "userID": 0,
+        "groupID": 0,
+        "mimeType": "application/json",
+        "size": 24524
+      },
+      "digests": [
+        {
+          "algorithm": "sha256",
+          "value": "222b87cd972b7b86079bdebac410a3c4a179b64550a3329cac654535ece22f1f"
+        }
+      ]
+    }
+  ],
+  "source": {
+    "id": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+    "name": "docker.io/janeisklar/alpine",
+    "version": "3.15-sbom",
+    "type": "image",
+    "metadata": {
+      "userInput": "docker.io/janeisklar/alpine:3.15-sbom",
+      "imageID": "sha256:7e9f834e009eae4cb0774f954b9dba2b026cb23bb3d297b9a8dd88717d800c20",
+      "manifestDigest": "sha256:346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "tags": [],
+      "imageSize": 24524,
+      "layers": [
+        {
+          "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+          "digest": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "size": 24524
+        }
+      ],
+      "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo3ZTlmODM0ZTAwOWVhZTRjYjA3NzRmOTU0YjlkYmEyYjAyNmNiMjNiYjNkMjk3YjlhOGRkODg3MTdkODAwYzIwIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
+      "config": "<<PRESENCE>>",
+      "repoDigests": [
+        "<<PRESENCE>>"
+      ],
+      "architecture": "<<PRESENCE>>",
+      "os": "linux"
+    }
+  },
+  "distro": {},
+  "descriptor": {
+    "name": "name",
+    "version": "unknown",
+    "configuration": {
+      "catalogers": {
+        "requested": {
+          "default": [
+            "image"
+          ]
+        },
+        "used": [
+          "alpm-db-cataloger",
+          "apk-db-cataloger",
+          "binary-classifier-cataloger",
+          "cargo-auditable-binary-cataloger",
+          "conan-info-cataloger",
+          "dotnet-portable-executable-cataloger",
+          "dpkg-db-cataloger",
+          "elf-binary-package-cataloger",
+          "go-module-binary-cataloger",
+          "graalvm-native-image-cataloger",
+          "java-archive-cataloger",
+          "java-jvm-cataloger",
+          "javascript-package-cataloger",
+          "linux-kernel-cataloger",
+          "lua-rock-cataloger",
+          "nix-store-cataloger",
+          "php-composer-installed-cataloger",
+          "php-pecl-serialized-cataloger",
+          "portage-cataloger",
+          "python-installed-package-cataloger",
+          "r-package-cataloger",
+          "rpm-db-cataloger",
+          "ruby-installed-gemspec-cataloger",
+          "sbom-cataloger",
+          "wordpress-plugins-cataloger"
+        ]
+      },
+      "data-generation": {
+        "generate-cpes": true
+      },
+      "files": {
+        "content": {
+          "globs": null,
+          "skip-files-above-size": 0
+        },
+        "hashers": [
+          "sha-256"
+        ],
+        "selection": "owned-by-package"
+      },
+      "packages": {
+        "binary": [
+          "python-binary",
+          "python-binary-lib",
+          "pypy-binary-lib",
+          "go-binary",
+          "julia-binary",
+          "helm",
+          "redis-binary",
+          "java-binary-openjdk",
+          "java-binary-ibm",
+          "java-binary-oracle",
+          "java-binary-graalvm",
+          "java-binary-jdk",
+          "nodejs-binary",
+          "go-binary-hint",
+          "busybox-binary",
+          "util-linux-binary",
+          "haproxy-binary",
+          "perl-binary",
+          "php-cli-binary",
+          "php-fpm-binary",
+          "php-apache-binary",
+          "php-composer-binary",
+          "httpd-binary",
+          "memcached-binary",
+          "traefik-binary",
+          "arangodb-binary",
+          "postgresql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "xtrabackup-binary",
+          "mariadb-binary",
+          "rust-standard-library-linux",
+          "rust-standard-library-macos",
+          "ruby-binary",
+          "erlang-binary",
+          "erlang-alpine-binary",
+          "erlang-library",
+          "swipl-binary",
+          "dart-binary",
+          "haskell-ghc-binary",
+          "haskell-cabal-binary",
+          "haskell-stack-binary",
+          "consul-binary",
+          "nginx-binary",
+          "bash-binary",
+          "openssl-binary",
+          "gcc-binary",
+          "fluent-bit-binary",
+          "wordpress-cli-binary",
+          "curl-binary",
+          "lighttpd-binary",
+          "proftpd-binary",
+          "zstd-binary",
+          "xz-binary",
+          "gzip-binary",
+          "sqlcipher-binary",
+          "jq-binary"
+        ],
+        "golang": {
+          "local-mod-cache-dir": "<<PRESENCE>>",
+          "main-module-version": {
+            "from-build-settings": true,
+            "from-contents": true,
+            "from-ld-flags": true
+          },
+          "proxies": [
+            "https://proxy.golang.org",
+            "direct"
+          ],
+          "search-local-mod-cache-licenses": false,
+          "search-remote-licenses": false
+        },
+        "java-archive": {
+          "include-indexed-archives": true,
+          "include-unindexed-archives": false,
+          "maven-base-url": "https://repo1.maven.org/maven2",
+          "maven-localrepository-dir": "<<PRESENCE>>",
+          "max-parent-recursive-depth": 0,
+          "resolve-transitive-dependencies": false,
+          "use-maven-localrepository": false,
+          "use-network": false
+        },
+        "javascript": {
+          "include-dev-dependencies": false,
+          "npm-base-url": "",
+          "search-remote-licenses": false
+        },
+        "linux-kernel": {
+          "catalog-modules": true
+        },
+        "python": {
+          "guess-unpinned-requirements": false
+        }
+      },
+      "relationships": {
+        "exclude-binary-packages-with-file-ownership-overlap": true,
+        "package-file-ownership": true,
+        "package-file-ownership-overlap": true
+      },
+      "search": {
+        "scope": "squashed"
+      }
+    }
+  },
+  "schema": {
+    "version": "16.0.18",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
+  }
+}
