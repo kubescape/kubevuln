@@ -56,7 +56,7 @@
       "repoDigests": [
         "quay.io/jitesoft/debian@sha256:aa12141fb9e387cdc9f933d5048ab58ba0aa4f3eb2c4d5fe804efce52e0b14eb"
       ],
-      "architecture": "amd64",
+      "architecture": "<<PRESENCE>>",
       "os": "linux"
     }
   },
