@@ -785,115 +785,115 @@
       }
     },
     {
-      "parent": "2012d31b8d3badde",
-      "child": "16e6789d3e426bcd",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "41d7e3ec829df079",
-      "type": "described-by"
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "41d7e3ec829df079",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "677d2014ac7ac0b8",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "d1b90f47bb04d35f",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "27a0780c2a3af2ad",
-      "child": "41d7e3ec829df079",
-      "type": "described-by"
-    },
-    {
-      "parent": "27a0780c2a3af2ad",
-      "child": "41d7e3ec829df079",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "04e71f62ec0b21ef",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "052a07799885b68d",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "0f83e0c56722c32e",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "15d9d76f9d0a3874",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "16e6789d3e426bcd",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "2012d31b8d3badde",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "27a0780c2a3af2ad",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "44e8a389fd73f542",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "5c444639085f2a1c",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "677d2014ac7ac0b8",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "a6493773d0d3fb84",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "d09e00fb920bdab6",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "d1b90f47bb04d35f",
       "type": "contains"
     },
     {
-      "parent": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "child": "edeb12d644aed288",
       "type": "contains"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "16e6789d3e426bcd",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "677d2014ac7ac0b8",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "2012d31b8d3badde",
+      "child": "d1b90f47bb04d35f",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "27a0780c2a3af2ad",
+      "child": "41d7e3ec829df079",
+      "type": "described-by"
+    },
+    {
+      "parent": "27a0780c2a3af2ad",
+      "child": "41d7e3ec829df079",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
     },
     {
       "parent": "44e8a389fd73f542",
@@ -1081,14 +1081,14 @@
     }
   ],
   "source": {
-    "id": "346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+    "id": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
     "name": "docker.io/janeisklar/alpine",
     "version": "3.15-sbom",
     "type": "image",
     "metadata": {
       "userInput": "docker.io/janeisklar/alpine:3.15-sbom",
-      "imageID": "sha256:7e9f834e009eae4cb0774f954b9dba2b026cb23bb3d297b9a8dd88717d800c20",
-      "manifestDigest": "sha256:346b86bf5ad764d5914ece060e36af8b40fcd81fda973fabdc1d9470fc1812ff",
+      "imageID": "sha256:29cc48299a7339eb76ae82970aee9f816d611d1dce64f18daa26b9a4b13ef3d3",
+      "manifestDigest": "sha256:1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
       "mediaType": "application/vnd.oci.image.manifest.v1+json",
       "tags": [],
       "imageSize": 24524,
@@ -1099,7 +1099,7 @@
           "size": 24524
         }
       ],
-      "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo3ZTlmODM0ZTAwOWVhZTRjYjA3NzRmOTU0YjlkYmEyYjAyNmNiMjNiYjNkMjk3YjlhOGRkODg3MTdkODAwYzIwIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
+      "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjoyOWNjNDgyOTlhNzMzOWViNzZhZTgyOTcwYWVlOWY4MTZkNjExZDFkY2U2NGYxOGRhYTI2YjlhNGIxM2VmM2QzIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
       "config": "<<PRESENCE>>",
       "repoDigests": [
         "<<PRESENCE>>"
