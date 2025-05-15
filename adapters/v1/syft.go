@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"runtime"
 	"strings"
 	"time"
@@ -30,9 +32,10 @@ import (
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
-	maxImageSize int64
-	maxSBOMSize  int
-	scanTimeout  time.Duration
+	maxImageSize      int64
+	maxSBOMSize       int
+	scanTimeout       time.Duration
+	scanEmbeddedSBOMs bool
 }
 
 const digestDelim = "@"
@@ -40,11 +43,12 @@ const digestDelim = "@"
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
-func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize int) *SyftAdapter {
+func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize int, scanEmbeddedSBOMs bool) *SyftAdapter {
 	return &SyftAdapter{
-		maxImageSize: maxImageSize,
-		maxSBOMSize:  maxSBOMSize,
-		scanTimeout:  scanTimeout,
+		maxImageSize:      maxImageSize,
+		maxSBOMSize:       maxSBOMSize,
+		scanTimeout:       scanTimeout,
+		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 	}
 }
 
@@ -184,6 +188,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		cfg := syft.DefaultCreateSBOMConfig()
 		cfg.ToolName = name
 		cfg.ToolVersion = s.Version()
+		if s.scanEmbeddedSBOMs {
+			// ask Syft to also scan the image for embedded SBOMs
+			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
+		}
 		syftSBOM, err = syft.CreateSBOM(ctx, src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)

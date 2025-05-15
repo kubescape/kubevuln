@@ -19,6 +19,7 @@ type Config struct {
 	MaxSBOMSize        int           `mapstructure:"maxSBOMSize"`
 	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
 	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
+	ScanEmbeddedSboms  bool          `mapstructure:"scanEmbeddedSBOMs"`
 	KeepLocal          bool          `mapstructure:"keepLocal"`
 	Storage            bool          `mapstructure:"storage"`
 	VexGeneration      bool          `mapstructure:"vexGeneration"`
@@ -40,6 +41,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("scanTimeout", 5*time.Minute)
 	viper.SetDefault("vexGeneration", false)
 	viper.SetDefault("namespace", "kubescape")
+	viper.SetDefault("scanEmbeddedSBOMs", false)
 
 	viper.AutomaticEnv()
 
