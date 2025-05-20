@@ -886,22 +886,73 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
-	var err error
 	if isFiltered {
-		_, err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(context.Background(), convertToFilteredSBOM(&manifest), metav1.CreateOptions{})
+		filtered := convertToFilteredSBOM(&manifest)
+		_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(context.Background(), filtered, metav1.CreateOptions{})
+		switch {
+		case errors.IsAlreadyExists(err):
+			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				// retrieve the latest version before attempting update
+				// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+				result, getErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(context.Background(), sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+				if getErr != nil {
+					return getErr
+				}
+				// update the filtered sbom
+				mergeMaps(result.Annotations, filtered.Annotations)
+				mergeMaps(result.Labels, filtered.Labels)
+				result.Spec = filtered.Spec
+				// try to send the updated filtered sbom
+				_, updateErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+				return updateErr
+			})
+			if retryErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to update filtered SBOM in storage", helpers.Error(err),
+					helpers.String("name", sbom.Name))
+			} else {
+				logger.L().Debug("updated filtered SBOM in storage",
+					helpers.String("name", sbom.Name))
+			}
+		case err != nil:
+			logger.L().Ctx(ctx).Warning("failed to store filtered SBOM in storage", helpers.Error(err),
+				helpers.String("name", sbom.Name))
+		default:
+			logger.L().Debug("stored filtered SBOM in storage",
+				helpers.String("name", sbom.Name))
+		}
 	} else {
-		_, err = a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
-	}
-	switch {
-	case errors.IsAlreadyExists(err):
-		logger.L().Debug("SBOM manifest already exists in storage",
-			helpers.String("name", sbom.Name))
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store SBOM into apiserver", helpers.Error(err),
-			helpers.String("name", sbom.Name))
-	default:
-		logger.L().Debug("stored SBOM in storage",
-			helpers.String("name", sbom.Name))
+		_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+		switch {
+		case errors.IsAlreadyExists(err):
+			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				// retrieve the latest version before attempting update
+				// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+				result, getErr := a.StorageClient.SBOMSyfts(a.Namespace).Get(context.Background(), sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+				if getErr != nil {
+					return getErr
+				}
+				// update the sbom
+				mergeMaps(result.Annotations, manifest.Annotations)
+				mergeMaps(result.Labels, manifest.Labels)
+				result.Spec = manifest.Spec
+				// try to send the updated sbom
+				_, updateErr := a.StorageClient.SBOMSyfts(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+				return updateErr
+			})
+			if retryErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to update SBOM in storage", helpers.Error(err),
+					helpers.String("name", sbom.Name))
+			} else {
+				logger.L().Debug("updated SBOM in storage",
+					helpers.String("name", sbom.Name))
+			}
+		case err != nil:
+			logger.L().Ctx(ctx).Warning("failed to store SBOM in storage", helpers.Error(err),
+				helpers.String("name", sbom.Name))
+		default:
+			logger.L().Debug("stored SBOM in storage",
+				helpers.String("name", sbom.Name))
+		}
 	}
 	return nil
 }
