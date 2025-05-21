@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/anchore/grype/grype/search"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
@@ -54,10 +55,10 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 			var isFixed int
 			var version string
 			description := match.Vulnerability.Description
-			link := "https://nvd.nist.gov/vuln/detail/" + match.Vulnerability.ID
+			link := linkToVuln(match.Vulnerability.ID)
 			if len(match.Vulnerability.Fix.Versions) != 0 {
 				isFixed = 1
-				version = match.Vulnerability.Fix.Versions[0]
+				version = suggestedVersion(match.Artifact.Version, match.Vulnerability.Fix.Versions)
 			} else {
 				// also check CPE matches
 				for _, detail := range match.MatchDetails {
@@ -170,6 +171,36 @@ func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 	}
 
 	return vulnerabilityResults, nil
+}
+
+func linkToVuln(id string) string {
+	switch {
+	case strings.HasPrefix("EUVD-", id):
+		return "https://euvd.enisa.europa.eu/enisa/" + id
+	case strings.HasPrefix("GHSA-", id):
+		return "https://github.com/advisories/" + id
+	default:
+		return "https://nvd.nist.gov/vuln/detail/" + id
+	}
+}
+
+func suggestedVersion(current string, versions []string) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	// compare with semver
+	// if current is not a version, return the first version
+	if c, err := semver.NewVersion(current); err == nil {
+		for _, version := range versions {
+			v, err := semver.NewVersion(version)
+			if err == nil {
+				if c.LessThan(v) {
+					return version
+				}
+			}
+		}
+	}
+	return versions[0]
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {

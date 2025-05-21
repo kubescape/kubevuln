@@ -199,3 +199,42 @@ func Test_parseLayersPayload(t *testing.T) {
 		})
 	}
 }
+
+func Test_suggestedVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  string
+		versions []string
+		want     string
+	}{
+		{
+			name:     "Test with empty versions",
+			current:  "1.0.0",
+			versions: []string{},
+			want:     "",
+		},
+		{
+			name:     "Test with empty current",
+			current:  "",
+			versions: []string{"1.0.0", "2.0.0"},
+			want:     "1.0.0",
+		},
+		{
+			name:     "Test with one version",
+			current:  "1.0.0",
+			versions: []string{"2.0.0"},
+			want:     "2.0.0",
+		},
+		{
+			name:     "Test with real versions",
+			current:  "14.7.0",
+			versions: []string{"10.24.0", "12.21.0", "14.16.0", "15.10.0"},
+			want:     "14.16.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions))
+		})
+	}
+}
