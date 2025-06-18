@@ -2,12 +2,22 @@ package v1
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/opencontainers/go-digest"
+
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/stereoscope/pkg/file"
@@ -36,6 +46,7 @@ type SyftAdapter struct {
 	pullMutex         sync.Mutex
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
+	diveAdapter       *DiveAdapter
 }
 
 const digestDelim = "@"
@@ -49,6 +60,7 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 		maxSBOMSize:       maxSBOMSize,
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
+		diveAdapter:       NewDiveAdapter("", scanTimeout),
 	}
 }
 
@@ -234,12 +246,39 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	logger.L().Debug("converting SBOM",
 		helpers.String("imageID", imageID))
 	domainSBOM.Content, err = s.syftToDomain(*syftSBOM)
+	if err != nil {
+		return domainSBOM, err
+	}
+
+	// Run dive scan on the same image after syft has successfully processed it
+	if imageTag != "" {
+		go func() {
+			diveCtx, cancel := context.WithTimeout(context.Background(), s.scanTimeout)
+			defer cancel()
+
+			// Generate unique output path for dive results with timestamp and job ID
+			timestamp := time.Now().Format("20060102-150405")
+			jobID := generateJobID(imageTag, timestamp)
+			outputPath := fmt.Sprintf("./dive-results/%s-%s-%s-dive.json", name, timestamp, jobID)
+
+			_, diveErr := s.diveAdapter.ScanImage(diveCtx, imageTag, outputPath)
+			if diveErr != nil {
+				logger.L().Ctx(ctx).Warning("dive scan failed",
+					helpers.Error(diveErr),
+					helpers.String("imageTag", imageTag))
+			} else {
+				logger.L().Ctx(ctx).Debug("dive scan completed successfully",
+					helpers.String("imageTag", imageTag),
+					helpers.String("outputPath", outputPath))
+			}
+		}()
+	}
 
 	// return SBOM
 	logger.L().Debug("returning SBOM",
 		helpers.String("imageID", imageID),
 		helpers.Int("packages", len(domainSBOM.Content.Artifacts)))
-	return domainSBOM, err
+	return domainSBOM, nil
 }
 
 // Version returns Syft's version which is used to tag SBOMs
@@ -247,4 +286,11 @@ func (s *SyftAdapter) Version() string {
 	v := tools.PackageVersion("github.com/anchore/syft")
 	// no more processing needed
 	return v
+}
+
+// generateJobID creates a unique job ID based on image tag and timestamp
+func generateJobID(imageTag, timestamp string) string {
+	// Create a hash from image tag and timestamp to ensure uniqueness
+	hash := sha256.Sum256([]byte(imageTag + timestamp))
+	return hex.EncodeToString(hash[:8]) // Use first 8 characters for readability
 }
