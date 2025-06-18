@@ -4,29 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/opencontainers/go-digest"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/opencontainers/go-digest"
 	"go.opentelemetry.io/otel"
 )
 
@@ -34,6 +33,7 @@ import (
 type SyftAdapter struct {
 	maxImageSize      int64
 	maxSBOMSize       int
+	pullMutex         sync.Mutex
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
 }
@@ -173,12 +173,15 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// use a deadline to prevent the process from hanging for too long
 	// TODO check memory usage and see if we can kill the goroutine
 	var syftSBOM *sbom.SBOM
+	// ensure no parallel pulls
+	s.pullMutex.Lock()
+	defer s.pullMutex.Unlock()
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
-				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
+				logger.L().Ctx(ctx).Fatal("failed to close source", helpers.Error(err),
 					helpers.String("imageID", imageID))
 			}
 		}(src)
