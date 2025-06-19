@@ -18,13 +18,15 @@ import (
 func main() {
 	// Define command line flags
 	var (
-		imageTag     = flag.String("image", "", "Docker image tag to scan (e.g., nginx:latest)")
-		timeout      = flag.Duration("timeout", 5*time.Minute, "Scan timeout")
-		maxImageSize = flag.Int64("max-image-size", 512*1024*1024, "Maximum image size in bytes")
-		maxSBOMSize  = flag.Int("max-sbom-size", 20*1024*1024, "Maximum SBOM size in bytes")
-		scanEmbedded = flag.Bool("scan-embedded", false, "Scan for embedded SBOMs")
-		waitForDive  = flag.Bool("wait-dive", false, "Wait for dive scan to complete")
-		help         = flag.Bool("help", false, "Show help")
+		imageTag       = flag.String("image", "", "Docker image tag to scan (e.g., nginx:latest)")
+		timeout        = flag.Duration("timeout", 5*time.Minute, "Scan timeout")
+		maxImageSize   = flag.Int64("max-image-size", 512*1024*1024, "Maximum image size in bytes")
+		maxSBOMSize    = flag.Int("max-sbom-size", 20*1024*1024, "Maximum SBOM size in bytes")
+		scanEmbedded   = flag.Bool("scan-embedded", false, "Scan for embedded SBOMs")
+		skipDive       = flag.Bool("skip-dive", false, "Skip dive scan (layer analysis)")
+		skipTruffleHog = flag.Bool("skip-trufflehog", false, "Skip trufflehog scan (secret detection)")
+		async          = flag.Bool("async", false, "Run scans asynchronously (don't wait for dive/trufflehog)")
+		help           = flag.Bool("help", false, "Show help")
 	)
 	flag.Parse()
 
@@ -39,8 +41,10 @@ func main() {
 		fmt.Println()
 		fmt.Println("Examples:")
 		fmt.Println("  kubevuln -image nginx:latest")
-		fmt.Println("  kubevuln -image alpine:latest -wait-dive")
+		fmt.Println("  kubevuln -image alpine:latest -skip-dive")
 		fmt.Println("  kubevuln -image ubuntu:20.04 -timeout 10m")
+		fmt.Println("  kubevuln -image nginx:latest -async")
+		fmt.Println("  kubevuln -image nginx:latest -skip-trufflehog")
 		return
 	}
 
@@ -56,7 +60,9 @@ func main() {
 	fmt.Printf("📦 Max image size: %d MB\n", *maxImageSize/(1024*1024))
 	fmt.Printf("📋 Max SBOM size: %d MB\n", *maxSBOMSize/(1024*1024))
 	fmt.Printf("🔍 Scan embedded SBOMs: %v\n", *scanEmbedded)
-	fmt.Printf("⏳ Wait for dive: %v\n", *waitForDive)
+	fmt.Printf("⏳ Skip dive: %v\n", *skipDive)
+	fmt.Printf("🔐 Skip trufflehog: %v\n", *skipTruffleHog)
+	fmt.Printf("🔄 Run scans asynchronously: %v\n", *async)
 	fmt.Println()
 
 	// Create syft adapter with dive integration
@@ -84,7 +90,13 @@ func main() {
 	fmt.Printf("📊 Status: %s\n", sbom.Status)
 	fmt.Printf("📦 Packages found: %d\n", len(sbom.Content.Artifacts))
 
-	if *waitForDive {
+	if *skipDive {
+		fmt.Println()
+		fmt.Println("💡 Dive scan is skipped")
+	} else if *async {
+		fmt.Println()
+		fmt.Println("💡 Dive scan is running asynchronously in the background")
+	} else {
 		fmt.Println()
 		fmt.Println("⏳ Waiting for dive scan to complete...")
 
@@ -104,10 +116,34 @@ func main() {
 				fmt.Println("⚠️  Dive scan did not complete within 3 minutes")
 			}
 		}
+	}
+
+	if *skipTruffleHog {
+		fmt.Println()
+		fmt.Println("🔐 TruffleHog scan is skipped")
+	} else if *async {
+		fmt.Println()
+		fmt.Println("🔐 TruffleHog scan is running asynchronously in the background")
 	} else {
 		fmt.Println()
-		fmt.Println("💡 Dive scan is running asynchronously in the background")
-		fmt.Println("   Use -wait-dive flag to wait for completion")
+		fmt.Println("⏳ Waiting for trufflehog scan to complete...")
+
+		// Wait for trufflehog results (reduced to 3 minutes = 18 iterations of 10 seconds)
+		for i := 0; i < 18; i++ {
+			time.Sleep(10 * time.Second)
+
+			// Check for trufflehog results
+			truffleHogFile := findMostRecentTruffleHogFile(imageName)
+			if truffleHogFile != "" {
+				fmt.Printf("✅ TruffleHog scan completed! Results saved to: %s\n", truffleHogFile)
+				fmt.Printf("📊 File size: %d bytes\n", getFileSize(truffleHogFile))
+				break
+			}
+
+			if i == 17 {
+				fmt.Println("⚠️  TruffleHog scan did not complete within 3 minutes")
+			}
+		}
 	}
 
 	fmt.Println()
@@ -162,6 +198,57 @@ func findMostRecentDiveFile(imageName string) string {
 	}
 	var fileInfos []fileInfoWithPath
 	for _, f := range diveFiles {
+		info, err := os.Stat(f)
+		if err == nil {
+			fileInfos = append(fileInfos, fileInfoWithPath{f, info.ModTime()})
+		}
+	}
+	if len(fileInfos) == 0 {
+		return ""
+	}
+	sort.Slice(fileInfos, func(i, j int) bool {
+		return fileInfos[i].modTime.After(fileInfos[j].modTime)
+	})
+	return fileInfos[0].path
+}
+
+// findMostRecentTruffleHogFile searches for the most recent trufflehog file for the given image
+func findMostRecentTruffleHogFile(imageName string) string {
+	truffleHogResultsDir := "./trufflehog-results"
+	if _, err := os.Stat(truffleHogResultsDir); os.IsNotExist(err) {
+		return ""
+	}
+	files, err := os.ReadDir(truffleHogResultsDir)
+	if err != nil {
+		logger.L().Warning("Could not read trufflehog-results directory", helpers.Error(err))
+		return ""
+	}
+	var truffleHogFiles []string
+	for _, file := range files {
+		if !file.IsDir() {
+			fileName := file.Name()
+			if strings.HasPrefix(fileName, imageName) && strings.HasSuffix(fileName, "-trufflehog.json") {
+				truffleHogFiles = append(truffleHogFiles, truffleHogResultsDir+"/"+fileName)
+			}
+		}
+	}
+	if len(truffleHogFiles) == 0 {
+		fmt.Printf("🔍 No trufflehog files found for %s\n", imageName)
+		fmt.Printf("   Available trufflehog files:\n")
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), "-trufflehog.json") {
+				fmt.Printf("   - %s\n", file.Name())
+			}
+		}
+		return ""
+	}
+	// Sort files by modification time (most recent first)
+	type fileInfoWithPath struct {
+		path    string
+		modTime time.Time
+	}
+	var fileInfos []fileInfoWithPath
+	for _, f := range truffleHogFiles {
 		info, err := os.Stat(f)
 		if err == nil {
 			fileInfos = append(fileInfos, fileInfoWithPath{f, info.ModTime()})

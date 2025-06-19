@@ -11,14 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
-
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/opencontainers/go-digest"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
@@ -47,6 +39,7 @@ type SyftAdapter struct {
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
 	diveAdapter       *DiveAdapter
+	truffleHogAdapter *TruffleHogAdapter
 }
 
 const digestDelim = "@"
@@ -61,6 +54,7 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 		diveAdapter:       NewDiveAdapter("", scanTimeout),
+		truffleHogAdapter: NewTruffleHogAdapter("", scanTimeout),
 	}
 }
 
@@ -268,6 +262,28 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 					helpers.String("imageTag", imageTag))
 			} else {
 				logger.L().Ctx(ctx).Debug("dive scan completed successfully",
+					helpers.String("imageTag", imageTag),
+					helpers.String("outputPath", outputPath))
+			}
+		}()
+
+		// Run trufflehog scan on the same image after syft has successfully processed it
+		go func() {
+			truffleHogCtx, cancel := context.WithTimeout(context.Background(), s.scanTimeout)
+			defer cancel()
+
+			// Generate unique output path for trufflehog results with timestamp and job ID
+			timestamp := time.Now().Format("20060102-150405")
+			jobID := generateJobID(imageTag, timestamp)
+			outputPath := fmt.Sprintf("./trufflehog-results/%s-%s-%s-trufflehog.json", name, timestamp, jobID)
+
+			_, truffleHogErr := s.truffleHogAdapter.ScanImage(truffleHogCtx, imageTag, outputPath)
+			if truffleHogErr != nil {
+				logger.L().Ctx(ctx).Warning("trufflehog scan failed",
+					helpers.Error(truffleHogErr),
+					helpers.String("imageTag", imageTag))
+			} else {
+				logger.L().Ctx(ctx).Debug("trufflehog scan completed successfully",
 					helpers.String("imageTag", imageTag),
 					helpers.String("outputPath", outputPath))
 			}
