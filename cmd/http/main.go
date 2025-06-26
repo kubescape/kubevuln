@@ -68,7 +68,11 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+
+	// Create unified scan report storage adapter
+	scanReportStorage := v1.NewScanReportStorageAdapter(c.Namespace)
+
+	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, scanReportStorage)
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform
 	if c.KeepLocal {
