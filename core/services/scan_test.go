@@ -464,7 +464,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	go func() {
 		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("../../adapters/v1/testdata")))
 	}()
-	cveAdapter := v1.NewGrypeAdapterFixedDB()
+	cveAdapter := v1.NewGrypeAdapter("http://localhost:8000/listing.json", false)
 	storageAP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)

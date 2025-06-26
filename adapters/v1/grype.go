@@ -57,16 +57,6 @@ func NewGrypeAdapter(listingURL string, useDefaultMatchers bool) *GrypeAdapter {
 	return g
 }
 
-func NewGrypeAdapterFixedDB() *GrypeAdapter {
-	g := &GrypeAdapter{
-		dbConfig: db.Config{
-			DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
-			ListingURL: "http://localhost:8000/listing.json",
-		},
-	}
-	return g
-}
-
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion(context.Context) string {
 	g.mu.RLock()
@@ -91,15 +81,36 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		defer span.End()
 		logger.L().Info("updating grype DB",
 			helpers.String("listingURL", g.dbConfig.ListingURL))
+
+		// Ensure the cache directory exists
+		if err := os.MkdirAll(g.dbConfig.DBRootDir, 0755); err != nil {
+			logger.L().Ctx(ctx).Error("failed to create cache directory", helpers.Error(err),
+				helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+			return false
+		}
+
+		// Force a fresh database download by clearing the cache directory
+		if err := tools.DeleteContents(g.dbConfig.DBRootDir); err != nil {
+			logger.L().Debug("failed to clear cache directory (may not exist)", helpers.Error(err),
+				helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+		} else {
+			logger.L().Debug("cleared cache directory for fresh download", helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+		}
+
 		var err error
 		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
-			err := tools.DeleteContents(g.dbConfig.DBRootDir)
-			logger.L().Debug("cleaned up cache", helpers.Error(err),
-				helpers.String("DBRootDir", g.dbConfig.DBRootDir))
-			logger.L().Info("restarting to release previous grype DB")
-			os.Exit(0)
+			// Try to clean up cache directory if it exists, but don't fail if it doesn't
+			if cleanupErr := tools.DeleteContents(g.dbConfig.DBRootDir); cleanupErr != nil {
+				logger.L().Debug("cache cleanup failed (directory may not exist)", helpers.Error(cleanupErr),
+					helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+			} else {
+				logger.L().Debug("cleaned up cache", helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+			}
+			// Don't restart the application, just return false to indicate not ready
+			logger.L().Info("grype DB update failed, will retry on next readiness check")
+			return false
 		}
 		g.lastDbUpdate = now
 		logger.L().Info("grype DB updated")

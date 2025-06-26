@@ -131,7 +131,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			if tt.scanTimeout > 0 {
 				scanTimeout = tt.scanTimeout
 			}
-			s := NewSyftAdapter(scanTimeout, maxImageSize, maxSBOMSize, tt.scanEmbeddedSBOMs)
+			s := NewSyftAdapter(scanTimeout, maxImageSize, maxSBOMSize, tt.scanEmbeddedSBOMs, nil)
 			got, err := s.CreateSBOM(context.TODO(), "name", tt.imageID, tt.imageTag, tt.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -152,7 +152,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 }
 
 func Test_syftAdapter_Version(t *testing.T) {
-	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false, nil)
 	version := s.Version()
 	assert.NotEqual(t, version, "")
 }
@@ -170,7 +170,7 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	sbom := toSyftModel(d)
 
 	// Convert to domain.sbom
-	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false, nil)
 	domainSBOM, err := s.syftToDomain(*sbom)
 	require.NoError(t, err)
 
