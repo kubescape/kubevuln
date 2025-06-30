@@ -3,19 +3,47 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
-
-	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
+	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/uuid"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestAmir(t *testing.T) {
+	scanID := uuid.New().String()
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID)
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+	c := config.Config{
+		ListingURL:         "https://toolbox-data.anchore.io/grype/databases/listing.json",
+		UseDefaultMatchers: false,
+	}
+	syftSbom := fileToType[v1beta1.SyftDocument]("testdata/sbom.json")
+	cveAdapter := NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
+	cveAdapter.Ready(ctx)
+	cveManifest, err := cveAdapter.ScanSBOM(ctx, domain.SBOM{
+		Annotations: map[string]string{
+			helpersv1.ScanIdMetadataKey: scanID,
+		},
+		Content: syftSbom,
+	})
+	require.NoError(t, err)
+	armo, err := domainToArmo(ctx, *cveManifest.Content, []armotypes.VulnerabilityExceptionPolicy{})
+	assert.NoError(t, err)
+	fmt.Println(len(armo))
+}
 
 func Test_domainToArmo(t *testing.T) {
 	tests := []struct {
