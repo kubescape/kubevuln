@@ -522,7 +522,7 @@ func Test_summarize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy, tt.args.imageManifest)
+			got, _ := Summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy, tt.args.imageManifest)
 			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
 				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
 			})

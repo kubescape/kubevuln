@@ -150,7 +150,7 @@ func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
 	*counter++
 }
 
-func summarize(report v1.ScanResultReport, vulnerabilities []containerscan.CommonContainerVulnerabilityResult, workload domain.ScanCommand, hasRelevancy bool, imageManifest *containerscan.ImageManifest) (*containerscan.CommonContainerScanSummaryResult, []containerscan.CommonContainerVulnerabilityResult) {
+func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.CommonContainerVulnerabilityResult, workload domain.ScanCommand, hasRelevancy bool, imageManifest *containerscan.ImageManifest) (*containerscan.CommonContainerScanSummaryResult, []containerscan.CommonContainerVulnerabilityResult) {
 	summary := containerscan.CommonContainerScanSummaryResult{
 		Designators:      report.Designators,
 		SeverityStats:    containerscan.SeverityStats{},
