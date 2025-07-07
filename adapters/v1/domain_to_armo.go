@@ -250,7 +250,7 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 
 }
 
-func parseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
+func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
 	if grypeDocument == nil || grypeDocument.Source == nil {
 		return nil, fmt.Errorf("empty grype document")
 	}

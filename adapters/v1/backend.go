@@ -195,7 +195,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		return fmt.Errorf("failed to convert vulnerabilities to report: %w", err)
 	}
 
-	imageManifest, e := parseImageManifest(cve.Content)
+	imageManifest, e := ParseImageManifest(cve.Content)
 	if e != nil {
 		logger.L().Ctx(ctx).Warning("failed to parse image manifest from grype document", helpers.Error(err))
 	}

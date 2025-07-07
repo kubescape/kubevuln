@@ -238,7 +238,7 @@ func TestParseImageManifest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			imageManifest, err := parseImageManifest(tt.document)
+			imageManifest, err := ParseImageManifest(tt.document)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
