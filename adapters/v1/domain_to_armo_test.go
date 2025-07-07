@@ -133,9 +133,9 @@ func Test_domainToArmo(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-			got, err := domainToArmo(ctx, tt.grypeDocument, tt.vulnerabilityExceptionPolicyList)
+			got, err := DomainToArmo(ctx, tt.grypeDocument, tt.vulnerabilityExceptionPolicyList)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("domainToArmo() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("DomainToArmo() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			got[0].ContainerScanID = ""
