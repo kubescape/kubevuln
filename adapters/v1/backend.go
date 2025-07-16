@@ -190,12 +190,12 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
 	// convert to vulnerabilities
-	vulnerabilities, err := domainToArmo(ctx, *cve.Content, exceptions)
+	vulnerabilities, err := DomainToArmo(ctx, *cve.Content, exceptions)
 	if err != nil {
 		return fmt.Errorf("failed to convert vulnerabilities to report: %w", err)
 	}
 
-	imageManifest, e := parseImageManifest(cve.Content)
+	imageManifest, e := ParseImageManifest(cve.Content)
 	if e != nil {
 		logger.L().Ctx(ctx).Warning("failed to parse image manifest from grype document", helpers.Error(err))
 	}
@@ -205,7 +205,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	if cvep.Content != nil {
 		hasRelevancy = true
 		// convert to relevantVulnerabilities
-		relevantVulnerabilities, err := domainToArmo(ctx, *cvep.Content, exceptions)
+		relevantVulnerabilities, err := DomainToArmo(ctx, *cvep.Content, exceptions)
 		if err != nil {
 			return fmt.Errorf("failed to convert filtered vulnerabilities to report: %w", err)
 		}
@@ -271,7 +271,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// add summary
-	finalReport.Summary, vulnerabilities = summarize(finalReport, vulnerabilities, workload, hasRelevancy, imageManifest)
+	finalReport.Summary, vulnerabilities = Summarize(finalReport, vulnerabilities, workload, hasRelevancy, imageManifest)
 	finalReport.Summary.Context = armoContext
 
 	// split vulnerabilities to chunks

@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func domainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
+func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
 	var vulnerabilityResults []containerscan.CommonContainerVulnerabilityResult
 
 	// retrieve timestamp from context
@@ -250,7 +250,7 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 
 }
 
-func parseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
+func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
 	if grypeDocument == nil || grypeDocument.Source == nil {
 		return nil, fmt.Errorf("empty grype document")
 	}
