@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -15,6 +16,63 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
+
+type Target struct {
+	directoryMetadata *source.DirectoryMetadata
+	imageMetadata     *source.ImageMetadata
+}
+
+func NewTargetFromSource(src *v1beta1.Source) (Target, error) {
+	var target Target
+	if src == nil {
+		return target, fmt.Errorf("grype document source is nil")
+	}
+
+	switch src.Type {
+	case "directory":
+		// Try unmarshaling into DirectoryMetadata first
+		var directoryMetadata source.DirectoryMetadata
+		if err := json.Unmarshal(src.Target, &directoryMetadata); err == nil {
+			target.directoryMetadata = &directoryMetadata
+		} else {
+			// Fallback: try unmarshaling as a raw string path
+			var path string
+			if err := json.Unmarshal(src.Target, &path); err != nil {
+				return target, fmt.Errorf("failed to unmarshal directory target as either DirectoryMetadata or string: %w", err)
+			}
+			if filepath.IsAbs(path) {
+				target.directoryMetadata = &source.DirectoryMetadata{Path: path}
+			} else {
+				return target, fmt.Errorf("expected a 'directory' to represent a valid path but got: %s", path)
+			}
+		}
+	// defaults to image
+	default:
+		var imageMetadata source.ImageMetadata
+		err := json.Unmarshal(src.Target, &imageMetadata)
+		if err != nil {
+			return target, err
+		}
+		target.imageMetadata = &imageMetadata
+	}
+
+	return target, nil
+}
+
+func (s *Target) IsImageTarget() bool {
+	return s.imageMetadata != nil
+}
+func (s *Target) IsDirectoryTarget() bool {
+	return s.directoryMetadata != nil
+}
+
+func (s *Target) GetImageMetadata() *source.ImageMetadata {
+	return s.imageMetadata
+}
+
+func (s *Target) GetDirectoryMetadata() *source.DirectoryMetadata {
+	return s.directoryMetadata
+}
 
 func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vulnerabilityExceptionPolicyList []armotypes.VulnerabilityExceptionPolicy) ([]containerscan.CommonContainerVulnerabilityResult, error) {
 	var vulnerabilityResults []containerscan.CommonContainerVulnerabilityResult
@@ -41,15 +99,20 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		parentLayer := map[string]string{
 			dummyLayer: parentLayerHash,
 		}
-		var target source.ImageMetadata
-		err := json.Unmarshal(grypeDocument.Source.Target, &target)
+
+		target, err := NewTargetFromSource(grypeDocument.Source)
 		if err != nil {
 			return vulnerabilityResults, err
 		}
-		for _, layer := range target.Layers {
-			parentLayer[layer.Digest] = parentLayerHash
-			parentLayerHash = layer.Digest
+
+		if target.IsImageTarget() {
+			imageMetadata := target.GetImageMetadata()
+			for _, layer := range imageMetadata.Layers {
+				parentLayer[layer.Digest] = parentLayerHash
+				parentLayerHash = layer.Digest
+			}
 		}
+
 		// iterate over all vulnerabilities
 		for _, match := range grypeDocument.Matches {
 			var isFixed int
@@ -145,28 +208,32 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 			vulnerabilityResults = append(vulnerabilityResults, vulnerabilityResult)
 		}
-		// parse layers from payload
-		data, err := parseLayersPayload(target)
-		if err != nil {
-			return vulnerabilityResults, err
-		}
-		// fill extra layer information
-		for i, v := range vulnerabilityResults {
-			earlyLayer := ""
-			for j, layer := range v.Layers {
-				if layer.ParentLayerHash == earlyLayer {
-					earlyLayer = layer.LayerHash
-				}
-				if l, ok := data[layer.LayerHash]; ok {
-					if layer.LayerInfo == nil {
-						vulnerabilityResults[i].Layers[j].LayerInfo = &containerscan.LayerInfo{}
-					}
-					vulnerabilityResults[i].Layers[j].CreatedBy = l.CreatedBy
-					vulnerabilityResults[i].Layers[j].CreatedTime = l.CreatedTime
-					vulnerabilityResults[i].Layers[j].LayerOrder = l.LayerOrder
-				}
+		if target.IsImageTarget() {
+			imageMetadata := target.GetImageMetadata()
+			// parse layers from payload
+			data, err := parseLayersPayload(*imageMetadata)
+			if err != nil {
+				return vulnerabilityResults, err
 			}
-			vulnerabilityResults[i].IntroducedInLayer = earlyLayer
+
+			// fill extra layer information
+			for i, v := range vulnerabilityResults {
+				earlyLayer := ""
+				for j, layer := range v.Layers {
+					if layer.ParentLayerHash == earlyLayer {
+						earlyLayer = layer.LayerHash
+					}
+					if l, ok := data[layer.LayerHash]; ok {
+						if layer.LayerInfo == nil {
+							vulnerabilityResults[i].Layers[j].LayerInfo = &containerscan.LayerInfo{}
+						}
+						vulnerabilityResults[i].Layers[j].CreatedBy = l.CreatedBy
+						vulnerabilityResults[i].Layers[j].CreatedTime = l.CreatedTime
+						vulnerabilityResults[i].Layers[j].LayerOrder = l.LayerOrder
+					}
+				}
+				vulnerabilityResults[i].IntroducedInLayer = earlyLayer
+			}
 		}
 	}
 
