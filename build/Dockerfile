@@ -1,22 +1,23 @@
-FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
+FROM debian:bookworm-slim
 
-ENV GO111MODULE=on CGO_ENABLED=0
-WORKDIR /work
-ARG TARGETOS TARGETARCH
+# Install tar and any other dependencies
+RUN apt-get update && apt-get install -y tar curl && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=target=. \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/kubevuln cmd/http/main.go
+# Create nonroot user and group
+RUN groupadd -r -g 65532 nonroot && \
+    useradd -r -s /bin/false -u 65532 -g nonroot nonroot
 
-FROM gcr.io/distroless/static-debian12:nonroot
-
-USER nonroot
+USER root
 WORKDIR /home/nonroot/
 
-COPY --from=builder /out/kubevuln /usr/bin/kubevuln
+# Copy the pre-built binary from host
+COPY kubevuln /usr/bin/kubevuln
+
+# Copy dive and trufflehog binaries (they should already be executable)
+COPY dive /usr/bin/dive
+COPY trufflehog /usr/bin/trufflehog
 
 ARG image_version
 ENV RELEASE=$image_version
 
-ENTRYPOINT ["kubevuln"]
+ENTRYPOINT ["/usr/bin/kubevuln"]

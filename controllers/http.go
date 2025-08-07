@@ -182,7 +182,12 @@ func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanC
 		Args:               c.Args,
 		Session:            sessionChainToSession(c.Session),
 	}
-	if slug, err := names.ImageInfoToSlug(imageTagNormalized, c.ImageHash); err == nil {
+	// Use fallback "nohash" if ImageHash is empty, similar to registry scan
+	imageHashForSlug := c.ImageHash
+	if imageHashForSlug == "" {
+		imageHashForSlug = "nohash"
+	}
+	if slug, err := names.ImageInfoToSlug(imageTagNormalized, imageHashForSlug); err == nil {
 		command.ImageSlug = slug
 	}
 	if c.InstanceID != nil {
