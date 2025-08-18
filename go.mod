@@ -17,7 +17,7 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/distribution/distribution v2.8.2+incompatible
-	github.com/docker/docker v27.4.0+incompatible
+	github.com/docker/docker v28.0.0+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.9.1
