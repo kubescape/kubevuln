@@ -477,7 +477,7 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreVEX")
 	defer span.End()
 
-	if cve.Name == "" {
+	if cvep.Name == "" {
 		logger.L().Debug("skipping storing VEX with empty name")
 		return nil
 	}
@@ -485,7 +485,7 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 	// Check if VEX already exists
 	// If it does, update it
 	// If it doesn't, create it
-	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{})
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create VEX
@@ -625,9 +625,9 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Create the VEX container
 	vexContainer := v1beta1.OpenVulnerabilityExchangeContainer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        cve.Name,
-			Labels:      cve.Labels,
-			Annotations: cve.Annotations,
+			Name:        cvep.Name,
+			Labels:      cvep.Labels,
+			Annotations: cvep.Annotations,
 		},
 		Spec: vexDoc,
 	}
