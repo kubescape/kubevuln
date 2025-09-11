@@ -79,6 +79,7 @@ func (g *GrypeAdapter) DBVersion(context.Context) string {
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	// DB update is in progress
 	if !g.mu.TryRLock() {
+		// FIXME this gets stuck forever if the db update times out
 		return false
 	}
 	g.mu.RUnlock() // because TryRLock doesn't unlock
