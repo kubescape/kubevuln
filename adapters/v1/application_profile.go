@@ -35,12 +35,12 @@ func (a *ApplicationProfileAdapter) GetContainerRelevancyScans(ctx context.Conte
 	}
 
 	// only complete application profiles are considered - we skip partial ones
-	if completionStatus, ok := applicationProfile.Annotations[helpersv1.CompletionMetadataKey]; !ok || completionStatus != helpersv1.Complete {
+	if completionStatus, ok := applicationProfile.Annotations[helpersv1.CompletionMetadataKey]; !ok || completionStatus != helpersv1.Full {
 		return scans, fmt.Errorf("application profile %s/%s is partial (workload restart required)", namespace, name)
 	}
 
 	// only ready or completed application profiles are considered
-	if status, ok := applicationProfile.Annotations[helpersv1.StatusMetadataKey]; !ok || !slices.Contains([]string{helpersv1.Completed, helpersv1.Ready}, status) {
+	if status, ok := applicationProfile.Annotations[helpersv1.StatusMetadataKey]; !ok || !slices.Contains([]string{helpersv1.Completed, helpersv1.Learning}, status) {
 		return scans, fmt.Errorf("application profile %s/%s is not ready or completed", namespace, name)
 	}
 	instanceIDString, ok := applicationProfile.Annotations[helpersv1.InstanceIDMetadataKey]

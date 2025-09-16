@@ -228,7 +228,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	// mark SBOM as ready
-	domainSBOM.Status = helpersv1.Ready
+	domainSBOM.Status = helpersv1.Learning
 
 	// convert SBOM
 	logger.L().Debug("converting SBOM",
