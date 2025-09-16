@@ -255,9 +255,9 @@ func TestScanService_ScanAP(t *testing.T) {
 					Name:      "daemonset-kube-proxy",
 					Namespace: "kube-system",
 					Annotations: map[string]string{
-						helpersv1.CompletionMetadataKey: helpersv1.Complete,
+						helpersv1.CompletionMetadataKey: helpersv1.Full,
 						helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
-						helpersv1.StatusMetadataKey:     helpersv1.Ready,
+						helpersv1.StatusMetadataKey:     helpersv1.Learning,
 						helpersv1.WlidMetadataKey:       wlid,
 					},
 					Labels: map[string]string{"foo": "bar"},
@@ -487,7 +487,7 @@ func TestScanService_NginxTest(t *testing.T) {
 			helpersv1.ImageIDMetadataKey:      "docker.io/library/nginx@sha256:04ba374043ccd2fc5c593885c0eacddebabd5ca375f9323666f28dfd5a9710e3",
 			helpersv1.ImageTagMetadataKey:     "nginx",
 			helpersv1.ResourceSizeMetadataKey: "3896210",
-			helpersv1.StatusMetadataKey:       helpersv1.Ready,
+			helpersv1.StatusMetadataKey:       helpersv1.Learning,
 		},
 		Labels: map[string]string{
 			helpersv1.ImageIDMetadataKey:   "docker-io-library-nginx-sha256-04ba374043ccd2fc5c593885c0eacdde",
