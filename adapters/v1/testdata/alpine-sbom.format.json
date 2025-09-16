@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "id": "0a3b4a9dae4049aa",
+      "id": "6e97ac524b16262e",
       "name": "alpine-baselayout",
       "version": "3.4.0-r0",
       "type": "apk",
@@ -407,7 +407,7 @@
       }
     },
     {
-      "id": "008bcc1445f44203",
+      "id": "f4d364196d3576d8",
       "name": "alpine-baselayout-data",
       "version": "3.4.0-r0",
       "type": "apk",
@@ -618,7 +618,7 @@
       }
     },
     {
-      "id": "f0def3051a26afc8",
+      "id": "7b661594e49912dd",
       "name": "alpine-keys",
       "version": "2.4-r1",
       "type": "apk",
@@ -1091,7 +1091,7 @@
       }
     },
     {
-      "id": "0faf8749e7caad06",
+      "id": "16afe072554310ee",
       "name": "apk-tools",
       "version": "2.12.10-r1",
       "type": "apk",
@@ -1235,7 +1235,7 @@
       }
     },
     {
-      "id": "edcf6e67eac04af0",
+      "id": "ca8e18476c9977b9",
       "name": "busybox",
       "version": "1.35.0-r29",
       "type": "apk",
@@ -1417,7 +1417,7 @@
       }
     },
     {
-      "id": "10c99a42ed5bf9d4",
+      "id": "93ba00f9117dea1c",
       "name": "busybox-binsh",
       "version": "1.35.0-r29",
       "type": "apk",
@@ -1516,7 +1516,7 @@
       }
     },
     {
-      "id": "4cb49698ca5c72c1",
+      "id": "732c2966885cbfbf",
       "name": "ca-certificates-bundle",
       "version": "20220614-r4",
       "type": "apk",
@@ -1672,7 +1672,7 @@
       }
     },
     {
-      "id": "f95be16d8615d51f",
+      "id": "b1c2651bdcbb8d9c",
       "name": "libc-utils",
       "version": "0.7.2-r3",
       "type": "apk",
@@ -1754,7 +1754,7 @@
       }
     },
     {
-      "id": "e5d4a79033ba84db",
+      "id": "cc0aece1ff98a6a5",
       "name": "libcrypto3",
       "version": "3.0.8-r0",
       "type": "apk",
@@ -1989,7 +1989,7 @@
       }
     },
     {
-      "id": "c0756f35a5e6d8b3",
+      "id": "f417be4ca8f7fe51",
       "name": "libssl3",
       "version": "3.0.8-r0",
       "type": "apk",
@@ -2096,7 +2096,7 @@
       }
     },
     {
-      "id": "adaa708f703652d6",
+      "id": "37bf72ed3848875c",
       "name": "musl",
       "version": "1.2.3-r4",
       "type": "apk",
@@ -2190,7 +2190,7 @@
       }
     },
     {
-      "id": "c0d6e0f3841a7244",
+      "id": "7e954e300b825db1",
       "name": "musl-utils",
       "version": "1.2.3-r4",
       "type": "apk",
@@ -2347,7 +2347,7 @@
       }
     },
     {
-      "id": "544ec51c3fe9a624",
+      "id": "aa189d4fe94178ae",
       "name": "scanelf",
       "version": "1.3.5-r1",
       "type": "apk",
@@ -2428,7 +2428,7 @@
       }
     },
     {
-      "id": "b37d6e2e45f66f33",
+      "id": "8827bc68b60ba6d0",
       "name": "ssl_client",
       "version": "1.35.0-r29",
       "type": "apk",
@@ -2531,7 +2531,7 @@
       }
     },
     {
-      "id": "6ad7c0b45a22318c",
+      "id": "0f6f64aa11912270",
       "name": "zlib",
       "version": "1.2.13-r0",
       "type": "apk",
@@ -2621,230 +2621,17 @@
   ],
   "artifactRelationships": [
     {
-      "parent": "008bcc1445f44203",
-      "child": "0a3b4a9dae4049aa",
+      "parent": "0f6f64aa11912270",
+      "child": "16afe072554310ee",
       "type": "dependency-of"
     },
     {
-      "parent": "008bcc1445f44203",
-      "child": "2791973cba0a89bb",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "4cf9c3537f896231",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "4fdfbb03676f495b",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "57e155e28050b71f",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "6202d0483a0eaf70",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "6b9abe7d80ee470b",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "8108ab845e4ccbcb",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "8668162f21426d67",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "b58b2fb69e8b39c8",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "c7bb6e42ea2504f8",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "dfe56f19a55af4ab",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "e456dfb5be04fdb7",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "e549cedcbd486e69",
-      "type": "contains"
-    },
-    {
-      "parent": "008bcc1445f44203",
-      "child": "fb8ddb3720060aa2",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "02eba7befcbb3bfa",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "1071b0c6b4d98bb1",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "35ab393f27e0bc39",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "71fcfec0ece1a67a",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "77282715f933737e",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "7b189c84b22c7f02",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "7ff31e5e9ba0bfa9",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "89c7ab9592844cbb",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "b103e8d521455a19",
-      "type": "contains"
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "0a3b4a9dae4049aa",
-      "child": "d98fbe0bce78b009",
-      "type": "contains"
-    },
-    {
-      "parent": "0faf8749e7caad06",
-      "child": "1aa086f53c8c0808",
-      "type": "contains"
-    },
-    {
-      "parent": "0faf8749e7caad06",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "0faf8749e7caad06",
-      "child": "c765115741fe905b",
-      "type": "contains"
-    },
-    {
-      "parent": "10c99a42ed5bf9d4",
-      "child": "0a3b4a9dae4049aa",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "10c99a42ed5bf9d4",
-      "child": "564026926225072e",
-      "type": "contains"
-    },
-    {
-      "parent": "10c99a42ed5bf9d4",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "4cb49698ca5c72c1",
-      "child": "0fab6f59514f4740",
-      "type": "contains"
-    },
-    {
-      "parent": "4cb49698ca5c72c1",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "4cb49698ca5c72c1",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "544ec51c3fe9a624",
-      "child": "6a7f2c32518c8dbc",
-      "type": "contains"
-    },
-    {
-      "parent": "544ec51c3fe9a624",
-      "child": "c0d6e0f3841a7244",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "544ec51c3fe9a624",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "6ad7c0b45a22318c",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "6ad7c0b45a22318c",
+      "parent": "0f6f64aa11912270",
       "child": "6d81ff77d1d5460a",
       "type": "contains"
     },
     {
-      "parent": "6ad7c0b45a22318c",
+      "parent": "0f6f64aa11912270",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
@@ -2852,37 +2639,12 @@
       }
     },
     {
-      "parent": "adaa708f703652d6",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
+      "parent": "16afe072554310ee",
+      "child": "1aa086f53c8c0808",
+      "type": "contains"
     },
     {
-      "parent": "adaa708f703652d6",
-      "child": "544ec51c3fe9a624",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "adaa708f703652d6",
-      "child": "6ad7c0b45a22318c",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "adaa708f703652d6",
-      "child": "b37d6e2e45f66f33",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "adaa708f703652d6",
-      "child": "c0756f35a5e6d8b3",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "adaa708f703652d6",
-      "child": "c0d6e0f3841a7244",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "adaa708f703652d6",
+      "parent": "16afe072554310ee",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
@@ -2890,22 +2652,110 @@
       }
     },
     {
-      "parent": "adaa708f703652d6",
-      "child": "e5d4a79033ba84db",
+      "parent": "16afe072554310ee",
+      "child": "c765115741fe905b",
+      "type": "contains"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "0f6f64aa11912270",
       "type": "dependency-of"
     },
     {
-      "parent": "adaa708f703652d6",
-      "child": "edcf6e67eac04af0",
+      "parent": "37bf72ed3848875c",
+      "child": "16afe072554310ee",
       "type": "dependency-of"
     },
     {
-      "parent": "adaa708f703652d6",
+      "parent": "37bf72ed3848875c",
+      "child": "7e954e300b825db1",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "8827bc68b60ba6d0",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "aa189d4fe94178ae",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "ca8e18476c9977b9",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "cc0aece1ff98a6a5",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
+      "child": "f417be4ca8f7fe51",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "37bf72ed3848875c",
       "child": "f45009f97952cd8e",
       "type": "contains"
     },
     {
-      "parent": "b37d6e2e45f66f33",
+      "parent": "6e97ac524b16262e",
+      "child": "02eba7befcbb3bfa",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "1071b0c6b4d98bb1",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "35ab393f27e0bc39",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "71fcfec0ece1a67a",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "77282715f933737e",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "7b189c84b22c7f02",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "7ff31e5e9ba0bfa9",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "89c7ab9592844cbb",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
+      "child": "b103e8d521455a19",
+      "type": "contains"
+    },
+    {
+      "parent": "6e97ac524b16262e",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
@@ -2913,27 +2763,22 @@
       }
     },
     {
-      "parent": "b37d6e2e45f66f33",
-      "child": "d7486c5ba43c6e31",
+      "parent": "6e97ac524b16262e",
+      "child": "d98fbe0bce78b009",
       "type": "contains"
     },
     {
-      "parent": "c0756f35a5e6d8b3",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "c0756f35a5e6d8b3",
-      "child": "5c67196b8e1d1558",
+      "parent": "732c2966885cbfbf",
+      "child": "0fab6f59514f4740",
       "type": "contains"
     },
     {
-      "parent": "c0756f35a5e6d8b3",
-      "child": "b37d6e2e45f66f33",
+      "parent": "732c2966885cbfbf",
+      "child": "16afe072554310ee",
       "type": "dependency-of"
     },
     {
-      "parent": "c0756f35a5e6d8b3",
+      "parent": "732c2966885cbfbf",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
@@ -2941,326 +2786,87 @@
       }
     },
     {
-      "parent": "c0d6e0f3841a7244",
-      "child": "47c9d14986fb43fc",
-      "type": "contains"
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "51ddc107d90f5f4b",
-      "type": "contains"
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "bf51187b1c0aae54",
-      "type": "contains"
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "c911f25351778370",
-      "type": "contains"
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "e0a729e0af2c3974",
-      "type": "contains"
-    },
-    {
-      "parent": "c0d6e0f3841a7244",
-      "child": "f95be16d8615d51f",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "008bcc1445f44203",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "0a3b4a9dae4049aa",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "0faf8749e7caad06",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "10c99a42ed5bf9d4",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "4cb49698ca5c72c1",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "544ec51c3fe9a624",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "6ad7c0b45a22318c",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "adaa708f703652d6",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "b37d6e2e45f66f33",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "c0756f35a5e6d8b3",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "c0d6e0f3841a7244",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "e5d4a79033ba84db",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "edcf6e67eac04af0",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "f0def3051a26afc8",
-      "type": "contains"
-    },
-    {
-      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-      "child": "f95be16d8615d51f",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "0e7815a8b0d1ecdc",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "0faf8749e7caad06",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "1ae61640919b8dcb",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "2cb40ab7cf323e58",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "76af347c7dbc737a",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "b37d6e2e45f66f33",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "b5c42da9eeef9d95",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "b6274398f5a1b17c",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "bacd9a5a78fe821e",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "c0756f35a5e6d8b3",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "cd658a985edaf628",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "d5b653bea57138f7",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "e05bfc6d7f257206",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "e5d401ebaaead494",
-      "type": "contains"
-    },
-    {
-      "parent": "e5d4a79033ba84db",
-      "child": "f280edcc4c0a74ca",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "10c99a42ed5bf9d4",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "564026926225072e",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "5f6a22a80b2c468e",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "7964b7b17ac34389",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "c3b51a85a6a2d3e1",
-      "type": "evident-by",
-      "metadata": {
-        "kind": "primary"
-      }
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "c468e3fb98398685",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "da2faa18609cadef",
-      "type": "contains"
-    },
-    {
-      "parent": "edcf6e67eac04af0",
-      "child": "faa5e8897571d717",
-      "type": "contains"
-    },
-    {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "09bf3883b623158f",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "3f37b052555a032a",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "5229138dd6e4ad25",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "5c344de6c0adfb41",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "627946275cda492f",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "671d1f01c6f0063d",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "6722cd9ee8e4cd77",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "75fcc462c95ba1ee",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "761377117b43797c",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "7e0eaf4903e2c594",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "81a031158e5a172a",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "8d0f0e38c71439e1",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "932c31c2300cc286",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "a11195f3b431951d",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "bd290647080920df",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "c0437528810bb1fb",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
@@ -3268,42 +2874,436 @@
       }
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "c4d82f372f586c5d",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "c9f749c20ace3749",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "d15e3bb2fde54385",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "d7833aea1af90c3e",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "e62c139013a804b7",
       "type": "contains"
     },
     {
-      "parent": "f0def3051a26afc8",
+      "parent": "7b661594e49912dd",
       "child": "f229e2967a4439ae",
       "type": "contains"
     },
     {
-      "parent": "f95be16d8615d51f",
+      "parent": "7e954e300b825db1",
+      "child": "47c9d14986fb43fc",
+      "type": "contains"
+    },
+    {
+      "parent": "7e954e300b825db1",
+      "child": "51ddc107d90f5f4b",
+      "type": "contains"
+    },
+    {
+      "parent": "7e954e300b825db1",
+      "child": "b1c2651bdcbb8d9c",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "7e954e300b825db1",
+      "child": "bf51187b1c0aae54",
+      "type": "contains"
+    },
+    {
+      "parent": "7e954e300b825db1",
       "child": "c3b51a85a6a2d3e1",
       "type": "evident-by",
       "metadata": {
         "kind": "primary"
       }
+    },
+    {
+      "parent": "7e954e300b825db1",
+      "child": "c911f25351778370",
+      "type": "contains"
+    },
+    {
+      "parent": "7e954e300b825db1",
+      "child": "e0a729e0af2c3974",
+      "type": "contains"
+    },
+    {
+      "parent": "8827bc68b60ba6d0",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "8827bc68b60ba6d0",
+      "child": "d7486c5ba43c6e31",
+      "type": "contains"
+    },
+    {
+      "parent": "93ba00f9117dea1c",
+      "child": "564026926225072e",
+      "type": "contains"
+    },
+    {
+      "parent": "93ba00f9117dea1c",
+      "child": "6e97ac524b16262e",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "93ba00f9117dea1c",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "aa189d4fe94178ae",
+      "child": "6a7f2c32518c8dbc",
+      "type": "contains"
+    },
+    {
+      "parent": "aa189d4fe94178ae",
+      "child": "7e954e300b825db1",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "aa189d4fe94178ae",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "b1c2651bdcbb8d9c",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "564026926225072e",
+      "type": "contains"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "5f6a22a80b2c468e",
+      "type": "contains"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "7964b7b17ac34389",
+      "type": "contains"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "93ba00f9117dea1c",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "c468e3fb98398685",
+      "type": "contains"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "da2faa18609cadef",
+      "type": "contains"
+    },
+    {
+      "parent": "ca8e18476c9977b9",
+      "child": "faa5e8897571d717",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "0e7815a8b0d1ecdc",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "16afe072554310ee",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "1ae61640919b8dcb",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "2cb40ab7cf323e58",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "76af347c7dbc737a",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "8827bc68b60ba6d0",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "b5c42da9eeef9d95",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "b6274398f5a1b17c",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "bacd9a5a78fe821e",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "cd658a985edaf628",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "d5b653bea57138f7",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "e05bfc6d7f257206",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "e5d401ebaaead494",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "f280edcc4c0a74ca",
+      "type": "contains"
+    },
+    {
+      "parent": "cc0aece1ff98a6a5",
+      "child": "f417be4ca8f7fe51",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "0f6f64aa11912270",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "16afe072554310ee",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "37bf72ed3848875c",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "6e97ac524b16262e",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "732c2966885cbfbf",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "7b661594e49912dd",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "7e954e300b825db1",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "8827bc68b60ba6d0",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "93ba00f9117dea1c",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "aa189d4fe94178ae",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "b1c2651bdcbb8d9c",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "ca8e18476c9977b9",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "cc0aece1ff98a6a5",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "f417be4ca8f7fe51",
+      "type": "contains"
+    },
+    {
+      "parent": "e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+      "child": "f4d364196d3576d8",
+      "type": "contains"
+    },
+    {
+      "parent": "f417be4ca8f7fe51",
+      "child": "16afe072554310ee",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "f417be4ca8f7fe51",
+      "child": "5c67196b8e1d1558",
+      "type": "contains"
+    },
+    {
+      "parent": "f417be4ca8f7fe51",
+      "child": "8827bc68b60ba6d0",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "f417be4ca8f7fe51",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "2791973cba0a89bb",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "4cf9c3537f896231",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "4fdfbb03676f495b",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "57e155e28050b71f",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "6202d0483a0eaf70",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "6b9abe7d80ee470b",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "6e97ac524b16262e",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "8108ab845e4ccbcb",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "8668162f21426d67",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "b58b2fb69e8b39c8",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "c3b51a85a6a2d3e1",
+      "type": "evident-by",
+      "metadata": {
+        "kind": "primary"
+      }
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "c7bb6e42ea2504f8",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "dfe56f19a55af4ab",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "e456dfb5be04fdb7",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "e549cedcbd486e69",
+      "type": "contains"
+    },
+    {
+      "parent": "f4d364196d3576d8",
+      "child": "fb8ddb3720060aa2",
+      "type": "contains"
     }
   ],
   "files": [
@@ -3734,7 +3734,7 @@
         "type": "RegularFile",
         "userID": 0,
         "groupID": 0,
-        "mimeType": "text/plain",
+        "mimeType": "text/x-shellscript",
         "size": 265
       },
       "digests": [
@@ -4450,7 +4450,7 @@
         "type": "RegularFile",
         "userID": 0,
         "groupID": 0,
-        "mimeType": "text/plain",
+        "mimeType": "text/x-shellscript",
         "size": 393
       },
       "digests": [
@@ -4591,7 +4591,7 @@
         "type": "RegularFile",
         "userID": 0,
         "groupID": 0,
-        "mimeType": "text/plain",
+        "mimeType": "text/x-shellscript",
         "size": 52
       },
       "digests": [
@@ -5239,7 +5239,7 @@
         "type": "RegularFile",
         "userID": 0,
         "groupID": 0,
-        "mimeType": "text/plain",
+        "mimeType": "text/x-shellscript",
         "size": 3688
       },
       "digests": [
@@ -5275,7 +5275,7 @@
         "index.docker.io/library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501"
       ],
       "architecture": "<<PRESENCE>>",
-      "os": "linux"
+      "os": ""
     }
   },
   "distro": {
@@ -5293,28 +5293,38 @@
       "catalogers": {
         "requested": {
           "default": [
-            "image"
+            "image",
+            "file"
           ]
         },
         "used": [
           "alpm-db-cataloger",
           "apk-db-cataloger",
           "binary-classifier-cataloger",
+          "bitnami-cataloger",
           "cargo-auditable-binary-cataloger",
           "conan-info-cataloger",
-          "dotnet-portable-executable-cataloger",
+          "dotnet-deps-binary-cataloger",
+          "dotnet-packages-lock-cataloger",
           "dpkg-db-cataloger",
           "elf-binary-package-cataloger",
+          "file-content-cataloger",
+          "file-digest-cataloger",
+          "file-executable-cataloger",
+          "file-metadata-cataloger",
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
+          "homebrew-cataloger",
           "java-archive-cataloger",
           "java-jvm-cataloger",
           "javascript-package-cataloger",
           "linux-kernel-cataloger",
           "lua-rock-cataloger",
-          "nix-store-cataloger",
+          "nix-cataloger",
+          "pe-binary-package-cataloger",
           "php-composer-installed-cataloger",
-          "php-pecl-serialized-cataloger",
+          "php-interpreter-cataloger",
+          "php-pear-serialized-cataloger",
           "portage-cataloger",
           "python-installed-package-cataloger",
           "r-package-cataloger",
@@ -5336,6 +5346,10 @@
         ],
         "selection": "owned-by-package"
       },
+      "licenses": {
+        "coverage": 75,
+        "include-content": "none"
+      },
       "packages": {
         "binary": [
           "python-binary",
@@ -5345,20 +5359,12 @@
           "julia-binary",
           "helm",
           "redis-binary",
-          "java-binary-openjdk",
-          "java-binary-ibm",
-          "java-binary-oracle",
-          "java-binary-graalvm",
-          "java-binary-jdk",
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
           "util-linux-binary",
           "haproxy-binary",
           "perl-binary",
-          "php-cli-binary",
-          "php-fpm-binary",
-          "php-apache-binary",
           "php-composer-binary",
           "httpd-binary",
           "memcached-binary",
@@ -5382,6 +5388,7 @@
           "haskell-cabal-binary",
           "haskell-stack-binary",
           "consul-binary",
+          "hashicorp-vault-binary",
           "nginx-binary",
           "bash-binary",
           "openssl-binary",
@@ -5395,13 +5402,24 @@
           "xz-binary",
           "gzip-binary",
           "sqlcipher-binary",
-          "jq-binary"
+          "jq-binary",
+          "chrome-binary",
+          "ffmpeg-binary",
+          "java-binary",
+          "java-jdb-binary"
         ],
+        "dotnet": {
+          "dep-packages-must-claim-dll": true,
+          "dep-packages-must-have-dll": false,
+          "propagate-dll-claims-to-parents": true,
+          "relax-dll-claims-when-bundling-detected": true
+        },
         "golang": {
           "local-mod-cache-dir": "<<PRESENCE>>",
+          "local-vendor-dir": "",
           "main-module-version": {
             "from-build-settings": true,
-            "from-contents": true,
+            "from-contents": false,
             "from-ld-flags": true
           },
           "proxies": [
@@ -5409,6 +5427,7 @@
             "direct"
           ],
           "search-local-mod-cache-licenses": false,
+          "search-local-vendor-licenses": false,
           "search-remote-licenses": false
         },
         "java-archive": {
@@ -5429,6 +5448,9 @@
         "linux-kernel": {
           "catalog-modules": true
         },
+        "nix": {
+          "capture-owned-files": false
+        },
         "python": {
           "guess-unpinned-requirements": false
         }
@@ -5444,7 +5466,7 @@
     }
   },
   "schema": {
-    "version": "16.0.18",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
+    "version": "16.0.39",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.39.json"
   }
 }

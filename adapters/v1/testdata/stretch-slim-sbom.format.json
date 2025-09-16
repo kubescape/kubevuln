@@ -78,28 +78,38 @@
       "catalogers": {
         "requested": {
           "default": [
-            "image"
+            "image",
+            "file"
           ]
         },
         "used": [
           "alpm-db-cataloger",
           "apk-db-cataloger",
           "binary-classifier-cataloger",
+          "bitnami-cataloger",
           "cargo-auditable-binary-cataloger",
           "conan-info-cataloger",
-          "dotnet-portable-executable-cataloger",
+          "dotnet-deps-binary-cataloger",
+          "dotnet-packages-lock-cataloger",
           "dpkg-db-cataloger",
           "elf-binary-package-cataloger",
+          "file-content-cataloger",
+          "file-digest-cataloger",
+          "file-executable-cataloger",
+          "file-metadata-cataloger",
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
+          "homebrew-cataloger",
           "java-archive-cataloger",
           "java-jvm-cataloger",
           "javascript-package-cataloger",
           "linux-kernel-cataloger",
           "lua-rock-cataloger",
-          "nix-store-cataloger",
+          "nix-cataloger",
+          "pe-binary-package-cataloger",
           "php-composer-installed-cataloger",
-          "php-pecl-serialized-cataloger",
+          "php-interpreter-cataloger",
+          "php-pear-serialized-cataloger",
           "portage-cataloger",
           "python-installed-package-cataloger",
           "r-package-cataloger",
@@ -121,6 +131,10 @@
         ],
         "selection": "owned-by-package"
       },
+      "licenses": {
+        "coverage": 75,
+        "include-content": "none"
+      },
       "packages": {
         "binary": [
           "python-binary",
@@ -130,20 +144,12 @@
           "julia-binary",
           "helm",
           "redis-binary",
-          "java-binary-openjdk",
-          "java-binary-ibm",
-          "java-binary-oracle",
-          "java-binary-graalvm",
-          "java-binary-jdk",
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
           "util-linux-binary",
           "haproxy-binary",
           "perl-binary",
-          "php-cli-binary",
-          "php-fpm-binary",
-          "php-apache-binary",
           "php-composer-binary",
           "httpd-binary",
           "memcached-binary",
@@ -167,6 +173,7 @@
           "haskell-cabal-binary",
           "haskell-stack-binary",
           "consul-binary",
+          "hashicorp-vault-binary",
           "nginx-binary",
           "bash-binary",
           "openssl-binary",
@@ -180,13 +187,24 @@
           "xz-binary",
           "gzip-binary",
           "sqlcipher-binary",
-          "jq-binary"
+          "jq-binary",
+          "chrome-binary",
+          "ffmpeg-binary",
+          "java-binary",
+          "java-jdb-binary"
         ],
+        "dotnet": {
+          "dep-packages-must-claim-dll": true,
+          "dep-packages-must-have-dll": false,
+          "propagate-dll-claims-to-parents": true,
+          "relax-dll-claims-when-bundling-detected": true
+        },
         "golang": {
           "local-mod-cache-dir": "<<PRESENCE>>",
+          "local-vendor-dir": "",
           "main-module-version": {
             "from-build-settings": true,
-            "from-contents": true,
+            "from-contents": false,
             "from-ld-flags": true
           },
           "proxies": [
@@ -194,6 +212,7 @@
             "direct"
           ],
           "search-local-mod-cache-licenses": false,
+          "search-local-vendor-licenses": false,
           "search-remote-licenses": false
         },
         "java-archive": {
@@ -214,6 +233,9 @@
         "linux-kernel": {
           "catalog-modules": true
         },
+        "nix": {
+          "capture-owned-files": false
+        },
         "python": {
           "guess-unpinned-requirements": false
         }
@@ -229,7 +251,7 @@
     }
   },
   "schema": {
-    "version": "16.0.18",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
+    "version": "16.0.39",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.39.json"
   }
 }

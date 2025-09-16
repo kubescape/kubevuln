@@ -142,7 +142,7 @@
           "jq-binary"
         ],
         "golang": {
-          "local-mod-cache-dir": "/home/mbertschy/go/pkg/mod",
+          "local-mod-cache-dir": "<<PRESENCE>>",
           "main-module-version": {
             "from-build-settings": true,
             "from-contents": true,
@@ -159,7 +159,7 @@
           "include-indexed-archives": true,
           "include-unindexed-archives": false,
           "maven-base-url": "https://repo1.maven.org/maven2",
-          "maven-localrepository-dir": "/home/mbertschy/.m2/repository",
+          "maven-localrepository-dir": "<<PRESENCE>>",
           "max-parent-recursive-depth": 0,
           "resolve-transitive-dependencies": false,
           "use-maven-localrepository": false,
@@ -188,7 +188,7 @@
     }
   },
   "schema": {
-    "version": "16.0.18",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
+    "version": "16.0.39",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.39.json"
   }
 }

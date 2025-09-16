@@ -138,8 +138,8 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 
 	//verify that all vulnerabilities received and sent
 	if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
-		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected " + strconv.Itoa(expectedVulnerabilitiesSum) +
-			" vulnerabilities but received " + strconv.Itoa(chunksVulnerabilitiesCount))
+		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
+			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount)
 	}
 }
 

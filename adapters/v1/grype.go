@@ -2,15 +2,20 @@ package v1
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
-	"github.com/anchore/grype/grype/db"
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
+	"github.com/anchore/grype/grype/distro"
+	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/matcher"
 	"github.com/anchore/grype/grype/matcher/dotnet"
 	"github.com/anchore/grype/grype/matcher/golang"
@@ -21,23 +26,25 @@ import (
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/grype/grype/store"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"go.opentelemetry.io/otel"
 )
 
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
 	lastDbUpdate       time.Time
-	dbCloser           *db.Closer
-	dbStatus           *db.Status
-	store              *store.Store
-	dbConfig           db.Config
+	dbStatus           *vulnerability.ProviderStatus
+	store              vulnerability.Provider
+	distCfg            distribution.Config
+	installCfg         installation.Config
 	mu                 sync.RWMutex
 	useDefaultMatchers bool
 }
@@ -48,23 +55,57 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 // DB loading is done via readiness probes
 func NewGrypeAdapter(listingURL string, useDefaultMatchers bool) *GrypeAdapter {
 	g := &GrypeAdapter{
-		dbConfig: db.Config{
-			DBRootDir:  path.Join(xdg.CacheHome, "grype", "db"),
-			ListingURL: listingURL,
+		distCfg: distribution.Config{
+			LatestURL: listingURL,
+		},
+		installCfg: installation.Config{
+			DBRootDir: path.Join(xdg.CacheHome, "grype", "db"),
 		},
 		useDefaultMatchers: useDefaultMatchers,
 	}
 	return g
 }
 
-func NewGrypeAdapterFixedDB() *GrypeAdapter {
+func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate func(), err error) {
+	req := testcontainers.ContainerRequest{
+		Image:        "quay.io/kubescape/grype-offline-db:v6-ci-only",
+		ExposedPorts: []string{"8080/tcp"},
+		WaitingFor:   wait.ForExposedPort(),
+	}
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+
+	mappedPort, err := container.MappedPort(ctx, "8080")
+	if err != nil {
+		return "", nil, err
+	}
+
+	terminate = func() {
+		_ = container.Terminate(ctx)
+	}
+	return mappedPort.Port(), terminate, nil
+}
+
+func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
+	// start grype-offline-db container
+	port, terminate, err := startGrypeOfflineDBContainer(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
 	g := &GrypeAdapter{
-		dbConfig: db.Config{
-			DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
-			ListingURL: "http://localhost:8000/listing.json",
+		distCfg: distribution.Config{
+			LatestURL: fmt.Sprintf("http://localhost:%s/databases", port),
+		},
+		installCfg: installation.Config{
+			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
 	}
-	return g
+	return g, terminate, nil
 }
 
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
@@ -72,7 +113,8 @@ func (g *GrypeAdapter) DBVersion(context.Context) string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	return g.dbStatus.Checksum
+	parts := strings.Split(g.dbStatus.From, "%3A")
+	return parts[len(parts)-1]
 }
 
 // Ready returns the status of the vulnerabilities DB
@@ -91,14 +133,14 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
 		defer span.End()
 		logger.L().Info("updating grype DB",
-			helpers.String("listingURL", g.dbConfig.ListingURL))
+			helpers.String("listingURL", g.distCfg.LatestURL))
 		var err error
-		g.store, g.dbStatus, g.dbCloser, err = grype.LoadVulnerabilityDB(g.dbConfig, true)
+		g.store, g.dbStatus, err = grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
-			err := tools.DeleteContents(g.dbConfig.DBRootDir)
+			err := tools.DeleteContents(g.installCfg.DBRootDir)
 			logger.L().Debug("cleaned up cache", helpers.Error(err),
-				helpers.String("DBRootDir", g.dbConfig.DBRootDir))
+				helpers.String("DBRootDir", g.installCfg.DBRootDir))
 			logger.L().Info("restarting to release previous grype DB")
 			os.Exit(0)
 		}
@@ -107,7 +149,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		return true
 	}
 
-	return g.dbStatus.Err == nil
+	return g.dbStatus.Error == nil
 }
 
 const dummyLayer = "generatedlayer"
@@ -136,12 +178,12 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	pkgContext := pkg.Context{
 		Source: &s.Source,
-		Distro: s.Artifacts.LinuxDistribution,
+		Distro: distro.FromRelease(s.Artifacts.LinuxDistribution, distro.DefaultFixChannels()),
 	}
 	vulnMatcher := grype.VulnerabilityMatcher{
-		Store:          *g.store,
-		Matchers:       getMatchers(g.useDefaultMatchers),
-		NormalizeByCVE: true,
+		VulnerabilityProvider: g.store,
+		Matchers:              getMatchers(g.useDefaultMatchers),
+		NormalizeByCVE:        true,
 	}
 
 	logger.L().Debug("finding vulnerabilities",
@@ -153,7 +195,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	logger.L().Debug("compiling results",
 		helpers.String("name", sbom.Name))
-	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus)
+	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus, models.DefaultSortStrategy, false)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
@@ -167,6 +209,9 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 
 	// retrieve scanID from context and add it to the annotations
 	scanID, _ := ctx.Value(domain.ScanIDKey{}).(string)
+	if sbom.Annotations == nil {
+		sbom.Annotations = make(map[string]string)
+	}
 	sbom.Annotations[helpersv1.ScanIdMetadataKey] = scanID
 
 	logger.L().Debug("returning CVE manifest",
@@ -183,7 +228,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	}, nil
 }
 
-func getMatchers(useDefaultMatchers bool) []matcher.Matcher {
+func getMatchers(useDefaultMatchers bool) []match.Matcher {
 	if useDefaultMatchers {
 		return matcher.NewDefaultMatchers(defaultMatcherConfig())
 	}
