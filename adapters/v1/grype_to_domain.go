@@ -21,7 +21,7 @@ func grypeToDomain(grypeDoc models.Document) (*v1beta1.GrypeDocument, error) {
 			Name:                  grypeDoc.Descriptor.Name,
 			Version:               grypeDoc.Descriptor.Version,
 			Configuration:         toRawMessage(grypeDoc.Descriptor.Configuration),
-			VulnerabilityDBStatus: toRawMessage(grypeDoc.Descriptor.VulnerabilityDBStatus),
+			VulnerabilityDBStatus: toRawMessage(grypeDoc.Descriptor.DB),
 		},
 	}
 	if grypeDoc.Source != nil {
@@ -138,7 +138,7 @@ func grypeToDomainMatchesMatchDetails(matchDetails []models.MatchDetails) []v1be
 	return result
 }
 
-func grypeToDomainMatchesLocations(locations []file.Coordinates) []v1beta1.SyftCoordinates {
+func grypeToDomainMatchesLocations(locations file.Locations) []v1beta1.SyftCoordinates {
 	var result []v1beta1.SyftCoordinates
 	for _, l := range locations {
 		result = append(result, v1beta1.SyftCoordinates{

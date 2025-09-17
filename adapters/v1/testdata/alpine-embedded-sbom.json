@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "id": "edeb12d644aed288",
+      "id": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
       "name": "alpine-baselayout",
       "version": "3.2.0-r18",
       "type": "apk",
@@ -56,7 +56,7 @@
       "metadata": null
     },
     {
-      "id": "a6493773d0d3fb84",
+      "id": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64\u0026distro=3.15.11",
       "name": "alpine-keys",
       "version": "2.4-r1",
       "type": "apk",
@@ -111,7 +111,7 @@
       "metadata": null
     },
     {
-      "id": "d1b90f47bb04d35f",
+      "id": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "name": "apk-tools",
       "version": "2.12.7-r3",
       "type": "apk",
@@ -166,7 +166,7 @@
       "metadata": null
     },
     {
-      "id": "04e71f62ec0b21ef",
+      "id": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "name": "busybox",
       "version": "1.34.1-r7",
       "type": "apk",
@@ -201,7 +201,7 @@
       "metadata": null
     },
     {
-      "id": "052a07799885b68d",
+      "id": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
       "name": "ca-certificates-bundle",
       "version": "20230506-r0",
       "type": "apk",
@@ -279,7 +279,7 @@
       "metadata": null
     },
     {
-      "id": "0f83e0c56722c32e",
+      "id": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
       "name": "libc-utils",
       "version": "0.7.2-r3",
       "type": "apk",
@@ -341,7 +341,7 @@
       "metadata": null
     },
     {
-      "id": "2012d31b8d3badde",
+      "id": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "name": "libcrypto1.1",
       "version": "1.1.1w-r1",
       "type": "apk",
@@ -376,7 +376,7 @@
       "metadata": null
     },
     {
-      "id": "16e6789d3e426bcd",
+      "id": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
       "name": "libretls",
       "version": "3.3.4-r3",
       "type": "apk",
@@ -425,7 +425,7 @@
       "metadata": null
     },
     {
-      "id": "677d2014ac7ac0b8",
+      "id": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "name": "libssl1.1",
       "version": "1.1.1w-r1",
       "type": "apk",
@@ -460,7 +460,7 @@
       "metadata": null
     },
     {
-      "id": "d09e00fb920bdab6",
+      "id": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "name": "musl",
       "version": "1.2.2-r9",
       "type": "apk",
@@ -499,7 +499,7 @@
       "metadata": null
     },
     {
-      "id": "44e8a389fd73f542",
+      "id": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "name": "musl-utils",
       "version": "1.2.2-r9",
       "type": "apk",
@@ -568,7 +568,7 @@
       "metadata": null
     },
     {
-      "id": "5c444639085f2a1c",
+      "id": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
       "name": "scanelf",
       "version": "1.3.3-r0",
       "type": "apk",
@@ -603,7 +603,7 @@
       "metadata": null
     },
     {
-      "id": "27a0780c2a3af2ad",
+      "id": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "name": "ssl_client",
       "version": "1.34.1-r7",
       "type": "apk",
@@ -658,7 +658,7 @@
       "metadata": null
     },
     {
-      "id": "15d9d76f9d0a3874",
+      "id": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
       "name": "zlib",
       "version": "1.2.12-r3",
       "type": "apk",
@@ -695,12 +695,82 @@
   ],
   "artifactRelationships": [
     {
-      "parent": "04e71f62ec0b21ef",
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "child": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "contains"
+    },
+    {
+      "parent": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "04e71f62ec0b21ef",
+      "parent": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -708,22 +778,12 @@
       }
     },
     {
-      "parent": "04e71f62ec0b21ef",
-      "child": "edeb12d644aed288",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "052a07799885b68d",
-      "child": "16e6789d3e426bcd",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "052a07799885b68d",
+      "parent": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "052a07799885b68d",
+      "parent": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -731,17 +791,12 @@
       }
     },
     {
-      "parent": "052a07799885b68d",
-      "child": "d1b90f47bb04d35f",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "0f83e0c56722c32e",
+      "parent": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "0f83e0c56722c32e",
+      "parent": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -749,12 +804,12 @@
       }
     },
     {
-      "parent": "15d9d76f9d0a3874",
+      "parent": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "15d9d76f9d0a3874",
+      "parent": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -762,22 +817,17 @@
       }
     },
     {
-      "parent": "15d9d76f9d0a3874",
-      "child": "d1b90f47bb04d35f",
+      "parent": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "16e6789d3e426bcd",
-      "child": "27a0780c2a3af2ad",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "16e6789d3e426bcd",
+      "parent": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "16e6789d3e426bcd",
+      "parent": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -785,87 +835,22 @@
       }
     },
     {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "04e71f62ec0b21ef",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "052a07799885b68d",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "0f83e0c56722c32e",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "15d9d76f9d0a3874",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "16e6789d3e426bcd",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "2012d31b8d3badde",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "27a0780c2a3af2ad",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "44e8a389fd73f542",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "5c444639085f2a1c",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "677d2014ac7ac0b8",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "a6493773d0d3fb84",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "d09e00fb920bdab6",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "d1b90f47bb04d35f",
-      "type": "contains"
-    },
-    {
-      "parent": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "child": "edeb12d644aed288",
-      "type": "contains"
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "16e6789d3e426bcd",
+      "parent": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "2012d31b8d3badde",
+      "parent": "pkg:apk/alpine/ca-certificates-bundle@20230506-r0?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "2012d31b8d3badde",
+      "parent": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -873,22 +858,12 @@
       }
     },
     {
-      "parent": "2012d31b8d3badde",
-      "child": "677d2014ac7ac0b8",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "2012d31b8d3badde",
-      "child": "d1b90f47bb04d35f",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "27a0780c2a3af2ad",
+      "parent": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "27a0780c2a3af2ad",
+      "parent": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -896,17 +871,27 @@
       }
     },
     {
-      "parent": "44e8a389fd73f542",
-      "child": "0f83e0c56722c32e",
+      "parent": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "44e8a389fd73f542",
+      "parent": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "44e8a389fd73f542",
+      "parent": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -914,12 +899,17 @@
       }
     },
     {
-      "parent": "5c444639085f2a1c",
+      "parent": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "5c444639085f2a1c",
+      "parent": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -927,22 +917,22 @@
       }
     },
     {
-      "parent": "5c444639085f2a1c",
-      "child": "44e8a389fd73f542",
+      "parent": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "677d2014ac7ac0b8",
-      "child": "16e6789d3e426bcd",
+      "parent": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "677d2014ac7ac0b8",
+      "parent": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "677d2014ac7ac0b8",
+      "parent": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -950,17 +940,17 @@
       }
     },
     {
-      "parent": "677d2014ac7ac0b8",
-      "child": "d1b90f47bb04d35f",
+      "parent": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "a6493773d0d3fb84",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "a6493773d0d3fb84",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -968,37 +958,62 @@
       }
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "04e71f62ec0b21ef",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/alpine-baselayout@3.2.0-r18?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "15d9d76f9d0a3874",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "16e6789d3e426bcd",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/busybox@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "2012d31b8d3badde",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libcrypto1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "27a0780c2a3af2ad",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libretls@3.3.4-r3?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/libssl1.1@1.1.1w-r1?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/musl@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
+    },
+    {
+      "parent": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "d09e00fb920bdab6",
+      "parent": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -1006,37 +1021,17 @@
       }
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "44e8a389fd73f542",
+      "parent": "pkg:apk/alpine/scanelf@1.3.3-r0?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/musl-utils@1.2.2-r9?arch=x86_64\u0026distro=3.15.11",
       "type": "dependency-of"
     },
     {
-      "parent": "d09e00fb920bdab6",
-      "child": "5c444639085f2a1c",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "d09e00fb920bdab6",
-      "child": "677d2014ac7ac0b8",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "d09e00fb920bdab6",
-      "child": "d1b90f47bb04d35f",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "d09e00fb920bdab6",
-      "child": "edeb12d644aed288",
-      "type": "dependency-of"
-    },
-    {
-      "parent": "d1b90f47bb04d35f",
+      "parent": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "d1b90f47bb04d35f",
+      "parent": "pkg:apk/alpine/ssl_client@1.34.1-r7?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
@@ -1044,17 +1039,22 @@
       }
     },
     {
-      "parent": "edeb12d644aed288",
+      "parent": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "described-by"
     },
     {
-      "parent": "edeb12d644aed288",
+      "parent": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
       "child": "41d7e3ec829df079",
       "type": "evident-by",
       "metadata": {
         "kind": "primary"
       }
+    },
+    {
+      "parent": "pkg:apk/alpine/zlib@1.2.12-r3?arch=x86_64\u0026distro=3.15.11",
+      "child": "pkg:apk/alpine/apk-tools@2.12.7-r3?arch=x86_64\u0026distro=3.15.11",
+      "type": "dependency-of"
     }
   ],
   "files": [
@@ -1100,11 +1100,11 @@
         }
       ],
       "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjoyOWNjNDgyOTlhNzMzOWViNzZhZTgyOTcwYWVlOWY4MTZkNjExZDFkY2U2NGYxOGRhYTI2YjlhNGIxM2VmM2QzIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
-      "config": "<<PRESENCE>>",
+      "config": "eyJhcmNoaXRlY3R1cmUiOiJhbWQ2NCIsImNvbmZpZyI6eyJFbnYiOlsiUEFUSD0vdXNyL2xvY2FsL3NiaW46L3Vzci9sb2NhbC9iaW46L3Vzci9zYmluOi91c3IvYmluOi9zYmluOi9iaW4iXSwiV29ya2luZ0RpciI6Ii8ifSwiY3JlYXRlZCI6IjIwMjUtMDUtMTNUMTk6NDY6NDIuMTAzMDM4Mzg1WiIsImhpc3RvcnkiOlt7ImNyZWF0ZWQiOiIyMDI1LTA1LTEzVDE5OjQ2OjQyLjEwMzAzODM4NVoiLCJjcmVhdGVkX2J5IjoiQUREIHJlc3VsdC5qc29uIC9vcHQvc2JvbS5jZHguanNvbiAjIGJ1aWxka2l0IiwiY29tbWVudCI6ImJ1aWxka2l0LmRvY2tlcmZpbGUudjAifV0sIm9zIjoibGludXgiLCJyb290ZnMiOnsidHlwZSI6ImxheWVycyIsImRpZmZfaWRzIjpbInNoYTI1NjpmZmI0MTUxMWZmOTUxODIyNWM2YTJhYmFjMmJjOTZhZTFlYjUwZDUyMjMwMWRmOGIyNDdkY2QzMTZlNTM0MDFhIl19fQ==",
       "repoDigests": [
-        "<<PRESENCE>>"
+        "index.docker.io/janeisklar/alpine@sha256:882c14de405e614e8ea033d02afe2adeb64a2b665f3c55c08c5649497491718a"
       ],
-      "architecture": "<<PRESENCE>>",
+      "architecture": "amd64",
       "os": "linux"
     }
   },
@@ -1116,28 +1116,38 @@
       "catalogers": {
         "requested": {
           "default": [
-            "image"
+            "image",
+            "file"
           ]
         },
         "used": [
           "alpm-db-cataloger",
           "apk-db-cataloger",
           "binary-classifier-cataloger",
+          "bitnami-cataloger",
           "cargo-auditable-binary-cataloger",
           "conan-info-cataloger",
-          "dotnet-portable-executable-cataloger",
+          "dotnet-deps-binary-cataloger",
+          "dotnet-packages-lock-cataloger",
           "dpkg-db-cataloger",
           "elf-binary-package-cataloger",
+          "file-content-cataloger",
+          "file-digest-cataloger",
+          "file-executable-cataloger",
+          "file-metadata-cataloger",
           "go-module-binary-cataloger",
           "graalvm-native-image-cataloger",
+          "homebrew-cataloger",
           "java-archive-cataloger",
           "java-jvm-cataloger",
           "javascript-package-cataloger",
           "linux-kernel-cataloger",
           "lua-rock-cataloger",
-          "nix-store-cataloger",
+          "nix-cataloger",
+          "pe-binary-package-cataloger",
           "php-composer-installed-cataloger",
-          "php-pecl-serialized-cataloger",
+          "php-interpreter-cataloger",
+          "php-pear-serialized-cataloger",
           "portage-cataloger",
           "python-installed-package-cataloger",
           "r-package-cataloger",
@@ -1160,6 +1170,10 @@
         ],
         "selection": "owned-by-package"
       },
+      "licenses": {
+        "coverage": 75,
+        "include-content": "none"
+      },
       "packages": {
         "binary": [
           "python-binary",
@@ -1169,20 +1183,12 @@
           "julia-binary",
           "helm",
           "redis-binary",
-          "java-binary-openjdk",
-          "java-binary-ibm",
-          "java-binary-oracle",
-          "java-binary-graalvm",
-          "java-binary-jdk",
           "nodejs-binary",
           "go-binary-hint",
           "busybox-binary",
           "util-linux-binary",
           "haproxy-binary",
           "perl-binary",
-          "php-cli-binary",
-          "php-fpm-binary",
-          "php-apache-binary",
           "php-composer-binary",
           "httpd-binary",
           "memcached-binary",
@@ -1206,6 +1212,7 @@
           "haskell-cabal-binary",
           "haskell-stack-binary",
           "consul-binary",
+          "hashicorp-vault-binary",
           "nginx-binary",
           "bash-binary",
           "openssl-binary",
@@ -1219,13 +1226,24 @@
           "xz-binary",
           "gzip-binary",
           "sqlcipher-binary",
-          "jq-binary"
+          "jq-binary",
+          "chrome-binary",
+          "ffmpeg-binary",
+          "java-binary",
+          "java-jdb-binary"
         ],
+        "dotnet": {
+          "dep-packages-must-claim-dll": true,
+          "dep-packages-must-have-dll": false,
+          "propagate-dll-claims-to-parents": true,
+          "relax-dll-claims-when-bundling-detected": true
+        },
         "golang": {
           "local-mod-cache-dir": "<<PRESENCE>>",
+          "local-vendor-dir": "",
           "main-module-version": {
             "from-build-settings": true,
-            "from-contents": true,
+            "from-contents": false,
             "from-ld-flags": true
           },
           "proxies": [
@@ -1233,6 +1251,7 @@
             "direct"
           ],
           "search-local-mod-cache-licenses": false,
+          "search-local-vendor-licenses": false,
           "search-remote-licenses": false
         },
         "java-archive": {
@@ -1253,6 +1272,9 @@
         "linux-kernel": {
           "catalog-modules": true
         },
+        "nix": {
+          "capture-owned-files": false
+        },
         "python": {
           "guess-unpinned-requirements": false
         }
@@ -1268,7 +1290,7 @@
     }
   },
   "schema": {
-    "version": "16.0.18",
-    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.18.json"
+    "version": "16.0.39",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.39.json"
   }
 }

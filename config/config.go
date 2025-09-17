@@ -35,7 +35,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigName("clusterData")
 	viper.SetConfigType("json")
 
-	viper.SetDefault("listingURL", "https://toolbox-data.anchore.io/grype/databases/listing.json")
+	viper.SetDefault("listingURL", "https://grype.anchore.io/databases")
 	viper.SetDefault("maxImageSize", 512*1024*1024)
 	viper.SetDefault("maxSBOMSize", 20*1024*1024)
 	viper.SetDefault("scanConcurrency", 1)

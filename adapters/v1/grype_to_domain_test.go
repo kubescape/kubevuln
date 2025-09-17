@@ -24,7 +24,7 @@ func Test_grypeToDomain(t *testing.T) {
 				}},
 				Matches: []models.Match{{
 					Artifact: models.Package{
-						Locations: []file.Coordinates{{}},
+						Locations: file.Locations{{}},
 						Upstreams: []models.UpstreamPackage{{}},
 					},
 					MatchDetails:           []models.MatchDetails{{}},

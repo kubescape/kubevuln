@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/anchore/grype/grype/search"
+	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -114,18 +114,18 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		}
 
 		// iterate over all vulnerabilities
-		for _, match := range grypeDocument.Matches {
+		for _, m := range grypeDocument.Matches {
 			var isFixed int
 			var version string
-			description := match.Vulnerability.Description
-			link := linkToVuln(match.Vulnerability.ID)
-			if len(match.Vulnerability.Fix.Versions) != 0 {
+			description := m.Vulnerability.Description
+			link := linkToVuln(m.Vulnerability.ID)
+			if len(m.Vulnerability.Fix.Versions) != 0 {
 				isFixed = 1
-				version = suggestedVersion(match.Artifact.Version, match.Vulnerability.Fix.Versions)
+				version = suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions)
 			} else {
 				// also check CPE matches
-				for _, detail := range match.MatchDetails {
-					var found search.CPEResult
+				for _, detail := range m.MatchDetails {
+					var found match.CPEResult
 					err := json.Unmarshal(detail.Found, &found)
 					if err == nil {
 						// we assume that if a higher version is mentioned in the CPE, then it is fixed somewhere
@@ -137,8 +137,8 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 					}
 				}
 			}
-			if description == "" && len(match.RelatedVulnerabilities) > 0 {
-				description = match.RelatedVulnerabilities[0].Description
+			if description == "" && len(m.RelatedVulnerabilities) > 0 {
+				description = m.RelatedVulnerabilities[0].Description
 			}
 			// create a vulnerability result for this vulnerability
 			vulnerabilityResult := containerscan.CommonContainerVulnerabilityResult{
@@ -150,44 +150,44 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 				IsFixed:         isFixed,
 				RelevantLinks: []string{
 					link,
-					match.Vulnerability.DataSource,
+					m.Vulnerability.DataSource,
 				},
 				Vulnerability: containerscan.Vulnerability{
-					Name:               match.Vulnerability.ID,
+					Name:               m.Vulnerability.ID,
 					ImageID:            workload.ImageHash,
 					ImageTag:           workload.ImageTagNormalized,
-					RelatedPackageName: match.Artifact.Name,
-					PackageVersion:     match.Artifact.Version,
+					RelatedPackageName: m.Artifact.Name,
+					PackageVersion:     m.Artifact.Version,
 					Link:               link,
 					Description:        description,
-					Severity:           match.Vulnerability.Severity,
-					SeverityScore:      containerscan.SeverityStr2Score[match.Vulnerability.Severity],
+					Severity:           m.Vulnerability.Severity,
+					SeverityScore:      containerscan.SeverityStr2Score[m.Vulnerability.Severity],
 					Fixes: []containerscan.FixedIn{
 						{
-							Name:    match.Vulnerability.Fix.State,
+							Name:    m.Vulnerability.Fix.State,
 							ImgTag:  workload.ImageTagNormalized,
 							Version: version,
 						},
 					},
-					PackageType:      string(match.Artifact.Type),
-					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, match.Vulnerability.ID, isFixed == 1),
+					PackageType:      string(m.Artifact.Type),
+					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, m.Vulnerability.ID, isFixed == 1),
 					IsRelevant:       nil, // TODO add relevancy here?
-					Coordinates:      syftCoordinatesToCoordinates(match.Artifact.Locations),
+					Coordinates:      syftCoordinatesToCoordinates(m.Artifact.Locations),
 				},
 			}
 			// add RCE information
 			vulnerabilityResult.Categories.IsRCE = vulnerabilityResult.IsRCE()
 			// add layer information
 			// make sure we have at least one location
-			if match.Artifact.Locations == nil || len(match.Artifact.Locations) < 1 {
-				match.Artifact.Locations = []v1beta1.SyftCoordinates{
+			if m.Artifact.Locations == nil || len(m.Artifact.Locations) < 1 {
+				m.Artifact.Locations = []v1beta1.SyftCoordinates{
 					{
 						FileSystemID: dummyLayer,
 					},
 				}
 			}
 			// iterate over locations
-			for _, location := range match.Artifact.Locations {
+			for _, location := range m.Artifact.Locations {
 				// create a layer
 				layer := containerscan.ESLayer{
 					LayerHash:       location.FileSystemID,

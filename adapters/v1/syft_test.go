@@ -37,22 +37,22 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		{
 			name:    "empty image produces empty SBOM",
 			imageID: "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
-			format:  string(fileContent("testdata/hello-world-sbom.format.json")),
+			format:  "testdata/hello-world-sbom.format.json",
 		},
 		{
 			name:    "schema v1 image produces well-formed SBOM",
 			imageID: "quay.io/jitesoft/debian:stretch-slim",
-			format:  string(fileContent("testdata/stretch-slim-sbom.format.json")),
+			format:  "testdata/stretch-slim-sbom.format.json",
 		},
 		{
 			name:    "valid image produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:  string(fileContent("testdata/alpine-sbom.format.json")),
+			format:  "testdata/alpine-sbom.format.json",
 		},
 		{
 			name:    "public image with invalid registry credentials falls back to unauthenticated and produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:  string(fileContent("testdata/alpine-sbom.format.json")),
+			format:  "testdata/alpine-sbom.format.json",
 			options: domain.RegistryOptions{
 				Credentials: []domain.RegistryCredentials{
 					{
@@ -67,28 +67,28 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		{
 			name:         "big image produces incomplete SBOM because of maxImageSize",
 			imageID:      "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:       "null",
+			format:       "",
 			maxImageSize: 1,
 			wantStatus:   helpersv1.Incomplete,
 		},
 		{
 			name:        "big image produces too large SBOM because of maxSBOMSize",
 			imageID:     "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:      "null",
+			format:      "",
 			maxSBOMSize: 1,
 			wantStatus:  helpersv1.TooLarge,
 		},
 		{
 			name:        "big image produces incomplete SBOM because of scanTimeout",
 			imageID:     "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:      "null",
+			format:      "",
 			scanTimeout: 1 * time.Millisecond,
 			wantStatus:  helpersv1.Incomplete,
 		},
 		{
 			name:    "system tests image",
 			imageID: "public-registry.systest-ns-bpf7:5000/nginx:test",
-			format:  "null",
+			format:  "",
 			wantErr: true,
 		},
 		{
@@ -114,7 +114,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			imageTag:          "docker.io/janeisklar/alpine:3.15-sbom",
 			scanEmbeddedSBOMs: true,
 			wantErr:           false,
-			format:            string(fileContent("testdata/alpine-embedded-sbom.json")),
+			format:            "testdata/alpine-embedded-sbom.json",
 		},
 	}
 	for _, tt := range tests {
@@ -144,8 +144,9 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			content, err := json.Marshal(got.Content)
 			require.NoError(t, err)
 			if tt.format != "" {
+				//os.WriteFile(tt.format, content, 0644)
 				ja := jsonassert.New(t)
-				ja.Assertf(string(content), tt.format)
+				ja.Assert(string(content), string(fileContent(tt.format)))
 			}
 		})
 	}
@@ -178,7 +179,7 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	ja := jsonassert.New(t)
 	b2, err := json.Marshal(domainSBOM)
 	require.NoError(t, err)
-	ja.Assertf(string(b2), string(b))
+	ja.Assert(string(b2), string(b))
 }
 
 func TestNormalizeImageID(t *testing.T) {

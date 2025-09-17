@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"os"
 	"testing"
 
@@ -461,10 +460,9 @@ func TestScanService_NginxTest(t *testing.T) {
 	slug := "replicaset-nginx-75f48cbc54-nginx-10dc-2a65"
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
-	go func() {
-		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("../../adapters/v1/testdata")))
-	}()
-	cveAdapter := v1.NewGrypeAdapterFixedDB()
+	cveAdapter, terminate, err := v1.NewGrypeAdapterFixedDB()
+	require.NoError(t, err)
+	defer terminate()
 	storageAP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
@@ -479,7 +477,6 @@ func TestScanService_NginxTest(t *testing.T) {
 		},
 		Wlid: "wlid://cluster-minikube/namespace-default/deployment-nginx",
 	}
-	var err error
 	ctx, err = s.ValidateScanAP(ctx, workload)
 	require.NoError(t, err)
 	sbom := domain.SBOM{
