@@ -15,6 +15,6 @@ func NewMockRelevancyAdapter() *MockRelevancyAdapter {
 	return &MockRelevancyAdapter{}
 }
 
-func (m MockRelevancyAdapter) GetContainerRelevancyScans(_ context.Context, _, _ string) ([]ports.ContainerRelevancyScan, error) {
+func (m MockRelevancyAdapter) GetContainerRelevancyScans(_ context.Context, _, _ string, _ bool) ([]ports.ContainerRelevancyScan, error) {
 	return []ports.ContainerRelevancyScan{}, nil
 }

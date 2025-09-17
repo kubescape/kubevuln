@@ -12,20 +12,21 @@ import (
 
 type Config struct {
 	AccountID          string        `mapstructure:"accountID"`
-	Namespace          string        `mapstructure:"namespace"`
 	ClusterName        string        `mapstructure:"clusterName"`
+	KeepLocal          bool          `mapstructure:"keepLocal"`
 	ListingURL         string        `mapstructure:"listingURL"`
 	MaxImageSize       int64         `mapstructure:"maxImageSize"`
 	MaxSBOMSize        int           `mapstructure:"maxSBOMSize"`
-	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
-	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
-	ScanEmbeddedSboms  bool          `mapstructure:"scanEmbeddedSBOMs"`
-	KeepLocal          bool          `mapstructure:"keepLocal"`
-	Storage            bool          `mapstructure:"storage"`
-	VexGeneration      bool          `mapstructure:"vexGeneration"`
+	Namespace          string        `mapstructure:"namespace"`
 	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
-	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
+	PartialRelevancy   bool          `mapstructure:"partialRelevancy"`
+	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
+	ScanEmbeddedSboms  bool          `mapstructure:"scanEmbeddedSBOMs"`
+	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
+	Storage            bool          `mapstructure:"storage"`
 	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
+	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
+	VexGeneration      bool          `mapstructure:"vexGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
