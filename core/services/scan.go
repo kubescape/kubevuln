@@ -45,6 +45,7 @@ type ScanService struct {
 	sbomRepository    ports.SBOMRepository
 	cveScanner        ports.CVEScanner
 	cveRepository     ports.CVERepository
+	partialRelevancy  bool
 	platform          ports.Platform
 	relevancyProvider ports.Relevancy
 	sbomGeneration    bool
@@ -57,19 +58,20 @@ type ScanService struct {
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
-func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, relevancyProvider ports.Relevancy, storage bool, vexGeneration bool, sbomGeneration bool, storeFilteredSbom bool) *ScanService {
+func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepository, cveScanner ports.CVEScanner, cveRepository ports.CVERepository, platform ports.Platform, relevancyProvider ports.Relevancy, storage bool, vexGeneration bool, sbomGeneration bool, storeFilteredSbom bool, partialRelevancy bool) *ScanService {
 	return &ScanService{
-		sbomCreator:       sbomCreator,
-		sbomRepository:    sbomRepository,
-		cveScanner:        cveScanner,
 		cveRepository:     cveRepository,
+		cveScanner:        cveScanner,
+		partialRelevancy:  partialRelevancy,
 		platform:          platform,
 		relevancyProvider: relevancyProvider,
+		sbomCreator:       sbomCreator,
 		sbomGeneration:    sbomGeneration,
-		storeFilteredSbom: storeFilteredSbom,
+		sbomRepository:    sbomRepository,
 		storage:           storage,
-		vexGeneration:     vexGeneration,
+		storeFilteredSbom: storeFilteredSbom,
 		tooManyRequests:   cache.New(cleaningInterval),
+		vexGeneration:     vexGeneration,
 	}
 }
 
@@ -151,7 +153,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
 
-	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name)
+	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name, s.partialRelevancy)
 	if err != nil {
 		return fmt.Errorf("getting container relevancy scans: %w", err)
 	}
@@ -286,7 +288,7 @@ func (s *ScanService) ScanAP(mainCtx context.Context) error {
 		// generate SBOM' from SBOM and relevant files
 		sbomp := domain.SBOM{}
 		if s.storage {
-			sbomp, err = filterSBOM(sbom, scan.InstanceID, scan.Wlid, scan.RelevantFiles, scan.Labels)
+			sbomp, err = filterSBOM(sbom, scan.InstanceID, scan.Wlid, scan.RelevantFiles, scan.Labels, scan.Completion)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("filtering SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
@@ -643,7 +645,7 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 	return parsedURL.Host
 }
 
-func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string) (domain.SBOM, error) {
+func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string, completion string) (domain.SBOM, error) {
 	name, err := instanceID.GetSlug(false)
 	if err != nil {
 		return domain.SBOM{}, fmt.Errorf("getting slug from instance id: %w", err)
@@ -651,12 +653,13 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	filteredSBOM := domain.SBOM{
 		Name: name,
 		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey:    completion,
+			helpersv1.ContainerNameMetadataKey: labels[helpersv1.ContainerNameMetadataKey],
 			helpersv1.ImageIDMetadataKey:       sbom.Annotations[helpersv1.ImageIDMetadataKey],
 			helpersv1.ImageTagMetadataKey:      sbom.Annotations[helpersv1.ImageTagMetadataKey],
 			helpersv1.InstanceIDMetadataKey:    instanceID.GetStringFormatted(),
 			helpersv1.StatusMetadataKey:        sbom.Annotations[helpersv1.StatusMetadataKey],
 			helpersv1.WlidMetadataKey:          wlid,
-			helpersv1.ContainerNameMetadataKey: labels[helpersv1.ContainerNameMetadataKey],
 		},
 		Labels:             labels,
 		SBOMCreatorName:    sbom.SBOMCreatorName,

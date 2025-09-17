@@ -85,7 +85,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(tt.getError, tt.storeError)
-			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), tt.storage, false, true, false)
+			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), tt.storage, false, true, false, false)
 			ctx := context.TODO()
 
 			workload := domain.ScanCommand{
@@ -224,7 +224,7 @@ func TestScanService_ScanAP(t *testing.T) {
 			storageAP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -403,7 +403,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			storageAP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -470,7 +470,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
 	relevancyProvider := v1.NewApplicationProfileAdapter(storageAP)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true, false, false)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		Args: map[string]interface{}{
@@ -531,7 +531,7 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			_, err := s.ValidateGenerateSBOM(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateGenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
@@ -571,7 +571,7 @@ func TestScanService_ValidateScanCVE(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			_, err := s.ValidateScanCVE(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanCVE() error = %v, wantErr %v", err, tt.wantErr)
@@ -623,7 +623,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			storage := repositories.NewMemoryStorage(false, false)
-			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
+			s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			ctx := context.TODO()
 			workload := domain.ScanCommand{
 				ImageSlug:          "imageSlug",
@@ -679,7 +679,7 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false)
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)

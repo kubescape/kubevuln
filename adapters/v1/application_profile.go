@@ -27,15 +27,18 @@ func NewApplicationProfileAdapter(repository ports.ApplicationProfileRepository)
 	}
 }
 
-func (a *ApplicationProfileAdapter) GetContainerRelevancyScans(ctx context.Context, namespace, name string) ([]ports.ContainerRelevancyScan, error) {
+func (a *ApplicationProfileAdapter) GetContainerRelevancyScans(ctx context.Context, namespace, name string, partialRelevancy bool) ([]ports.ContainerRelevancyScan, error) {
 	var scans []ports.ContainerRelevancyScan
 	applicationProfile, err := a.repository.GetApplicationProfile(ctx, namespace, name)
 	if err != nil {
 		return scans, fmt.Errorf("GetApplicationProfile: %w", err)
 	}
 
-	// only complete application profiles are considered - we skip partial ones
-	if completionStatus, ok := applicationProfile.Annotations[helpersv1.CompletionMetadataKey]; !ok || completionStatus != helpersv1.Full {
+	// check completion status
+	// if partialRelevancy is false, only full application profiles are considered
+	// if partialRelevancy is true, all application profiles are considered
+	completionStatus := applicationProfile.Annotations[helpersv1.CompletionMetadataKey]
+	if !partialRelevancy && completionStatus != helpersv1.Full {
 		return scans, fmt.Errorf("application profile %s/%s is partial (workload restart required)", namespace, name)
 	}
 
@@ -63,6 +66,7 @@ func (a *ApplicationProfileAdapter) GetContainerRelevancyScans(ctx context.Conte
 			instanceID.(*containerinstance.InstanceID).ContainerName = c.Name
 			instanceID.(*containerinstance.InstanceID).InstanceType = containerType
 			scan := ports.ContainerRelevancyScan{
+				Completion:       completionStatus,
 				ContainerName:    c.Name,
 				ImageID:          c.ImageID,
 				ImageTag:         c.ImageTag,

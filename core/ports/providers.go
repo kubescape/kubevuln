@@ -31,6 +31,7 @@ type Platform interface {
 }
 
 type ContainerRelevancyScan struct {
+	Completion       string
 	ContainerName    string
 	ImageID          string
 	ImageTag         string
@@ -43,5 +44,5 @@ type ContainerRelevancyScan struct {
 
 // Relevancy is the port implemented by adapters to be used in ScanService to calculate filtered SBOMs
 type Relevancy interface {
-	GetContainerRelevancyScans(ctx context.Context, namespace, name string) ([]ContainerRelevancyScan, error)
+	GetContainerRelevancyScans(ctx context.Context, namespace, name string, partialRelevancy bool) ([]ContainerRelevancyScan, error)
 }
