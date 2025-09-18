@@ -1110,7 +1110,7 @@
   },
   "distro": {},
   "descriptor": {
-    "name": "name",
+    "name": "syft",
     "version": "unknown",
     "configuration": {
       "catalogers": {
