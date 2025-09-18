@@ -5287,7 +5287,7 @@
     "bugReportURL": "https://gitlab.alpinelinux.org/alpine/aports/-/issues"
   },
   "descriptor": {
-    "name": "name",
+    "name": "syft",
     "version": "unknown",
     "configuration": {
       "catalogers": {

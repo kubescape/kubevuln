@@ -189,13 +189,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
 		cfg := syft.DefaultCreateSBOMConfig()
-		cfg.ToolName = name
+		cfg.ToolName = "syft"
 		cfg.ToolVersion = s.Version()
 		if s.scanEmbeddedSBOMs {
 			// ask Syft to also scan the image for embedded SBOMs
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}
-		syftSBOM, err = syft.CreateSBOM(ctx, src, cfg)
+		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
 		}
