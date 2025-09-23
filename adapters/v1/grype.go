@@ -173,12 +173,19 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		return domain.CVEManifest{}, err
 	}
 
+	dist := distro.FromRelease(s.Artifacts.LinuxDistribution, distro.DefaultFixChannels())
+
 	logger.L().Debug("reading packages from SBOM", helpers.String("name", sbom.Name))
-	packages := pkg.FromCollection(s.Artifacts.Packages, pkg.SynthesisConfig{})
+	packages := pkg.FromCollection(s.Artifacts.Packages, pkg.SynthesisConfig{
+		GenerateMissingCPEs: false,
+		Distro: pkg.DistroConfig{
+			Override:    dist,
+			FixChannels: distro.DefaultFixChannels(),
+		}})
 
 	pkgContext := pkg.Context{
 		Source: &s.Source,
-		Distro: distro.FromRelease(s.Artifacts.LinuxDistribution, distro.DefaultFixChannels()),
+		Distro: dist,
 	}
 	vulnMatcher := grype.VulnerabilityMatcher{
 		VulnerabilityProvider: g.store,
