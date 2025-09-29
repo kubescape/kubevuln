@@ -40,7 +40,7 @@ type APIServerStore struct {
 	Namespace     string
 }
 
-var _ ports.ApplicationProfileRepository = (*APIServerStore)(nil)
+var _ ports.ContainerProfileRepository = (*APIServerStore)(nil)
 
 var _ ports.CVERepository = (*APIServerStore)(nil)
 
@@ -73,23 +73,23 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	}
 }
 
-func (a *APIServerStore) GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error) {
-	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetApplicationProfile")
+func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetContainerProfile")
 	defer span.End()
 	if name == "" {
-		logger.L().Debug("empty name provided, skipping application profile retrieval")
-		return v1beta1.ApplicationProfile{}, nil
+		logger.L().Debug("empty name provided, skipping container profile retrieval")
+		return v1beta1.ContainerProfile{}, nil
 	}
-	profile, err := a.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	profile, err := a.StorageClient.ContainerProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
-		logger.L().Debug("application profile not found in storage",
+		logger.L().Debug("container profile not found in storage",
 			helpers.String("name", name))
-		return v1beta1.ApplicationProfile{}, nil
+		return v1beta1.ContainerProfile{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get application profile from apiserver", helpers.Error(err),
+		logger.L().Ctx(ctx).Warning("failed to get container profile from apiserver", helpers.Error(err),
 			helpers.String("name", name))
-		return v1beta1.ApplicationProfile{}, fmt.Errorf("failed to get application profile from apiserver: %w", err)
+		return v1beta1.ContainerProfile{}, fmt.Errorf("failed to get container profile from apiserver: %w", err)
 	}
 	return *profile, nil
 }

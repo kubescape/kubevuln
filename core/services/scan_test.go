@@ -220,10 +220,10 @@ func TestScanService_ScanAP(t *testing.T) {
 			}
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, false)
 			cveAdapter := adapters.NewMockCVEAdapter()
-			storageAP := repositories.NewMemoryStorage(false, false)
+			storageCP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false, false)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewContainerProfileAdapter(storageCP), tt.storage, false, true, false, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -249,7 +249,7 @@ func TestScanService_ScanAP(t *testing.T) {
 					_ = storageCVE.StoreCVE(ctx, cve, false)
 				}
 			}
-			ap := v1beta1.ApplicationProfile{
+			ap := v1beta1.ContainerProfile{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "daemonset-kube-proxy",
 					Namespace: "kube-system",
@@ -261,21 +261,18 @@ func TestScanService_ScanAP(t *testing.T) {
 					},
 					Labels: map[string]string{"foo": "bar"},
 				},
-				Spec: v1beta1.ApplicationProfileSpec{
-					Containers: []v1beta1.ApplicationProfileContainer{{
-						Name: "kube-proxy",
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/local/bin/kube-proxy"},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/etc/kubernetes/kube-proxy.conf"},
-						},
-						ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
-						ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
-					}},
+				Spec: v1beta1.ContainerProfileSpec{
+					Execs: []v1beta1.ExecCalls{
+						{Path: "/usr/local/bin/kube-proxy"},
+					},
+					Opens: []v1beta1.OpenCalls{
+						{Path: "/etc/kubernetes/kube-proxy.conf"},
+					},
+					ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+					ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
 				},
 			}
-			err := storageAP.StoreApplicationProfile(ctx, ap)
+			err := storageCP.StoreContainerProfile(ctx, ap)
 			require.NoError(t, err)
 
 			if err := s.ScanAP(ctx); (err != nil) != tt.wantErr {
@@ -399,10 +396,10 @@ func TestScanService_ScanCVE(t *testing.T) {
 			}
 			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			cveAdapter := adapters.NewMockCVEAdapter()
-			storageAP := repositories.NewMemoryStorage(false, false)
+			storageCP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
 			storageCVE := repositories.NewMemoryStorage(tt.getErrorCVE, tt.storeErrorCVE)
-			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewApplicationProfileAdapter(storageAP), tt.storage, false, true, false, false)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(tt.wantEmptyReport), v1.NewContainerProfileAdapter(storageCP), tt.storage, false, true, false, false)
 			ctx := context.TODO()
 			s.Ready(ctx)
 
@@ -449,8 +446,8 @@ func fileToSyftDocument(path string) *v1beta1.SyftDocument {
 	return &sbom
 }
 
-func fileToApplicationProfile(path string) v1beta1.ApplicationProfile {
-	ap := v1beta1.ApplicationProfile{}
+func fileToContainerProfile(path string) v1beta1.ContainerProfile {
+	ap := v1beta1.ContainerProfile{}
 	_ = json.Unmarshal(fileContent(path), &ap)
 	return ap
 }
@@ -463,16 +460,16 @@ func TestScanService_NginxTest(t *testing.T) {
 	cveAdapter, terminate, err := v1.NewGrypeAdapterFixedDB()
 	require.NoError(t, err)
 	defer terminate()
-	storageAP := repositories.NewMemoryStorage(false, false)
+	storageCP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
 	platform := adapters.NewMockPlatform(false)
-	relevancyProvider := v1.NewApplicationProfileAdapter(storageAP)
+	relevancyProvider := v1.NewContainerProfileAdapter(storageCP)
 	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancyProvider, true, false, true, false, false)
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
 		Args: map[string]interface{}{
-			domain.ArgsName:      "replicaset-nginx-75f48cbc54",
+			domain.ArgsName:      "replicaset-nginx-75f48cbc54-nginx-714a-83bf",
 			domain.ArgsNamespace: "default",
 		},
 		Wlid: "wlid://cluster-minikube/namespace-default/deployment-nginx",
@@ -496,8 +493,8 @@ func TestScanService_NginxTest(t *testing.T) {
 	}
 	err = storageSBOM.StoreSBOM(ctx, sbom, false)
 	require.NoError(t, err)
-	ap := fileToApplicationProfile("../../adapters/v1/testdata/nginx-ap.json")
-	err = storageAP.StoreApplicationProfile(ctx, ap)
+	ap := fileToContainerProfile("../../adapters/v1/testdata/nginx-ap.json")
+	err = storageCP.StoreContainerProfile(ctx, ap)
 	require.NoError(t, err)
 	err = s.ScanAP(ctx)
 	require.NoError(t, err)

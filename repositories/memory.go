@@ -28,14 +28,14 @@ type sbomID struct {
 
 // MemoryStore implements both CVERepository and SBOMRepository with in-memory storage (maps) to be used for tests
 type MemoryStore struct {
-	aps          map[apID]v1beta1.ApplicationProfile
+	aps          map[apID]v1beta1.ContainerProfile
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
 	getError     bool
 	storeError   bool
 }
 
-var _ ports.ApplicationProfileRepository = (*MemoryStore)(nil)
+var _ ports.ContainerProfileRepository = (*MemoryStore)(nil)
 
 var _ ports.CVERepository = (*MemoryStore)(nil)
 
@@ -44,7 +44,7 @@ var _ ports.SBOMRepository = (*MemoryStore)(nil)
 // NewMemoryStorage initializes the MemoryStore struct and its maps
 func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 	return &MemoryStore{
-		aps:          map[apID]v1beta1.ApplicationProfile{},
+		aps:          map[apID]v1beta1.ContainerProfile{},
 		cveManifests: map[cveID]domain.CVEManifest{},
 		sboms:        map[sbomID]domain.SBOM{},
 		getError:     getError,
@@ -52,12 +52,12 @@ func NewMemoryStorage(getError, storeError bool) *MemoryStore {
 	}
 }
 
-func (m *MemoryStore) GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error) {
-	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetApplicationProfile")
+func (m *MemoryStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetContainerProfile")
 	defer span.End()
 
 	if m.getError {
-		return v1beta1.ApplicationProfile{}, domain.ErrMockError
+		return v1beta1.ContainerProfile{}, domain.ErrMockError
 	}
 
 	id := apID{
@@ -67,11 +67,11 @@ func (m *MemoryStore) GetApplicationProfile(ctx context.Context, namespace strin
 	if value, ok := m.aps[id]; ok {
 		return value, nil
 	}
-	return v1beta1.ApplicationProfile{}, nil
+	return v1beta1.ContainerProfile{}, nil
 }
 
-func (m *MemoryStore) StoreApplicationProfile(ctx context.Context, ap v1beta1.ApplicationProfile) error {
-	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreApplicationProfile")
+func (m *MemoryStore) StoreContainerProfile(ctx context.Context, ap v1beta1.ContainerProfile) error {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreContainerProfile")
 	defer span.End()
 
 	if m.storeError {
