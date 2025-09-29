@@ -771,7 +771,7 @@ func (s *ScanService) ValidateScanAP(ctx context.Context, workload domain.ScanCo
 	name := workload.Args[domain.ArgsName].(string)
 	namespace := workload.Args[domain.ArgsNamespace].(string)
 	if name == "" || namespace == "" {
-		return ctx, domain.ErrMissingApInfo
+		return ctx, domain.ErrMissingCpInfo
 	}
 	// add instanceID and imageSlug to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {

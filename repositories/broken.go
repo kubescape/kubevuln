@@ -11,7 +11,7 @@ import (
 
 type BrokenStore struct{}
 
-var _ ports.ApplicationProfileRepository = (*BrokenStore)(nil)
+var _ ports.ContainerProfileRepository = (*BrokenStore)(nil)
 
 var _ ports.CVERepository = (*BrokenStore)(nil)
 
@@ -21,10 +21,10 @@ func NewBrokenStorage() *BrokenStore {
 	return &BrokenStore{}
 }
 
-func (b BrokenStore) GetApplicationProfile(ctx context.Context, _ string, _ string) (v1beta1.ApplicationProfile, error) {
-	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetApplicationProfile")
+func (b BrokenStore) GetContainerProfile(ctx context.Context, _ string, _ string) (v1beta1.ContainerProfile, error) {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.GetContainerProfile")
 	defer span.End()
-	return v1beta1.ApplicationProfile{}, domain.ErrExpectedError
+	return v1beta1.ContainerProfile{}, domain.ErrExpectedError
 }
 
 func (b BrokenStore) GetSBOM(ctx context.Context, _ string, _ string) (domain.SBOM, error) {

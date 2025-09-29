@@ -7,8 +7,8 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-type ApplicationProfileRepository interface {
-	GetApplicationProfile(ctx context.Context, namespace string, name string) (v1beta1.ApplicationProfile, error)
+type ContainerProfileRepository interface {
+	GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error)
 }
 
 // CVERepository is the port implemented by adapters to be used in ScanService to store CVE manifests
