@@ -135,8 +135,8 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 	return s.cveScanner.Ready(ctx)
 }
 
-func (s *ScanService) ScanAP(mainCtx context.Context) error {
-	mainCtx, span := otel.Tracer("").Start(mainCtx, "ScanService.ScanAP")
+func (s *ScanService) ScanCP(mainCtx context.Context) error {
+	mainCtx, span := otel.Tracer("").Start(mainCtx, "ScanService.ScanCP")
 	defer span.End()
 
 	mainCtx = addTimestamp(mainCtx)
@@ -763,8 +763,8 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	return ctx, nil
 }
 
-func (s *ScanService) ValidateScanAP(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
-	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanAP")
+func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
+	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCP")
 	defer span.End()
 	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
