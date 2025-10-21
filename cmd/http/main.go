@@ -96,7 +96,7 @@ func main() {
 	{
 		group.Use(otelgin.Middleware("kubevuln-svc"))
 		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
-		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanAP)
+		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
 		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
 		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
 	}

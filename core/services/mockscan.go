@@ -28,7 +28,7 @@ func (m MockScanService) Ready(context.Context) bool {
 	return m.happy
 }
 
-func (m MockScanService) ScanAP(context.Context) error {
+func (m MockScanService) ScanCP(context.Context) error {
 	if m.happy {
 		return nil
 	}
@@ -56,7 +56,7 @@ func (m MockScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.Scan
 	return ctx, domain.ErrMockError
 }
 
-func (m MockScanService) ValidateScanAP(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+func (m MockScanService) ValidateScanCP(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	if m.happy {
 		return ctx, nil
 	}

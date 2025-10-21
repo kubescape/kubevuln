@@ -121,7 +121,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 	}
 }
 
-func TestScanService_ScanAP(t *testing.T) {
+func TestScanService_ScanCP(t *testing.T) {
 	tests := []struct {
 		createSBOMError bool
 		name            string
@@ -236,7 +236,7 @@ func TestScanService_ScanAP(t *testing.T) {
 			}
 			if tt.workload {
 				var err error
-				ctx, err = s.ValidateScanAP(ctx, workload)
+				ctx, err = s.ValidateScanCP(ctx, workload)
 				require.NoError(t, err)
 			}
 			if tt.sbom {
@@ -275,8 +275,8 @@ func TestScanService_ScanAP(t *testing.T) {
 			err := storageCP.StoreContainerProfile(ctx, ap)
 			require.NoError(t, err)
 
-			if err := s.ScanAP(ctx); (err != nil) != tt.wantErr {
-				t.Errorf("ScanAP() error = %v, wantErr %v", err, tt.wantErr)
+			if err := s.ScanCP(ctx); (err != nil) != tt.wantErr {
+				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
@@ -474,7 +474,7 @@ func TestScanService_NginxTest(t *testing.T) {
 		},
 		Wlid: "wlid://cluster-minikube/namespace-default/deployment-nginx",
 	}
-	ctx, err = s.ValidateScanAP(ctx, workload)
+	ctx, err = s.ValidateScanCP(ctx, workload)
 	require.NoError(t, err)
 	sbom := domain.SBOM{
 		Annotations: map[string]string{
@@ -496,7 +496,7 @@ func TestScanService_NginxTest(t *testing.T) {
 	ap := fileToContainerProfile("../../adapters/v1/testdata/nginx-ap.json")
 	err = storageCP.StoreContainerProfile(ctx, ap)
 	require.NoError(t, err)
-	err = s.ScanAP(ctx)
+	err = s.ScanCP(ctx)
 	require.NoError(t, err)
 	cvep, err := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 	require.NoError(t, err)

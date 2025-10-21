@@ -86,8 +86,8 @@ func (h HTTPController) Ready(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
-// ScanAP unmarshalls the payload and calls scanService.ScanAP
-func (h HTTPController) ScanAP(c *gin.Context) {
+// ScanCP unmarshalls the payload and calls scanService.ScanCP
+func (h HTTPController) ScanCP(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var websocketScanCommand wssc.WebsocketScanCommand
@@ -104,7 +104,7 @@ func (h HTTPController) ScanAP(c *gin.Context) {
 
 	details := problem.Detailf("Wlid=%s, Name=%s, Namespace=%s", newScan.Wlid, name, namespace)
 
-	ctx, err = h.scanService.ValidateScanAP(ctx, newScan)
+	ctx, err = h.scanService.ValidateScanCP(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("wlid", newScan.Wlid),
@@ -117,9 +117,9 @@ func (h HTTPController) ScanAP(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	h.workerPool.Submit(func() {
-		err = h.scanService.ScanAP(ctx)
+		err = h.scanService.ScanCP(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error - ScanAP", helpers.Error(err),
+			logger.L().Ctx(ctx).Error("service error - ScanCP", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
 				helpers.String("name", name),
 				helpers.String("namespace", namespace))
