@@ -22,6 +22,10 @@ jobs:
                   registry: quay.io/kubescape
                   username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
                   password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
             - name: Build the Image and Push to Quay.io
               id: build-and-push-image
-              run: docker buildx build --file build/Dockerfile.offline-db --platform linux/amd64,linux/arm64 --tag quay.io/kubescape/grype-offline-db:v6-test --push .
+              run: docker buildx build --file build/Dockerfile.offline-db --platform linux/amd64,linux/arm64 --tag quay.io/kubescape/grype-offline-db:v6-latest --push .
