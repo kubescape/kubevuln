@@ -16,10 +16,13 @@ RUN DB_PATH=$(jq -r '.path' latest.json) && \
     curl -O ${GRYPE_DB_ROOT}/$DB_PATH
 
 # Stage 2: The final production image
-FROM nginxinc/nginx-unprivileged:alpine
+FROM busybox:latest
+
+RUN adduser -D -u 1000 -h /www www
+USER 1000
+WORKDIR /www
 
 # Copy the generated artifacts from the builder stage
-COPY --from=builder /app/grype-db/ /usr/share/nginx/html/databases/v6/
+COPY --from=builder /app/grype-db/ /www/databases/v6/
 
-# Command to run NGINX
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
