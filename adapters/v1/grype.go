@@ -135,8 +135,12 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			helpers.String("listingURL", g.distCfg.LatestURL))
 
 		// Create a context with timeout to prevent stuck updates
-		updateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		// 15 minutes allows for slow network connections while still catching truly stuck downloads
+		updateCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		defer cancel()
+
+		// Track if we have an existing DB to fall back on
+		hasExistingDB := g.dbStatus != nil
 
 		// Run the DB update in a goroutine to respect the timeout
 		type updateResult struct {
@@ -172,13 +176,23 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			logger.L().Info("grype DB updated")
 			return true
 		case <-updateCtx.Done():
-			logger.L().Ctx(ctx).Error("grype DB update timed out after 5 minutes")
-			err := tools.DeleteContents(g.installCfg.DBRootDir)
-			logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
-				helpers.String("DBRootDir", g.installCfg.DBRootDir))
-			logger.L().Info("restarting pod due to grype DB update timeout")
-			// Use same exit code as regular DB update failures for consistent behavior
-			os.Exit(0)
+			if hasExistingDB {
+				// We have an existing DB, keep using it instead of crashing
+				// This prevents crashloop in case of slow but functional network
+				logger.L().Ctx(ctx).Warning("grype DB update timed out after 15 minutes, continuing with existing DB",
+					helpers.String("existingDBVersion", g.DBVersion(ctx)))
+				// Update lastDbUpdate to prevent immediate retry, will retry in next 24h cycle
+				g.lastDbUpdate = now
+				return true
+			} else {
+				// No existing DB to fall back on, must restart
+				logger.L().Ctx(ctx).Error("grype DB initial download timed out after 15 minutes")
+				err := tools.DeleteContents(g.installCfg.DBRootDir)
+				logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
+					helpers.String("DBRootDir", g.installCfg.DBRootDir))
+				logger.L().Info("restarting pod due to grype DB initial download timeout")
+				os.Exit(0)
+			}
 		}
 	}
 
