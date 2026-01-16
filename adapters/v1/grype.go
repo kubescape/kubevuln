@@ -108,13 +108,20 @@ func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
 	return g, terminate, nil
 }
 
+func (g *GrypeAdapter) dbVersionLocked() string {
+	if g.dbStatus == nil {
+		return ""
+	}
+	parts := strings.Split(g.dbStatus.From, "%3A")
+	return parts[len(parts)-1]
+}
+
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion(context.Context) string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	parts := strings.Split(g.dbStatus.From, "%3A")
-	return parts[len(parts)-1]
+	return g.dbVersionLocked()
 }
 
 // Ready returns the status of the vulnerabilities DB
@@ -180,7 +187,7 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 				// We have an existing DB, keep using it instead of crashing
 				// This prevents crashloop in case of slow but functional network
 				logger.L().Ctx(ctx).Warning("grype DB update timed out after 15 minutes, continuing with existing DB",
-					helpers.String("existingDBVersion", g.DBVersion(ctx)))
+					helpers.String("existingDBVersion", g.dbVersionLocked()))
 				// Update lastDbUpdate to prevent immediate retry, will retry in next 24h cycle
 				g.lastDbUpdate = now
 				return true
@@ -275,7 +282,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
-		CVEDBVersion:       g.DBVersion(ctx),
+		CVEDBVersion:       g.dbVersionLocked(),
 		Annotations:        sbom.Annotations,
 		Labels:             sbom.Labels,
 		Content:            vulnerabilityResults,
