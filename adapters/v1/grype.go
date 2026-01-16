@@ -108,20 +108,26 @@ func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
 	return g, terminate, nil
 }
 
+func (g *GrypeAdapter) dbVersionLocked() string {
+	if g.dbStatus == nil {
+		return ""
+	}
+	parts := strings.Split(g.dbStatus.From, "%3A")
+	return parts[len(parts)-1]
+}
+
 // DBVersion returns the vulnerabilities DB checksum which is used to tag CVE manifests
 func (g *GrypeAdapter) DBVersion(context.Context) string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	parts := strings.Split(g.dbStatus.From, "%3A")
-	return parts[len(parts)-1]
+	return g.dbVersionLocked()
 }
 
 // Ready returns the status of the vulnerabilities DB
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	// DB update is in progress
 	if !g.mu.TryRLock() {
-		// FIXME this gets stuck forever if the db update times out
 		return false
 	}
 	g.mu.RUnlock() // because TryRLock doesn't unlock
@@ -134,19 +140,67 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		defer span.End()
 		logger.L().Info("updating grype DB",
 			helpers.String("listingURL", g.distCfg.LatestURL))
-		var err error
-		g.store, g.dbStatus, err = grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
-			err := tools.DeleteContents(g.installCfg.DBRootDir)
-			logger.L().Debug("cleaned up cache", helpers.Error(err),
-				helpers.String("DBRootDir", g.installCfg.DBRootDir))
-			logger.L().Info("restarting to release previous grype DB")
-			os.Exit(0)
+
+		// Create a context with timeout to prevent stuck updates
+		// 15 minutes allows for slow network connections while still catching truly stuck downloads
+		updateCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		defer cancel()
+
+		// Track if we have an existing DB to fall back on
+		hasExistingDB := g.dbStatus != nil
+
+		// Run the DB update in a goroutine to respect the timeout
+		type updateResult struct {
+			store    vulnerability.Provider
+			dbStatus *vulnerability.ProviderStatus
+			err      error
 		}
-		g.lastDbUpdate = now
-		logger.L().Info("grype DB updated")
-		return true
+		// Buffered channel (size 1) prevents goroutine from blocking if timeout occurs
+		// The goroutine will complete in background but won't leak since it will successfully send
+		resultCh := make(chan updateResult, 1)
+
+		go func() {
+			// Note: grype.LoadVulnerabilityDB does not accept context, so the goroutine
+			// will continue to completion even if timeout occurs. The buffered channel
+			// ensures the goroutine can complete without blocking.
+			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
+			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
+		}()
+
+		select {
+		case result := <-resultCh:
+			if result.err != nil {
+				logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(result.err))
+				err := tools.DeleteContents(g.installCfg.DBRootDir)
+				logger.L().Debug("cleaned up cache", helpers.Error(err),
+					helpers.String("DBRootDir", g.installCfg.DBRootDir))
+				logger.L().Info("restarting to release previous grype DB")
+				os.Exit(0)
+			}
+			g.store = result.store
+			g.dbStatus = result.dbStatus
+			g.lastDbUpdate = now
+			logger.L().Info("grype DB updated")
+			return true
+		case <-updateCtx.Done():
+			if hasExistingDB {
+				// We have an existing DB, keep using it instead of crashing
+				// This prevents crashloop in case of slow but functional network
+				logger.L().Ctx(ctx).Warning("grype DB update timed out after 15 minutes, continuing with existing DB",
+					helpers.String("existingDBVersion", g.dbVersionLocked()))
+				// Update lastDbUpdate to prevent immediate retry, will retry in next 24h cycle
+				g.lastDbUpdate = now
+				return true
+			} else {
+				// No existing DB to fall back on, must restart
+				logger.L().Ctx(ctx).Error("grype DB initial download timed out after 15 minutes")
+				err := tools.DeleteContents(g.installCfg.DBRootDir)
+				logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
+					helpers.String("DBRootDir", g.installCfg.DBRootDir))
+				logger.L().Info("restarting pod due to grype DB initial download timeout")
+				os.Exit(0)
+			}
+		}
 	}
 
 	return g.dbStatus.Error == nil
@@ -228,7 +282,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
-		CVEDBVersion:       g.DBVersion(ctx),
+		CVEDBVersion:       g.dbVersionLocked(),
 		Annotations:        sbom.Annotations,
 		Labels:             sbom.Labels,
 		Content:            vulnerabilityResults,
