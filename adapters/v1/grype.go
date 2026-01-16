@@ -121,7 +121,6 @@ func (g *GrypeAdapter) DBVersion(context.Context) string {
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	// DB update is in progress
 	if !g.mu.TryRLock() {
-		// FIXME this gets stuck forever if the db update times out
 		return false
 	}
 	g.mu.RUnlock() // because TryRLock doesn't unlock
@@ -134,19 +133,47 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 		defer span.End()
 		logger.L().Info("updating grype DB",
 			helpers.String("listingURL", g.distCfg.LatestURL))
-		var err error
-		g.store, g.dbStatus, err = grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
-			err := tools.DeleteContents(g.installCfg.DBRootDir)
-			logger.L().Debug("cleaned up cache", helpers.Error(err),
-				helpers.String("DBRootDir", g.installCfg.DBRootDir))
-			logger.L().Info("restarting to release previous grype DB")
-			os.Exit(0)
+
+		// Create a context with timeout to prevent stuck updates
+		updateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		// Run the DB update in a goroutine to respect the timeout
+		type updateResult struct {
+			store    vulnerability.Provider
+			dbStatus *vulnerability.ProviderStatus
+			err      error
 		}
-		g.lastDbUpdate = now
-		logger.L().Info("grype DB updated")
-		return true
+		resultCh := make(chan updateResult, 1)
+
+		go func() {
+			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
+			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
+		}()
+
+		select {
+		case result := <-resultCh:
+			if result.err != nil {
+				logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(result.err))
+				err := tools.DeleteContents(g.installCfg.DBRootDir)
+				logger.L().Debug("cleaned up cache", helpers.Error(err),
+					helpers.String("DBRootDir", g.installCfg.DBRootDir))
+				logger.L().Info("restarting to release previous grype DB")
+				os.Exit(0)
+			}
+			g.store = result.store
+			g.dbStatus = result.dbStatus
+			g.lastDbUpdate = now
+			logger.L().Info("grype DB updated")
+			return true
+		case <-updateCtx.Done():
+			logger.L().Ctx(ctx).Error("grype DB update timed out after 5 minutes")
+			err := tools.DeleteContents(g.installCfg.DBRootDir)
+			logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
+				helpers.String("DBRootDir", g.installCfg.DBRootDir))
+			logger.L().Info("restarting pod due to grype DB update timeout")
+			os.Exit(1)
+		}
 	}
 
 	return g.dbStatus.Error == nil
