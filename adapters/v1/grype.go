@@ -144,9 +144,14 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			dbStatus *vulnerability.ProviderStatus
 			err      error
 		}
+		// Buffered channel (size 1) prevents goroutine from blocking if timeout occurs
+		// The goroutine will complete in background but won't leak since it will successfully send
 		resultCh := make(chan updateResult, 1)
 
 		go func() {
+			// Note: grype.LoadVulnerabilityDB does not accept context, so the goroutine
+			// will continue to completion even if timeout occurs. The buffered channel
+			// ensures the goroutine can complete without blocking.
 			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
 			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
 		}()
@@ -172,7 +177,8 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
 				helpers.String("DBRootDir", g.installCfg.DBRootDir))
 			logger.L().Info("restarting pod due to grype DB update timeout")
-			os.Exit(1)
+			// Use same exit code as regular DB update failures for consistent behavior
+			os.Exit(0)
 		}
 	}
 
