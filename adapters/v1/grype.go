@@ -136,7 +136,8 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 	if g.dbStatus == nil || now.Sub(g.lastDbUpdate) > 24*time.Hour {
 		g.mu.Lock()
 		defer g.mu.Unlock()
-		ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.UpdateDB")
+		// Use context.WithoutCancel to prevent the update from being cancelled if the request context (e.g. readiness probe) is cancelled
+		ctx, span := otel.Tracer("").Start(context.WithoutCancel(ctx), "GrypeAdapter.UpdateDB")
 		defer span.End()
 		logger.L().Info("updating grype DB",
 			helpers.String("listingURL", g.distCfg.LatestURL))
