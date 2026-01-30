@@ -205,13 +205,38 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	if cve.Content != nil {
 		manifest.Spec.Payload = *cve.Content
 	}
-	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	// Regardless of relevency, VulnerabilityManifests gets stored to default namespace
+	err := a.StoreCVEHelper(ctx, a.Namespace, cve, manifest, withRelevancy)
+	if err != nil {
+		return err
+	}
+	//VulnerabilityManifests only gets stored to workload namespace if relevency is enabled
+	if withRelevancy {
+		workloadNamespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+		if err != nil {
+			return err
+		}
+		if workloadNamespace == "" {
+			// fallback to default namespace
+			workloadNamespace = a.Namespace
+		}
+		err = a.StoreCVEHelper(ctx, workloadNamespace, cve, manifest, withRelevancy)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (a *APIServerStore) StoreCVEHelper(ctx context.Context, namespace string, cve domain.CVEManifest, manifest v1beta1.VulnerabilityManifest, withRelevancy bool) error {
+	_, err := a.StorageClient.VulnerabilityManifests(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			result, getErr := a.StorageClient.VulnerabilityManifests(namespace).Get(context.Background(), cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 			if getErr != nil {
 				return getErr
 			}
@@ -220,7 +245,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.VulnerabilityManifests(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
