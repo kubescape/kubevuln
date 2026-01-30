@@ -205,12 +205,12 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	if cve.Content != nil {
 		manifest.Spec.Payload = *cve.Content
 	}
-	// Regardless of relevency, VulnerabilityManifests gets stored to default namespace
+	// Regardless of relevancy, VulnerabilityManifests gets stored to default namespace
 	err := a.StoreCVEHelper(ctx, a.Namespace, cve, manifest, withRelevancy)
 	if err != nil {
 		return err
 	}
-	//VulnerabilityManifests only gets stored to workload namespace if relevency is enabled
+	// VulnerabilityManifests only gets stored to workload namespace if relevancy is enabled
 	if withRelevancy {
 		workloadNamespace, err := GetCVESummaryK8sResourceNamespace(ctx)
 		if err != nil {
@@ -249,9 +249,10 @@ func (a *APIServerStore) StoreCVEHelper(ctx context.Context, namespace string, c
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", cve.Name),
 				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			return retryErr
 		} else {
 			logger.L().Debug("updated CVE manifest in storage",
 				helpers.String("name", cve.Name),
@@ -261,6 +262,7 @@ func (a *APIServerStore) StoreCVEHelper(ctx context.Context, namespace string, c
 		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err),
 			helpers.String("name", cve.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		return err
 	default:
 		logger.L().Debug("stored CVE manifest in storage",
 			helpers.String("name", cve.Name),
