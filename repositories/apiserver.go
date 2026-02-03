@@ -372,6 +372,10 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 }
 
 func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
+	return GetCVESummaryK8sResourceNameWithCVEName(ctx, "")
+}
+
+func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string) (string, error) {
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
 		return "", domain.ErrCastingWorkload
@@ -379,6 +383,10 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	kind := strings.ToLower(wlid.GetKindFromWlid(workload.Wlid))
 	name := strings.ToLower(wlid.GetNameFromWlid(workload.Wlid))
 	contName := strings.ToLower(workload.ContainerName)
+
+	if kind == "" && name == "" && contName == "" && cveName != "" {
+		return cveName, nil
+	}
 
 	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
 }
@@ -410,7 +418,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
-	summaryK8sResourceName, err := GetCVESummaryK8sResourceName(ctx)
+	summaryK8sResourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, cve.Name)
 	if err != nil {
 		return err
 	}
