@@ -503,6 +503,7 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	tests := []struct {
 		expRes   string
 		workload domain.ScanCommand
+		cveName  string
 	}{
 		{
 			workload: domain.ScanCommand{
@@ -546,6 +547,11 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 			},
 			expRes: "pod-etcd-control-plane-etcd-control-plane",
 		},
+		{
+			workload: domain.ScanCommand{},
+			cveName:  "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
+			expRes:   "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
+		},
 	}
 
 	testsErrorCases := []struct {
@@ -559,7 +565,7 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 
 	for i := range tests {
 		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, tests[i].workload)
-		name, err := GetCVESummaryK8sResourceName(ctx)
+		name, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, tests[i].cveName)
 		assert.Equal(t, err, nil)
 		assert.Equal(t, tests[i].expRes, name)
 	}
