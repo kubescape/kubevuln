@@ -14,6 +14,8 @@ import (
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	syftfile "github.com/anchore/syft/syft/file"
+	"github.com/anchore/syft/syft/pkg"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
@@ -215,6 +217,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		return domainSBOM, err
 	}
 
+	// strip the SBOM to reduce size
+	s.StripSBOM(syftSBOM)
 	// check the size of the SBOM
 	sz := size.Of(syftSBOM)
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
@@ -247,4 +251,48 @@ func (s *SyftAdapter) Version() string {
 	v := tools.PackageVersion("github.com/anchore/syft")
 	// no more processing needed
 	return v
+}
+
+// StripSBOM removes unnecessary fields from a Syft SBOM to reduce size
+func (s *SyftAdapter) StripSBOM(syftSBOM *sbom.SBOM) {
+	if syftSBOM == nil || syftSBOM.Artifacts.Packages == nil {
+		return
+	}
+
+	// Clear source metadata
+	syftSBOM.Source.Metadata = nil
+
+	// Clear descriptor configuration
+	syftSBOM.Descriptor.Configuration = nil
+
+	// Clear fields in each artifact by rebuilding the collection
+	var modifiedPackages []pkg.Package
+	for p := range syftSBOM.Artifacts.Packages.Enumerate() {
+		p.FoundBy = ""
+		p.Metadata = nil
+
+		// Clear license locations by rebuilding the license set
+		licenses := p.Licenses.ToSlice()
+		var modifiedLicenses []pkg.License
+		for _, lic := range licenses {
+			lic.Locations = syftfile.NewLocationSet()
+			modifiedLicenses = append(modifiedLicenses, lic)
+		}
+		p.Licenses = pkg.NewLicenseSet(modifiedLicenses...)
+
+		// Clear virtual path in locations by rebuilding the location set
+		locations := p.Locations.ToSlice()
+		var modifiedLocations []syftfile.Location
+		for _, loc := range locations {
+			loc.AccessPath = ""
+			loc.Annotations = nil
+			modifiedLocations = append(modifiedLocations, loc)
+		}
+		p.Locations = syftfile.NewLocationSet(modifiedLocations...)
+
+		modifiedPackages = append(modifiedPackages, p)
+	}
+
+	// Replace the collection with modified packages
+	syftSBOM.Artifacts.Packages = pkg.NewCollection(modifiedPackages...)
 }

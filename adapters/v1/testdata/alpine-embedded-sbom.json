@@ -5,15 +5,12 @@
       "name": "alpine-baselayout",
       "version": "3.2.0-r18",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -60,15 +57,12 @@
       "name": "alpine-keys",
       "version": "2.4-r1",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -115,15 +109,12 @@
       "name": "apk-tools",
       "version": "2.12.7-r3",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -170,15 +161,12 @@
       "name": "busybox",
       "version": "1.34.1-r7",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -205,15 +193,12 @@
       "name": "ca-certificates-bundle",
       "version": "20230506-r0",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -283,15 +268,12 @@
       "name": "libc-utils",
       "version": "0.7.2-r3",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -345,15 +327,12 @@
       "name": "libcrypto1.1",
       "version": "1.1.1w-r1",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -380,15 +359,12 @@
       "name": "libretls",
       "version": "3.3.4-r3",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -429,15 +405,12 @@
       "name": "libssl1.1",
       "version": "1.1.1w-r1",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -464,15 +437,12 @@
       "name": "musl",
       "version": "1.2.2-r9",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -503,15 +473,12 @@
       "name": "musl-utils",
       "version": "1.2.2-r9",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -572,15 +539,12 @@
       "name": "scanelf",
       "version": "1.3.3-r0",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -607,15 +571,12 @@
       "name": "ssl_client",
       "version": "1.34.1-r7",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -662,15 +623,12 @@
       "name": "zlib",
       "version": "1.2.12-r3",
       "type": "apk",
-      "foundBy": "sbom-cataloger",
+      "foundBy": "",
       "locations": [
         {
           "path": "/opt/sbom.cdx.json",
           "layerID": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "accessPath": "/opt/sbom.cdx.json",
-          "annotations": {
-            "evidence": "primary"
-          }
+          "accessPath": ""
         }
       ],
       "licenses": [
@@ -1084,210 +1042,13 @@
     "id": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
     "name": "docker.io/janeisklar/alpine",
     "version": "3.15-sbom",
-    "type": "image",
-    "metadata": {
-      "userInput": "docker.io/janeisklar/alpine:3.15-sbom",
-      "imageID": "sha256:29cc48299a7339eb76ae82970aee9f816d611d1dce64f18daa26b9a4b13ef3d3",
-      "manifestDigest": "sha256:1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
-      "mediaType": "application/vnd.oci.image.manifest.v1+json",
-      "tags": [],
-      "imageSize": 24524,
-      "layers": [
-        {
-          "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
-          "digest": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
-          "size": 24524
-        }
-      ],
-      "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjoyOWNjNDgyOTlhNzMzOWViNzZhZTgyOTcwYWVlOWY4MTZkNjExZDFkY2U2NGYxOGRhYTI2YjlhNGIxM2VmM2QzIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
-      "config": "eyJhcmNoaXRlY3R1cmUiOiJhbWQ2NCIsImNvbmZpZyI6eyJFbnYiOlsiUEFUSD0vdXNyL2xvY2FsL3NiaW46L3Vzci9sb2NhbC9iaW46L3Vzci9zYmluOi91c3IvYmluOi9zYmluOi9iaW4iXSwiV29ya2luZ0RpciI6Ii8ifSwiY3JlYXRlZCI6IjIwMjUtMDUtMTNUMTk6NDY6NDIuMTAzMDM4Mzg1WiIsImhpc3RvcnkiOlt7ImNyZWF0ZWQiOiIyMDI1LTA1LTEzVDE5OjQ2OjQyLjEwMzAzODM4NVoiLCJjcmVhdGVkX2J5IjoiQUREIHJlc3VsdC5qc29uIC9vcHQvc2JvbS5jZHguanNvbiAjIGJ1aWxka2l0IiwiY29tbWVudCI6ImJ1aWxka2l0LmRvY2tlcmZpbGUudjAifV0sIm9zIjoibGludXgiLCJyb290ZnMiOnsidHlwZSI6ImxheWVycyIsImRpZmZfaWRzIjpbInNoYTI1NjpmZmI0MTUxMWZmOTUxODIyNWM2YTJhYmFjMmJjOTZhZTFlYjUwZDUyMjMwMWRmOGIyNDdkY2QzMTZlNTM0MDFhIl19fQ==",
-      "repoDigests": [
-        "index.docker.io/janeisklar/alpine@sha256:882c14de405e614e8ea033d02afe2adeb64a2b665f3c55c08c5649497491718a"
-      ],
-      "architecture": "amd64",
-      "os": "linux"
-    }
+    "type": "",
+    "metadata": null
   },
   "distro": {},
   "descriptor": {
     "name": "syft",
-    "version": "unknown",
-    "configuration": {
-      "catalogers": {
-        "requested": {
-          "default": [
-            "image",
-            "file"
-          ]
-        },
-        "used": [
-          "alpm-db-cataloger",
-          "apk-db-cataloger",
-          "binary-classifier-cataloger",
-          "bitnami-cataloger",
-          "cargo-auditable-binary-cataloger",
-          "conan-info-cataloger",
-          "dotnet-deps-binary-cataloger",
-          "dotnet-packages-lock-cataloger",
-          "dpkg-db-cataloger",
-          "elf-binary-package-cataloger",
-          "file-content-cataloger",
-          "file-digest-cataloger",
-          "file-executable-cataloger",
-          "file-metadata-cataloger",
-          "go-module-binary-cataloger",
-          "graalvm-native-image-cataloger",
-          "homebrew-cataloger",
-          "java-archive-cataloger",
-          "java-jvm-cataloger",
-          "javascript-package-cataloger",
-          "linux-kernel-cataloger",
-          "lua-rock-cataloger",
-          "nix-cataloger",
-          "pe-binary-package-cataloger",
-          "php-composer-installed-cataloger",
-          "php-interpreter-cataloger",
-          "php-pear-serialized-cataloger",
-          "portage-cataloger",
-          "python-installed-package-cataloger",
-          "r-package-cataloger",
-          "rpm-db-cataloger",
-          "ruby-installed-gemspec-cataloger",
-          "sbom-cataloger",
-          "wordpress-plugins-cataloger"
-        ]
-      },
-      "data-generation": {
-        "generate-cpes": true
-      },
-      "files": {
-        "content": {
-          "globs": null,
-          "skip-files-above-size": 0
-        },
-        "hashers": [
-          "sha-256"
-        ],
-        "selection": "owned-by-package"
-      },
-      "licenses": {
-        "coverage": 75,
-        "include-content": "none"
-      },
-      "packages": {
-        "binary": [
-          "python-binary",
-          "python-binary-lib",
-          "pypy-binary-lib",
-          "go-binary",
-          "julia-binary",
-          "helm",
-          "redis-binary",
-          "nodejs-binary",
-          "go-binary-hint",
-          "busybox-binary",
-          "util-linux-binary",
-          "haproxy-binary",
-          "perl-binary",
-          "php-composer-binary",
-          "httpd-binary",
-          "memcached-binary",
-          "traefik-binary",
-          "arangodb-binary",
-          "postgresql-binary",
-          "mysql-binary",
-          "mysql-binary",
-          "mysql-binary",
-          "xtrabackup-binary",
-          "mariadb-binary",
-          "rust-standard-library-linux",
-          "rust-standard-library-macos",
-          "ruby-binary",
-          "erlang-binary",
-          "erlang-alpine-binary",
-          "erlang-library",
-          "swipl-binary",
-          "dart-binary",
-          "haskell-ghc-binary",
-          "haskell-cabal-binary",
-          "haskell-stack-binary",
-          "consul-binary",
-          "hashicorp-vault-binary",
-          "nginx-binary",
-          "bash-binary",
-          "openssl-binary",
-          "gcc-binary",
-          "fluent-bit-binary",
-          "wordpress-cli-binary",
-          "curl-binary",
-          "lighttpd-binary",
-          "proftpd-binary",
-          "zstd-binary",
-          "xz-binary",
-          "gzip-binary",
-          "sqlcipher-binary",
-          "jq-binary",
-          "chrome-binary",
-          "ffmpeg-binary",
-          "java-binary",
-          "java-jdb-binary"
-        ],
-        "dotnet": {
-          "dep-packages-must-claim-dll": true,
-          "dep-packages-must-have-dll": false,
-          "propagate-dll-claims-to-parents": true,
-          "relax-dll-claims-when-bundling-detected": true
-        },
-        "golang": {
-          "local-mod-cache-dir": "<<PRESENCE>>",
-          "local-vendor-dir": "",
-          "main-module-version": {
-            "from-build-settings": true,
-            "from-contents": false,
-            "from-ld-flags": true
-          },
-          "proxies": [
-            "https://proxy.golang.org",
-            "direct"
-          ],
-          "search-local-mod-cache-licenses": false,
-          "search-local-vendor-licenses": false,
-          "search-remote-licenses": false
-        },
-        "java-archive": {
-          "include-indexed-archives": true,
-          "include-unindexed-archives": false,
-          "maven-base-url": "https://repo1.maven.org/maven2",
-          "maven-localrepository-dir": "<<PRESENCE>>",
-          "max-parent-recursive-depth": 0,
-          "resolve-transitive-dependencies": false,
-          "use-maven-localrepository": false,
-          "use-network": false
-        },
-        "javascript": {
-          "include-dev-dependencies": false,
-          "npm-base-url": "",
-          "search-remote-licenses": false
-        },
-        "linux-kernel": {
-          "catalog-modules": true
-        },
-        "nix": {
-          "capture-owned-files": false
-        },
-        "python": {
-          "guess-unpinned-requirements": false
-        }
-      },
-      "relationships": {
-        "exclude-binary-packages-with-file-ownership-overlap": true,
-        "package-file-ownership": true,
-        "package-file-ownership-overlap": true
-      },
-      "search": {
-        "scope": "squashed"
-      }
-    }
+    "version": "unknown"
   },
   "schema": {
     "version": "16.0.39",
