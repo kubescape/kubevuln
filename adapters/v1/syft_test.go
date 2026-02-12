@@ -232,3 +232,35 @@ func TestNormalizeImageID(t *testing.T) {
 		})
 	}
 }
+
+func TestStripSBOM(t *testing.T) {
+	b := fileContent("testdata/alpine-sbom.json")
+
+	var d model.Document
+	err := json.Unmarshal(b, &d)
+	require.NoError(t, err)
+
+	sbom := toSyftModel(d)
+
+	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
+
+	s.StripSBOM(sbom)
+
+	assert.Nil(t, sbom.Source.Metadata)
+	assert.Nil(t, sbom.Descriptor.Configuration)
+
+	for pkg := range sbom.Artifacts.Packages.Enumerate() {
+		assert.Empty(t, pkg.FoundBy)
+		assert.Nil(t, pkg.Metadata)
+
+		licenses := pkg.Licenses.ToSlice()
+		for _, lic := range licenses {
+			assert.True(t, lic.Locations.Empty())
+		}
+
+		locations := pkg.Locations.ToSlice()
+		for _, loc := range locations {
+			assert.Empty(t, loc.AccessPath)
+		}
+	}
+}
