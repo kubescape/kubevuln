@@ -679,8 +679,29 @@
     "id": "1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
     "name": "docker.io/janeisklar/alpine",
     "version": "3.15-sbom",
-    "type": "",
-    "metadata": null
+    "type": "image",
+    "metadata": {
+      "userInput": "docker.io/janeisklar/alpine:3.15-sbom",
+      "imageID": "sha256:29cc48299a7339eb76ae82970aee9f816d611d1dce64f18daa26b9a4b13ef3d3",
+      "manifestDigest": "sha256:1cdf05d8a9115bb12894524e9444b0ebf82cfc2d3b7fdcc814f2a13a1ef3620b",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "tags": [],
+      "imageSize": 24524,
+      "layers": [
+        {
+          "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+          "digest": "sha256:ffb41511ff9518225c6a2abac2bc96ae1eb50d522301df8b247dcd316e53401a",
+          "size": 24524
+        }
+      ],
+      "manifest": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjoyOWNjNDgyOTlhNzMzOWViNzZhZTgyOTcwYWVlOWY4MTZkNjExZDFkY2U2NGYxOGRhYTI2YjlhNGIxM2VmM2QzIiwKICAgICJzaXplIjogNDUxCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo5OTYwYTRiNDBjODEwNDIzNzZkNWI4ZWEzYTFlZjhmY2ZjMWM0Njg0MDk1YjE2OTVjYTY2ODNkZWQ4NDYwZjRhIiwKICAgICAgInNpemUiOiAyMzM0CiAgICB9CiAgXQp9",
+      "config": "eyJhcmNoaXRlY3R1cmUiOiJhbWQ2NCIsImNvbmZpZyI6eyJFbnYiOlsiUEFUSD0vdXNyL2xvY2FsL3NiaW46L3Vzci9sb2NhbC9iaW46L3Vzci9zYmluOi91c3IvYmluOi9zYmluOi9iaW4iXSwiV29ya2luZ0RpciI6Ii8ifSwiY3JlYXRlZCI6IjIwMjUtMDUtMTNUMTk6NDY6NDIuMTAzMDM4Mzg1WiIsImhpc3RvcnkiOlt7ImNyZWF0ZWQiOiIyMDI1LTA1LTEzVDE5OjQ2OjQyLjEwMzAzODM4NVoiLCJjcmVhdGVkX2J5IjoiQUREIHJlc3VsdC5qc29uIC9vcHQvc2JvbS5jZHguanNvbiAjIGJ1aWxka2l0IiwiY29tbWVudCI6ImJ1aWxka2l0LmRvY2tlcmZpbGUudjAifV0sIm9zIjoibGludXgiLCJyb290ZnMiOnsidHlwZSI6ImxheWVycyIsImRpZmZfaWRzIjpbInNoYTI1NjpmZmI0MTUxMWZmOTUxODIyNWM2YTJhYmFjMmJjOTZhZTFlYjUwZDUyMjMwMWRmOGIyNDdkY2QzMTZlNTM0MDFhIl19fQ==",
+      "repoDigests": [
+        "index.docker.io/janeisklar/alpine@sha256:882c14de405e614e8ea033d02afe2adeb64a2b665f3c55c08c5649497491718a"
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    }
   },
   "distro": {},
   "descriptor": {
