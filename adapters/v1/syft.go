@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/opencontainers/go-digest"
 	"go.opentelemetry.io/otel"
 )
@@ -215,6 +216,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		return domainSBOM, err
 	}
 
+	// strip the SBOM to reduce size
+	v1beta1.StripSBOM(syftSBOM)
 	// check the size of the SBOM
 	sz := size.Of(syftSBOM)
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
