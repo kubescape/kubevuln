@@ -25,6 +25,12 @@ import (
 )
 
 func main() {
+	// If running as SBOM worker subprocess, handle request and exit.
+	if os.Getenv("KUBEVULN_SBOM_WORKER") == "1" {
+		v1.RunSBOMWorker()
+		return
+	}
+
 	ctx := context.Background()
 
 	configDir := "/etc/config"
@@ -68,7 +74,11 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	syftAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	sbomAdapter := v1.NewSubprocessSBOMCreator(syftAdapter, c.ScanTimeout, c.SubprocessSBOM)
+	if c.SubprocessSBOM {
+		logger.L().Info("subprocess SBOM creation enabled")
+	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform
 	if c.KeepLocal {

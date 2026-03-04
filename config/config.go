@@ -25,6 +25,7 @@ type Config struct {
 	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
 	Storage            bool          `mapstructure:"storage"`
 	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
+	SubprocessSBOM     bool          `mapstructure:"subprocessSBOM"`
 	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
 	VexGeneration      bool          `mapstructure:"vexGeneration"`
 }
@@ -43,6 +44,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("vexGeneration", false)
 	viper.SetDefault("namespace", "kubescape")
 	viper.SetDefault("scanEmbeddedSBOMs", false)
+	viper.SetDefault("subprocessSBOM", false)
 
 	viper.AutomaticEnv()
 
