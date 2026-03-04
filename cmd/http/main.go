@@ -75,9 +75,10 @@ func main() {
 		}
 	}
 	syftAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
-	sbomAdapter := v1.NewSubprocessSBOMCreator(syftAdapter, c.ScanTimeout, c.SubprocessSBOM)
+	sbomAdapter := v1.NewSubprocessSBOMCreator(syftAdapter, c.ScanTimeout, c.SubprocessSBOMMemoryLimit, c.SubprocessSBOM)
 	if c.SubprocessSBOM {
-		logger.L().Info("subprocess SBOM creation enabled")
+		logger.L().Info("subprocess SBOM creation enabled",
+			helpers.Int("memoryLimitBytes", int(c.SubprocessSBOMMemoryLimit)))
 	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform

@@ -13,7 +13,7 @@ import (
 
 func TestSubprocessSBOMCreator_DisabledFallsThrough(t *testing.T) {
 	inner := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
-	creator := NewSubprocessSBOMCreator(inner, 5*time.Minute, false)
+	creator := NewSubprocessSBOMCreator(inner, 5*time.Minute, 0, false)
 
 	// When disabled, it should use the inner adapter directly.
 	// We can't easily test a full SBOM creation without a real image,
