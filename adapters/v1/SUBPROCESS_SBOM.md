@@ -15,26 +15,26 @@ structured error instead of crashing.
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────┐
-│  kubevuln (parent)                              │
-│                                                 │
-│  1. Serialize scan request as JSON              │
-│  2. Re-exec self with KUBEVULN_SBOM_WORKER=1   │
-│  3. Pipe request via stdin, read result stdout  │
-│  4. If child is SIGKILL'd → ErrChildOOMKilled   │
-│  5. If child times out   → ErrChildTimeout      │
-│  6. If child succeeds    → return SBOM          │
-└──────────────┬──────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  kubevuln (parent)                                    │
+│                                                       │
+│  1. Serialize scan request as JSON                    │
+│  2. Re-exec self with KUBEVULN_SBOM_WORKER=1          │
+│  3. Send request via os.Pipe (FD 3), read FD 4        │
+│  4. If child is SIGKILL'd → ErrChildOOMKilled         │
+│  5. If child times out   → ErrChildTimeout            │
+│  6. If child succeeds    → return SBOM                │
+└──────────────┬────────────────────────────────────────┘
                │ fork/exec
-┌──────────────▼──────────────────────────────────┐
-│  kubevuln (child worker)                        │
-│                                                 │
-│  1. Apply RLIMIT_AS memory limit (if set)       │
-│  2. Read request from stdin                     │
-│  3. Create SyftAdapter, run CreateSBOM()        │
-│  4. Write JSON response to stdout               │
-│  5. Exit                                        │
-└─────────────────────────────────────────────────┘
+┌──────────────▼────────────────────────────────────────┐
+│  kubevuln (child worker)                              │
+│                                                       │
+│  1. Apply RLIMIT_AS memory limit (if set)             │
+│  2. Read request from pipe FD 3                       │
+│  3. Create SyftAdapter, run CreateSBOM()              │
+│  4. Write JSON response to pipe FD 4                  │
+│  5. Exit — stdout/stderr free for normal logging      │
+└───────────────────────────────────────────────────────┘
 ```
 
 ### Key design decisions
@@ -42,8 +42,10 @@ structured error instead of crashing.
 - **Self-re-exec**: The child runs the same kubevuln binary with env var
   `KUBEVULN_SBOM_WORKER=1`. This is checked at the top of `main()` before any
   HTTP server setup.
-- **JSON over stdio**: The parent sends an `sbomWorkerRequest` via stdin and reads
-  an `sbomWorkerResponse` from stdout. Simple, no sockets or temp files.
+- **os.Pipe for IPC (not stdin/stdout)**: The parent creates two pipes and passes
+  them as `ExtraFiles` (FD 3 = request, FD 4 = response). This keeps stdout/stderr
+  free for normal logging in the child. If Syft or any dependency logs to stdout,
+  it won't corrupt the JSON data channel.
 - **Memory limit**: The parent passes `KUBEVULN_SBOM_WORKER_MEMLIMIT` (bytes) to
   the child, which applies it via `RLIMIT_AS`. When hit, memory allocations fail
   and the process crashes — the parent detects SIGKILL and returns `ErrChildOOMKilled`.

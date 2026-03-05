@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,7 +51,7 @@ func NewSubprocessSBOMCreator(inner *SyftAdapter, timeout time.Duration, memoryL
 	}
 }
 
-// sbomWorkerRequest is the JSON payload sent to the child process via stdin.
+// sbomWorkerRequest is the JSON payload sent to the child process via a pipe.
 type sbomWorkerRequest struct {
 	Name     string                 `json:"name"`
 	ImageID  string                 `json:"imageID"`
@@ -63,7 +64,7 @@ type sbomWorkerRequest struct {
 	ScanEmbeddedSBOMs bool          `json:"scanEmbeddedSBOMs"`
 }
 
-// sbomWorkerResponse is the JSON payload the child process writes to stdout.
+// sbomWorkerResponse is the JSON payload the child process writes back via a pipe.
 type sbomWorkerResponse struct {
 	SBOM  *domain.SBOM `json:"sbom,omitempty"`
 	Error string       `json:"error,omitempty"`
@@ -114,13 +115,28 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 		return domain.SBOM{}, fmt.Errorf("failed to get executable path: %w", err)
 	}
 
+	// Create pipes for IPC. These are separate from stdout/stderr, so the
+	// child can log freely to stdout/stderr without corrupting the data channel.
+	reqReader, reqWriter, err := os.Pipe()
+	if err != nil {
+		return domain.SBOM{}, fmt.Errorf("failed to create request pipe: %w", err)
+	}
+	defer reqReader.Close()
+
+	respReader, respWriter, err := os.Pipe()
+	if err != nil {
+		reqWriter.Close()
+		return domain.SBOM{}, fmt.Errorf("failed to create response pipe: %w", err)
+	}
+	defer respWriter.Close()
+
 	// Give the parent extra time so the child can return a clean timeout
 	// error before the parent force-kills it.
 	childCtx, cancel := context.WithTimeout(ctx, s.timeout+parentTimeoutBuffer)
 	defer cancel()
 
 	cmd := exec.CommandContext(childCtx, executable)
-	cmd.Stdin = bytes.NewReader(reqBytes)
+	cmd.ExtraFiles = []*os.File{reqReader, respWriter} // FD 3 = request, FD 4 = response
 	cmd.Env = append(os.Environ(), "KUBEVULN_SBOM_WORKER=1")
 
 	// Set memory limit on the child process if configured.
@@ -129,23 +145,60 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 		cmd.Env = append(cmd.Env, fmt.Sprintf("KUBEVULN_SBOM_WORKER_MEMLIMIT=%d", s.memoryLimit))
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	logger.L().Ctx(ctx).Info("spawning SBOM worker subprocess",
 		helpers.String("imageID", imageID),
 		helpers.String("imageTag", imageTag))
 
-	err = cmd.Run()
-	if err != nil {
-		// Clean up orphaned temp dirs left by the killed child.
+	if err := cmd.Start(); err != nil {
+		reqWriter.Close()
+		respReader.Close()
+		return domain.SBOM{}, fmt.Errorf("failed to start worker subprocess: %w", err)
+	}
+
+	// Close the parent's copy of the child's read/write ends.
+	reqReader.Close()
+	respWriter.Close()
+
+	// Write request to child via pipe, then close to signal EOF.
+	if _, err := reqWriter.Write(reqBytes); err != nil {
+		reqWriter.Close()
+		respReader.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return domain.SBOM{}, fmt.Errorf("failed to write request to worker: %w", err)
+	}
+	reqWriter.Close()
+
+	// Read response from child via pipe.
+	respBytes, readErr := io.ReadAll(respReader)
+	respReader.Close()
+
+	// Wait for child to exit.
+	waitErr := cmd.Wait()
+
+	// Check for context timeout first (parent-side kill).
+	if childCtx.Err() == context.DeadlineExceeded {
 		cleanupOrphanedTempDirs(ctx)
-		return s.handleChildError(ctx, err, childCtx, imageID, stderr.String())
+		logger.L().Ctx(ctx).Error("SBOM worker subprocess timed out",
+			helpers.String("imageID", imageID),
+			helpers.String("stderr", stderr.String()))
+		return domain.SBOM{}, ErrChildTimeout
+	}
+
+	if waitErr != nil {
+		cleanupOrphanedTempDirs(ctx)
+		return s.handleChildError(ctx, waitErr, childCtx, imageID, stderr.String())
+	}
+
+	if readErr != nil {
+		return domain.SBOM{}, fmt.Errorf("failed to read worker response: %w (stderr: %s)", readErr, stderr.String())
 	}
 
 	var resp sbomWorkerResponse
-	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
 		return domain.SBOM{}, fmt.Errorf("failed to unmarshal worker response: %w (stderr: %s)", err, stderr.String())
 	}
 
@@ -217,15 +270,25 @@ func cleanupOrphanedTempDirs(ctx context.Context) {
 }
 
 // RunSBOMWorker is the entry point for the child process.
-// It reads a request from stdin, creates the SBOM, and writes the result to stdout.
-// On error, it writes an error response and exits with code 1.
+// It reads a request from pipe FD 3, creates the SBOM, and writes the result
+// to pipe FD 4. Stdout/stderr remain free for normal logging.
 func RunSBOMWorker() {
 	// Apply memory limit if set by parent.
 	applyMemoryLimit()
 
+	// FD 3 = request pipe, FD 4 = response pipe (set by parent via ExtraFiles).
+	reqPipe := os.NewFile(3, "req-pipe")
+	respPipe := os.NewFile(4, "resp-pipe")
+	if reqPipe == nil || respPipe == nil {
+		fmt.Fprintf(os.Stderr, "sbom-worker: missing pipe file descriptors\n")
+		os.Exit(1)
+	}
+	defer reqPipe.Close()
+	defer respPipe.Close()
+
 	var req sbomWorkerRequest
-	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
-		writeWorkerError(fmt.Sprintf("failed to decode request: %v", err))
+	if err := json.NewDecoder(reqPipe).Decode(&req); err != nil {
+		writeWorkerError(respPipe, fmt.Sprintf("failed to decode request: %v", err))
 		os.Exit(1)
 	}
 
@@ -241,8 +304,8 @@ func RunSBOMWorker() {
 		resp.Error = err.Error()
 	}
 
-	if err := json.NewEncoder(os.Stdout).Encode(resp); err != nil {
-		writeWorkerError(fmt.Sprintf("failed to encode response: %v", err))
+	if err := json.NewEncoder(respPipe).Encode(resp); err != nil {
+		writeWorkerError(respPipe, fmt.Sprintf("failed to encode response: %v", err))
 		os.Exit(1)
 	}
 }
@@ -270,7 +333,7 @@ func applyMemoryLimit() {
 	}
 }
 
-func writeWorkerError(msg string) {
+func writeWorkerError(w io.Writer, msg string) {
 	resp := sbomWorkerResponse{Error: msg}
-	json.NewEncoder(os.Stdout).Encode(resp) //nolint:errcheck
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
