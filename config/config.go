@@ -25,8 +25,10 @@ type Config struct {
 	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
 	Storage            bool          `mapstructure:"storage"`
 	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
-	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
-	VexGeneration      bool          `mapstructure:"vexGeneration"`
+	SubprocessSBOM            bool  `mapstructure:"subprocessSBOM"`
+	SubprocessSBOMMemoryLimit int64 `mapstructure:"subprocessSBOMMemoryLimit"` // bytes, 0 = no limit
+	UseDefaultMatchers        bool  `mapstructure:"useDefaultMatchers"`
+	VexGeneration             bool  `mapstructure:"vexGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -43,6 +45,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("vexGeneration", false)
 	viper.SetDefault("namespace", "kubescape")
 	viper.SetDefault("scanEmbeddedSBOMs", false)
+	viper.SetDefault("subprocessSBOM", false)
+	viper.SetDefault("subprocessSBOMMemoryLimit", 0)
 
 	viper.AutomaticEnv()
 

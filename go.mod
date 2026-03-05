@@ -30,6 +30,7 @@ require (
 	github.com/kubescape/go-logger v0.0.25
 	github.com/kubescape/k8s-interface v0.0.199
 	github.com/kubescape/storage v0.0.247
+	github.com/moby/sys/reexec v0.1.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.5
 	github.com/spf13/viper v1.20.1

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,11 @@ import (
 )
 
 func main() {
+	// If re-exec'd as a subprocess worker, run the handler and exit.
+	if v1.InitReexec() {
+		return
+	}
+
 	ctx := context.Background()
 
 	configDir := "/etc/config"
@@ -68,7 +74,12 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	syftAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	sbomAdapter := v1.NewSubprocessSBOMCreator(syftAdapter, c.ScanTimeout, c.SubprocessSBOMMemoryLimit, c.SubprocessSBOM)
+	if c.SubprocessSBOM {
+		logger.L().Info("subprocess SBOM creation enabled",
+			helpers.String("memoryLimit", fmt.Sprintf("%d", c.SubprocessSBOMMemoryLimit)))
+	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform
 	if c.KeepLocal {
@@ -129,6 +140,9 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
 	}
+
+	// Terminate any active SBOM worker subprocesses.
+	sbomAdapter.Shutdown()
 
 	// Purging the controller worker queue
 	controller.Shutdown()
