@@ -249,5 +249,6 @@ func TestParentSurvivesChildOOMKill(t *testing.T) {
 
 	var resp sbomWorkerResponse
 	require.NoError(t, json.Unmarshal(output, &resp))
+	require.NotNil(t, resp.SBOM)
 	assert.Equal(t, "test-from-child", resp.SBOM.Name)
 }
