@@ -260,15 +260,22 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 	var res workerResult
 	select {
 	case <-childCtx.Done():
-		// Timeout fired — kill the child and reap to avoid zombies.
+		// Context done — kill the child and reap to avoid zombies.
 		_ = cmd.Process.Kill()
 		res = <-resultCh // ensure child is reaped
 		_ = res          // discard; we already know the outcome
 		cleanupWorkerTempDir(ctx, childTmpDir)
-		logger.L().Ctx(ctx).Error("SBOM worker subprocess timed out",
+		// Differentiate timeout from parent-context cancellation (e.g. shutdown).
+		if errors.Is(childCtx.Err(), context.DeadlineExceeded) {
+			logger.L().Ctx(ctx).Error("SBOM worker subprocess timed out",
+				helpers.String("imageID", imageID),
+				helpers.String("stderr", stderr.String()))
+			return domain.SBOM{}, ErrChildTimeout
+		}
+		logger.L().Ctx(ctx).Warning("SBOM worker subprocess canceled",
 			helpers.String("imageID", imageID),
 			helpers.String("stderr", stderr.String()))
-		return domain.SBOM{}, ErrChildTimeout
+		return domain.SBOM{}, fmt.Errorf("SBOM creation canceled: %w", childCtx.Err())
 	case res = <-resultCh:
 	}
 
