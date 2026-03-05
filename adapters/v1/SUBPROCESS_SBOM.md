@@ -15,7 +15,7 @@ structured error instead of crashing.
 
 ## How It Works
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │  kubevuln (parent)                                  │
 │                                                     │

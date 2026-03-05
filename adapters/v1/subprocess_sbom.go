@@ -9,8 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -184,9 +182,27 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 	childCtx, cancel := context.WithTimeout(ctx, s.timeout+parentTimeoutBuffer)
 	defer cancel()
 
+	// Create a per-child temp directory so cleanup on failure is scoped to
+	// this child only — it won't affect concurrent scans.
+	childTmpDir, err := os.MkdirTemp("", "kubevuln-sbom-worker-*")
+	if err != nil {
+		reqWriter.Close()
+		respReader.Close()
+		return domain.SBOM{}, fmt.Errorf("failed to create worker temp dir: %w", err)
+	}
+	defer func() {
+		// On success the child cleans up after itself; remove leftovers on
+		// any failure path (the dir is empty on success, so this is cheap).
+		os.RemoveAll(childTmpDir)
+	}()
+
 	cmd := reexec.Command(sbomWorkerName)
 	cmd.ExtraFiles = []*os.File{reqReader, respWriter} // FD 3 = request, FD 4 = response
 	cmd.Env = os.Environ()
+
+	// Override TMPDIR so the child (and stereoscope) writes temp files into
+	// our scoped directory instead of the global temp dir.
+	cmd.Env = append(cmd.Env, fmt.Sprintf("TMPDIR=%s", childTmpDir))
 
 	// Set memory limit on the child process if configured.
 	if s.memoryLimit > 0 {
@@ -223,33 +239,50 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 	}
 	reqWriter.Close()
 
-	// Read response from child via pipe.
-	respBytes, readErr := io.ReadAll(respReader)
-	respReader.Close()
+	// Read response and wait for child in a goroutine so the parent-side
+	// timeout (childCtx) can actually fire and kill a hung child.
+	type workerResult struct {
+		respBytes []byte
+		readErr   error
+		waitErr   error
+	}
+	resultCh := make(chan workerResult, 1)
+	go func() {
+		rb, re := io.ReadAll(respReader)
+		_ = respReader.Close()
+		resultCh <- workerResult{
+			respBytes: rb,
+			readErr:   re,
+			waitErr:   cmd.Wait(),
+		}
+	}()
 
-	// Wait for child to exit.
-	waitErr := cmd.Wait()
-
-	// Check for context timeout first (parent-side kill).
-	if childCtx.Err() == context.DeadlineExceeded {
-		cleanupOrphanedTempDirs(ctx)
+	var res workerResult
+	select {
+	case <-childCtx.Done():
+		// Timeout fired — kill the child and reap to avoid zombies.
+		_ = cmd.Process.Kill()
+		res = <-resultCh // ensure child is reaped
+		_ = res          // discard; we already know the outcome
+		cleanupWorkerTempDir(ctx, childTmpDir)
 		logger.L().Ctx(ctx).Error("SBOM worker subprocess timed out",
 			helpers.String("imageID", imageID),
 			helpers.String("stderr", stderr.String()))
 		return domain.SBOM{}, ErrChildTimeout
+	case res = <-resultCh:
 	}
 
-	if waitErr != nil {
-		cleanupOrphanedTempDirs(ctx)
-		return s.handleChildError(ctx, waitErr, imageID, stderr.String())
+	if res.waitErr != nil {
+		cleanupWorkerTempDir(ctx, childTmpDir)
+		return s.handleChildError(ctx, res.waitErr, imageID, stderr.String())
 	}
 
-	if readErr != nil {
-		return domain.SBOM{}, fmt.Errorf("failed to read worker response: %w (stderr: %s)", readErr, stderr.String())
+	if res.readErr != nil {
+		return domain.SBOM{}, fmt.Errorf("failed to read worker response: %w (stderr: %s)", res.readErr, stderr.String())
 	}
 
 	var resp sbomWorkerResponse
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
+	if err := json.Unmarshal(res.respBytes, &resp); err != nil {
 		return domain.SBOM{}, fmt.Errorf("failed to unmarshal worker response: %w (stderr: %s)", err, stderr.String())
 	}
 
@@ -258,7 +291,7 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 	}
 
 	if resp.SBOM == nil {
-		return domain.SBOM{}, nil
+		return domain.SBOM{}, errors.New("worker returned empty response (no SBOM and no error)")
 	}
 
 	return *resp.SBOM, nil
@@ -289,25 +322,19 @@ func (s *SubprocessSBOMCreator) handleChildError(ctx context.Context, err error,
 	return domain.SBOM{}, fmt.Errorf("SBOM worker subprocess failed: %w (stderr: %s)", err, stderrOutput)
 }
 
-// cleanupOrphanedTempDirs removes temporary directories left by a killed child
-// process. Stereoscope creates temp dirs with prefix "stereoscope" under os.TempDir().
-func cleanupOrphanedTempDirs(ctx context.Context) {
-	entries, err := os.ReadDir(os.TempDir())
-	if err != nil {
+// cleanupWorkerTempDir removes the per-child temp directory created by the
+// parent. This is scoped to the specific child and won't affect concurrent scans.
+func cleanupWorkerTempDir(ctx context.Context, tmpDir string) {
+	if tmpDir == "" {
 		return
 	}
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), "stereoscope") {
-			path := filepath.Join(os.TempDir(), entry.Name())
-			if err := os.RemoveAll(path); err != nil {
-				logger.L().Ctx(ctx).Warning("failed to cleanup orphaned temp dir",
-					helpers.String("path", path),
-					helpers.Error(err))
-			} else {
-				logger.L().Ctx(ctx).Debug("cleaned up orphaned temp dir",
-					helpers.String("path", path))
-			}
-		}
+	if err := os.RemoveAll(tmpDir); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to cleanup worker temp dir",
+			helpers.String("path", tmpDir),
+			helpers.Error(err))
+	} else {
+		logger.L().Ctx(ctx).Debug("cleaned up worker temp dir",
+			helpers.String("path", tmpDir))
 	}
 }
 

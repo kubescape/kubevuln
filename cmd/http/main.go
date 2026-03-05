@@ -141,11 +141,11 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
 	}
 
-	// Terminate any active SBOM worker subprocesses.
-	sbomAdapter.Shutdown()
-
-	// Purging the controller worker queue
+	// Purge worker queue first so no new SBOM jobs start.
 	controller.Shutdown()
+
+	// Then terminate any remaining active SBOM worker subprocesses.
+	sbomAdapter.Shutdown()
 
 	logger.L().Info("kubevuln exiting")
 }
