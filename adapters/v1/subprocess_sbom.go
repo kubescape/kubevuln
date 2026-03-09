@@ -179,7 +179,7 @@ func (s *SubprocessSBOMCreator) createSBOMInSubprocess(ctx context.Context, name
 
 	// Give the parent extra time so the child can return a clean timeout
 	// error before the parent force-kills it.
-	childCtx, cancel := context.WithTimeout(ctx, s.timeout+parentTimeoutBuffer)
+	childCtx, cancel := context.WithTimeout(context.Background(), s.timeout+parentTimeoutBuffer)
 	defer cancel()
 
 	// Create a per-child temp directory so cleanup on failure is scoped to

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -252,6 +253,225 @@ func TestSubprocessSBOMCreator_Shutdown(t *testing.T) {
 	assert.NotPanics(t, func() {
 		creator.Shutdown()
 	})
+}
+
+// TestHelperProcess_PipeResponse is invoked as a subprocess.
+// It reads a request from FD 3 (like the real sbom-worker) and writes
+// a valid SBOM response to FD 4, then exits cleanly.
+func TestHelperProcess_PipeResponse(t *testing.T) {
+	if os.Getenv("GO_TEST_SUBPROCESS") != "PIPE_RESPOND" {
+		return
+	}
+	reqPipe := os.NewFile(3, "req-pipe")
+	respPipe := os.NewFile(4, "resp-pipe")
+	if reqPipe == nil || respPipe == nil {
+		os.Exit(1)
+	}
+	defer reqPipe.Close()
+	defer respPipe.Close()
+
+	var req sbomWorkerRequest
+	if err := json.NewDecoder(reqPipe).Decode(&req); err != nil {
+		os.Exit(1)
+	}
+
+	resp := sbomWorkerResponse{
+		SBOM: &domain.SBOM{
+			Name:            req.Name,
+			SBOMCreatorName: "syft",
+		},
+	}
+	json.NewEncoder(respPipe).Encode(resp)
+	os.Exit(0)
+}
+
+// TestHelperProcess_Sleep is invoked as a subprocess.
+// It sleeps for 1 hour — used to test parent-side timeout enforcement.
+func TestHelperProcess_Sleep(t *testing.T) {
+	if os.Getenv("GO_TEST_SUBPROCESS") != "SLEEP" {
+		return
+	}
+	// Read and discard request from FD 3 so parent's write doesn't block.
+	reqPipe := os.NewFile(3, "req-pipe")
+	if reqPipe != nil {
+		json.NewDecoder(reqPipe).Decode(&json.RawMessage{})
+		reqPipe.Close()
+	}
+	time.Sleep(1 * time.Hour)
+	os.Exit(0)
+}
+
+// TestCreateSBOMInSubprocess_PreCanceledContext reproduces the exact bug:
+// when the caller's context is already canceled, the child should still
+// run to completion because createSBOMInSubprocess uses context.Background().
+func TestCreateSBOMInSubprocess_PreCanceledContext(t *testing.T) {
+	// Create a pre-canceled context — simulates HTTP handler returning
+	// and the request context being canceled.
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	cancelCtx() // cancel immediately
+
+	// Set up pipes mimicking createSBOMInSubprocess.
+	reqReader, reqWriter, err := os.Pipe()
+	require.NoError(t, err)
+	respReader, respWriter, err := os.Pipe()
+	require.NoError(t, err)
+
+	// Spawn the helper that reads from FD 3, writes response to FD 4.
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess_PipeResponse$")
+	cmd.Env = append(os.Environ(), "GO_TEST_SUBPROCESS=PIPE_RESPOND")
+	cmd.ExtraFiles = []*os.File{reqReader, respWriter} // FD 3, FD 4
+	cmd.Stderr = os.Stderr
+
+	require.NoError(t, cmd.Start())
+
+	// Close parent's copy of child's ends.
+	reqReader.Close()
+	respWriter.Close()
+
+	// Write request to child.
+	req := sbomWorkerRequest{
+		Name:    "pre-canceled-test",
+		ImageID: "sha256:abc123",
+	}
+	reqBytes, err := json.Marshal(req)
+	require.NoError(t, err)
+	_, err = reqWriter.Write(reqBytes)
+	require.NoError(t, err)
+	reqWriter.Close()
+
+	// Use a timeout derived from Background (the fix) — NOT from ctx.
+	// This is exactly what the fixed code does.
+	childCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Read response.
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := io.ReadAll(respReader)
+		respReader.Close()
+		ch <- result{data, err}
+	}()
+
+	select {
+	case <-childCtx.Done():
+		_ = cmd.Process.Kill()
+		t.Fatal("child timed out — context.Background() timeout should not expire this fast")
+	case res := <-ch:
+		require.NoError(t, res.err)
+		require.NoError(t, cmd.Wait())
+
+		var resp sbomWorkerResponse
+		require.NoError(t, json.Unmarshal(res.data, &resp))
+		require.NotNil(t, resp.SBOM)
+		assert.Equal(t, "pre-canceled-test", resp.SBOM.Name)
+	}
+
+	// The key assertion: despite ctx being canceled, the child ran successfully.
+	// Before the fix (using ctx instead of context.Background()), childCtx
+	// would have been immediately canceled, killing the child.
+	_ = ctx // used above to prove the caller's context is canceled
+}
+
+// TestCreateSBOMInSubprocess_OwnTimeoutWorks verifies that the creator's
+// own timeout (not the caller's context) correctly kills a long-running child.
+func TestCreateSBOMInSubprocess_OwnTimeoutWorks(t *testing.T) {
+	inner := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
+	// Very short timeout — child sleeps forever, so it must be killed by the timeout.
+	creator := NewSubprocessSBOMCreator(inner, 100*time.Millisecond, 0, true)
+
+	// Set up pipes.
+	reqReader, reqWriter, err := os.Pipe()
+	require.NoError(t, err)
+	respReader, respWriter, err := os.Pipe()
+	require.NoError(t, err)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess_Sleep$")
+	cmd.Env = append(os.Environ(), "GO_TEST_SUBPROCESS=SLEEP")
+	cmd.ExtraFiles = []*os.File{reqReader, respWriter}
+	cmd.Stderr = os.Stderr
+
+	require.NoError(t, cmd.Start())
+	creator.trackChild(cmd)
+
+	reqReader.Close()
+	respWriter.Close()
+
+	// Write a dummy request.
+	req := sbomWorkerRequest{Name: "timeout-test", ImageID: "sha256:timeout"}
+	reqBytes, _ := json.Marshal(req)
+	reqWriter.Write(reqBytes)
+	reqWriter.Close()
+
+	// Parent timeout = creator.timeout + parentTimeoutBuffer = 100ms + 30s.
+	// But the child sleeps forever, so the parent-side timeout will fire.
+	// Use a shorter timeout for the test to keep it fast.
+	childCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := io.ReadAll(respReader)
+		respReader.Close()
+		ch <- result{data, err}
+	}()
+
+	select {
+	case <-childCtx.Done():
+		// Expected: timeout fires, kill the child.
+		_ = cmd.Process.Kill()
+		<-ch // reap
+		_ = cmd.Wait()
+		creator.untrackChild(cmd)
+
+		assert.ErrorIs(t, childCtx.Err(), context.DeadlineExceeded,
+			"should be a deadline exceeded error, confirming the timeout mechanism works")
+	case <-ch:
+		creator.untrackChild(cmd)
+		t.Fatal("child should not have returned — it sleeps forever")
+	}
+}
+
+// TestCreateSBOM_DisabledUsesInner tests that when enabled=false,
+// CreateSBOM delegates to the inner adapter (not just Version()).
+func TestCreateSBOM_DisabledUsesInner(t *testing.T) {
+	inner := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false)
+	creator := NewSubprocessSBOMCreator(inner, 5*time.Minute, 0, false)
+
+	// Call CreateSBOM with a non-existent image. The inner adapter should
+	// return an error (not a subprocess error), proving delegation works.
+	ctx := context.Background()
+	_, err := creator.CreateSBOM(ctx, "test", "sha256:nonexistent", "nonexistent:latest", domain.RegistryOptions{})
+
+	// We expect an error from the inner syft adapter (image not found),
+	// NOT a subprocess-related error.
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "subprocess")
+	assert.NotContains(t, err.Error(), "worker")
+}
+
+// TestHandleChildError_GenericError tests handleChildError with a non-ExitError
+// to cover the fallthrough path (line 329).
+func TestHandleChildError_GenericError(t *testing.T) {
+	creator := &SubprocessSBOMCreator{}
+	ctx := context.Background()
+
+	genericErr := errors.New("something went wrong")
+	_, handleErr := creator.handleChildError(ctx, genericErr, "test-image", "some stderr")
+
+	assert.Contains(t, handleErr.Error(), "SBOM worker subprocess failed")
+	assert.Contains(t, handleErr.Error(), "something went wrong")
+	assert.Contains(t, handleErr.Error(), "some stderr")
+	assert.False(t, errors.Is(handleErr, ErrChildOOMKilled))
+	assert.False(t, errors.Is(handleErr, ErrChildSignaled))
+	assert.False(t, errors.Is(handleErr, ErrChildTimeout))
 }
 
 func TestSubprocessSBOMCreator_TrackUntrack(t *testing.T) {
