@@ -16,8 +16,10 @@ import (
 	"github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/stretchr/testify/require"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
@@ -319,4 +321,116 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
+	var capturedURL string
+	var capturedReport scanfailure.ScanFailureReport
+
+	mockHTTP := func(_ httputils.IHttpClient, fullURL string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+		capturedURL = fullURL
+		require.NoError(t, json.Unmarshal(body, &capturedReport))
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpPostFunc:         mockHTTP,
+		accessKey:            "test-key",
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:1.25.0",
+		ImageHash:          "sha256:abc123",
+		JobID:              "job-42",
+		ContainerName:      "web",
+	})
+
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, "timeout generating SBOM")
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:8080/k8s/v2/vulnScanFailure", capturedURL)
+	assert.Equal(t, "test-account", capturedReport.CustomerGUID)
+	assert.Equal(t, "nginx:1.25.0", capturedReport.ImageTag)
+	assert.Equal(t, "sha256:abc123", capturedReport.ImageHash)
+	assert.Equal(t, "job-42", capturedReport.JobID)
+	assert.Equal(t, scanfailure.ScanFailureSBOMGeneration, capturedReport.FailureCase)
+	assert.Equal(t, "timeout generating SBOM", capturedReport.FailureReason)
+	assert.False(t, capturedReport.IsRegistryScan)
+	require.Len(t, capturedReport.Workloads, 1)
+	assert.Equal(t, "prod", capturedReport.Workloads[0].ClusterName)
+	assert.Equal(t, "default", capturedReport.Workloads[0].Namespace)
+	assert.Equal(t, "Deployment", capturedReport.Workloads[0].WorkloadKind)
+	assert.Equal(t, "nginx", capturedReport.Workloads[0].WorkloadName)
+	assert.Equal(t, "web", capturedReport.Workloads[0].ContainerName)
+}
+
+func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
+	var capturedReport scanfailure.ScanFailureReport
+
+	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+		require.NoError(t, json.Unmarshal(body, &capturedReport))
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpPostFunc:         mockHTTP,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-scanner",
+		ImageTagNormalized: "registry.io/app:v1",
+		ImageHash:          "sha256:def456",
+		Args:               map[string]interface{}{"registryName": "my-registry"},
+	})
+
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, "CVE DB unavailable")
+
+	require.NoError(t, err)
+	assert.True(t, capturedReport.IsRegistryScan)
+	assert.Equal(t, "my-registry", capturedReport.RegistryName)
+	assert.Nil(t, capturedReport.Workloads)
+	assert.Equal(t, "registry.io/app:v1", capturedReport.ImageTag)
+}
+
+func TestBackendAdapter_ReportScanFailure_NoWorkloadInContext(t *testing.T) {
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+	}
+
+	err := a.ReportScanFailure(context.Background(), scanfailure.ScanFailureCVE, "should fail")
+
+	assert.ErrorIs(t, err, domain.ErrCastingWorkload)
+}
+
+func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
+	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+		return nil, assert.AnError
+	}
+
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpPostFunc:         mockHTTP,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:latest",
+	})
+
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, "backend down")
+
+	assert.Error(t, err)
 }

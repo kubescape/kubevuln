@@ -6,6 +6,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"go.opentelemetry.io/otel"
 )
 
@@ -33,6 +34,12 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 
 func (m MockPlatform) ReportError(ctx context.Context, _ error) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.ReportError")
+	defer span.End()
+	return nil
+}
+
+func (m MockPlatform) ReportScanFailure(ctx context.Context, _ scanfailure.ScanFailureCase, _ string) error {
+	_, span := otel.Tracer("").Start(ctx, "MockPlatform.ReportScanFailure")
 	defer span.End()
 	return nil
 }
