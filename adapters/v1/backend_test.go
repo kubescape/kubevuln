@@ -354,7 +354,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, "timeout generating SBOM")
 
 	require.NoError(t, err)
-	assert.Equal(t, "http://localhost:8080/k8s/v2/vulnScanFailure", capturedURL)
+	assert.Equal(t, "http://localhost:8080/k8s/v2/scanFailure", capturedURL)
 	assert.Equal(t, "test-account", capturedReport.CustomerGUID)
 	assert.Equal(t, "nginx:1.25.0", capturedReport.ImageTag)
 	assert.Equal(t, "sha256:abc123", capturedReport.ImageHash)
