@@ -391,7 +391,7 @@ func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
 		Wlid:               "wlid://cluster-prod/namespace-default/deployment-scanner",
 		ImageTagNormalized: "registry.io/app:v1",
 		ImageHash:          "sha256:def456",
-		Args:               map[string]interface{}{"registryName": "my-registry"},
+		Args:               map[string]interface{}{identifiers.AttributeRegistryName: "my-registry"},
 	})
 
 	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, "CVE DB unavailable")

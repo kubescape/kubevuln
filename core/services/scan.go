@@ -116,6 +116,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+				fmt.Sprintf("SBOM generation failed: %s", err))
 			return err
 		}
 	}
@@ -124,6 +126,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if s.storage {
 		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 		if err != nil {
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
+				fmt.Sprintf("failed to store SBOM: %s", err))
 			return err
 		}
 	}

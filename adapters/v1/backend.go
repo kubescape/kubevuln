@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"encoding/json"
+	"io"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
@@ -150,7 +151,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	// For registry scans, populate registry fields instead of workload
-	if regName, ok := workload.Args["registryName"]; ok {
+	if regName, ok := workload.Args[identifiers.AttributeRegistryName]; ok {
 		if name, ok := regName.(string); ok {
 			report.IsRegistryScan = true
 			report.RegistryName = name
@@ -173,6 +174,10 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 		return err
 	}
 	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("scan failure report returned HTTP %d", resp.StatusCode)
+	}
 	return nil
 }
 
