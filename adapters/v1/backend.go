@@ -27,8 +27,6 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/armosec/armoapi-go/scanfailure"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 )
 
@@ -124,11 +122,6 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	return nil
 }
 
-var scanFailureReportErrors = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "kubevuln_scan_failure_report_errors_total",
-	Help: "Errors sending scan failure reports to backend",
-}, []string{"reason"})
-
 // ReportScanFailure sends a structured ScanFailureReport to the backend
 func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportScanFailure")
@@ -173,7 +166,6 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	url := fmt.Sprintf("%s/k8s/v2/vulnScanFailure", a.eventReceiverRestURL)
 	resp, err := a.httpPostFunc(http.DefaultClient, url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
-		scanFailureReportErrors.WithLabelValues("connectivity").Inc()
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
 			helpers.String("failureCase", failureCase.String()),
