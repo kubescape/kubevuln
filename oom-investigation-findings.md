@@ -142,19 +142,38 @@ The SBOM worker subprocess would run in a child cgroup with its own `memory.max`
 
 ### Option E: Sidecar container
 
-**Status: Clean but requires architectural changes**
+**Status: Recommended — Kubernetes-native, portable, no special privileges**
 
-Run the SBOM worker as a separate container in the pod. Each container gets its own cgroup with its own memory limit. Kubernetes-native, no special privileges needed.
+Run the SBOM worker as a separate container in the same pod (kubevuln or node-agent). Kubernetes automatically gives each container its own cgroup with its own `memory.max`. When the sidecar OOMs, only that container restarts — the main container survives.
 
-**Trade-off:** Significant code restructuring — IPC between containers (shared volume or network), lifecycle management, etc.
+IPC between the main container and the sidecar can use a shared `emptyDir` volume (JSON files) or localhost networking.
+
+**Trade-off:** More upfront architectural work (IPC, lifecycle coordination between containers).
 
 ## Recommendation
 
-**Option D (move to node-agent)** is the most practical path:
-- Minimal deployment change (one `readOnly` flag)
-- No security regression (node-agent is already highly privileged)
-- The child cgroup approach works cleanly with root + `SYS_ADMIN`
-- `oom_score_adj` also works as belt-and-suspenders (root has effective `SYS_RESOURCE`)
+**Option E (sidecar container)** is the recommended path.
+
+### Why not Option D (child cgroup in node-agent)?
+
+While Option D is technically feasible (node-agent already has root + `SYS_ADMIN` + host cgroup mount), it operates at the Linux cgroup layer alongside the kubelet and container runtime — both of which assume they own the cgroup hierarchy. This creates significant risks for a product shipping to diverse customer environments:
+
+- **cgroup path format varies** across cgroup drivers (systemd vs cgroupfs), container runtimes, and Kubernetes distributions (EKS, GKE, AKS, OpenShift, RKE, k3s). Discovery logic would need to handle all variants.
+- **cgroup v1 vs v2** — some customer clusters still run cgroup v1, which has a completely different API (separate per-controller hierarchies, no `memory.oom.group`). The code would need to support both.
+- **Race conditions with kubelet** — the kubelet periodically reconciles cgroup settings. Unexpected sub-cgroups may cause undefined behavior or be cleaned up.
+- **Security policy conflicts** — hardened clusters (OPA/Gatekeeper, Kyverno, PodSecurity) may reject the writable `/sys/fs/cgroup` hostPath mount or flag it in audits.
+- **Debugging burden** — failures would require investigating the intersection of kernel version, cgroup driver, runtime version, kubelet config, and SELinux/AppArmor policies. This is the kind of deep debugging that doesn't scale across a customer base.
+
+### Why Option E (sidecar container)?
+
+- **Kubernetes-native** — uses standard pod spec primitives, works on every conformant cluster regardless of runtime, cgroup version, or distribution.
+- **Cgroup isolation for free** — Kubernetes gives each container its own cgroup with its own `memory.max`. No manual cgroup manipulation needed.
+- **No special privileges** — no root, no `SYS_ADMIN`, no `hostPath` mounts, no cgroup filesystem access. Works with strict PodSecurity policies.
+- **Portable** — identical behavior on cgroup v1 and v2, every runtime, every distribution.
+- **Observable with standard tooling** — `kubectl describe pod` shows the sidecar's OOM kill, restart count, and memory usage. No need for host-level debugging.
+- **Clear responsibility boundary** — Kubernetes manages the cgroup lifecycle; the application only manages the IPC and work coordination.
+
+The trade-off is more upfront engineering (IPC protocol, container lifecycle coordination, Helm chart changes), but the operational surface area in production is dramatically smaller than managing cgroups directly.
 
 ## Environment Details
 
