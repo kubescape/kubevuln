@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -351,7 +352,8 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 		ContainerName:      "web",
 	})
 
-	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, "timeout generating SBOM")
+	scanErr := fmt.Errorf("syft: timeout after 300s")
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:8080/k8s/v2/scanFailure", capturedURL)
@@ -360,7 +362,8 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 	assert.Equal(t, "sha256:abc123", capturedReport.ImageHash)
 	assert.Equal(t, "job-42", capturedReport.JobID)
 	assert.Equal(t, scanfailure.ScanFailureSBOMGeneration, capturedReport.FailureCase)
-	assert.Equal(t, "timeout generating SBOM", capturedReport.FailureReason)
+	assert.Equal(t, scanfailure.ReasonSBOMGenerationFailed, capturedReport.FailureReason)
+	assert.Equal(t, "syft: timeout after 300s", capturedReport.Error)
 	assert.False(t, capturedReport.IsRegistryScan)
 	require.Len(t, capturedReport.Workloads, 1)
 	assert.Equal(t, "prod", capturedReport.Workloads[0].ClusterName)
@@ -394,13 +397,16 @@ func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
 		Args:               map[string]interface{}{identifiers.AttributeRegistryName: "my-registry"},
 	})
 
-	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, "CVE DB unavailable")
+	scanErr := fmt.Errorf("grype: CVE DB unavailable")
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, scanfailure.ReasonCVEMatchingFailed, scanErr)
 
 	require.NoError(t, err)
 	assert.True(t, capturedReport.IsRegistryScan)
 	assert.Equal(t, "my-registry", capturedReport.RegistryName)
 	assert.Nil(t, capturedReport.Workloads)
 	assert.Equal(t, "registry.io/app:v1", capturedReport.ImageTag)
+	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, capturedReport.FailureReason)
+	assert.Equal(t, "grype: CVE DB unavailable", capturedReport.Error)
 }
 
 func TestBackendAdapter_ReportScanFailure_NoWorkloadInContext(t *testing.T) {
@@ -409,7 +415,7 @@ func TestBackendAdapter_ReportScanFailure_NoWorkloadInContext(t *testing.T) {
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
 	}
 
-	err := a.ReportScanFailure(context.Background(), scanfailure.ScanFailureCVE, "should fail")
+	err := a.ReportScanFailure(context.Background(), scanfailure.ScanFailureCVE, "should fail", nil)
 
 	assert.ErrorIs(t, err, domain.ErrCastingWorkload)
 }
@@ -430,7 +436,61 @@ func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
 		ImageTagNormalized: "nginx:latest",
 	})
 
-	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, "backend down")
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, scanfailure.ReasonResultUploadFailed, fmt.Errorf("connection refused"))
 
 	assert.Error(t, err)
+}
+
+func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
+	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 500,
+			Body:       io.NopCloser(bytes.NewBufferString("internal server error")),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpPostFunc:         mockHTTP,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:latest",
+	})
+
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, scanfailure.ReasonResultUploadFailed, fmt.Errorf("backend error"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 500")
+}
+
+func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
+	var capturedReport scanfailure.ScanFailureReport
+
+	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+		require.NoError(t, json.Unmarshal(body, &capturedReport))
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://localhost:8080",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpPostFunc:         mockHTTP,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:1.25.0",
+	})
+
+	err := a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMIncomplete, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, scanfailure.ReasonSBOMIncomplete, capturedReport.FailureReason)
+	assert.Empty(t, capturedReport.Error, "Error field should be empty when scanErr is nil")
 }

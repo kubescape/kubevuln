@@ -117,7 +117,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				fmt.Sprintf("SBOM generation failed: %s", err))
+				classifySBOMError(err), err)
 			return err
 		}
 	}
@@ -127,7 +127,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-				fmt.Sprintf("failed to store SBOM: %s", err))
+				scanfailure.ReasonSBOMStorageFailed, err)
 			return err
 		}
 	}
@@ -226,7 +226,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
 						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							fmt.Sprintf("SBOM generation failed: %s", err))
+							classifySBOMError(err), err)
 						continue // we need the SBOM
 					}
 					// store SBOM
@@ -250,7 +250,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				logger.L().Ctx(ctx).Warning("incomplete or too large SBOM, skipping scan",
 					helpers.String("imageSlug", slug))
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					fmt.Sprintf("SBOM generation incomplete: %s", sbom.Status))
+					classifySBOMStatus(sbom.Status), nil)
 				continue // do not process this SBOM
 			}
 		}
@@ -263,7 +263,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				logger.L().Ctx(ctx).Error("scanning SBOM, skipping scan", helpers.Error(err),
 					helpers.String("imageSlug", slug))
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
-					fmt.Sprintf("CVE scan failed: %s", err))
+					scanfailure.ReasonCVEMatchingFailed, err)
 				continue // we need the CVE
 			}
 
@@ -356,7 +356,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),
 				helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-				fmt.Sprintf("failed to submit scan results: %s", err))
+				scanfailure.ReasonResultUploadFailed, err)
 			continue // we need to submit the CVE
 		}
 	}
@@ -415,7 +415,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						fmt.Sprintf("SBOM generation failed: %s", err))
+						classifySBOMError(err), err)
 					return fmt.Errorf("creating SBOM: %w", err)
 				}
 				// store SBOM
@@ -436,7 +436,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// do not process timed out SBOM
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				fmt.Sprintf("SBOM generation incomplete: %s", sbom.Status))
+				classifySBOMStatus(sbom.Status), nil)
 			return domain.ErrIncompleteSBOM
 		}
 	}
@@ -447,7 +447,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
-				fmt.Sprintf("CVE scan failed: %s", err))
+				scanfailure.ReasonCVEMatchingFailed, err)
 			return fmt.Errorf("scanning SBOM: %w", err)
 		}
 
@@ -482,7 +482,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-				fmt.Sprintf("failed to submit scan results: %s", err))
+				scanfailure.ReasonResultUploadFailed, err)
 			return fmt.Errorf("submitting CVEs: %w", err)
 		}
 	}
@@ -526,14 +526,14 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			fmt.Sprintf("SBOM generation failed: %s", err))
+			classifySBOMError(err), err)
 		return err
 	}
 
 	// do not process timed out SBOM
 	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			fmt.Sprintf("SBOM generation incomplete: %s", sbom.Status))
+			classifySBOMStatus(sbom.Status), nil)
 		return domain.ErrIncompleteSBOM
 	}
 
@@ -546,7 +546,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
-			fmt.Sprintf("CVE scan failed: %s", err))
+			scanfailure.ReasonCVEMatchingFailed, err)
 		return err
 	}
 
@@ -560,7 +560,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 	if err != nil {
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-			fmt.Sprintf("failed to submit scan results: %s", err))
+			scanfailure.ReasonResultUploadFailed, err)
 		return err
 	}
 	// report submit success to platform

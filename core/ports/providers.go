@@ -27,7 +27,7 @@ type SBOMCreator interface {
 type Platform interface {
 	GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error)
 	ReportError(ctx context.Context, err error) error
-	ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string) error
+	ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error
 	SendStatus(ctx context.Context, step int) error
 	SubmitCVE(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error
 }

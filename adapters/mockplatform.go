@@ -38,7 +38,7 @@ func (m MockPlatform) ReportError(ctx context.Context, _ error) error {
 	return nil
 }
 
-func (m MockPlatform) ReportScanFailure(ctx context.Context, _ scanfailure.ScanFailureCase, _ string) error {
+func (m MockPlatform) ReportScanFailure(ctx context.Context, _ scanfailure.ScanFailureCase, _ string, _ error) error {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.ReportScanFailure")
 	defer span.End()
 	return nil

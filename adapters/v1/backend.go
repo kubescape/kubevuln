@@ -123,8 +123,10 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	return nil
 }
 
-// ReportScanFailure sends a structured ScanFailureReport to the backend
-func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string) error {
+// ReportScanFailure sends a structured ScanFailureReport to the backend.
+// reason is a human-friendly constant (from scanfailure.Reason*) displayed in notifications.
+// scanErr is the raw error for R&D debugging (stored in the Error field, not shown to users).
+func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportScanFailure")
 	defer span.End()
 
@@ -148,6 +150,10 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 			WorkloadName:  wlidpkg.GetNameFromWlid(workload.Wlid),
 			ContainerName: workload.ContainerName,
 		}},
+	}
+
+	if scanErr != nil {
+		report.Error = scanErr.Error()
 	}
 
 	// For registry scans, populate registry fields instead of workload
