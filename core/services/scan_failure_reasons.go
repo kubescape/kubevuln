@@ -31,7 +31,7 @@ func classifySBOMError(err error) string {
 	// String-based fallbacks for errors not using typed wrapping
 	errStr := err.Error()
 	switch {
-	case strings.Contains(errStr, "401 Unauthorized"):
+	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
 	case strings.Contains(errStr, "MANIFEST_UNKNOWN"):
 		return scanfailure.ReasonImageNotFound

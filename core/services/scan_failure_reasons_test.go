@@ -49,6 +49,11 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageAuthFailed,
 		},
 		{
+			name:     "string-based 403 Forbidden",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 403 Forbidden"),
+			expected: scanfailure.ReasonImageAuthFailed,
+		},
+		{
 			name:     "MANIFEST_UNKNOWN",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: MANIFEST_UNKNOWN: not found"),
 			expected: scanfailure.ReasonImageNotFound,
