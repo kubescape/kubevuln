@@ -1,0 +1,47 @@
+syntax = "proto3";
+package sbomscanner.v1;
+
+option go_package = "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto";
+
+service SBOMScanner {
+  rpc CreateSBOM(CreateSBOMRequest) returns (CreateSBOMResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message RegistryCredentials {
+  string authority = 1;
+  string username = 2;
+  string password = 3;
+  string token = 4;
+}
+
+message CreateSBOMRequest {
+  string image_id = 1;
+  string image_tag = 2;
+  string platform = 3;
+  repeated RegistryCredentials credentials = 4;
+  bool insecure_skip_tls_verify = 5;
+  bool insecure_use_http = 6;
+  int64 max_image_size = 7;
+  int32 max_sbom_size = 8;
+  bool enable_embedded_sboms = 9;
+  int64 timeout_seconds = 10;
+}
+
+message CreateSBOMResponse {
+  // Terminal status: "Learning", "Incomplete", "TooLarge", "Unauthorize"
+  string status = 1;
+  // JSON-serialized v1beta1.SyftDocument (empty for non-Learning statuses)
+  bytes sbom_document = 2;
+  // Size of the in-memory SBOM before serialization
+  int64 sbom_size = 3;
+  // Error message (for non-terminal errors that should be propagated)
+  string error_message = 4;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string version = 1;
+  bool ready = 2;
+}
