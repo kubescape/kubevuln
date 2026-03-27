@@ -55,10 +55,19 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		imageID = normalizeImageID(imageID, imageTag)
 	}
 
-	// Set default platform
-	platform := req.Platform
-	if platform == "" {
-		platform = runtime.GOARCH
+	// Parse platform for multi-arch image resolution.
+	// The platform specifier uses OCI format: "os/arch[/variant]" (e.g. "linux/amd64").
+	// If only an architecture is provided (e.g. "amd64"), we prepend "linux/".
+	platformStr := req.Platform
+	if platformStr == "" {
+		platformStr = runtime.GOARCH
+	}
+	if !strings.Contains(platformStr, "/") {
+		platformStr = "linux/" + platformStr
+	}
+	imgPlatform, err := image.NewPlatform(platformStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
 	}
 
 	// Build registry credentials
@@ -90,14 +99,14 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
 	src, err := syft.GetSource(ctxWithSize, imageID,
-		syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+		syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 
 	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
 			helpers.String("imageTag", imageTag),
 			helpers.String("imageID", imageID))
 		src, err = syft.GetSource(ctxWithSize, imageTag,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
@@ -105,7 +114,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.String("imageID", imageID))
 		registryOptions.Credentials = nil
 		src, err = syft.GetSource(ctxWithSize, imageID,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 	}
 
 	switch {
@@ -150,6 +159,11 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(
 				sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}
+		// NOTE: Syft's cataloguers do not support context cancellation (see
+		// https://github.com/anchore/syft/issues/3705). The deadline.Run wrapper
+		// will return ErrTimedOut, but the Syft goroutine may continue until it
+		// finishes naturally. This is an accepted tradeoff — the sidecar's memory
+		// limit will OOM-kill the container if resource usage grows unbounded.
 		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
