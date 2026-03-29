@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
@@ -68,7 +69,21 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
 	}
-	sbomAdapter := v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	var sbomAdapter ports.SBOMCreator
+	if socketPath := os.Getenv("SBOM_SCANNER_SOCKET"); socketPath != "" {
+		logger.L().Info("connecting to SBOM scanner sidecar", helpers.String("socket", socketPath))
+		scannerClient, err := sbomscanner.NewSBOMScannerClient(socketPath)
+		if err != nil {
+			logger.L().Warning("failed to connect to SBOM scanner sidecar, falling back to in-process Syft",
+				helpers.Error(err))
+			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+		} else {
+			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")
+			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit)
+		}
+	} else {
+		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 	var platform ports.Platform
 	if c.KeepLocal {
