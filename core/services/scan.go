@@ -250,7 +250,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				logger.L().Ctx(ctx).Warning("incomplete or too large SBOM, skipping scan",
 					helpers.String("imageSlug", slug))
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					classifySBOMStatus(sbom.Status), nil)
+					classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
 				continue // do not process this SBOM
 			}
 		}
@@ -436,7 +436,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// do not process timed out SBOM
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				classifySBOMStatus(sbom.Status), nil)
+				classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
 			return domain.ErrIncompleteSBOM
 		}
 	}
@@ -533,7 +533,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// do not process timed out SBOM
 	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			classifySBOMStatus(sbom.Status), nil)
+			classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
 		return domain.ErrIncompleteSBOM
 	}
 

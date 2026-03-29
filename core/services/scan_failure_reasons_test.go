@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,6 +23,21 @@ func TestClassifySBOMError(t *testing.T) {
 			name:     "nil error returns unexpected",
 			err:      nil,
 			expected: scanfailure.ReasonUnexpected,
+		},
+		{
+			name:     "sidecar crash returns OOM killed",
+			err:      fmt.Errorf("scan failed: %w", sbomscanner.ErrScannerCrashed),
+			expected: scanfailure.ReasonScannerOOMKilled,
+		},
+		{
+			name:     "direct sidecar crash",
+			err:      sbomscanner.ErrScannerCrashed,
+			expected: scanfailure.ReasonScannerOOMKilled,
+		},
+		{
+			name:     "context deadline exceeded returns timeout",
+			err:      fmt.Errorf("scan: %w", context.DeadlineExceeded),
+			expected: scanfailure.ReasonScanTimeout,
 		},
 		{
 			name: "transport 401 via errors.As",
@@ -106,6 +123,51 @@ func TestClassifySBOMStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := classifySBOMStatus(tt.status)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      string
+		annotations map[string]string
+		expected    string
+	}{
+		{
+			name:   "TooLarge with scanner OOM annotation",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				helpersv1.StatusMetadataKey: "scanner OOM after 3 retries (memory limit: 2Gi)",
+			},
+			expected: scanfailure.ReasonScannerOOMKilled,
+		},
+		{
+			name:   "TooLarge without OOM annotation falls back to SBOM too large",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				helpersv1.StatusMetadataKey: "SBOM size exceeds limit",
+			},
+			expected: scanfailure.ReasonSBOMTooLarge,
+		},
+		{
+			name:        "TooLarge with no annotations",
+			status:      helpersv1.TooLarge,
+			annotations: map[string]string{},
+			expected:    scanfailure.ReasonSBOMTooLarge,
+		},
+		{
+			name:        "Incomplete status ignores annotations",
+			status:      helpersv1.Incomplete,
+			annotations: map[string]string{},
+			expected:    scanfailure.ReasonSBOMIncomplete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifySBOMStatusWithAnnotation(tt.status, tt.annotations)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
