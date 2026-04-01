@@ -3,16 +3,21 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -774,4 +779,151 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress("quay.io"))
 	assert.Equal(t, "x.quay.io", parseAuthorityFromServerAddress("https://x.quay.io"))
 	assert.Equal(t, "europe-docker.pkg.dev", parseAuthorityFromServerAddress("europe-docker.pkg.dev/xxx/xxx"))
+}
+
+func Test_filterSBOM(t *testing.T) {
+	nginxSBOM := domain.SBOM{
+		Name: "nginx-sbom",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:  "docker.io/library/nginx@sha256:04ba374043ccd2fc5c593885c0eacddebabd5ca375f9323666f28dfd5a9710e3",
+			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
+			helpersv1.StatusMetadataKey:   helpersv1.Learning,
+		},
+		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+	}
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
+	)
+	require.NoError(t, err)
+	labels := map[string]string{
+		helpersv1.ContainerNameMetadataKey: "nginx",
+	}
+	wlid := "wlid://cluster-test/namespace-default/deployment-nginx"
+
+	type args struct {
+		sbom          domain.SBOM
+		instanceID    instanceidhandler.IInstanceID
+		wlid          string
+		relevantFiles mapset.Set[string]
+		labels        map[string]string
+		completion    string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    func(*testing.T, domain.SBOM)
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "empty relevantFiles produces empty filtered content",
+			args: args{
+				sbom:          nginxSBOM,
+				instanceID:    instanceID,
+				wlid:          wlid,
+				relevantFiles: mapset.NewSet[string](),
+				labels:        labels,
+				completion:    helpersv1.Full,
+			},
+			want: func(t *testing.T, got domain.SBOM) {
+				assert.Empty(t, got.Content.Files)
+				assert.Empty(t, got.Content.Artifacts)
+				assert.Empty(t, got.Content.ArtifactRelationships)
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "direct file match includes owning artifact",
+			args: args{
+				sbom:          nginxSBOM,
+				instanceID:    instanceID,
+				wlid:          wlid,
+				relevantFiles: mapset.NewSet[string]("/etc/nginx/nginx.conf"),
+				labels:        labels,
+				completion:    helpersv1.Full,
+			},
+			want: func(t *testing.T, got domain.SBOM) {
+				require.Len(t, got.Content.Files, 1)
+				assert.Equal(t, "/etc/nginx/nginx.conf", got.Content.Files[0].Location.RealPath)
+				// nginx.conf belongs to the nginx package; the relationship traversal
+				// also pulls in nginx's transitive dependencies (libc6, openssl, etc.)
+				assert.NotEmpty(t, got.Content.Artifacts)
+				var artifactNames []string
+				for _, a := range got.Content.Artifacts {
+					artifactNames = append(artifactNames, a.Name)
+				}
+				assert.Contains(t, artifactNames, "nginx")
+				assert.NotEmpty(t, got.Content.ArtifactRelationships)
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			// DynamicIdentifier (⋯, U+22EF) acts as a single-segment wildcard.
+			// "/etc/nginx/⋯" matches all direct children of /etc/nginx/.
+			name: "DynamicIdentifier matches multiple files and pulls in nginx artifact",
+			args: args{
+				sbom:          nginxSBOM,
+				instanceID:    instanceID,
+				wlid:          wlid,
+				relevantFiles: mapset.NewSet[string]("/etc/nginx/" + dynamicpathdetector.DynamicIdentifier),
+				labels:        labels,
+				completion:    helpersv1.Full,
+			},
+			want: func(t *testing.T, got domain.SBOM) {
+				// nginx-sbom has 8 files directly under /etc/nginx/
+				assert.Equal(t, 8, len(got.Content.Files), "expected all /etc/nginx/* files to match")
+				var artifactNames []string
+				for _, a := range got.Content.Artifacts {
+					artifactNames = append(artifactNames, a.Name)
+				}
+				assert.Contains(t, artifactNames, "nginx")
+				assert.NotEmpty(t, got.Content.ArtifactRelationships)
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "non-matching relevantFiles produces empty content",
+			args: args{
+				sbom:          nginxSBOM,
+				instanceID:    instanceID,
+				wlid:          wlid,
+				relevantFiles: mapset.NewSet[string]("/nonexistent/path/file.txt"),
+				labels:        labels,
+				completion:    helpersv1.Full,
+			},
+			want: func(t *testing.T, got domain.SBOM) {
+				assert.Empty(t, got.Content.Files)
+				assert.Empty(t, got.Content.Artifacts)
+				assert.Empty(t, got.Content.ArtifactRelationships)
+			},
+			wantErr: assert.NoError,
+		},
+		{
+			name: "metadata annotations and labels are propagated correctly",
+			args: args{
+				sbom:          nginxSBOM,
+				instanceID:    instanceID,
+				wlid:          wlid,
+				relevantFiles: mapset.NewSet[string](),
+				labels:        labels,
+				completion:    helpersv1.Full,
+			},
+			want: func(t *testing.T, got domain.SBOM) {
+				assert.Equal(t, helpersv1.Full, got.Annotations[helpersv1.CompletionMetadataKey])
+				assert.Equal(t, wlid, got.Annotations[helpersv1.WlidMetadataKey])
+				assert.Equal(t, nginxSBOM.Annotations[helpersv1.ImageIDMetadataKey], got.Annotations[helpersv1.ImageIDMetadataKey])
+				assert.Equal(t, "nginx", got.Annotations[helpersv1.ContainerNameMetadataKey])
+				assert.Equal(t, helpersv1.ContainerArtifactType, got.Labels[helpersv1.ArtifactTypeMetadataKey])
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := filterSBOM(tt.args.sbom, tt.args.instanceID, tt.args.wlid, tt.args.relevantFiles, tt.args.labels, tt.args.completion)
+			if !tt.wantErr(t, err, fmt.Sprintf("filterSBOM(%v, %v, %v, %v, %v, %v)", tt.args.sbom, tt.args.instanceID, tt.args.wlid, tt.args.relevantFiles, tt.args.labels, tt.args.completion)) {
+				return
+			}
+			tt.want(t, got)
+		})
+	}
 }
