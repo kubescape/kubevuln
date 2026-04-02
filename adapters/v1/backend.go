@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
+	"io"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
@@ -24,6 +27,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"go.opentelemetry.io/otel"
 )
 
@@ -116,6 +120,70 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobFailed, true)
+	return nil
+}
+
+// ReportScanFailure sends a structured ScanFailureReport to the backend.
+// reason is a human-friendly constant (from scanfailure.Reason*) displayed in notifications.
+// scanErr is the raw error for R&D debugging (stored in the Error field, not shown to users).
+func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error {
+	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportScanFailure")
+	defer span.End()
+
+	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok {
+		return domain.ErrCastingWorkload
+	}
+
+	report := scanfailure.ScanFailureReport{
+		CustomerGUID:  a.clusterConfig.AccountID,
+		ImageTag:      workload.ImageTagNormalized,
+		ImageHash:     workload.ImageHash,
+		JobID:         workload.JobID,
+		FailureCase:   failureCase,
+		FailureReason: reason,
+		Timestamp:     time.Now(),
+		Workloads: []scanfailure.WorkloadIdentifier{{
+			ClusterName:   wlidpkg.GetClusterFromWlid(workload.Wlid),
+			Namespace:     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
+			WorkloadKind:  wlidpkg.GetKindFromWlid(workload.Wlid),
+			WorkloadName:  wlidpkg.GetNameFromWlid(workload.Wlid),
+			ContainerName: workload.ContainerName,
+		}},
+	}
+
+	if scanErr != nil {
+		report.Error = scanErr.Error()
+	}
+
+	// For registry scans, populate registry fields instead of workload
+	if regName, ok := workload.Args[identifiers.AttributeRegistryName]; ok {
+		if name, ok := regName.(string); ok {
+			report.IsRegistryScan = true
+			report.RegistryName = name
+			report.Workloads = nil
+		}
+	}
+
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("marshal scan failure report: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
+	resp, err := a.httpPostFunc(http.DefaultClient, url, a.getRequestHeaders(), payload, 30*time.Second)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
+			helpers.Error(err),
+			helpers.String("failureCase", failureCase.String()),
+			helpers.String("reason", reason))
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("scan failure report returned HTTP %d", resp.StatusCode)
+	}
 	return nil
 }
 
