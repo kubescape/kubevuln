@@ -363,9 +363,9 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
 	enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[helpersv1.KindMetadataKey] = strings.ToLower(workloadKind)
-	enrichedLabels[helpersv1.NameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
-	enrichedLabels[helpersv1.NamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	enrichedLabels[helpersv1.RelatedKindMetadataKey] = strings.ToLower(workloadKind)
+	enrichedLabels[helpersv1.RelatedNameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+	enrichedLabels[helpersv1.RelatedNamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
 	enrichedLabels[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 
 	return enrichedLabels, nil
