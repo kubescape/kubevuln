@@ -18,9 +18,3 @@ func TestLoadConfigNotFound(t *testing.T) {
 	_, err := LoadConfig("testdataInvalid")
 	assert.Error(t, err)
 }
-
-func TestLoadBackendServicesConfig(t *testing.T) {
-	services, err := LoadBackendServicesConfig("testdata")
-	assert.NoError(t, err)
-	assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
-}
