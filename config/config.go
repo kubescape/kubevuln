@@ -1,12 +1,11 @@
 package config
 
 import (
-	"path/filepath"
 	"time"
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
-	v2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/spf13/viper"
 )
 
@@ -56,19 +55,11 @@ func LoadConfig(path string) (Config, error) {
 	return config, err
 }
 
-// LoadConfig reads configuration from file or environment variables.
-func LoadBackendServicesConfig(path string) (schema.IBackendServices, error) {
-	if path == "" {
-		return nil, nil
-	}
-
-	fullPath := filepath.Join(path, "services.json")
-	services, err := servicediscovery.GetServices(
-		v2.NewServiceDiscoveryFileV2(fullPath),
-	)
-
+// LoadBackendServicesConfig queries the API for backend service URLs.
+func LoadBackendServicesConfig(apiURL string) (schema.IBackendServices, error) {
+	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
 	if err != nil {
 		return nil, err
 	}
-	return services, nil
+	return servicediscovery.GetServices(client)
 }
