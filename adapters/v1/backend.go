@@ -16,6 +16,7 @@ import (
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/armosec/utils-go/httputils"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
@@ -27,18 +28,20 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	"github.com/armosec/armoapi-go/scanfailure"
+	sev1 "github.com/kubescape/storage/pkg/apis/securityexception/v1"
 	"go.opentelemetry.io/otel"
 )
 
 type BackendAdapter struct {
-	eventReceiverRestURL string
-	apiServerRestURL     string
-	clusterConfig        pkgcautils.ClusterConfig
-	getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc         func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
-	sendStatusFunc       func(*backendClientV1.BaseReportSender, string, bool)
-	accessKey            string
+	eventReceiverRestURL      string
+	apiServerRestURL          string
+	clusterConfig             pkgcautils.ClusterConfig
+	getCVEExceptionsFunc      func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	httpPostFunc              func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
+	sendStatusFunc            func(*backendClientV1.BaseReportSender, string, bool)
+	accessKey                 string
+	securityExceptionAdapter  *SecurityExceptionAdapter
+	getSecurityExceptionsFunc func(ctx context.Context, namespace string) ([]sev1.SecurityException, []sev1.ClusterSecurityException, error)
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -57,6 +60,13 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		},
 		accessKey: accessKey,
 	}
+}
+
+// SetSecurityExceptionAdapter configures the adapter to merge CRD-based
+// SecurityException resources into the vulnerability exception pipeline.
+func (a *BackendAdapter) SetSecurityExceptionAdapter(adapter *SecurityExceptionAdapter) {
+	a.securityExceptionAdapter = adapter
+	a.getSecurityExceptionsFunc = adapter.GetSecurityExceptions
 }
 
 const ActionName = "vuln scan"
@@ -102,6 +112,19 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	if err != nil {
 		return nil, err
 	}
+
+	// Merge CRD-based exceptions if available
+	if a.getSecurityExceptionsFunc != nil {
+		namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+		seList, cseList, err := a.getSecurityExceptionsFunc(ctx, namespace)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
+		} else {
+			crdPolicies := convertToVulnerabilityExceptionPolicies(seList, cseList)
+			vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+		}
+	}
+
 	return vulnExceptionList, nil
 }
 

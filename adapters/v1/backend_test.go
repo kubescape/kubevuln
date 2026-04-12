@@ -26,8 +26,10 @@ import (
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
+	sev1 "github.com/kubescape/storage/pkg/apis/securityexception/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
@@ -493,4 +495,43 @@ func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, scanfailure.ReasonSBOMIncomplete, capturedReport.FailureReason)
 	assert.Empty(t, capturedReport.Error, "Error field should be empty when scanErr is nil")
+}
+
+func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
+	cloudPolicies := []armotypes.VulnerabilityExceptionPolicy{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-CLOUD-1"}},
+		},
+	}
+
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return cloudPolicies, nil
+		},
+		getSecurityExceptionsFunc: func(ctx context.Context, namespace string) ([]sev1.SecurityException, []sev1.ClusterSecurityException, error) {
+			se := []sev1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+					Spec: sev1.SecurityExceptionSpec{
+						Vulnerabilities: []sev1.VulnerabilityException{
+							{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-CRD-1"}},
+						},
+					},
+				},
+			}
+			return se, nil, nil
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid: "wlid://cluster-test/namespace-default/deployment-myapp",
+	})
+
+	exceptions, err := a.GetCVEExceptions(ctx)
+	require.NoError(t, err)
+	assert.Len(t, exceptions, 2, "should merge cloud + CRD exceptions")
+	assert.Equal(t, "CVE-CLOUD-1", exceptions[0].VulnerabilityPolicies[0].Name)
+	assert.Equal(t, "CVE-CRD-1", exceptions[1].VulnerabilityPolicies[0].Name)
 }
