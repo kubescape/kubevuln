@@ -226,7 +226,7 @@ When `expiredOnFix: true` is set on a vulnerability entry, the exception is auto
 
 This means:
 - The exception remains in the CRD (it is not deleted or mutated)
-- The `status.conditions` should reflect that the exception was skipped due to fix availability
+- Skip-on-fix is observable via scan-time Events emitted on the SecurityException resource (no status mutation)
 - If the fix is later retracted (e.g., image reverted to an older version), the exception automatically applies again on the next scan
 
 ### Posture Action Enums
@@ -238,7 +238,7 @@ This means:
 
 ### Component Interaction
 
-```
+```text
 ┌─────────────┐   Watch    ┌──────────┐   Rescan    ┌──────────┐
 │  GitOps /   │──────────→ │ Operator │───────────→ │ kubevuln │
 │  kubectl    │            │ Watcher  │             │          │
@@ -292,7 +292,7 @@ The key insight is that by converting CRD data into existing `armotypes.Vulnerab
 1. New `SecurityExceptionWatchHandler` watching both `securityexceptions` and `clustersecurityexceptions`
 2. Uses `CooldownQueue` to debounce rapid changes
 3. On change: determines affected namespaces/workloads, dispatches rescan commands
-4. Expiry controller: goroutine checking every 5 minutes for expired CRDs
+4. Expiry controller: goroutine checking every 5 minutes for newly-expired CRDs and triggering rescans (no status writes — scanners evaluate `expiresAt` at scan time)
 
 ## Identifier Bridging
 
