@@ -28,7 +28,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	sev1 "github.com/kubescape/storage/pkg/apis/securityexception/v1"
+	sev1 "github.com/kubescape/kubevuln/pkg/securityexception/v1"
 	"go.opentelemetry.io/otel"
 )
 

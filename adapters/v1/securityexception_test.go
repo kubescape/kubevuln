@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	sev1 "github.com/kubescape/storage/pkg/apis/securityexception/v1"
+	sev1 "github.com/kubescape/kubevuln/pkg/securityexception/v1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

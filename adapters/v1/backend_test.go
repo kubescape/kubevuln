@@ -26,7 +26,7 @@ import (
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
-	sev1 "github.com/kubescape/storage/pkg/apis/securityexception/v1"
+	sev1 "github.com/kubescape/kubevuln/pkg/securityexception/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
