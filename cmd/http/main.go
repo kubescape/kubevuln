@@ -20,8 +20,6 @@ import (
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -96,19 +94,14 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey)
-
-		// Wire up CRD-based SecurityException integration (optional — failures are non-fatal)
-		if restConfig, err := rest.InClusterConfig(); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to get in-cluster config for SecurityException CRDs", helpers.Error(err))
-		} else if dynClient, err := dynamic.NewForConfig(restConfig); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to create dynamic client for SecurityException CRDs", helpers.Error(err))
-		} else {
-			seAdapter := v1.NewSecurityExceptionAdapter(dynClient)
-			backendAdapter.SetSecurityExceptionAdapter(seAdapter)
+		var seRepo ports.SecurityExceptionRepository
+		if storage != nil {
+			seRepo = storage
 			logger.L().Info("SecurityException CRD integration enabled")
+		} else {
+			seRepo = &v1.NoOpSecurityExceptionRepository{}
 		}
-
+		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
 		platform = backendAdapter
 	}
 	relevancyProvider := v1.NewContainerProfileAdapter(storage)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kubescape/kubevuln/core/domain"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -24,4 +25,9 @@ type CVERepository interface {
 type SBOMRepository interface {
 	GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error)
 	StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error
+}
+
+// SecurityExceptionRepository reads SecurityException CRDs from the cluster
+type SecurityExceptionRepository interface {
+	GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error)
 }

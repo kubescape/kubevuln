@@ -4,32 +4,32 @@ import (
 	"testing"
 	"time"
 
-	sev1 "github.com/kubescape/kubevuln/pkg/securityexception/v1"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestConvertVulnerabilityExceptions(t *testing.T) {
-	exceptions := []sev1.SecurityException{
+	exceptions := []sev1beta1.SecurityException{
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
-			Spec: sev1.SecurityExceptionSpec{
+			Spec: sev1beta1.SecurityExceptionSpec{
 				Reason: "accepted risk",
-				Vulnerabilities: []sev1.VulnerabilityException{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
 					{
-						Vulnerability: sev1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
 					},
 				},
 			},
 		},
 	}
-	clusterExceptions := []sev1.ClusterSecurityException{
+	clusterExceptions := []sev1beta1.ClusterSecurityException{
 		{
-			Spec: sev1.SecurityExceptionSpec{
+			Spec: sev1beta1.SecurityExceptionSpec{
 				Reason: "cluster-wide",
-				Vulnerabilities: []sev1.VulnerabilityException{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
 					{
-						Vulnerability: sev1.VulnerabilityRef{ID: "CVE-2022-12345"},
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2022-12345"},
 					},
 				},
 			},
@@ -79,13 +79,13 @@ func TestConvertExpiredOnFix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			exceptions := []sev1.SecurityException{
+			exceptions := []sev1beta1.SecurityException{
 				{
 					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
-					Spec: sev1.SecurityExceptionSpec{
-						Vulnerabilities: []sev1.VulnerabilityException{
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
 							{
-								Vulnerability: sev1.VulnerabilityRef{ID: "CVE-2023-0001"},
+								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-0001"},
 								ExpiredOnFix:  tt.expiredOnFix,
 							},
 						},
@@ -110,33 +110,33 @@ func TestConvertSkipsExpired(t *testing.T) {
 	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
 	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
 
-	exceptions := []sev1.SecurityException{
+	exceptions := []sev1beta1.SecurityException{
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
-			Spec: sev1.SecurityExceptionSpec{
+			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &past,
-				Vulnerabilities: []sev1.VulnerabilityException{
-					{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-EXPIRED"}},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED"}},
 				},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
-			Spec: sev1.SecurityExceptionSpec{
+			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &future,
-				Vulnerabilities: []sev1.VulnerabilityException{
-					{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-VALID"}},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-VALID"}},
 				},
 			},
 		},
 	}
 
-	clusterExceptions := []sev1.ClusterSecurityException{
+	clusterExceptions := []sev1beta1.ClusterSecurityException{
 		{
-			Spec: sev1.SecurityExceptionSpec{
+			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &past,
-				Vulnerabilities: []sev1.VulnerabilityException{
-					{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}},
 				},
 			},
 		},
@@ -149,18 +149,18 @@ func TestConvertSkipsExpired(t *testing.T) {
 }
 
 func TestConvertMatchResources(t *testing.T) {
-	exceptions := []sev1.SecurityException{
+	exceptions := []sev1beta1.SecurityException{
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "production"},
-			Spec: sev1.SecurityExceptionSpec{
-				Match: sev1.ExceptionMatch{
-					Resources: []sev1.ResourceMatch{
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Match: sev1beta1.ExceptionMatch{
+					Resources: []sev1beta1.ResourceMatch{
 						{Kind: "Deployment", Name: "my-app"},
 						{Kind: "StatefulSet", Name: "my-db"},
 					},
 				},
-				Vulnerabilities: []sev1.VulnerabilityException{
-					{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-2023-9999"}},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"}},
 				},
 			},
 		},

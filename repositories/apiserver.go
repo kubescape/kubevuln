@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -26,6 +27,9 @@ import (
 	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -37,14 +41,30 @@ const (
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
+	DynamicClient dynamic.Interface
 	Namespace     string
 }
+
+var (
+	securityExceptionGVR = schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1beta1",
+		Resource: "securityexceptions",
+	}
+	clusterSecurityExceptionGVR = schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1beta1",
+		Resource: "clustersecurityexceptions",
+	}
+)
 
 var _ ports.ContainerProfileRepository = (*APIServerStore)(nil)
 
 var _ ports.CVERepository = (*APIServerStore)(nil)
 
 var _ ports.SBOMRepository = (*APIServerStore)(nil)
+
+var _ ports.SecurityExceptionRepository = (*APIServerStore)(nil)
 
 // NewAPIServerStorage initializes the APIServerStore struct
 func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
@@ -53,15 +73,22 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
-	// force GRPC
-	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
-	config.ContentType = "application/vnd.kubernetes.protobuf"
-	clientset, err := versioned.NewForConfig(config)
+	// Typed client for storage API (uses protobuf)
+	protoConfig := *config
+	protoConfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	protoConfig.ContentType = "application/vnd.kubernetes.protobuf"
+	clientset, err := versioned.NewForConfig(&protoConfig)
+	if err != nil {
+		return nil, err
+	}
+	// Dynamic client for CRDs (uses JSON)
+	dynClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, err
 	}
 	return &APIServerStore{
 		StorageClient: clientset.SpdxV1beta1(),
+		DynamicClient: dynClient,
 		Namespace:     namespace,
 	}, nil
 }
@@ -71,6 +98,45 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		Namespace:     namespace,
 	}
+}
+
+func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	var exceptions []sev1beta1.SecurityException
+
+	// Only list namespaced exceptions when namespace is provided
+	if namespace != "" {
+		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
+		} else {
+			for i := range seList.Items {
+				var se sev1beta1.SecurityException
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(seList.Items[i].Object, &se); err != nil {
+					logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err))
+					continue
+				}
+				exceptions = append(exceptions, se)
+			}
+		}
+	}
+
+	// List cluster-scoped exceptions
+	var clusterExceptions []sev1beta1.ClusterSecurityException
+	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
+	} else {
+		for i := range cseList.Items {
+			var cse sev1beta1.ClusterSecurityException
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(cseList.Items[i].Object, &cse); err != nil {
+				logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err))
+				continue
+			}
+			clusterExceptions = append(clusterExceptions, cse)
+		}
+	}
+
+	return exceptions, clusterExceptions, nil
 }
 
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {

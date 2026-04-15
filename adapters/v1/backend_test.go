@@ -26,7 +26,7 @@ import (
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
-	sev1 "github.com/kubescape/kubevuln/pkg/securityexception/v1"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,8 +73,9 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &BackendAdapter{
-				clusterConfig:        tt.fields.clusterConfig,
-				getCVEExceptionsFunc: tt.fields.getCVEExceptionsFunc,
+				clusterConfig:         tt.fields.clusterConfig,
+				getCVEExceptionsFunc:  tt.fields.getCVEExceptionsFunc,
+				securityExceptionRepo: &NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
 			if tt.workload {
@@ -192,7 +193,8 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 					return tt.exceptions, nil
 				},
-				httpPostFunc: httpPostFunc,
+				httpPostFunc:          httpPostFunc,
+				securityExceptionRepo: &NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
@@ -272,10 +274,11 @@ func TestNewBackendAdapter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "")
+			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "", &NoOpSecurityExceptionRepository{})
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil
+			got.securityExceptionRepo = nil
 			assert.NotEqual(t, got, tt.want)
 		})
 	}
@@ -497,6 +500,16 @@ func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 	assert.Empty(t, capturedReport.Error, "Error field should be empty when scanErr is nil")
 }
 
+type mockSecurityExceptionRepo struct {
+	exceptions        []sev1beta1.SecurityException
+	clusterExceptions []sev1beta1.ClusterSecurityException
+	err               error
+}
+
+func (m *mockSecurityExceptionRepo) GetSecurityExceptions(_ context.Context, _ string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	return m.exceptions, m.clusterExceptions, m.err
+}
+
 func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 	cloudPolicies := []armotypes.VulnerabilityExceptionPolicy{
 		{
@@ -505,24 +518,25 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 		},
 	}
 
+	mockRepo := &mockSecurityExceptionRepo{
+		exceptions: []sev1beta1.SecurityException{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CRD-1"}},
+					},
+				},
+			},
+		},
+	}
+
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
 		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return cloudPolicies, nil
 		},
-		getSecurityExceptionsFunc: func(ctx context.Context, namespace string) ([]sev1.SecurityException, []sev1.ClusterSecurityException, error) {
-			se := []sev1.SecurityException{
-				{
-					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
-					Spec: sev1.SecurityExceptionSpec{
-						Vulnerabilities: []sev1.VulnerabilityException{
-							{Vulnerability: sev1.VulnerabilityRef{ID: "CVE-CRD-1"}},
-						},
-					},
-				},
-			}
-			return se, nil, nil
-		},
+		securityExceptionRepo: mockRepo,
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
