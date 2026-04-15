@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -96,6 +97,7 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	return &APIServerStore{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		DynamicClient: fakedynamic.NewSimpleDynamicClient(runtime.NewScheme()),
 		Namespace:     namespace,
 	}
 }

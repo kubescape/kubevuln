@@ -27,6 +27,7 @@ import (
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
+	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,7 +76,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 			a := &BackendAdapter{
 				clusterConfig:         tt.fields.clusterConfig,
 				getCVEExceptionsFunc:  tt.fields.getCVEExceptionsFunc,
-				securityExceptionRepo: &NoOpSecurityExceptionRepository{},
+				securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
 			if tt.workload {
@@ -194,7 +195,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 					return tt.exceptions, nil
 				},
 				httpPostFunc:          httpPostFunc,
-				securityExceptionRepo: &NoOpSecurityExceptionRepository{},
+				securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
 			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
@@ -274,7 +275,7 @@ func TestNewBackendAdapter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "", &NoOpSecurityExceptionRepository{})
+			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "", &repositories.NoOpSecurityExceptionRepository{})
 			// need to nil functions to compare
 			got.httpPostFunc = nil
 			got.getCVEExceptionsFunc = nil

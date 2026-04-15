@@ -99,7 +99,7 @@ func main() {
 			seRepo = storage
 			logger.L().Info("SecurityException CRD integration enabled")
 		} else {
-			seRepo = &v1.NoOpSecurityExceptionRepository{}
+			seRepo = &repositories.NoOpSecurityExceptionRepository{}
 		}
 		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
 		platform = backendAdapter
