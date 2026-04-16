@@ -267,6 +267,9 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				continue // we need the CVE
 			}
 
+			// apply security exceptions before storing
+			s.applyExceptionsToManifest(ctx, &cve)
+
 			// store CVE
 			if s.storage {
 				err = s.cveRepository.StoreCVE(ctx, cve, false)
@@ -325,6 +328,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				continue // we need the CVE'
 			}
+
+			// apply security exceptions before storing
+			s.applyExceptionsToManifest(ctx, &cvep)
+
 			// store CVE'
 			if s.storage {
 				cvep.Wlid = scan.Wlid
@@ -451,6 +458,9 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return fmt.Errorf("scanning SBOM: %w", err)
 		}
 
+		// apply security exceptions before storing
+		s.applyExceptionsToManifest(ctx, &cve)
+
 		// store CVE
 		if s.storage {
 			err = s.cveRepository.StoreCVE(ctx, cve, false)
@@ -574,6 +584,21 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
 	return nil
+}
+
+// applyExceptionsToManifest filters the CVE manifest using SecurityException policies.
+func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve *domain.CVEManifest) {
+	if cve == nil || cve.Content == nil {
+		return
+	}
+	exceptions, err := s.platform.GetCVEExceptions(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
+		return
+	}
+	if len(exceptions) > 0 {
+		v1.ApplySecurityExceptions(cve.Content, exceptions)
+	}
 }
 
 func addTimestamp(ctx context.Context) context.Context {
