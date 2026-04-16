@@ -82,8 +82,11 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Dynamic client for CRDs (uses JSON)
-	dynClient, err := dynamic.NewForConfig(config)
+	// Dynamic client for CRDs (uses JSON, separate rate limiter)
+	dynConfig := *config
+	dynConfig.QPS = 50
+	dynConfig.Burst = 100
+	dynClient, err := dynamic.NewForConfig(&dynConfig)
 	if err != nil {
 		return nil, err
 	}
