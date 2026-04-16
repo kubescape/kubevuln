@@ -9,10 +9,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// convertToVulnerabilityExceptionPolicies converts SecurityException and
+// ConvertToVulnerabilityExceptionPolicies converts SecurityException and
 // ClusterSecurityException CRDs into armotypes.VulnerabilityExceptionPolicy
 // slices compatible with the existing exception pipeline.
-func convertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException) []armotypes.VulnerabilityExceptionPolicy {
+func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException) []armotypes.VulnerabilityExceptionPolicy {
 	var policies []armotypes.VulnerabilityExceptionPolicy
 
 	now := time.Now()

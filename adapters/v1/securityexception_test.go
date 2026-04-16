@@ -36,7 +36,7 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 		},
 	}
 
-	policies := convertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
 
 	assert.Len(t, policies, 2)
 
@@ -93,7 +93,7 @@ func TestConvertExpiredOnFix(t *testing.T) {
 				},
 			}
 
-			policies := convertToVulnerabilityExceptionPolicies(exceptions, nil)
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
 			assert.Len(t, policies, 1)
 
 			if tt.wantNil {
@@ -142,7 +142,7 @@ func TestConvertSkipsExpired(t *testing.T) {
 		},
 	}
 
-	policies := convertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
 
 	assert.Len(t, policies, 1)
 	assert.Equal(t, "CVE-VALID", policies[0].VulnerabilityPolicies[0].Name)
@@ -166,7 +166,7 @@ func TestConvertMatchResources(t *testing.T) {
 		},
 	}
 
-	policies := convertToVulnerabilityExceptionPolicies(exceptions, nil)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
 
 	assert.Len(t, policies, 1)
 	assert.Len(t, policies[0].Designatores, 2)

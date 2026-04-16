@@ -85,22 +85,25 @@ func main() {
 		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
 	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
+
+	// SecurityException CRD integration (works in both local and cloud modes)
+	var seRepo ports.SecurityExceptionRepository
+	if storage != nil {
+		seRepo = storage
+		logger.L().Info("SecurityException CRD integration enabled")
+	} else {
+		seRepo = &repositories.NoOpSecurityExceptionRepository{}
+	}
+
 	var platform ports.Platform
 	if c.KeepLocal {
-		platform = adapters.NewMockPlatform(true)
+		platform = adapters.NewMockPlatform(true, seRepo)
 	} else {
 		backendServices, err := config.LoadBackendServicesConfig("/etc/config")
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		var seRepo ports.SecurityExceptionRepository
-		if storage != nil {
-			seRepo = storage
-			logger.L().Info("SecurityException CRD integration enabled")
-		} else {
-			seRepo = &repositories.NoOpSecurityExceptionRepository{}
-		}
 		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
 		platform = backendAdapter
 	}
