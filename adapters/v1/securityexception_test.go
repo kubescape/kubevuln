@@ -4,7 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -180,4 +183,72 @@ func TestConvertMatchResources(t *testing.T) {
 	assert.Equal(t, "production", d1.Attributes["namespace"])
 	assert.Equal(t, "StatefulSet", d1.Attributes["kind"])
 	assert.Equal(t, "my-db", d1.Attributes["name"])
+}
+
+func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-9999"}}},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions)
+
+	assert.Len(t, doc.Matches, 1, "one match should remain")
+	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
+
+	assert.Len(t, doc.IgnoredMatches, 1, "one match should be ignored")
+	assert.Equal(t, "CVE-2021-44228", doc.IgnoredMatches[0].Vulnerability.ID)
+	assert.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 1)
+	assert.Equal(t, "CVE-2021-44228", doc.IgnoredMatches[0].AppliedIgnoreRules[0].Vulnerability)
+}
+
+func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
+	expiredOnFix := true
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+				Fix:                   v1beta1.Fix{State: "fixed", Versions: []string{"2.17.0"}},
+			}},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+			ExpiredOnFix:          &expiredOnFix,
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions)
+
+	assert.Len(t, doc.Matches, 1, "CVE with fix should remain in Matches")
+	assert.Len(t, doc.IgnoredMatches, 0, "nothing should be ignored")
+}
+
+func TestApplySecurityExceptions_NilDoc(t *testing.T) {
+	ApplySecurityExceptions(nil, domain.CVEExceptions{})
+}
+
+func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, nil)
+
+	assert.Len(t, doc.Matches, 1, "no filtering when no exceptions")
 }

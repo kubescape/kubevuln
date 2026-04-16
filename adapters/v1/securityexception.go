@@ -5,7 +5,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -70,6 +72,31 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 	p.Designatores = buildDesignators(spec.Match.Resources, namespace)
 
 	return p
+}
+
+// ApplySecurityExceptions moves CVEs covered by exception policies from
+// doc.Matches to doc.IgnoredMatches with applied ignore rules.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions) {
+	if doc == nil || len(exceptions) == 0 {
+		return
+	}
+
+	var remaining []v1beta1.Match
+	for _, m := range doc.Matches {
+		isFixed := m.Vulnerability.Fix.State == "fixed"
+		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		if len(matched) > 0 {
+			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
+				Match: m,
+				AppliedIgnoreRules: []v1beta1.IgnoreRule{
+					{Vulnerability: m.Vulnerability.ID},
+				},
+			})
+		} else {
+			remaining = append(remaining, m)
+		}
+	}
+	doc.Matches = remaining
 }
 
 func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []identifiers.PortalDesignator {
