@@ -94,7 +94,15 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		platform = v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey)
+		var seRepo ports.SecurityExceptionRepository
+		if storage != nil {
+			seRepo = storage
+			logger.L().Info("SecurityException CRD integration enabled")
+		} else {
+			seRepo = &repositories.NoOpSecurityExceptionRepository{}
+		}
+		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
+		platform = backendAdapter
 	}
 	relevancyProvider := v1.NewContainerProfileAdapter(storage)
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
