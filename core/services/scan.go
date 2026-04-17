@@ -267,18 +267,18 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				continue // we need the CVE
 			}
 
-			// apply security exceptions before storing
-			s.applyExceptionsToManifest(ctx, &cve)
+			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
+			filteredCve := s.applyExceptionsToManifest(ctx, cve)
 
-			// store CVE
+			// store filtered CVE
 			if s.storage {
-				err = s.cveRepository.StoreCVE(ctx, cve, false)
+				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE is not critical
 				}
-				err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", slug))
@@ -286,22 +286,18 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				}
 			}
 		} else {
-			// apply security exceptions to cached manifest
-			s.applyExceptionsToManifest(ctx, &cve)
+			filteredCve := s.applyExceptionsToManifest(ctx, cve)
 
-			if s.storage {
-				// re-store with exceptions applied
-				err = s.cveRepository.StoreCVE(ctx, cve, false)
+			if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
+				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
 						helpers.String("imageSlug", slug))
-					// no continue, storing the CVE is not critical
 				}
-				err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
 						helpers.String("imageSlug", slug))
-					// no continue, storing the CVE summary is not critical
 				}
 			}
 		}
@@ -336,19 +332,19 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				continue // we need the CVE'
 			}
 
-			// apply security exceptions before storing
-			s.applyExceptionsToManifest(ctx, &cvep)
+			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
+			filteredCvep := s.applyExceptionsToManifest(ctx, cvep)
 
-			// store CVE'
+			// store filtered CVE'
 			if s.storage {
-				cvep.Wlid = scan.Wlid
-				err = s.cveRepository.StoreCVE(ctx, cvep, true)
+				filteredCvep.Wlid = scan.Wlid
+				err = s.cveRepository.StoreCVE(ctx, filteredCvep, true)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVEp", helpers.Error(err),
 						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 					// no continue, storing the CVE' is not critical
 				}
-				err = s.cveRepository.StoreCVESummary(ctx, cve, cvep, true)
+				err = s.cveRepository.StoreCVESummary(ctx, cve, filteredCvep, true)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", slug))
@@ -465,34 +461,32 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return fmt.Errorf("scanning SBOM: %w", err)
 		}
 
-		// apply security exceptions before storing
-		s.applyExceptionsToManifest(ctx, &cve)
+		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
+		filteredCve := s.applyExceptionsToManifest(ctx, cve)
 
-		// store CVE
+		// store filtered CVE
 		if s.storage {
-			err = s.cveRepository.StoreCVE(ctx, cve, false)
+			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
 	} else {
-		// apply security exceptions to cached manifest
-		s.applyExceptionsToManifest(ctx, &cve)
+		filteredCve := s.applyExceptionsToManifest(ctx, cve)
 
-		if s.storage {
-			// re-store with exceptions applied
-			err = s.cveRepository.StoreCVE(ctx, cve, false)
+		if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
+			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
@@ -599,19 +593,26 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	return nil
 }
 
-// applyExceptionsToManifest filters the CVE manifest using SecurityException policies.
-func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve *domain.CVEManifest) {
-	if cve == nil || cve.Content == nil {
-		return
+// applyExceptionsToManifest returns a filtered copy of the CVE manifest with
+// SecurityException policies applied. The original manifest is not mutated,
+// so callers can still use it for SubmitCVE (cloud reporting).
+func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.CVEManifest) domain.CVEManifest {
+	if cve.Content == nil {
+		return cve
 	}
 	exceptions, err := s.platform.GetCVEExceptions(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
-		return
+		return cve
 	}
-	if len(exceptions) > 0 {
-		v1.ApplySecurityExceptions(cve.Content, exceptions)
+	if len(exceptions) == 0 {
+		return cve
 	}
+	filtered := cve
+	docCopy := cve.Content.DeepCopy()
+	v1.ApplySecurityExceptions(docCopy, exceptions)
+	filtered.Content = docCopy
+	return filtered
 }
 
 func addTimestamp(ctx context.Context) context.Context {

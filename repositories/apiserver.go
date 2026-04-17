@@ -108,7 +108,7 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
 	// Use a detached context with timeout — the scan context may be canceled
 	// before the CRD listing completes due to rate limiting.
-	listCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	listCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 
 	var exceptions []sev1beta1.SecurityException

@@ -74,6 +74,18 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 	return p
 }
 
+// hasIgnoreAction returns true if any of the matched policies contain the Ignore action.
+func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
+	for _, p := range policies {
+		for _, a := range p.Actions {
+			if a == armotypes.Ignore {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ApplySecurityExceptions moves CVEs covered by exception policies from
 // doc.Matches to doc.IgnoredMatches with applied ignore rules.
 func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions) {
@@ -85,7 +97,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	for _, m := range doc.Matches {
 		isFixed := m.Vulnerability.Fix.State == "fixed"
 		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
-		if len(matched) > 0 {
+		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
 				Match: m,
 				AppliedIgnoreRules: []v1beta1.IgnoreRule{
