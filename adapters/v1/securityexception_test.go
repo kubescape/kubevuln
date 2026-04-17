@@ -226,6 +226,7 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 	exceptions := domain.CVEExceptions{
 		{
 			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
 			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
 			ExpiredOnFix:          &expiredOnFix,
 		},
@@ -233,8 +234,9 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 
 	ApplySecurityExceptions(doc, exceptions)
 
-	assert.Len(t, doc.Matches, 1, "CVE with fix should remain in Matches")
-	assert.Len(t, doc.IgnoredMatches, 0, "nothing should be ignored")
+	// Fix available + expiredOnFix = exception skipped, CVE stays in Matches
+	assert.Len(t, doc.Matches, 1, "CVE with fix should remain in Matches when expiredOnFix is set")
+	assert.Len(t, doc.IgnoredMatches, 0, "nothing should be ignored when fix is available and expiredOnFix is set")
 }
 
 func TestApplySecurityExceptions_NilDoc(t *testing.T) {

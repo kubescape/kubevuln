@@ -344,6 +344,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 					// no continue, storing the CVE' is not critical
 				}
+				// Summary uses original cve (all matches for total counts) and
+				// filteredCvep (exceptions applied to relevant matches only).
 				err = s.cveRepository.StoreCVESummary(ctx, cve, filteredCvep, true)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
