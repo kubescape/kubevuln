@@ -107,7 +107,12 @@ func main() {
 		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
 		platform = backendAdapter
 	}
-	relevancyProvider := v1.NewContainerProfileAdapter(storage)
+	var relevancyProvider ports.Relevancy
+	if storage != nil {
+		relevancyProvider = v1.NewContainerProfileAdapter(storage)
+	} else {
+		relevancyProvider = adapters.NewMockRelevancyAdapter()
+	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
