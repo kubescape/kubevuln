@@ -87,7 +87,7 @@ func TestScan(t *testing.T) {
 			repository := repositories.NewFakeAPIServerStorage("kubescape")
 			sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 			cveAdapter := adapters.NewMockCVEAdapter()
-			platform := adapters.NewMockPlatform(true)
+			platform := adapters.NewMockPlatform(true, nil)
 			relevancyProvider := adapters.NewMockRelevancyAdapter()
 			service := services.NewScanService(sbomAdapter, repository, cveAdapter, repository, platform, relevancyProvider, test.storage, false, true, false, false)
 			controller := controllers.NewHTTPController(service, 2)

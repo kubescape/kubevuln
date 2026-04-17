@@ -82,8 +82,11 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Dynamic client for CRDs (uses JSON)
-	dynClient, err := dynamic.NewForConfig(config)
+	// Dynamic client for CRDs (uses JSON, separate rate limiter)
+	dynConfig := *config
+	dynConfig.QPS = 50
+	dynConfig.Burst = 100
+	dynClient, err := dynamic.NewForConfig(&dynConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +106,16 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 }
 
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	// Use a detached context with timeout — the scan context may be canceled
+	// before the CRD listing completes due to rate limiting.
+	listCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	var exceptions []sev1beta1.SecurityException
 
 	// Only list namespaced exceptions when namespace is provided
 	if namespace != "" {
-		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
 		} else {
@@ -124,7 +132,7 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 
 	// List cluster-scoped exceptions
 	var clusterExceptions []sev1beta1.ClusterSecurityException
-	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(ctx, metav1.ListOptions{})
+	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
 	} else {
