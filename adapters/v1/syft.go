@@ -32,10 +32,7 @@ import (
 )
 
 func isGCPRegistry(imageID string) bool {
-	host := imageID
-	if i := strings.IndexByte(imageID, '/'); i >= 0 {
-		host = imageID[:i]
-	}
+	host, _, _ := strings.Cut(imageID, "/")
 	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
 }
 
