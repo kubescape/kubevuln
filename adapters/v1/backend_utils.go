@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,7 +277,7 @@ func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExc
 
 	for i := range srcCVEList {
 		for j := range srcCVEList[i].VulnerabilityPolicies {
-			if srcCVEList[i].VulnerabilityPolicies[j].Name == CVEName {
+			if strings.EqualFold(srcCVEList[i].VulnerabilityPolicies[j].Name, CVEName) {
 				if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
 					continue
 				}

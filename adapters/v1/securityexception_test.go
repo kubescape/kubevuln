@@ -239,6 +239,51 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 	assert.Len(t, doc.IgnoredMatches, 0, "nothing should be ignored when fix is available and expiredOnFix is set")
 }
 
+func TestConvertSkipsEmptyAndWhitespaceIDs(t *testing.T) {
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: ""}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "   "}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "  CVE-2024-1234  "}},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
+
+	assert.Len(t, policies, 1)
+	assert.Equal(t, "CVE-2024-1234", policies[0].VulnerabilityPolicies[0].Name)
+}
+
+func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-JC7W-C686-C4V9"}}},
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-9999"}}},
+		},
+	}
+
+	// Exception stored with mixed-case GHSA ID (canonical form from CRD)
+	exceptions := domain.CVEExceptions{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "GHSA-jc7w-c686-c4v9"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions)
+
+	assert.Len(t, doc.Matches, 1)
+	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
+	assert.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, "GHSA-JC7W-C686-C4V9", doc.IgnoredMatches[0].Vulnerability.ID)
+}
+
 func TestApplySecurityExceptions_NilDoc(t *testing.T) {
 	ApplySecurityExceptions(nil, domain.CVEExceptions{})
 }

@@ -165,6 +165,42 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "case-insensitive: lowercase CVE matches uppercase policy",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+			CVEName: "cve-2021-1234",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "CVE-2021-1234"},
+					},
+				},
+			},
+		},
+		{
+			name: "case-insensitive: GHSA mixed-case policy matches grype-reported ID",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "GHSA-jc7w-c686-c4v9"},
+					},
+				},
+			},
+			CVEName: "GHSA-JC7W-C686-C4V9",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "GHSA-jc7w-c686-c4v9"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

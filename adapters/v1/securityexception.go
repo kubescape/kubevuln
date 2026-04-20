@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -26,6 +27,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 		namespace := se.Namespace
 		for _, vuln := range se.Spec.Vulnerabilities {
+			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
+				continue
+			}
 			p := buildPolicy(se.Spec, vuln, namespace)
 			policies = append(policies, p)
 		}
@@ -37,6 +41,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			continue
 		}
 		for _, vuln := range cse.Spec.Vulnerabilities {
+			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
+				continue
+			}
 			p := buildPolicy(cse.Spec, vuln, "")
 			policies = append(policies, p)
 		}
@@ -54,7 +61,7 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 		PolicyType: "vulnerabilityExceptionPolicy",
 		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
 		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
-			{Name: vuln.Vulnerability.ID},
+			{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
 		},
 		Reason: spec.Reason,
 	}
