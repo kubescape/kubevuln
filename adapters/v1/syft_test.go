@@ -286,3 +286,90 @@ func TestNormalizeImageID(t *testing.T) {
 		})
 	}
 }
+
+func TestRewriteImageRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		imageRef string
+		proxyMap map[string]string
+		want     string
+	}{
+		{
+			name:     "nil map returns original",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: nil,
+			want:     "docker.io/library/nginx:latest",
+		},
+		{
+			name:     "empty map returns original",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: map[string]string{},
+			want:     "docker.io/library/nginx:latest",
+		},
+		{
+			name:     "empty proxy value is skipped, returns original",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: map[string]string{"docker.io": ""},
+			want:     "docker.io/library/nginx:latest",
+		},
+		{
+			name:     "trailing slash in proxy value is stripped",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: map[string]string{"docker.io": "mirror.io/"},
+			want:     "mirror.io/library/nginx:latest",
+		},
+		{
+			name:     "basic rewrite",
+			imageRef: "docker.io/library/alpine:3.18",
+			proxyMap: map[string]string{"docker.io": "mirror.example.com"},
+			want:     "mirror.example.com/library/alpine:3.18",
+		},
+		{
+			name:     "index.docker.io in ref matched by docker.io key",
+			imageRef: "index.docker.io/library/alpine:latest",
+			proxyMap: map[string]string{"docker.io": "mirror.example.com"},
+			want:     "mirror.example.com/library/alpine:latest",
+		},
+		{
+			name:     "docker.io in ref matched by index.docker.io key",
+			imageRef: "docker.io/library/alpine:latest",
+			proxyMap: map[string]string{"index.docker.io": "mirror.example.com"},
+			want:     "mirror.example.com/library/alpine:latest",
+		},
+		{
+			name:     "digest ref is rewritten",
+			imageRef: "docker.io/library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			proxyMap: map[string]string{"docker.io": "mirror.example.com"},
+			want:     "mirror.example.com/library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		},
+		{
+			name:     "non-matching prefix returns original",
+			imageRef: "quay.io/kubescape/kubevuln:latest",
+			proxyMap: map[string]string{"docker.io": "mirror.example.com"},
+			want:     "quay.io/kubescape/kubevuln:latest",
+		},
+		{
+			name:     "longest prefix wins over shorter prefix",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: map[string]string{
+				"docker.io":         "generic-mirror.example.com",
+				"docker.io/library": "library-mirror.example.com",
+			},
+			want: "library-mirror.example.com/nginx:latest",
+		},
+		{
+			name:     "multiple entries, correct one matches",
+			imageRef: "quay.io/kubescape/kubevuln:latest",
+			proxyMap: map[string]string{
+				"docker.io": "mirror.example.com",
+				"quay.io":   "quay-mirror.example.com",
+			},
+			want: "quay-mirror.example.com/kubescape/kubevuln:latest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, rewriteImageRef(tt.imageRef, tt.proxyMap))
+		})
+	}
+}

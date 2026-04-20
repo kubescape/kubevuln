@@ -78,6 +78,9 @@ func main() {
 				helpers.Error(err))
 			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 		} else {
+			if len(c.ProxyRegistryMap) > 0 {
+				logger.L().Warning("proxyRegistryMap is set but has no effect in sidecar mode")
+			}
 			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")
 			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit)
 		}

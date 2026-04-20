@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +78,16 @@ func rewriteImageRef(imageRef string, proxyMap map[string]string) string {
 	if len(proxyMap) == 0 {
 		return imageRef
 	}
-	for original, proxy := range proxyMap {
+	keys := make([]string, 0, len(proxyMap))
+	for k := range proxyMap {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, original := range keys {
+		proxy := strings.TrimRight(proxyMap[original], "/")
+		if proxy == "" {
+			continue
+		}
 		if strings.HasPrefix(imageRef, original+"/") {
 			return proxy + imageRef[len(original):]
 		}
