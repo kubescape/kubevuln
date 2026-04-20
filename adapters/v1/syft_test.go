@@ -117,7 +117,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:            "testdata/alpine-embedded-sbom.json",
 		},
 		{
-			name:    "public image with invalid credentials falls back through GCP ADC to unauthenticated",
+			name:    "public image with invalid credentials falls back to unauthenticated",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  "testdata/alpine-sbom.format.json",
 			options: domain.RegistryOptions{
