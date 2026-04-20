@@ -116,6 +116,39 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			wantErr:           false,
 			format:            "testdata/alpine-embedded-sbom.json",
 		},
+		{
+			name:    "public image with invalid credentials falls back to unauthenticated",
+			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+			format:  "testdata/alpine-sbom.format.json",
+			options: domain.RegistryOptions{
+				Credentials: []domain.RegistryCredentials{
+					{
+						Authority: "index.docker.io",
+						Username:  "username",
+						Password:  "badpassword",
+					},
+				},
+			},
+		},
+		{
+			name:    "public GCR image with invalid credentials attempts ADC then falls back to unauthenticated",
+			imageID: "gcr.io/google-containers/pause:3.1",
+			options: domain.RegistryOptions{
+				Credentials: []domain.RegistryCredentials{
+					{
+						Authority: "gcr.io",
+						Username:  "username",
+						Password:  "badpassword",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "GCP registry with no ADC falls back to anonymous and fails gracefully",
+			imageID: "gcr.io/nonexistent-project/nonexistent-image:latest",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -148,6 +181,27 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 				ja := jsonassert.New(t)
 				ja.Assert(string(content), string(fileContent(tt.format)))
 			}
+		})
+	}
+}
+
+func TestIsGCPRegistry(t *testing.T) {
+	tests := []struct {
+		imageID string
+		want    bool
+	}{
+		{"gcr.io/foo/bar", true},
+		{"us.gcr.io/foo/bar", true},
+		{"us-docker.pkg.dev/foo/bar", true},
+		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
+		{"quay.io/foo/bar", false},
+		{"quay.io/foo/bar-docker.pkg.dev/x", false},
+		{"index.docker.io/library/alpine", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.imageID, func(t *testing.T) {
+			assert.Equal(t, tt.want, isGCPRegistry(tt.imageID))
 		})
 	}
 }
