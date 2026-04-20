@@ -59,7 +59,7 @@ func TestSidecarSBOMAdapter_CreateSBOM_Success(t *testing.T) {
 		},
 	}
 
-	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi")
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
 
 	sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "nginx:latest", domain.RegistryOptions{})
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestSidecarSBOMAdapter_CreateSBOM_TooLarge(t *testing.T) {
 		},
 	}
 
-	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi")
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
 
 	sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "large-image:latest", domain.RegistryOptions{})
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry(t *testing.T) {
 		},
 	}
 
-	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi")
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
 
 	// First two attempts should return crash error (for retry)
 	for i := 0; i < 2; i++ {
@@ -122,6 +122,6 @@ func TestSidecarSBOMAdapter_Version(t *testing.T) {
 		healthReady:   true,
 	}
 
-	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi")
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
 	assert.Equal(t, "v0.100.0", adapter.Version())
 }
