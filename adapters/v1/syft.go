@@ -28,7 +28,33 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/opencontainers/go-digest"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/oauth2/google"
 )
+
+func isGCPRegistry(imageID string) bool {
+	if strings.HasPrefix(imageID, "gcr.io/") {
+		return true
+	}
+	if strings.Contains(imageID, ".gcr.io/") {
+		return true
+	}
+	if strings.Contains(imageID, "-docker.pkg.dev/") {
+		return true
+	}
+	return false
+}
+
+func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, err
+	}
+	token, err := creds.TokenSource.Token()
+	if err != nil {
+		return nil, err
+	}
+	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
+}
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
@@ -150,10 +176,21 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		logger.L().Debug("got 401, retrying without credentials",
-			helpers.String("imageID", imageID))
-		registryOptions.Credentials = nil
-		src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+		if isGCPRegistry(imageID) {
+			if gcpCreds, gcpErr := gcpCredentials(ctx); gcpErr != nil {
+				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
+					helpers.String("imageID", imageID))
+			} else {
+				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
+				src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			}
+		}
+		if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+			logger.L().Debug("got 401, retrying without credentials",
+				helpers.String("imageID", imageID))
+			registryOptions.Credentials = nil
+			src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+		}
 	}
 
 	switch {
