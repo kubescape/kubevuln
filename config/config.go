@@ -21,8 +21,9 @@ type Config struct {
 	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
 	PartialRelevancy   bool          `mapstructure:"partialRelevancy"`
 	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
-	ScanEmbeddedSboms  bool          `mapstructure:"scanEmbeddedSBOMs"`
-	ScanTimeout        time.Duration `mapstructure:"scanTimeout"`
+	ProxyRegistryMap   map[string]string `mapstructure:"proxyRegistryMap"`
+	ScanEmbeddedSboms  bool              `mapstructure:"scanEmbeddedSBOMs"`
+	ScanTimeout        time.Duration     `mapstructure:"scanTimeout"`
 	Storage            bool          `mapstructure:"storage"`
 	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
 	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
