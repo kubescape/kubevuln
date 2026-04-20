@@ -24,6 +24,7 @@ type SidecarSBOMAdapter struct {
 	client            sbomscanner.SBOMScannerClient
 	maxImageSize      int64
 	maxSBOMSize       int
+	proxyRegistryMap  map[string]string
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
 	memoryLimit       string
@@ -45,11 +46,13 @@ func NewSidecarSBOMAdapter(
 	maxSBOMSize int,
 	scanEmbeddedSBOMs bool,
 	memoryLimit string,
+	proxyRegistryMap map[string]string,
 ) *SidecarSBOMAdapter {
 	return &SidecarSBOMAdapter{
 		client:            client,
 		maxImageSize:      maxImageSize,
 		maxSBOMSize:       maxSBOMSize,
+		proxyRegistryMap:  proxyRegistryMap,
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 		memoryLimit:       memoryLimit,
@@ -75,9 +78,12 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	}
 	domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
 
+	pullImageID := rewriteImageRef(imageID, s.proxyRegistryMap)
+	pullImageTag := rewriteImageRef(imageTag, s.proxyRegistryMap)
+
 	req := sbomscanner.ScanRequest{
-		ImageID:             imageID,
-		ImageTag:            imageTag,
+		ImageID:             pullImageID,
+		ImageTag:            pullImageTag,
 		Options:             options,
 		MaxImageSize:        s.maxImageSize,
 		MaxSBOMSize:         int32(s.maxSBOMSize),

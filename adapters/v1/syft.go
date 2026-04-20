@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
 type SyftAdapter struct {
 	maxImageSize      int64
 	maxSBOMSize       int
+	proxyRegistryMap  map[string]string
 	pullMutex         sync.Mutex
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
@@ -62,13 +64,42 @@ const digestDelim = "@"
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
 // NewSyftAdapter initializes the SyftAdapter struct
-func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize int, scanEmbeddedSBOMs bool) *SyftAdapter {
+func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize int, scanEmbeddedSBOMs bool, proxyRegistryMap map[string]string) *SyftAdapter {
 	return &SyftAdapter{
 		maxImageSize:      maxImageSize,
 		maxSBOMSize:       maxSBOMSize,
+		proxyRegistryMap:  proxyRegistryMap,
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 	}
+}
+
+func rewriteImageRef(imageRef string, proxyMap map[string]string) string {
+	if len(proxyMap) == 0 {
+		return imageRef
+	}
+	keys := make([]string, 0, len(proxyMap))
+	for k := range proxyMap {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, original := range keys {
+		proxy := strings.TrimRight(proxyMap[original], "/")
+		if proxy == "" {
+			continue
+		}
+		if strings.HasPrefix(imageRef, original+"/") {
+			return proxy + imageRef[len(original):]
+		}
+		// treat docker.io and index.docker.io as the same registry
+		if original == "docker.io" && strings.HasPrefix(imageRef, "index.docker.io/") {
+			return proxy + imageRef[len("index.docker.io"):]
+		}
+		if original == "index.docker.io" && strings.HasPrefix(imageRef, "docker.io/") {
+			return proxy + imageRef[len("docker.io"):]
+		}
+	}
+	return imageRef
 }
 
 func NormalizeImageID(imageID, imageTag string) string {
@@ -158,13 +189,15 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
-	src, err := syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
+	src, err := syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 
 	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
 			helpers.String("imageTag", imageTag),
 			helpers.String("imageID", imageID))
-		src, err = syft.GetSource(ctxWithSize, imageTag, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+		pullRef = rewriteImageRef(imageTag, s.proxyRegistryMap)
+		src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
@@ -183,7 +216,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			logger.L().Debug("got 401, retrying without credentials",
 				helpers.String("imageID", imageID))
 			registryOptions.Credentials = nil
-			src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			src, err = syft.GetSource(ctxWithSize, rewriteImageRef(imageID, s.proxyRegistryMap), syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 		}
 	}
 

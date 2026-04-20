@@ -76,13 +76,13 @@ func main() {
 		if err != nil {
 			logger.L().Warning("failed to connect to SBOM scanner sidecar, falling back to in-process Syft",
 				helpers.Error(err))
-			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 		} else {
 			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")
-			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit)
+			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit, c.ProxyRegistryMap)
 		}
 	} else {
-		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms)
+		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 
