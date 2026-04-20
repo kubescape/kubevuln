@@ -32,16 +32,11 @@ import (
 )
 
 func isGCPRegistry(imageID string) bool {
-	if strings.HasPrefix(imageID, "gcr.io/") {
-		return true
+	host := imageID
+	if i := strings.IndexByte(imageID, '/'); i >= 0 {
+		host = imageID[:i]
 	}
-	if strings.Contains(imageID, ".gcr.io/") {
-		return true
-	}
-	if strings.Contains(imageID, "-docker.pkg.dev/") {
-		return true
-	}
-	return false
+	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
@@ -185,6 +180,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 				src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 			}
 		}
+		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
+		// fall back to anonymous access. err/src retain the result of the last attempt.
 		if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 			logger.L().Debug("got 401, retrying without credentials",
 				helpers.String("imageID", imageID))
