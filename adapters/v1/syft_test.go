@@ -117,18 +117,18 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:            "testdata/alpine-embedded-sbom.json",
 		},
 		{
-			name:    "public image with invalid credentials falls back to unauthenticated",
-			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-			format:  "testdata/alpine-sbom.format.json",
+			name:    "public GCR image with invalid credentials attempts ADC then falls back to unauthenticated",
+			imageID: "gcr.io/google-containers/pause:3.1",
 			options: domain.RegistryOptions{
 				Credentials: []domain.RegistryCredentials{
 					{
-						Authority: "index.docker.io",
+						Authority: "gcr.io",
 						Username:  "username",
 						Password:  "badpassword",
 					},
 				},
 			},
+			wantErr: true,
 		},
 		{
 			name:    "GCP registry with no ADC falls back to anonymous and fails gracefully",
