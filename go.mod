@@ -459,3 +459,5 @@ require (
 replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20250916161743-dd57158479de
 
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
+
+replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
