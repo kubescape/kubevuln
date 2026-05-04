@@ -164,6 +164,15 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			// Note: grype.LoadVulnerabilityDB does not accept context, so the goroutine
 			// will continue to completion even if timeout occurs. The buffered channel
 			// ensures the goroutine can complete without blocking.
+			if logger.L().GetLevel() == "debug" {
+				if distClient, err := distribution.NewClient(g.distCfg); err == nil {
+					if archive, err := distClient.IsUpdateAvailable(nil); err == nil && archive != nil {
+						if archiveURL, err := distClient.ResolveArchiveURL(*archive); err == nil {
+							logger.L().Debug("downloading grype DB", helpers.String("archiveURL", archiveURL))
+						}
+					}
+				}
+			}
 			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
 			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
 		}()
