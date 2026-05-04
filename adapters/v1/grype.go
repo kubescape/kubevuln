@@ -164,6 +164,20 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 			// Note: grype.LoadVulnerabilityDB does not accept context, so the goroutine
 			// will continue to completion even if timeout occurs. The buffered channel
 			// ensures the goroutine can complete without blocking.
+			if logger.L().GetLevel() == "debug" {
+				if distClient, err := distribution.NewClient(g.distCfg); err == nil {
+					if archive, err := distClient.IsUpdateAvailable(nil); err == nil && archive != nil {
+						if archiveURL, err := distClient.ResolveArchiveURL(*archive); err == nil {
+							logger.L().Debug("downloading grype DB", helpers.String("archiveURL", archiveURL))
+						}
+					}
+				}
+			}
+			if err := checkDBDirWritable(g.installCfg.DBRootDir); err != nil {
+				logger.L().Ctx(ctx).Warning("grype DB root dir is not writable",
+					helpers.Error(err),
+					helpers.String("dbRootDir", g.installCfg.DBRootDir))
+			}
 			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
 			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
 		}()
@@ -327,6 +341,20 @@ func defaultMatcherConfig() matcher.Config {
 		},
 		Stock: stock.MatcherConfig{UseCPEs: true},
 	}
+}
+
+// checkDBDirWritable probes write access by creating and immediately removing a temp file.
+func checkDBDirWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".write-check-*")
+	if err != nil {
+		return err
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return nil
 }
 
 // Version returns Grype's version which is used to tag CVE manifests
