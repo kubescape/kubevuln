@@ -86,9 +86,9 @@ func main() {
 	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
 
-	// SecurityException CRD integration (works in both local and cloud modes)
+	// SecurityException CRD integration requires storage and riskAcceptance RBAC
 	var seRepo ports.SecurityExceptionRepository
-	if storage != nil {
+	if storage != nil && c.RiskAcceptance {
 		seRepo = storage
 		logger.L().Info("SecurityException CRD integration enabled")
 	} else {

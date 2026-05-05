@@ -8,6 +8,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 )
 
@@ -35,7 +36,7 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	// if partialRelevancy is true, all container profiles are considered
 	completionStatus := containerProfile.Annotations[helpersv1.CompletionMetadataKey]
 	if !partialRelevancy && completionStatus != helpersv1.Full {
-		return scans, fmt.Errorf("container profile %s/%s is partial (workload restart required)", namespace, name)
+		return scans, fmt.Errorf("container profile %s/%s: %w", namespace, name, domain.ErrPartialContainerProfile)
 	}
 
 	// only ready or completed container profiles are considered

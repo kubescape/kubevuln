@@ -11,23 +11,24 @@ import (
 )
 
 type Config struct {
-	AccountID          string        `mapstructure:"accountID"`
-	ClusterName        string        `mapstructure:"clusterName"`
-	KeepLocal          bool          `mapstructure:"keepLocal"`
-	ListingURL         string        `mapstructure:"listingURL"`
-	MaxImageSize       int64         `mapstructure:"maxImageSize"`
-	MaxSBOMSize        int           `mapstructure:"maxSBOMSize"`
-	Namespace          string        `mapstructure:"namespace"`
-	NodeSbomGeneration bool          `mapstructure:"nodeSbomGeneration"`
-	PartialRelevancy   bool          `mapstructure:"partialRelevancy"`
-	ScanConcurrency    int           `mapstructure:"scanConcurrency"`
+	AccountID          string            `mapstructure:"accountID"`
+	ClusterName        string            `mapstructure:"clusterName"`
+	KeepLocal          bool              `mapstructure:"keepLocal"`
+	ListingURL         string            `mapstructure:"listingURL"`
+	MaxImageSize       int64             `mapstructure:"maxImageSize"`
+	MaxSBOMSize        int               `mapstructure:"maxSBOMSize"`
+	Namespace          string            `mapstructure:"namespace"`
+	NodeSbomGeneration bool              `mapstructure:"nodeSbomGeneration"`
+	PartialRelevancy   bool              `mapstructure:"partialRelevancy"`
+	ScanConcurrency    int               `mapstructure:"scanConcurrency"`
 	ProxyRegistryMap   map[string]string `mapstructure:"proxyRegistryMap"`
 	ScanEmbeddedSboms  bool              `mapstructure:"scanEmbeddedSBOMs"`
 	ScanTimeout        time.Duration     `mapstructure:"scanTimeout"`
-	Storage            bool          `mapstructure:"storage"`
-	StoreFilteredSbom  bool          `mapstructure:"storeFilteredSbom"`
-	UseDefaultMatchers bool          `mapstructure:"useDefaultMatchers"`
-	VexGeneration      bool          `mapstructure:"vexGeneration"`
+	RiskAcceptance     bool              `mapstructure:"riskAcceptance"`
+	Storage            bool              `mapstructure:"storage"`
+	StoreFilteredSbom  bool              `mapstructure:"storeFilteredSbom"`
+	UseDefaultMatchers bool              `mapstructure:"useDefaultMatchers"`
+	VexGeneration      bool              `mapstructure:"vexGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

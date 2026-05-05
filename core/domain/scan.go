@@ -21,6 +21,7 @@ var (
 	ErrOutdatedSBOM             = errors.New("SBOM is outdated")
 	ErrSBOMWithPartialArtifacts = errors.New("SBOM having partial artifacts")
 	ErrInvalidScanID            = errors.New("invalid scanID")
+	ErrPartialContainerProfile  = errors.New("container profile is partial (workload restart required)")
 	ErrMissingCpInfo            = errors.New("missing container profile information")
 	ErrMissingImageInfo         = errors.New("missing image information")
 	ErrMissingSBOM              = errors.New("missing SBOM")

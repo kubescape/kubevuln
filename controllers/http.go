@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -119,10 +120,17 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCP(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error - ScanCP", helpers.Error(err),
-				helpers.String("wlid", newScan.Wlid),
-				helpers.String("name", name),
-				helpers.String("namespace", namespace))
+			if errors.Is(err, domain.ErrPartialContainerProfile) {
+				logger.L().Ctx(ctx).Warning("service warning - ScanCP", helpers.Error(err),
+					helpers.String("wlid", newScan.Wlid),
+					helpers.String("name", name),
+					helpers.String("namespace", namespace))
+			} else {
+				logger.L().Ctx(ctx).Error("service error - ScanCP", helpers.Error(err),
+					helpers.String("wlid", newScan.Wlid),
+					helpers.String("name", name),
+					helpers.String("namespace", namespace))
+			}
 		}
 	})
 }
