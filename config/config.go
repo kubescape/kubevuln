@@ -1,6 +1,9 @@
 package config
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
@@ -57,11 +60,19 @@ func LoadConfig(path string) (Config, error) {
 	return config, err
 }
 
-// LoadBackendServicesConfig queries the API for backend service URLs.
-func LoadBackendServicesConfig(apiURL string) (schema.IBackendServices, error) {
+// LoadBackendServicesConfig loads backend service URLs from configDir/services.json if
+// present, otherwise queries apiURL for service discovery.
+func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendServices, error) {
+	filePath := filepath.Join(configDir, "services.json")
+	if _, err := os.Stat(filePath); err == nil {
+		return servicediscovery.GetServices(v3.NewServiceDiscoveryFileV3(filePath))
+	}
+
 	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
 	if err != nil {
 		return nil, err
 	}
+	// http.DefaultClient has no timeout by default; cap the startup discovery call.
+	http.DefaultClient = &http.Client{Timeout: 30 * time.Second}
 	return servicediscovery.GetServices(client)
 }
