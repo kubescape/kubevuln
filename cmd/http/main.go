@@ -100,9 +100,6 @@ func main() {
 		platform = adapters.NewMockPlatform(true, seRepo)
 	} else {
 		apiURL := os.Getenv("API_URL")
-		if apiURL == "" {
-			apiURL = "api.armosec.io"
-		}
 		backendServices, err := config.LoadBackendServicesConfig(configDir, apiURL)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))

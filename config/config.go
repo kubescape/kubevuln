@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,11 +62,16 @@ func LoadConfig(path string) (Config, error) {
 }
 
 // LoadBackendServicesConfig loads backend service URLs from configDir/services.json if
-// present, otherwise queries apiURL for service discovery.
+// present, otherwise queries apiURL for live service discovery.
+// apiURL must be set explicitly when services.json is absent; no default is applied here.
 func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendServices, error) {
 	filePath := filepath.Join(configDir, "services.json")
 	if _, err := os.Stat(filePath); err == nil {
 		return servicediscovery.GetServices(v3.NewServiceDiscoveryFileV3(filePath))
+	}
+
+	if apiURL == "" {
+		return nil, fmt.Errorf("no service configuration: provide %s/services.json or set API_URL", configDir)
 	}
 
 	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
