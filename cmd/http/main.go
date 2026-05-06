@@ -99,7 +99,8 @@ func main() {
 	if c.KeepLocal {
 		platform = adapters.NewMockPlatform(true, seRepo)
 	} else {
-		backendServices, err := config.LoadBackendServicesConfig("/etc/config")
+		apiURL := os.Getenv("API_URL")
+		backendServices, err := config.LoadBackendServicesConfig(configDir, apiURL)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}

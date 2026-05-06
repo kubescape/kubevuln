@@ -1,12 +1,15 @@
 package config
 
 import (
+	"fmt"
+	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
-	v2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/spf13/viper"
 )
 
@@ -58,19 +61,24 @@ func LoadConfig(path string) (Config, error) {
 	return config, err
 }
 
-// LoadConfig reads configuration from file or environment variables.
-func LoadBackendServicesConfig(path string) (schema.IBackendServices, error) {
-	if path == "" {
-		return nil, nil
+// LoadBackendServicesConfig loads backend service URLs from configDir/services.json if
+// present, otherwise queries apiURL for live service discovery.
+// apiURL must be set explicitly when services.json is absent; no default is applied here.
+func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendServices, error) {
+	filePath := filepath.Join(configDir, "services.json")
+	if _, err := os.Stat(filePath); err == nil {
+		return servicediscovery.GetServices(v3.NewServiceDiscoveryFileV3(filePath))
 	}
 
-	fullPath := filepath.Join(path, "services.json")
-	services, err := servicediscovery.GetServices(
-		v2.NewServiceDiscoveryFileV2(fullPath),
-	)
+	if apiURL == "" {
+		return nil, fmt.Errorf("no service configuration: provide %s/services.json or set API_URL", configDir)
+	}
 
+	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
 	if err != nil {
 		return nil, err
 	}
-	return services, nil
+	// http.DefaultClient has no timeout by default; cap the startup discovery call.
+	http.DefaultClient = &http.Client{Timeout: 30 * time.Second}
+	return servicediscovery.GetServices(client)
 }

@@ -419,15 +419,15 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceVersion)
 
-		val, exist = enrichedLabels[helpersv1.KindMetadataKey]
+		val, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceType)
 
-		val, exist = enrichedLabels[helpersv1.NameMetadataKey]
+		val, exist = enrichedLabels[helpersv1.RelatedNameMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceName)
 
-		val, exist = enrichedLabels[helpersv1.NamespaceMetadataKey]
+		val, exist = enrichedLabels[helpersv1.RelatedNamespaceMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].k8sResourceNamespace)
 
