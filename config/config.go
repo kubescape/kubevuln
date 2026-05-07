@@ -36,28 +36,30 @@ type Config struct {
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
-	viper.AddConfigPath(path)
-	viper.SetConfigName("clusterData")
-	viper.SetConfigType("json")
+	// set key delimiter to :: to allow nested config when using JSON files
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
+	v.AddConfigPath(path)
+	v.SetConfigName("clusterData")
+	v.SetConfigType("json")
 
-	viper.SetDefault("listingURL", "https://grype.anchore.io/databases")
-	viper.SetDefault("maxImageSize", 512*1024*1024)
-	viper.SetDefault("maxSBOMSize", 20*1024*1024)
-	viper.SetDefault("scanConcurrency", 1)
-	viper.SetDefault("scanTimeout", 5*time.Minute)
-	viper.SetDefault("vexGeneration", false)
-	viper.SetDefault("namespace", "kubescape")
-	viper.SetDefault("scanEmbeddedSBOMs", false)
+	v.SetDefault("listingURL", "https://grype.anchore.io/databases")
+	v.SetDefault("maxImageSize", 512*1024*1024)
+	v.SetDefault("maxSBOMSize", 20*1024*1024)
+	v.SetDefault("scanConcurrency", 1)
+	v.SetDefault("scanTimeout", 5*time.Minute)
+	v.SetDefault("vexGeneration", false)
+	v.SetDefault("namespace", "kubescape")
+	v.SetDefault("scanEmbeddedSBOMs", false)
 
-	viper.AutomaticEnv()
+	v.AutomaticEnv()
 
-	err := viper.ReadInConfig()
+	err := v.ReadInConfig()
 	if err != nil {
 		return Config{}, err
 	}
 
 	var config Config
-	err = viper.Unmarshal(&config)
+	err = v.Unmarshal(&config)
 	return config, err
 }
 
