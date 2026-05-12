@@ -10,5 +10,10 @@
   "backendOpenAPI": "https://api.armosec.io/api",
   "eventReceiverRestURL": "https://report.armo.cloud",
   "eventReceiverWebsocketURL": "wss://report.armo.cloud",
-  "rootGatewayURL": "wss://ens.euprod1.cyberarmorsoft.com/v1/waitfornotification"       
+  "rootGatewayURL": "wss://ens.euprod1.cyberarmorsoft.com/v1/waitfornotification",
+  "proxyRegistryMap": {
+    "docker.io": "my-mirror.example.com",
+    "quay.io": "my-mirror.example.com",
+    "gcr.io": "my-mirror.example.com"
+  }
 }
