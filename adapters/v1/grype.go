@@ -192,6 +192,11 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 				logger.L().Info("restarting to release previous grype DB")
 				os.Exit(0)
 			}
+			if g.store != nil {
+				if err := g.store.Close(); err != nil {
+					logger.L().Ctx(ctx).Warning("failed to close previous grype DB", helpers.Error(err))
+				}
+			}
 			g.store = result.store
 			g.dbStatus = result.dbStatus
 			g.lastDbUpdate = now
