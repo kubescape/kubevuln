@@ -92,7 +92,12 @@ func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate f
 }
 
 func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
-	// start grype-offline-db container
+	return NewGrypeAdapterFixedDBWithMatchers(false)
+}
+
+// NewGrypeAdapterFixedDBWithMatchers is like NewGrypeAdapterFixedDB but lets
+// callers exercise the same matcher mode as production (see NewGrypeAdapter).
+func NewGrypeAdapterFixedDBWithMatchers(useDefaultMatchers bool) (*GrypeAdapter, func(), error) {
 	port, terminate, err := startGrypeOfflineDBContainer(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -104,6 +109,7 @@ func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
+		useDefaultMatchers: useDefaultMatchers,
 	}
 	return g, terminate, nil
 }
