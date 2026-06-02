@@ -12,7 +12,7 @@ require (
 	github.com/anchore/stereoscope v0.1.9
 	github.com/anchore/syft v1.32.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.694
+	github.com/armosec/armoapi-go v0.0.718
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/cenkalti/backoff/v5 v5.0.3
@@ -461,8 +461,3 @@ replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
-
-// Temporary: build against the local armoapi-go checkout for the new
-// scanfailure.ReasonImageSchemaUnsupported reason code. Revert once armoapi-go
-// is released and the require above is bumped to the tagged version.
-replace github.com/armosec/armoapi-go => ../armoapi-go
