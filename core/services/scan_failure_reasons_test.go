@@ -76,6 +76,26 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
+			name:     "MANIFEST_SCHEMA_UNSUPPORTED uppercase code",
+			err:      fmt.Errorf("creating SBOM: oci-registry: GET https://index.docker.io/v2/app/manifests/sha256:abc: MANIFEST_SCHEMA_UNSUPPORTED: manifest schema unsupported"),
+			expected: scanfailure.ReasonImageSchemaUnsupported,
+		},
+		{
+			name:     "unsupported schema lowercase phrase only",
+			err:      fmt.Errorf("oci-registry: failed to get image descriptor from registry: unsupported schema manifest version"),
+			expected: scanfailure.ReasonImageSchemaUnsupported,
+		},
+		{
+			name: "wrapped transport 400 with schema code falls through to string match",
+			err: fmt.Errorf("creating SBOM: %w", &transport.Error{
+				StatusCode: http.StatusBadRequest,
+				Errors: []transport.Diagnostic{
+					{Code: transport.ErrorCode("MANIFEST_SCHEMA_UNSUPPORTED"), Message: "manifest schema unsupported"},
+				},
+			}),
+			expected: scanfailure.ReasonImageSchemaUnsupported,
+		},
+		{
 			name:     "generic error falls back to SBOM generation failed",
 			err:      fmt.Errorf("failed to generate SBOM: some internal error"),
 			expected: scanfailure.ReasonSBOMGenerationFailed,

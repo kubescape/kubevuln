@@ -13,6 +13,7 @@ import (
 
 	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -26,7 +27,6 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
-	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
@@ -225,8 +225,17 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
+						reason := classifySBOMError(err)
 						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							classifySBOMError(err), err)
+							reason, err)
+						// surface a per-workload record for schema-unsupported images so UIs
+						// do not show the workload as silently unscanned
+						if s.storage && reason == scanfailure.ReasonImageSchemaUnsupported {
+							if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, statusUnsupportedSchema); stubErr != nil {
+								logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
+									helpers.String("imageSlug", slug))
+							}
+						}
 						continue // we need the SBOM
 					}
 					// store SBOM
@@ -426,8 +435,17 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
+					reason := classifySBOMError(err)
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						classifySBOMError(err), err)
+						reason, err)
+					// surface a per-workload record for schema-unsupported images so UIs
+					// do not show the workload as silently unscanned
+					if s.storage && reason == scanfailure.ReasonImageSchemaUnsupported {
+						if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, statusUnsupportedSchema); stubErr != nil {
+							logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
+								helpers.String("imageSlug", workload.ImageSlug))
+						}
+					}
 					return fmt.Errorf("creating SBOM: %w", err)
 				}
 				// store SBOM

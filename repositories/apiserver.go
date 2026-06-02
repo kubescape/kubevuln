@@ -557,6 +557,75 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	return nil
 }
 
+func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVESummaryStub")
+	defer span.End()
+
+	annotations, err := enrichSummaryManifestObjectAnnotations(ctx, nil)
+	if err != nil {
+		return err
+	}
+	annotations[helpersv1.StatusMetadataKey] = status
+	labels, err := enrichSummaryManifestObjectLabels(ctx, nil, false)
+	if err != nil {
+		return err
+	}
+	summaryK8sResourceName, err := GetCVESummaryK8sResourceName(ctx)
+	if err != nil {
+		return err
+	}
+	workloadNamespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	if err != nil {
+		return err
+	}
+	if workloadNamespace == "" {
+		// fallback to default namespace
+		workloadNamespace = a.Namespace
+	}
+
+	manifest := v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        summaryK8sResourceName,
+			Annotations: annotations,
+			Labels:      labels,
+		},
+	}
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			if getErr != nil {
+				return getErr
+			}
+			// refresh annotations/labels only, keep any existing Spec intact
+			mergeMaps(result.Annotations, manifest.Annotations)
+			mergeMaps(result.Labels, manifest.Labels)
+			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to update CVE summary stub in storage", helpers.Error(retryErr),
+				helpers.String("name", manifest.Name),
+				helpers.String("status", status))
+		} else {
+			logger.L().Debug("updated CVE summary stub in storage",
+				helpers.String("name", manifest.Name),
+				helpers.String("status", status))
+		}
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to store CVE summary stub in storage", helpers.Error(err),
+			helpers.String("name", manifest.Name),
+			helpers.String("status", status))
+	default:
+		logger.L().Debug("stored CVE summary stub in storage",
+			helpers.String("name", manifest.Name),
+			helpers.String("status", status))
+	}
+	return nil
+}
+
 func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreVEX")
 	defer span.End()

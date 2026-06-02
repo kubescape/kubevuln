@@ -31,6 +31,7 @@ type MemoryStore struct {
 	aps          map[apID]v1beta1.ContainerProfile
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
+	summaryStubs []string // statuses passed to StoreCVESummaryStub, recorded for tests
 	getError     bool
 	storeError   bool
 }
@@ -161,6 +162,24 @@ func (m *MemoryStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifes
 
 	m.cveManifests[id] = cve
 	return nil
+}
+
+// StoreCVESummaryStub records the status of a stub CVE summary in memory
+func (m *MemoryStore) StoreCVESummaryStub(ctx context.Context, status string) error {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreCVESummaryStub")
+	defer span.End()
+
+	if m.storeError {
+		return domain.ErrMockError
+	}
+
+	m.summaryStubs = append(m.summaryStubs, status)
+	return nil
+}
+
+// CVESummaryStubs returns the statuses passed to StoreCVESummaryStub, for tests
+func (m *MemoryStore) CVESummaryStubs() []string {
+	return m.summaryStubs
 }
 
 // GetSBOM returns a SBOM from an in-memory map

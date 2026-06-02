@@ -12,6 +12,11 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
+// statusUnsupportedSchema is the kubescape.io/status annotation value for a stub
+// summary. Parallels the helpersv1 statuses (incomplete, too-large), but kubevuln-owned
+// since the upstream vocabulary has no equivalent.
+const statusUnsupportedSchema = "unsupported-schema"
+
 // classifySBOMError inspects the error returned by CreateSBOM and returns
 // a reason code constant. Uses errors.Is for sentinel errors (Go 1.13+),
 // errors.As for typed errors, and falls back to string matching.
@@ -47,6 +52,11 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonImageAuthFailed
 	case strings.Contains(errStr, "MANIFEST_UNKNOWN"):
 		return scanfailure.ReasonImageNotFound
+	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
+	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
+	case strings.Contains(errStr, "MANIFEST_SCHEMA_UNSUPPORTED") ||
+		strings.Contains(errStr, "unsupported schema manifest"):
+		return scanfailure.ReasonImageSchemaUnsupported
 	}
 
 	return scanfailure.ReasonSBOMGenerationFailed
