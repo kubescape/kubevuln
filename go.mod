@@ -461,3 +461,8 @@ replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
+
+// Temporary: build against the local k8s-interface checkout for the new
+// helpersv1.UnsupportedSchema status. Revert once k8s-interface is released and
+// the require above is bumped to the tagged version.
+replace github.com/kubescape/k8s-interface => ../k8s-interface

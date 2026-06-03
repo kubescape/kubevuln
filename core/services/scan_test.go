@@ -468,7 +468,7 @@ func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 		ctx, err := s.ValidateScanCVE(ctx, workload)
 		require.NoError(t, err)
 		require.Error(t, s.ScanCVE(ctx))
-		assert.Equal(t, []string{statusUnsupportedSchema}, storageCVE.CVESummaryStubs())
+		assert.Equal(t, []string{helpersv1.UnsupportedSchema}, storageCVE.CVESummaryStubs())
 	})
 
 	t.Run("generic SBOM error does not write a stub summary", func(t *testing.T) {
