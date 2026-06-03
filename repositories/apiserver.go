@@ -557,6 +557,18 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	return nil
 }
 
+// summaryHasVulnerabilityData reports whether a summary already holds real scan results
+func summaryHasVulnerabilityData(s *v1beta1.VulnerabilityManifestSummary) bool {
+	sev := s.Spec.Severities
+	if sev.Critical.All > 0 || sev.High.All > 0 || sev.Medium.All > 0 ||
+		sev.Low.All > 0 || sev.Negligible.All > 0 || sev.Unknown.All > 0 {
+		return true
+	}
+	// a real summary records the workload/image scope even with zero findings
+	return s.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name != "" ||
+		s.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name != ""
+}
+
 func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.StoreCVESummaryStub")
 	defer span.End()
@@ -599,7 +611,11 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 			if getErr != nil {
 				return getErr
 			}
-			// refresh annotations/labels only, keep any existing Spec intact
+			// don't overwrite a real summary with a stub status
+			if summaryHasVulnerabilityData(result) {
+				return nil
+			}
+			// refresh annotations/labels only, keep any existing Spec
 			mergeMaps(result.Annotations, manifest.Annotations)
 			mergeMaps(result.Labels, manifest.Labels)
 			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
