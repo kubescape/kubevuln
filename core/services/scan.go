@@ -228,9 +228,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						reason := classifySBOMError(err)
 						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 							reason, err)
-						// surface a per-workload record for schema-unsupported images so UIs
-						// do not show the workload as silently unscanned
-						if s.storage && reason == scanfailure.ReasonImageSchemaUnsupported {
+						if s.storage &&
+							subWorkload.Wlid != "" &&
+							subWorkload.ContainerName != "" &&
+							reason == scanfailure.ReasonImageSchemaUnsupported {
 							if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
 								logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
 									helpers.String("imageSlug", slug))
@@ -439,8 +440,12 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 						reason, err)
 					// surface a per-workload record for schema-unsupported images so UIs
-					// do not show the workload as silently unscanned
-					if s.storage && reason == scanfailure.ReasonImageSchemaUnsupported {
+					// do not show the workload as silently unscanned; skip image-only
+					// scans where there is no workload to attach the stub to
+					if s.storage &&
+						workload.Wlid != "" &&
+						workload.ContainerName != "" &&
+						reason == scanfailure.ReasonImageSchemaUnsupported {
 						if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
 							logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
 								helpers.String("imageSlug", workload.ImageSlug))

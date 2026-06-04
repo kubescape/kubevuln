@@ -481,6 +481,21 @@ func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 		require.Error(t, s.ScanCVE(ctx))
 		assert.Empty(t, storageCVE.CVESummaryStubs())
 	})
+
+	t.Run("image-only scan (empty wlid) does not write a stub summary", func(t *testing.T) {
+		storageCVE := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(schemaUnsupportedSBOMAdapter{}, repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)), true, false, true, false, false)
+		ctx := context.TODO()
+		s.Ready(ctx)
+		imageOnly := domain.ScanCommand{
+			ImageSlug: "imageSlug",
+			ImageHash: imageHash,
+		}
+		ctx, err := s.ValidateScanCVE(ctx, imageOnly)
+		require.NoError(t, err)
+		require.Error(t, s.ScanCVE(ctx))
+		assert.Empty(t, storageCVE.CVESummaryStubs(), "image-only scan must not attempt a per-workload stub")
+	})
 }
 
 func fileContent(path string) []byte {
