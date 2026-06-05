@@ -347,6 +347,84 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	assert.Equal(t, relevant+1, relevant2)
 }
 
+func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
+		ContainerName: "local-path-provisioner",
+	}
+	stubCtx := func() context.Context {
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+		return context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	}
+
+	t.Run("fresh create writes a zeroed summary with the status annotation", func(t *testing.T) {
+		a := NewFakeAPIServerStorage("kubescape")
+		ctx := stubCtx()
+
+		require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+
+		ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+		require.NoError(t, err)
+		resourceName, err := GetCVESummaryK8sResourceName(ctx)
+		require.NoError(t, err)
+
+		got, err := a.StorageClient.VulnerabilityManifestSummaries(ns).Get(context.Background(), resourceName, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, helpersv1.Incomplete, got.Annotations[helpersv1.StatusMetadataKey])
+		assert.Equal(t, workload.Wlid, got.Annotations[helpersv1.WlidMetadataKey])
+		assert.Equal(t, "local-path-provisioner", got.Labels[helpersv1.RelatedNameMetadataKey])
+		assert.Equal(t, helpersv1.ContextMetadataKeyNonFiltered, got.Labels[helpersv1.ContextMetadataKey])
+		assert.False(t, summaryHasVulnerabilityData(got), "stub Spec should be empty")
+	})
+
+	t.Run("update over an existing stub refreshes the status, Spec stays empty", func(t *testing.T) {
+		a := NewFakeAPIServerStorage("kubescape")
+		ctx := stubCtx()
+
+		require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+		require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.TooLarge))
+
+		ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+		require.NoError(t, err)
+		resourceName, err := GetCVESummaryK8sResourceName(ctx)
+		require.NoError(t, err)
+
+		got, err := a.StorageClient.VulnerabilityManifestSummaries(ns).Get(context.Background(), resourceName, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, helpersv1.TooLarge, got.Annotations[helpersv1.StatusMetadataKey], "status should be refreshed")
+		assert.False(t, summaryHasVulnerabilityData(got))
+	})
+
+	t.Run("update over a real summary preserves Spec and does not clobber its status", func(t *testing.T) {
+		a := NewFakeAPIServerStorage("kubescape")
+		ctx := stubCtx()
+
+		ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+		require.NoError(t, err)
+		resourceName, err := GetCVESummaryK8sResourceName(ctx)
+		require.NoError(t, err)
+
+		// Seed a real summary (non-zero severities) directly in storage
+		real := &v1beta1.VulnerabilityManifestSummary{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			Spec: v1beta1.VulnerabilityManifestSummarySpec{
+				Severities: v1beta1.SeveritySummary{
+					High: v1beta1.VulnerabilityCounters{All: 3, Relevant: 1},
+				},
+			},
+		}
+		_, err = a.StorageClient.VulnerabilityManifestSummaries(ns).Create(context.Background(), real, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+
+		got, err := a.StorageClient.VulnerabilityManifestSummaries(ns).Get(context.Background(), resourceName, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), got.Spec.Severities.High.All, "real Spec must be preserved")
+		assert.NotEqual(t, helpersv1.Incomplete, got.Annotations[helpersv1.StatusMetadataKey], "real summary status must not be clobbered by the stub")
+	})
+}
+
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 	ctx := context.Background()
 

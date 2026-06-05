@@ -18,6 +18,7 @@ type CVERepository interface {
 	GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error)
 	StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error
 	StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error
+	StoreCVESummaryStub(ctx context.Context, status string) error
 	StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error
 }
 

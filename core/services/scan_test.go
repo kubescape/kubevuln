@@ -440,6 +440,64 @@ func TestScanService_ScanCVE(t *testing.T) {
 	}
 }
 
+// schemaUnsupportedSBOMAdapter is a mock SBOMCreator that always fails with a
+// registry schema-unsupported error, used to exercise the per-workload stub summary path.
+type schemaUnsupportedSBOMAdapter struct{}
+
+func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	return domain.SBOM{}, fmt.Errorf("creating SBOM: oci-registry: failed to get image descriptor from registry: MANIFEST_SCHEMA_UNSUPPORTED: manifest schema unsupported")
+}
+
+func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
+
+func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
+	imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+	workload := domain.ScanCommand{
+		ImageSlug:     "imageSlug",
+		ContainerName: "kube-proxy",
+		ImageHash:     imageHash,
+		Wlid:          wlid,
+	}
+
+	t.Run("schema-unsupported error writes a stub summary", func(t *testing.T) {
+		storageCVE := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(schemaUnsupportedSBOMAdapter{}, repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)), true, false, true, false, false)
+		ctx := context.TODO()
+		s.Ready(ctx)
+		ctx, err := s.ValidateScanCVE(ctx, workload)
+		require.NoError(t, err)
+		require.Error(t, s.ScanCVE(ctx))
+		assert.Equal(t, []string{helpersv1.UnsupportedSchema}, storageCVE.CVESummaryStubs())
+	})
+
+	t.Run("generic SBOM error does not write a stub summary", func(t *testing.T) {
+		storageCVE := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(adapters.NewMockSBOMAdapter(true, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)), true, false, true, false, false)
+		ctx := context.TODO()
+		s.Ready(ctx)
+		ctx, err := s.ValidateScanCVE(ctx, workload)
+		require.NoError(t, err)
+		require.Error(t, s.ScanCVE(ctx))
+		assert.Empty(t, storageCVE.CVESummaryStubs())
+	})
+
+	t.Run("image-only scan (empty wlid) does not write a stub summary", func(t *testing.T) {
+		storageCVE := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(schemaUnsupportedSBOMAdapter{}, repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)), true, false, true, false, false)
+		ctx := context.TODO()
+		s.Ready(ctx)
+		imageOnly := domain.ScanCommand{
+			ImageSlug: "imageSlug",
+			ImageHash: imageHash,
+		}
+		ctx, err := s.ValidateScanCVE(ctx, imageOnly)
+		require.NoError(t, err)
+		require.Error(t, s.ScanCVE(ctx))
+		assert.Empty(t, storageCVE.CVESummaryStubs(), "image-only scan must not attempt a per-workload stub")
+	})
+}
+
 func fileContent(path string) []byte {
 	b, _ := os.ReadFile(path)
 	return b

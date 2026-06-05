@@ -63,6 +63,12 @@ func (b BrokenStore) StoreCVESummary(ctx context.Context, _ domain.CVEManifest, 
 	return domain.ErrExpectedError
 }
 
+func (b BrokenStore) StoreCVESummaryStub(ctx context.Context, _ string) error {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreCVESummaryStub")
+	defer span.End()
+	return domain.ErrExpectedError
+}
+
 func (b BrokenStore) StoreVEX(ctx context.Context, _ domain.CVEManifest, _ domain.CVEManifest, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "BrokenStore.StoreVEX")
 	defer span.End()

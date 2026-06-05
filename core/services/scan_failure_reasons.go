@@ -47,6 +47,11 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonImageAuthFailed
 	case strings.Contains(errStr, "MANIFEST_UNKNOWN"):
 		return scanfailure.ReasonImageNotFound
+	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
+	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
+	case strings.Contains(errStr, "MANIFEST_SCHEMA_UNSUPPORTED") ||
+		strings.Contains(errStr, "unsupported schema manifest"):
+		return scanfailure.ReasonImageSchemaUnsupported
 	}
 
 	return scanfailure.ReasonSBOMGenerationFailed
