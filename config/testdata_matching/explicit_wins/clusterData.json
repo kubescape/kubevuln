@@ -1,0 +1,6 @@
+{
+  "accountID": "12345",
+  "clusterName": "clusterName",
+  "useDefaultMatchers": true,
+  "cveMatchingMode": "on"
+}

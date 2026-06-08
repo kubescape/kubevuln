@@ -84,7 +84,7 @@ func main() {
 	} else {
 		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 	}
-	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.UseDefaultMatchers)
+	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.CVEMatchingMode, c.TrustedVendors)
 
 	// SecurityException CRD integration requires storage and riskAcceptance RBAC
 	var seRepo ports.SecurityExceptionRepository

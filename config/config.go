@@ -13,6 +13,28 @@ import (
 	"github.com/spf13/viper"
 )
 
+// CVEMatchingMode controls how kubevuln configures Grype's CPE-based matching.
+type CVEMatchingMode string
+
+const (
+	// CVEMatchingOff disables CPE matching everywhere (Grype defaults).
+	// Equivalent to the legacy useDefaultMatchers: true.
+	CVEMatchingOff CVEMatchingMode = "off"
+	// CVEMatchingOn enables CPE matching everywhere.
+	// Equivalent to the legacy useDefaultMatchers: false.
+	CVEMatchingOn CVEMatchingMode = "on"
+	// CVEMatchingAdaptive enables CPE matching everywhere except for images
+	// from trusted vendors (identified via Grype's distro detection), where
+	// Grype defaults apply for that scan. This is the default mode.
+	CVEMatchingAdaptive CVEMatchingMode = "adaptive"
+)
+
+// defaultTrustedVendors are the distro identifiers (as recognised by Grype's
+// distro detection) of vendors that maintain authoritative vulnerability feeds
+// already integrated into the Grype DB. For these images CPE name-fuzzing only
+// adds false positives, so adaptive mode falls back to Grype defaults.
+var defaultTrustedVendors = []string{"echo", "chainguard", "wolfi", "minimos"}
+
 type Config struct {
 	AccountID          string            `mapstructure:"accountID"`
 	ClusterName        string            `mapstructure:"clusterName"`
@@ -31,6 +53,8 @@ type Config struct {
 	Storage            bool              `mapstructure:"storage"`
 	StoreFilteredSbom  bool              `mapstructure:"storeFilteredSbom"`
 	UseDefaultMatchers bool              `mapstructure:"useDefaultMatchers"`
+	CVEMatchingMode    CVEMatchingMode   `mapstructure:"cveMatchingMode"`
+	TrustedVendors     []string          `mapstructure:"trustedVendors"`
 	VexGeneration      bool              `mapstructure:"vexGeneration"`
 }
 
@@ -50,6 +74,10 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("vexGeneration", false)
 	v.SetDefault("namespace", "kubescape")
 	v.SetDefault("scanEmbeddedSBOMs", false)
+	// NB: cveMatchingMode is intentionally NOT given a viper default. viper
+	// reports SetDefault keys as "set" via IsSet, which would defeat the
+	// presence detection used below for backward compatibility. The default
+	// (adaptive) is applied in code instead.
 
 	v.AutomaticEnv()
 
@@ -59,8 +87,40 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	var config Config
-	err = v.Unmarshal(&config)
-	return config, err
+	if err = v.Unmarshal(&config); err != nil {
+		return Config{}, err
+	}
+
+	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
+	// always wins. Backward compatibility: when cveMatchingMode is absent but
+	// the legacy useDefaultMatchers boolean is set, derive the mode from it
+	// (true -> off, false -> on). With neither set, the default is adaptive.
+	switch {
+	case v.IsSet("cveMatchingMode"):
+		// keep config.CVEMatchingMode as unmarshalled; validated below
+	case v.IsSet("useDefaultMatchers"):
+		if config.UseDefaultMatchers {
+			config.CVEMatchingMode = CVEMatchingOff
+		} else {
+			config.CVEMatchingMode = CVEMatchingOn
+		}
+	default:
+		config.CVEMatchingMode = CVEMatchingAdaptive
+	}
+
+	switch config.CVEMatchingMode {
+	case CVEMatchingOff, CVEMatchingOn, CVEMatchingAdaptive:
+		// valid
+	default:
+		return Config{}, fmt.Errorf("invalid cveMatchingMode %q: must be one of %q, %q, %q",
+			config.CVEMatchingMode, CVEMatchingOff, CVEMatchingOn, CVEMatchingAdaptive)
+	}
+
+	if len(config.TrustedVendors) == 0 {
+		config.TrustedVendors = defaultTrustedVendors
+	}
+
+	return config, nil
 }
 
 // LoadBackendServicesConfig loads backend service URLs from configDir/services.json if
