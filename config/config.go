@@ -122,7 +122,8 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	if len(config.TrustedVendors) == 0 {
-		config.TrustedVendors = defaultTrustedVendors
+		// copy to avoid aliasing the package-level default slice
+		config.TrustedVendors = append([]string{}, defaultTrustedVendors...)
 	}
 
 	return config, nil

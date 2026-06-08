@@ -447,7 +447,7 @@ For clusters with > 500 pods:
   "scanTimeout": "15m",
   "maxImageSize": 2147483648,
   "maxSBOMSize": 52428800,
-  "useDefaultMatchers": true,
+  "cveMatchingMode": "off",
   "vexGeneration": true,
   "partialRelevancy": true
 }
