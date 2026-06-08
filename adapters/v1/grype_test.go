@@ -78,6 +78,10 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			require.NoError(t, err)
 			ja := jsonassert.New(t)
 			ja.Assert(string(content), string(fileContent(tt.format)))
+			// observability: adapter runs in CVEMatchingOn here (non-trusted scan),
+			// so the mode is annotated but the vendor-trusted flag is not.
+			assert.Equal(t, string(config.CVEMatchingOn), got.Annotations[CVEMatchingModeMetadataKey])
+			assert.NotContains(t, got.Annotations, VendorTrustedMatchMetadataKey)
 		})
 	}
 }
@@ -108,6 +112,7 @@ func Test_grypeAdapter_resolveUseDefaultMatchers(t *testing.T) {
 		{name: "adaptive + trusted distro -> default matchers", mode: config.CVEMatchingAdaptive, dist: echoDistro, want: true},
 		{name: "adaptive + untrusted distro -> CPE matchers", mode: config.CVEMatchingAdaptive, dist: ubuntuDistro, want: false},
 		{name: "adaptive + nil distro -> CPE matchers", mode: config.CVEMatchingAdaptive, dist: nil, want: false},
+		{name: "unknown mode falls back to CPE matchers", mode: config.CVEMatchingMode("bogus"), dist: echoDistro, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

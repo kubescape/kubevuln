@@ -361,7 +361,8 @@ func (g *GrypeAdapter) resolveUseDefaultMatchers(dist *distro.Distro) bool {
 	case config.CVEMatchingAdaptive:
 		return dist != nil && g.trustedVendors[dist.Type]
 	default:
-		// unreachable: config validation rejects unknown modes
+		// LoadConfig rejects unknown modes, but NewGrypeAdapter is exported and
+		// takes a raw mode; fall back to CPE-on (the safe, no-false-negative choice).
 		return false
 	}
 }

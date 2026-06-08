@@ -54,6 +54,26 @@ func TestLoadConfigCVEMatchingMode(t *testing.T) {
 	}
 }
 
+// TestLoadConfigCVEMatchingModeEnv verifies env-var overrides are honored and
+// do not crash LoadConfig (AutomaticEnv values are not unmarshalled, so the
+// resolution must read through viper's getters).
+func TestLoadConfigCVEMatchingModeEnv(t *testing.T) {
+	t.Run("mode via env on empty-key config", func(t *testing.T) {
+		viper.Reset()
+		t.Setenv("CVEMATCHINGMODE", "on")
+		c, err := LoadConfig("testdata")
+		assert.NoError(t, err)
+		assert.Equal(t, CVEMatchingOn, c.CVEMatchingMode)
+	})
+	t.Run("legacy bool via env maps to off", func(t *testing.T) {
+		viper.Reset()
+		t.Setenv("USEDEFAULTMATCHERS", "true")
+		c, err := LoadConfig("testdata")
+		assert.NoError(t, err)
+		assert.Equal(t, CVEMatchingOff, c.CVEMatchingMode)
+	})
+}
+
 // TestLoadConfigTrustedVendors covers the trusted-vendor default and override.
 func TestLoadConfigTrustedVendors(t *testing.T) {
 	viper.Reset()

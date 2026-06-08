@@ -52,9 +52,9 @@ type Config struct {
 	RiskAcceptance     bool              `mapstructure:"riskAcceptance"`
 	Storage            bool              `mapstructure:"storage"`
 	StoreFilteredSbom  bool              `mapstructure:"storeFilteredSbom"`
-	UseDefaultMatchers bool              `mapstructure:"useDefaultMatchers"`
+	UseDefaultMatchers bool              `mapstructure:"useDefaultMatchers"` // Deprecated: use CVEMatchingMode. Kept for backward compatibility (true -> off, false -> on).
 	CVEMatchingMode    CVEMatchingMode   `mapstructure:"cveMatchingMode"`
-	TrustedVendors     []string          `mapstructure:"trustedVendors"`
+	TrustedVendors     []string          `mapstructure:"trustedVendors"` // distro slugs trusted in adaptive mode; empty/unset reverts to defaultTrustedVendors
 	VexGeneration      bool              `mapstructure:"vexGeneration"`
 }
 
@@ -95,11 +95,16 @@ func LoadConfig(path string) (Config, error) {
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
 	// the legacy useDefaultMatchers boolean is set, derive the mode from it
 	// (true -> off, false -> on). With neither set, the default is adaptive.
+	// Read through viper's getters rather than the unmarshalled struct: with
+	// AutomaticEnv, a value supplied purely via environment variable is visible
+	// to IsSet/GetString but is NOT populated by Unmarshal, so relying on the
+	// struct field here would drop env overrides (and, for the mode, fail
+	// validation below).
 	switch {
 	case v.IsSet("cveMatchingMode"):
-		// keep config.CVEMatchingMode as unmarshalled; validated below
+		config.CVEMatchingMode = CVEMatchingMode(v.GetString("cveMatchingMode"))
 	case v.IsSet("useDefaultMatchers"):
-		if config.UseDefaultMatchers {
+		if v.GetBool("useDefaultMatchers") {
 			config.CVEMatchingMode = CVEMatchingOff
 		} else {
 			config.CVEMatchingMode = CVEMatchingOn
