@@ -10,6 +10,7 @@ This document provides comprehensive documentation for configuring Kubevuln.
 - [Configuration Methods](#configuration-methods)
 - [Environment Variables](#environment-variables)
 - [Configuration File Reference](#configuration-file-reference)
+- [CVE Matching Mode](#cve-matching-mode)
 - [Backend Services Configuration](#backend-services-configuration)
 - [Credentials Configuration](#credentials-configuration)
 - [Configuration Examples](#configuration-examples)
@@ -176,7 +177,9 @@ The main configuration file. All options can be overridden via environment varia
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `listingURL` | string | `https://grype.anchore.io/databases` | Grype vulnerability database URL |
-| `useDefaultMatchers` | bool | `false` | Use Grype's default matchers (less aggressive CPE matching) |
+| `cveMatchingMode` | string | `adaptive` | CPE matching policy: `off` (Grype defaults everywhere), `on` (aggressive CPE matching everywhere), or `adaptive` (CPE matching everywhere except trusted-vendor images, which fall back to Grype defaults). See [CVE Matching Mode](#cve-matching-mode). |
+| `trustedVendors` | []string | `["echo","chainguard","wolfi","minimos"]` | Distro identifiers (as recognised by Grype's distro detection) treated as trusted vendors in `adaptive` mode. Override to add/remove vendors without a release. |
+| `useDefaultMatchers` | bool | `false` | **Deprecated**, kept for backward compatibility. Maps to `cveMatchingMode`: `true` -> `off`, `false` -> `on`. An explicit `cveMatchingMode` always wins. |
 
 #### Storage Options
 
@@ -261,6 +264,16 @@ The main configuration file. All options can be overridden via environment varia
       "type": "boolean",
       "default": false
     },
+    "cveMatchingMode": {
+      "type": "string",
+      "enum": ["off", "on", "adaptive"],
+      "default": "adaptive"
+    },
+    "trustedVendors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["echo", "chainguard", "wolfi", "minimos"]
+    },
     "useDefaultMatchers": {
       "type": "boolean",
       "default": false
@@ -272,6 +285,45 @@ The main configuration file. All options can be overridden via environment varia
   }
 }
 ```
+
+---
+
+## CVE Matching Mode
+
+Kubevuln uses Grype as its scanning engine. Grype connects packages to CVEs
+through two mechanisms: ecosystem/feed-based matching and CPE name-fuzzing.
+CPE matching avoids false negatives but, for images whose vendor maintains an
+authoritative vulnerability feed already in the Grype DB, it only adds false
+positives. `cveMatchingMode` controls this trade-off.
+
+| Mode | Behavior |
+|------|----------|
+| `off` | Grype defaults everywhere (CPE matching disabled). Equivalent to the legacy `useDefaultMatchers: true`. |
+| `on` | CPE matching enabled everywhere (most aggressive). Equivalent to the legacy `useDefaultMatchers: false`. |
+| `adaptive` **(default)** | CPE matching enabled, except when the scanned image's distro is a trusted vendor, in which case Grype defaults apply for that scan. |
+
+### Trusted vendors
+
+In `adaptive` mode, the per-scan decision reuses Grype's own distro detection:
+Syft parses the image's `/etc/os-release` into the SBOM, and Grype maps the
+release ID to a distro type. When that type is in `trustedVendors`, CPE
+matching is disabled for that scan and matching relies on the vendor's
+authoritative feed. The default set is `echo` (Echo.ai), `chainguard` and
+`wolfi` (Chainguard), and `minimos` (Minimus).
+
+### Backward compatibility
+
+The legacy `useDefaultMatchers` boolean is still honored. When
+`cveMatchingMode` is not set explicitly, the boolean is mapped to a mode
+(`true` -> `off`, `false` -> `on`). An explicit `cveMatchingMode` always wins.
+If neither is set, the mode defaults to `adaptive`.
+
+### Observability
+
+When `adaptive` mode downgrades a scan to a trusted vendor's feed, the CVE
+manifest is annotated with `kubescape.io/cve-matching-mode` and
+`kubescape.io/vendor-trusted-match`, so the backend/UI can explain why two
+similar images may show different vulnerability counts.
 
 ---
 
@@ -395,7 +447,7 @@ For clusters with > 500 pods:
   "scanTimeout": "15m",
   "maxImageSize": 2147483648,
   "maxSBOMSize": 52428800,
-  "useDefaultMatchers": true,
+  "cveMatchingMode": "off",
   "vexGeneration": true,
   "partialRelevancy": true
 }
@@ -499,7 +551,7 @@ Some configuration is validated at runtime:
 | Setting | Impact |
 |---------|--------|
 | `scanConcurrency` | Higher = more CPU usage |
-| `useDefaultMatchers` | `true` = less CPU (fewer matches) |
+| `cveMatchingMode` | `off`/`adaptive` = less CPU than `on` (fewer CPE matches) |
 
 ### Disk Usage
 

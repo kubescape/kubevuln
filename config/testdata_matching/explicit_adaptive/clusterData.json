@@ -1,0 +1,6 @@
+{
+  "accountID": "12345",
+  "clusterName": "clusterName",
+  "cveMatchingMode": "adaptive",
+  "trustedVendors": ["echo", "acme"]
+}

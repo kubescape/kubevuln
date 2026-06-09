@@ -30,6 +30,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -38,22 +39,34 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+// Observability annotation keys for CVE manifests. They follow the same
+// kubescape.io/<kebab> convention as the shared keys in k8s-interface, but are
+// kubevuln-local since they describe a kubevuln scanning decision.
+const (
+	// CVEMatchingModeMetadataKey records the configured matching mode (off/on/adaptive).
+	CVEMatchingModeMetadataKey = "kubescape.io/cve-matching-mode"
+	// VendorTrustedMatchMetadataKey records the trusted vendor distro when adaptive
+	// mode downgraded a scan to that vendor's authoritative feed.
+	VendorTrustedMatchMetadataKey = "kubescape.io/vendor-trusted-match"
+)
+
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	lastDbUpdate       time.Time
-	dbStatus           *vulnerability.ProviderStatus
-	store              vulnerability.Provider
-	distCfg            distribution.Config
-	installCfg         installation.Config
-	mu                 sync.RWMutex
-	useDefaultMatchers bool
+	lastDbUpdate   time.Time
+	dbStatus       *vulnerability.ProviderStatus
+	store          vulnerability.Provider
+	distCfg        distribution.Config
+	installCfg     installation.Config
+	mu             sync.RWMutex
+	matchingMode   config.CVEMatchingMode
+	trustedVendors map[distro.Type]bool
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
-func NewGrypeAdapter(listingURL string, useDefaultMatchers bool) *GrypeAdapter {
+func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, trustedVendors []string) *GrypeAdapter {
 	g := &GrypeAdapter{
 		distCfg: distribution.Config{
 			LatestURL: listingURL,
@@ -61,9 +74,19 @@ func NewGrypeAdapter(listingURL string, useDefaultMatchers bool) *GrypeAdapter {
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype", "db"),
 		},
-		useDefaultMatchers: useDefaultMatchers,
+		matchingMode:   matchingMode,
+		trustedVendors: buildTrustedVendorSet(trustedVendors),
 	}
 	return g
+}
+
+// buildTrustedVendorSet maps configured vendor slugs to Grype distro types.
+func buildTrustedVendorSet(vendors []string) map[distro.Type]bool {
+	set := make(map[distro.Type]bool, len(vendors))
+	for _, v := range vendors {
+		set[distro.Type(v)] = true
+	}
+	return set
 }
 
 func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate func(), err error) {
@@ -92,12 +115,12 @@ func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate f
 }
 
 func NewGrypeAdapterFixedDB() (*GrypeAdapter, func(), error) {
-	return NewGrypeAdapterFixedDBWithMatchers(false)
+	return NewGrypeAdapterFixedDBWithMatchers(config.CVEMatchingOn, nil)
 }
 
 // NewGrypeAdapterFixedDBWithMatchers is like NewGrypeAdapterFixedDB but lets
 // callers exercise the same matcher mode as production (see NewGrypeAdapter).
-func NewGrypeAdapterFixedDBWithMatchers(useDefaultMatchers bool) (*GrypeAdapter, func(), error) {
+func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, trustedVendors []string) (*GrypeAdapter, func(), error) {
 	port, terminate, err := startGrypeOfflineDBContainer(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -109,7 +132,8 @@ func NewGrypeAdapterFixedDBWithMatchers(useDefaultMatchers bool) (*GrypeAdapter,
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
-		useDefaultMatchers: useDefaultMatchers,
+		matchingMode:   matchingMode,
+		trustedVendors: buildTrustedVendorSet(trustedVendors),
 	}
 	return g, terminate, nil
 }
@@ -267,9 +291,10 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Source: &s.Source,
 		Distro: dist,
 	}
+	useDefaultMatchers := g.resolveUseDefaultMatchers(dist)
 	vulnMatcher := grype.VulnerabilityMatcher{
 		VulnerabilityProvider: g.store,
-		Matchers:              getMatchers(g.useDefaultMatchers),
+		Matchers:              getMatchers(useDefaultMatchers),
 		NormalizeByCVE:        true,
 	}
 
@@ -301,6 +326,14 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	}
 	sbom.Annotations[helpersv1.ScanIdMetadataKey] = scanID
 
+	// record the matching mode so backend/UI can explain count differences;
+	// when adaptive mode actually downgraded this scan to a trusted vendor's
+	// feed, flag the matched vendor distro as well.
+	sbom.Annotations[CVEMatchingModeMetadataKey] = string(g.matchingMode)
+	if g.matchingMode == config.CVEMatchingAdaptive && useDefaultMatchers && dist != nil {
+		sbom.Annotations[VendorTrustedMatchMetadataKey] = dist.Type.String()
+	}
+
 	logger.L().Debug("returning CVE manifest",
 		helpers.String("name", sbom.Name),
 		helpers.Int("vulnerabilities", len(vulnerabilityResults.Matches)))
@@ -313,6 +346,25 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 		Labels:             sbom.Labels,
 		Content:            vulnerabilityResults,
 	}, nil
+}
+
+// resolveUseDefaultMatchers decides, for a single scan, whether to use Grype's
+// default (CPE-off) matcher configuration. In adaptive mode this is true only
+// when the scanned image's distro is a trusted vendor, so CPE name-fuzzing is
+// dropped in favour of the vendor's authoritative feed.
+func (g *GrypeAdapter) resolveUseDefaultMatchers(dist *distro.Distro) bool {
+	switch g.matchingMode {
+	case config.CVEMatchingOff:
+		return true
+	case config.CVEMatchingOn:
+		return false
+	case config.CVEMatchingAdaptive:
+		return dist != nil && g.trustedVendors[dist.Type]
+	default:
+		// LoadConfig rejects unknown modes, but NewGrypeAdapter is exported and
+		// takes a raw mode; fall back to CPE-on (the safe, no-false-negative choice).
+		return false
+	}
 }
 
 func getMatchers(useDefaultMatchers bool) []match.Matcher {
@@ -371,8 +423,6 @@ func checkDBDirWritable(dir string) error {
 // Version returns Grype's version which is used to tag CVE manifests
 func (g *GrypeAdapter) Version() string {
 	v := tools.PackageVersion("github.com/anchore/grype")
-	if g.useDefaultMatchers {
-		v += "-default-matchers"
-	}
+	v += "-matching-" + string(g.matchingMode)
 	return v
 }

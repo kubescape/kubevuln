@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/distro"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -76,12 +78,46 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			require.NoError(t, err)
 			ja := jsonassert.New(t)
 			ja.Assert(string(content), string(fileContent(tt.format)))
+			// observability: adapter runs in CVEMatchingOn here (non-trusted scan),
+			// so the mode is annotated but the vendor-trusted flag is not.
+			assert.Equal(t, string(config.CVEMatchingOn), got.Annotations[CVEMatchingModeMetadataKey])
+			assert.NotContains(t, got.Annotations, VendorTrustedMatchMetadataKey)
 		})
 	}
 }
 
 func Test_grypeAdapter_Version(t *testing.T) {
-	g := NewGrypeAdapter("", false)
+	g := NewGrypeAdapter("", config.CVEMatchingOn, nil)
 	version := g.Version()
 	assert.NotEqual(t, version, "")
+}
+
+func Test_grypeAdapter_resolveUseDefaultMatchers(t *testing.T) {
+	trusted := []string{"echo", "chainguard", "wolfi", "minimos"}
+	echoDistro := &distro.Distro{Type: distro.Echo}
+	ubuntuDistro := &distro.Distro{Type: distro.Ubuntu}
+
+	tests := []struct {
+		name string
+		mode config.CVEMatchingMode
+		dist *distro.Distro
+		want bool
+	}{
+		{name: "off + trusted distro -> default matchers", mode: config.CVEMatchingOff, dist: echoDistro, want: true},
+		{name: "off + untrusted distro -> default matchers", mode: config.CVEMatchingOff, dist: ubuntuDistro, want: true},
+		{name: "off + nil distro -> default matchers", mode: config.CVEMatchingOff, dist: nil, want: true},
+		{name: "on + trusted distro -> CPE matchers", mode: config.CVEMatchingOn, dist: echoDistro, want: false},
+		{name: "on + untrusted distro -> CPE matchers", mode: config.CVEMatchingOn, dist: ubuntuDistro, want: false},
+		{name: "on + nil distro -> CPE matchers", mode: config.CVEMatchingOn, dist: nil, want: false},
+		{name: "adaptive + trusted distro -> default matchers", mode: config.CVEMatchingAdaptive, dist: echoDistro, want: true},
+		{name: "adaptive + untrusted distro -> CPE matchers", mode: config.CVEMatchingAdaptive, dist: ubuntuDistro, want: false},
+		{name: "adaptive + nil distro -> CPE matchers", mode: config.CVEMatchingAdaptive, dist: nil, want: false},
+		{name: "unknown mode falls back to CPE matchers", mode: config.CVEMatchingMode("bogus"), dist: echoDistro, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &GrypeAdapter{matchingMode: tt.mode, trustedVendors: buildTrustedVendorSet(trusted)}
+			assert.Equal(t, tt.want, g.resolveUseDefaultMatchers(tt.dist))
+		})
+	}
 }
