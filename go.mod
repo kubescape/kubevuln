@@ -28,7 +28,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kinbiko/jsonassert v1.2.0
 	github.com/kubescape/backend v0.0.40
-	github.com/kubescape/go-logger v0.0.28
+	github.com/kubescape/go-logger v0.0.33
 	github.com/kubescape/k8s-interface v0.0.214
 	github.com/kubescape/storage v0.0.258
 	github.com/opencontainers/go-digest v1.0.0
