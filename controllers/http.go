@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -61,10 +62,11 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
+	bgCtx := context.WithoutCancel(ctx)
 	h.workerPool.Submit(func() {
-		err = h.scanService.GenerateSBOM(ctx)
+		err = h.scanService.GenerateSBOM(bgCtx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error - GenerateSBOM", helpers.Error(err),
+			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 				helpers.String("imageHash", newScan.ImageHash))
@@ -117,16 +119,17 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
+	bgCtx := context.WithoutCancel(ctx)
 	h.workerPool.Submit(func() {
-		err = h.scanService.ScanCP(ctx)
+		err = h.scanService.ScanCP(bgCtx)
 		if err != nil {
 			if errors.Is(err, domain.ErrPartialContainerProfile) {
-				logger.L().Ctx(ctx).Warning("service warning - ScanCP", helpers.Error(err),
+				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			} else {
-				logger.L().Ctx(ctx).Error("service error - ScanCP", helpers.Error(err),
+				logger.L().Ctx(bgCtx).Error("service error - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
@@ -163,10 +166,11 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
+	bgCtx := context.WithoutCancel(ctx)
 	h.workerPool.Submit(func() {
-		err = h.scanService.ScanCVE(ctx)
+		err = h.scanService.ScanCVE(bgCtx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error - ScanCVE", helpers.Error(err),
+			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
@@ -232,10 +236,11 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
+	bgCtx := context.WithoutCancel(ctx)
 	h.workerPool.Submit(func() {
-		err = h.scanService.ScanRegistry(ctx)
+		err = h.scanService.ScanRegistry(bgCtx)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("service error - ScanRegistry", helpers.Error(err),
+			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
 				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 				helpers.String("imageHash", newScan.ImageHash))

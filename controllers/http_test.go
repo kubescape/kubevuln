@@ -1,15 +1,19 @@
 package controllers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -279,3 +283,136 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		assert.Equal(t, tests[i].ParentJobID, scanComm.ParentJobID)
 	}
 }
+
+type contextSpyScanService struct {
+	lastGenerateSBOMCtx context.Context
+	lastScanCPCtx       context.Context
+	lastScanCVECtx      context.Context
+	lastScanRegistryCtx context.Context
+	generateSBOMCh      chan struct{}
+	scanCPCh            chan struct{}
+	scanCVECh           chan struct{}
+	scanRegistryCh      chan struct{}
+}
+
+var _ ports.ScanService = (*contextSpyScanService)(nil)
+
+func (s *contextSpyScanService) GenerateSBOM(ctx context.Context) error {
+	s.lastGenerateSBOMCtx = ctx
+	close(s.generateSBOMCh)
+	return nil
+}
+
+func (s *contextSpyScanService) Ready(ctx context.Context) bool {
+	return true
+}
+
+func (s *contextSpyScanService) ScanCP(ctx context.Context) error {
+	s.lastScanCPCtx = ctx
+	close(s.scanCPCh)
+	return nil
+}
+
+func (s *contextSpyScanService) ScanCVE(ctx context.Context) error {
+	s.lastScanCVECtx = ctx
+	close(s.scanCVECh)
+	return nil
+}
+
+func (s *contextSpyScanService) ScanRegistry(ctx context.Context) error {
+	s.lastScanRegistryCtx = ctx
+	close(s.scanRegistryCh)
+	return nil
+}
+
+func (s *contextSpyScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func (s *contextSpyScanService) ValidateScanCP(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func (s *contextSpyScanService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func (s *contextSpyScanService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
+	spy := &contextSpyScanService{
+		generateSBOMCh: make(chan struct{}),
+		scanCPCh:       make(chan struct{}),
+		scanCVECh:      make(chan struct{}),
+		scanRegistryCh: make(chan struct{}),
+	}
+
+	c := HTTPController{
+		scanService: spy,
+		workerPool:  workerpool.New(4),
+	}
+	defer c.Shutdown()
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.POST("/v1/scanCP", c.ScanCP)
+	router.POST("/v1/scanCVE", c.ScanCVE)
+	router.POST("/v1/scanRegistryImage", c.ScanRegistry)
+
+	// Helper function to send requests
+	sendRequest := func(path string) {
+		payload := `{
+			"imageTag": "k8s.gcr.io/kube-proxy:v1.24.3",
+			"wlid": "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+			"containerName": "kube-proxy",
+			"imageHash": "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+			"args": {
+				"name": "daemonset-kube-proxy",
+				"namespace": "kube-system"
+			}
+		}`
+		req, _ := http.NewRequest("POST", path, strings.NewReader(payload))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// 1. GenerateSBOM
+	sendRequest("/v1/generateSBOM")
+	select {
+	case <-spy.generateSBOMCh:
+		assert.NoError(t, spy.lastGenerateSBOMCtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("GenerateSBOM worker was not executed in time")
+	}
+
+	// 2. ScanCP
+	sendRequest("/v1/scanCP")
+	select {
+	case <-spy.scanCPCh:
+		assert.NoError(t, spy.lastScanCPCtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("ScanCP worker was not executed in time")
+	}
+
+	// 3. ScanCVE
+	sendRequest("/v1/scanCVE")
+	select {
+	case <-spy.scanCVECh:
+		assert.NoError(t, spy.lastScanCVECtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("ScanCVE worker was not executed in time")
+	}
+
+	// 4. ScanRegistry
+	sendRequest("/v1/scanRegistryImage")
+	select {
+	case <-spy.scanRegistryCh:
+		assert.NoError(t, spy.lastScanRegistryCtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("ScanRegistry worker was not executed in time")
+	}
+}
+
