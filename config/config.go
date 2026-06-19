@@ -141,13 +141,13 @@ type clusterDataBackendServicesConfig struct {
 	ReportReceiverURL    string `json:"reportReceiverURL"`
 }
 
-func normalizeServiceURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func normalizeServiceURL(input string) string {
+	normalized := strings.TrimSpace(input)
+	if normalized == "" {
 		return ""
 	}
 
-	parsed, err := url.Parse(raw)
+	parsed, err := url.Parse(normalized)
 	if err == nil && parsed.Host != "" {
 		scheme := parsed.Scheme
 		if scheme == "" {
@@ -156,17 +156,17 @@ func normalizeServiceURL(raw string) string {
 		return (&url.URL{Scheme: scheme, Host: parsed.Host}).String()
 	}
 
-	hasHTTP := strings.HasPrefix(raw, "http://")
-	raw = strings.TrimPrefix(raw, "http://")
-	raw = strings.TrimPrefix(raw, "https://")
-	raw = strings.Split(raw, "/")[0]
-	if raw == "" {
+	hasHTTP := strings.HasPrefix(normalized, "http://")
+	normalized = strings.TrimPrefix(normalized, "http://")
+	normalized = strings.TrimPrefix(normalized, "https://")
+	normalized, _, _ = strings.Cut(normalized, "/")
+	if normalized == "" {
 		return ""
 	}
 	if hasHTTP {
-		return "http://" + raw
+		return "http://" + normalized
 	}
-	return "https://" + raw
+	return "https://" + normalized
 }
 
 func loadBackendServicesFromClusterData(configDir string) (schema.IBackendServices, error) {
