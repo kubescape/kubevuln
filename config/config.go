@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/spf13/viper"
 )
 
@@ -141,6 +144,7 @@ type clusterDataBackendServicesConfig struct {
 	ReportReceiverURL    string `json:"reportReceiverURL"`
 }
 
+// normalizeServiceURL returns a base service URL (scheme + host), dropping any path.
 func normalizeServiceURL(input string) string {
 	normalized := strings.TrimSpace(input)
 	if normalized == "" {
@@ -235,7 +239,10 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	}
 
 	if fallbackServices, fallbackErr := loadBackendServicesFromClusterData(configDir); fallbackErr == nil {
+		logger.L().Warning("API_URL service discovery failed, falling back to static backend URLs from clusterData.json",
+			helpers.Error(err))
 		return fallbackServices, nil
+	} else {
+		return nil, errors.Join(err, fallbackErr)
 	}
-	return nil, err
 }

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -63,6 +64,18 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
 		assert.Equal(t, "https://report.armo.cloud", services.GetReportReceiverHttpUrl())
+	})
+
+	t.Run("returns joined error when discovery and fallback fail", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		_, err := LoadBackendServicesConfig(t.TempDir(), server.URL)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "404"))
+		assert.True(t, strings.Contains(err.Error(), "clusterData.json"))
 	})
 }
 
