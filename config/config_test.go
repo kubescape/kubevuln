@@ -1,6 +1,10 @@
 package config
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -23,6 +27,43 @@ func TestLoadBackendServicesConfig(t *testing.T) {
 	services, err := LoadBackendServicesConfig("testdata", "")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
+}
+
+func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
+	t.Run("fallback when API_URL is missing", func(t *testing.T) {
+		dir := t.TempDir()
+		clusterData := `{
+			"backendOpenAPI":"https://api.armosec.io/api",
+			"eventReceiverRestURL":"https://report.armo.cloud"
+		}`
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(clusterData), 0o600)
+		assert.NoError(t, err)
+
+		services, err := LoadBackendServicesConfig(dir, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
+		assert.Equal(t, "https://report.armo.cloud", services.GetReportReceiverHttpUrl())
+	})
+
+	t.Run("fallback when API_URL discovery returns 404", func(t *testing.T) {
+		dir := t.TempDir()
+		clusterData := `{
+			"backendOpenAPI":"https://api.armosec.io/api",
+			"eventReceiverRestURL":"https://report.armo.cloud"
+		}`
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(clusterData), 0o600)
+		assert.NoError(t, err)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		services, err := LoadBackendServicesConfig(dir, server.URL)
+		assert.NoError(t, err)
+		assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
+		assert.Equal(t, "https://report.armo.cloud", services.GetReportReceiverHttpUrl())
+	})
 }
 
 // TestLoadConfigCVEMatchingMode covers mode resolution and backward compatibility.
