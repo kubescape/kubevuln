@@ -1,15 +1,21 @@
 package config
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/spf13/viper"
 )
 
@@ -129,9 +135,68 @@ func LoadConfig(path string) (Config, error) {
 	return config, nil
 }
 
+type clusterDataBackendServicesConfig struct {
+	BackendOpenAPI       string `json:"backendOpenAPI"`
+	EventReceiverRestURL string `json:"eventReceiverRestURL"`
+}
+
+// normalizeServiceURL returns a base service URL (scheme + host), dropping any path.
+func normalizeServiceURL(input string) string {
+	normalized := strings.TrimSpace(input)
+	if normalized == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err == nil && parsed.Host != "" {
+		scheme := parsed.Scheme
+		if scheme == "" {
+			scheme = "https"
+		}
+		return (&url.URL{Scheme: scheme, Host: parsed.Host}).String()
+	}
+
+	hasHTTP := strings.HasPrefix(normalized, "http://")
+	normalized = strings.TrimPrefix(normalized, "http://")
+	normalized = strings.TrimPrefix(normalized, "https://")
+	normalized, _, _ = strings.Cut(normalized, "/")
+	if normalized == "" {
+		return ""
+	}
+	if hasHTTP {
+		return "http://" + normalized
+	}
+	return "https://" + normalized
+}
+
+func loadBackendServicesFromClusterData(configDir string) (schema.IBackendServices, error) {
+	filePath := filepath.Join(configDir, "clusterData.json")
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var clusterData clusterDataBackendServicesConfig
+	if err := json.Unmarshal(content, &clusterData); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
+	}
+
+	apiServerURL := normalizeServiceURL(clusterData.BackendOpenAPI)
+	reportReceiverURL := normalizeServiceURL(clusterData.EventReceiverRestURL)
+
+	if apiServerURL == "" || reportReceiverURL == "" {
+		return nil, fmt.Errorf("no static backend URLs in %s", filePath)
+	}
+
+	return &v3.ServicesV3{
+		ApiServerUrl:         apiServerURL,
+		EventReceiverHttpUrl: reportReceiverURL,
+	}, nil
+}
+
 // LoadBackendServicesConfig loads backend service URLs from configDir/services.json if
-// present, otherwise queries apiURL for live service discovery.
-// apiURL must be set explicitly when services.json is absent; no default is applied here.
+// present. When services.json is absent, it first attempts API_URL service discovery and
+// falls back to static URLs in clusterData.json.
 func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendServices, error) {
 	filePath := filepath.Join(configDir, "services.json")
 	if _, err := os.Stat(filePath); err == nil {
@@ -139,7 +204,10 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	}
 
 	if apiURL == "" {
-		return nil, fmt.Errorf("no service configuration: provide %s/services.json or set API_URL", configDir)
+		if services, err := loadBackendServicesFromClusterData(configDir); err == nil {
+			return services, nil
+		}
+		return nil, fmt.Errorf("no service configuration: provide %s/services.json, set API_URL, or set backendOpenAPI/eventReceiverRestURL in clusterData.json", configDir)
 	}
 
 	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
@@ -148,5 +216,16 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	}
 	// http.DefaultClient has no timeout by default; cap the startup discovery call.
 	http.DefaultClient = &http.Client{Timeout: 30 * time.Second}
-	return servicediscovery.GetServices(client)
+	services, err := servicediscovery.GetServices(client)
+	if err == nil {
+		return services, nil
+	}
+
+	fallbackServices, fallbackErr := loadBackendServicesFromClusterData(configDir)
+	if fallbackErr == nil {
+		logger.L().Warning("API_URL service discovery failed, falling back to static backend URLs from clusterData.json",
+			helpers.Error(err))
+		return fallbackServices, nil
+	}
+	return nil, errors.Join(err, fallbackErr)
 }

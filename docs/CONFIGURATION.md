@@ -329,6 +329,11 @@ similar images may show different vulnerability counts.
 
 ## Backend Services Configuration
 
+Kubevuln resolves backend service URLs in this order:
+1. `services.json` (if present)
+2. `API_URL` service discovery
+3. static `clusterData.json` values (`backendOpenAPI` + `eventReceiverRestURL`)
+
 ### services.json
 
 Configures URLs for Kubescape backend services.
