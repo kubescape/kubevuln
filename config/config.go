@@ -137,11 +137,7 @@ func LoadConfig(path string) (Config, error) {
 
 type clusterDataBackendServicesConfig struct {
 	BackendOpenAPI       string `json:"backendOpenAPI"`
-	ApiServer            string `json:"apiServer"`
-	ApiServerURL         string `json:"apiServerURL"`
 	EventReceiverRestURL string `json:"eventReceiverRestURL"`
-	ReportReceiver       string `json:"reportReceiver"`
-	ReportReceiverURL    string `json:"reportReceiverURL"`
 }
 
 // normalizeServiceURL returns a base service URL (scheme + host), dropping any path.
@@ -186,20 +182,7 @@ func loadBackendServicesFromClusterData(configDir string) (schema.IBackendServic
 	}
 
 	apiServerURL := normalizeServiceURL(clusterData.BackendOpenAPI)
-	if apiServerURL == "" {
-		apiServerURL = normalizeServiceURL(clusterData.ApiServerURL)
-	}
-	if apiServerURL == "" {
-		apiServerURL = normalizeServiceURL(clusterData.ApiServer)
-	}
-
 	reportReceiverURL := normalizeServiceURL(clusterData.EventReceiverRestURL)
-	if reportReceiverURL == "" {
-		reportReceiverURL = normalizeServiceURL(clusterData.ReportReceiverURL)
-	}
-	if reportReceiverURL == "" {
-		reportReceiverURL = normalizeServiceURL(clusterData.ReportReceiver)
-	}
 
 	if apiServerURL == "" || reportReceiverURL == "" {
 		return nil, fmt.Errorf("no static backend URLs in %s", filePath)
@@ -238,11 +221,11 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 		return services, nil
 	}
 
-	if fallbackServices, fallbackErr := loadBackendServicesFromClusterData(configDir); fallbackErr == nil {
+	fallbackServices, fallbackErr := loadBackendServicesFromClusterData(configDir)
+	if fallbackErr == nil {
 		logger.L().Warning("API_URL service discovery failed, falling back to static backend URLs from clusterData.json",
 			helpers.Error(err))
 		return fallbackServices, nil
-	} else {
-		return nil, errors.Join(err, fallbackErr)
 	}
+	return nil, errors.Join(err, fallbackErr)
 }
