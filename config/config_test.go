@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -74,8 +73,8 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 
 		_, err := LoadBackendServicesConfig(t.TempDir(), server.URL)
 		assert.Error(t, err)
-		assert.True(t, strings.Contains(err.Error(), "404"))
-		assert.True(t, strings.Contains(err.Error(), "clusterData.json"))
+		assert.Contains(t, err.Error(), "404")
+		assert.Contains(t, err.Error(), "clusterData.json")
 	})
 }
 
