@@ -66,6 +66,51 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 	})
 }
 
+func TestNormalizeServiceURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "spaces only", input: "   ", want: ""},
+		{name: "https with path", input: "https://api.armosec.io/api", want: "https://api.armosec.io"},
+		{name: "http with path", input: "http://operator:4002/api/v3/servicediscovery", want: "http://operator:4002"},
+		{name: "host without scheme", input: "api.armosec.io/api", want: "https://api.armosec.io"},
+		{name: "host and port without scheme", input: "operator:4002/path", want: "https://operator:4002"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeServiceURL(tt.input))
+		})
+	}
+}
+
+func TestLoadBackendServicesFromClusterData_Errors(t *testing.T) {
+	t.Run("missing clusterData file", func(t *testing.T) {
+		_, err := loadBackendServicesFromClusterData(t.TempDir())
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid clusterData json", func(t *testing.T) {
+		dir := t.TempDir()
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte("{invalid-json"), 0o600)
+		assert.NoError(t, err)
+
+		_, err = loadBackendServicesFromClusterData(dir)
+		assert.Error(t, err)
+	})
+
+	t.Run("missing required backend urls", func(t *testing.T) {
+		dir := t.TempDir()
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(`{"clusterName":"test"}`), 0o600)
+		assert.NoError(t, err)
+
+		_, err = loadBackendServicesFromClusterData(dir)
+		assert.Error(t, err)
+	})
+}
+
 // TestLoadConfigCVEMatchingMode covers mode resolution and backward compatibility.
 func TestLoadConfigCVEMatchingMode(t *testing.T) {
 	tests := []struct {
