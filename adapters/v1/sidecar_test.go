@@ -116,6 +116,34 @@ func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry(t *testing.T) {
 	assert.Equal(t, 3, callCount)
 }
 
+// TestSidecarSBOMAdapter_CreateSBOM_EmptyDigestSendsTag is the regression guard for
+// the double-normalization bug. A registry scan arrives with an empty image digest
+// (imageID == "") and only a tag. The adapter is the single normalization point, so
+// it must send the tag as-is to the scanner — ImageID == ImageTag == the tag — and
+// must NOT graft the tag into a fake digest like repo@sha256:<tag>.
+func TestSidecarSBOMAdapter_CreateSBOM_EmptyDigestSendsTag(t *testing.T) {
+	const imageTag = "quay.io/systemtests/webgoat:latest"
+
+	var got sbomscanner.ScanRequest
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(_ context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			got = req
+			return &sbomscanner.ScanResult{Status: helpersv1.Learning}, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", imageTag, domain.RegistryOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, imageTag, got.ImageID, "empty digest must scan by tag, not be grafted into a digest")
+	assert.Equal(t, imageTag, got.ImageTag)
+	assert.Equal(t, got.ImageTag, got.ImageID, "ImageID and ImageTag must match for an empty-digest registry scan")
+}
+
 func TestSidecarSBOMAdapter_Version(t *testing.T) {
 	mock := &mockScannerClient{
 		healthVersion: "v0.100.0",
