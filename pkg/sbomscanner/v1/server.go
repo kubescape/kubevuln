@@ -16,8 +16,8 @@ import (
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/format/syftjson"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
@@ -26,8 +26,6 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/opencontainers/go-digest"
 )
 
 type scannerServer struct {
@@ -47,13 +45,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// imageID is already the final, normalized pull reference. The SidecarSBOMAdapter
+	// normalizes it (NormalizeImageID) before sending the request - that is the single
+	// normalization point. Do not normalize again here: re-normalizing an
+	// already-complete reference corrupts it (e.g. into repo@sha256:<tag> when no
+	// digest is known, which then fails to parse).
 	imageID := req.ImageId
 	imageTag := req.ImageTag
-
-	// Normalize image ID (same logic as SyftAdapter)
-	if imageTag != "" {
-		imageID = normalizeImageID(imageID, imageTag)
-	}
 
 	// Parse platform for multi-arch image resolution.
 	// The platform specifier uses OCI format: "os/arch[/variant]" (e.g. "linux/amd64").
@@ -258,36 +256,6 @@ func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
 	}
 
 	return syftDoc
-}
-
-const digestDelim = "@"
-
-// normalizeImageID is the same logic as the top-level NormalizeImageID in adapters/v1/syft.go.
-func normalizeImageID(imageID, imageTag string) string {
-	if imageID == "" {
-		return imageTag
-	}
-
-	// try to parse imageID as a full digest
-	if newDigest, err := name.NewDigest(imageID); err == nil {
-		return newDigest.String()
-	}
-	// if it's not a full digest, use imageTag as a reference
-	tag, err := name.ParseReference(imageTag)
-	if err != nil {
-		return ""
-	}
-
-	// and append imageID as a digest
-	parts := strings.Split(imageID, digestDelim)
-	if len(parts) > 1 {
-		imageID = parts[len(parts)-1]
-	}
-	prefix := digest.Canonical.String() + ":"
-	if !strings.HasPrefix(imageID, prefix) {
-		imageID = prefix + imageID
-	}
-	return tag.Context().String() + "@" + imageID
 }
 
 func packageVersion(name string) string {

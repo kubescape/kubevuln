@@ -64,32 +64,3 @@ func TestCreateSBOM_ContextCancelled(t *testing.T) {
 	assert.Nil(t, resp)
 	require.Error(t, err)
 }
-
-func TestNormalizeImageID(t *testing.T) {
-	tests := []struct {
-		name     string
-		imageID  string
-		imageTag string
-		expected string
-	}{
-		{
-			name:     "empty imageID uses imageTag",
-			imageID:  "",
-			imageTag: "nginx:latest",
-			expected: "nginx:latest",
-		},
-		{
-			name:     "full digest reference",
-			imageID:  "docker.io/library/nginx@sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-			imageTag: "nginx:latest",
-			expected: "docker.io/library/nginx@sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeImageID(tt.imageID, tt.imageTag)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
