@@ -17,7 +17,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const healthCheckTimeout = 5 * time.Second
+const (
+	healthCheckTimeout = 5 * time.Second
+	MaxgRPCMessageSize = 128 * 1024 * 1024
+)
 
 type sbomScannerClient struct {
 	conn   *grpc.ClientConn
@@ -30,6 +33,10 @@ func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
 	target := fmt.Sprintf("unix://%s", socketPath)
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(MaxgRPCMessageSize),
+			grpc.MaxCallSendMsgSize(MaxgRPCMessageSize),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)

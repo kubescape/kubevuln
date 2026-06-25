@@ -36,7 +36,10 @@ func main() {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
 
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(sbomscanner.MaxgRPCMessageSize),
+		grpc.MaxSendMsgSize(sbomscanner.MaxgRPCMessageSize),
+	)
 	pb.RegisterSBOMScannerServer(srv, sbomscanner.NewScannerServer())
 
 	sigCh := make(chan os.Signal, 1)
