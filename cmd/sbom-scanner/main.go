@@ -11,6 +11,15 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"google.golang.org/grpc"
+
+	// Register a pure-Go sqlite driver under the name "sqlite". Syft's RPM
+	// (redhat) cataloger requires it to read newer sqlite-backed RPM databases
+	// (rpmdb.sqlite) found in recent RPM-based images. Unlike the main HTTP
+	// binary, this sidecar does not import grype, so it does not transitively
+	// pull a sqlite driver; without this import the cataloger fails with
+	// "sqlite driver is required for cataloging newer RPM databases, none
+	// registered". See https://github.com/kubescape/kubevuln/issues/378.
+	_ "modernc.org/sqlite"
 )
 
 func main() {
