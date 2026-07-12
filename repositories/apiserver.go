@@ -57,6 +57,11 @@ var (
 		Version:  "v1beta1",
 		Resource: "clustersecurityexceptions",
 	}
+	namespaceGVR = schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "namespaces",
+	}
 )
 
 var _ ports.ContainerProfileRepository = (*APIServerStore)(nil)
@@ -147,6 +152,50 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	}
 
 	return exceptions, clusterExceptions, nil
+}
+
+// GetWorkloadLabels resolves the labels of a workload so that a
+// SecurityException's match.objectSelector can be evaluated. The workload's
+// GroupVersionResource is derived from its kind; if it cannot be resolved or the
+// workload is not found, nil labels are returned (the selector then matches
+// nothing, i.e. the exception is not applied — the safe default for a
+// suppression feature).
+func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
+	if namespace == "" || kind == "" || name == "" {
+		return nil, nil
+	}
+	gvr, err := k8sinterface.GetGroupVersionResource(kind)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
+	}
+	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	obj, err := a.DynamicClient.Resource(gvr).Namespace(namespace).Get(getCtx, name, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return obj.GetLabels(), nil
+}
+
+// GetNamespaceLabels resolves the labels of a namespace so that a
+// ClusterSecurityException's match.namespaceSelector can be evaluated.
+func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
+	if name == "" {
+		return nil, nil
+	}
+	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return obj.GetLabels(), nil
 }
 
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {

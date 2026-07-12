@@ -28,7 +28,15 @@ type SBOMRepository interface {
 	StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error
 }
 
-// SecurityExceptionRepository reads SecurityException CRDs from the cluster
+// SecurityExceptionRepository reads SecurityException CRDs from the cluster and
+// resolves the labels needed to evaluate objectSelector/namespaceSelector.
 type SecurityExceptionRepository interface {
 	GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error)
+	// GetWorkloadLabels returns the labels of the given workload, used to
+	// evaluate match.objectSelector. Returns nil when the workload cannot be
+	// found or its group/version cannot be resolved.
+	GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error)
+	// GetNamespaceLabels returns the labels of the given namespace, used to
+	// evaluate match.namespaceSelector. Returns nil when the namespace is not found.
+	GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error)
 }
