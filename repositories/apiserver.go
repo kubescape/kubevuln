@@ -172,9 +172,9 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(gvr).Namespace(namespace).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
+		// Propagate NotFound as an error (rather than nil labels) so the caller
+		// fails closed: a negative objectSelector must not match a workload that
+		// could not be resolved.
 		return nil, err
 	}
 	return obj.GetLabels(), nil
@@ -190,9 +190,8 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
+		// Propagate NotFound as an error so the caller fails closed (see
+		// GetWorkloadLabels).
 		return nil, err
 	}
 	return obj.GetLabels(), nil

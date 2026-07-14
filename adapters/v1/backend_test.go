@@ -502,11 +502,13 @@ func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 }
 
 type mockSecurityExceptionRepo struct {
-	exceptions        []sev1beta1.SecurityException
-	clusterExceptions []sev1beta1.ClusterSecurityException
-	err               error
-	workloadLabels    map[string]string
-	namespaceLabels   map[string]string
+	exceptions         []sev1beta1.SecurityException
+	clusterExceptions  []sev1beta1.ClusterSecurityException
+	err                error
+	workloadLabels     map[string]string
+	namespaceLabels    map[string]string
+	workloadLabelsErr  error
+	namespaceLabelsErr error
 }
 
 func (m *mockSecurityExceptionRepo) GetSecurityExceptions(_ context.Context, _ string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
@@ -514,11 +516,11 @@ func (m *mockSecurityExceptionRepo) GetSecurityExceptions(_ context.Context, _ s
 }
 
 func (m *mockSecurityExceptionRepo) GetWorkloadLabels(_ context.Context, _, _, _ string) (map[string]string, error) {
-	return m.workloadLabels, nil
+	return m.workloadLabels, m.workloadLabelsErr
 }
 
 func (m *mockSecurityExceptionRepo) GetNamespaceLabels(_ context.Context, _ string) (map[string]string, error) {
-	return m.namespaceLabels, nil
+	return m.namespaceLabels, m.namespaceLabelsErr
 }
 
 func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {

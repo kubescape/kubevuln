@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kubescape/kubevuln/core/domain"
@@ -36,8 +37,10 @@ func TestMatchImages(t *testing.T) {
 	}
 }
 
+func strptr(s string) *string { return &s }
+
 func TestMatchResources(t *testing.T) {
-	target := ExceptionTarget{Kind: "deployment", Name: "nginx", APIGroup: "apps"}
+	target := ExceptionTarget{Kind: "deployment", Name: "nginx", APIGroup: strptr("apps")}
 	tests := []struct {
 		name      string
 		resources []sev1beta1.ResourceMatch
@@ -52,7 +55,9 @@ func TestMatchResources(t *testing.T) {
 		{name: "OR across entries", resources: []sev1beta1.ResourceMatch{{Kind: "StatefulSet", Name: "db"}, {Kind: "Deployment", Name: "nginx"}}, target: target, want: true},
 		{name: "apiGroup match", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: target, want: true},
 		{name: "apiGroup mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "batch"}}, target: target, want: false},
-		{name: "apiGroup skipped when target group unknown", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "deployment", Name: "nginx"}, want: true},
+		{name: "apiGroup fails closed when target group unknown", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "deployment", Name: "nginx"}, want: false},
+		{name: "core group target does not match a group-scoped exception", resources: []sev1beta1.ResourceMatch{{Kind: "Pod", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "pod", Name: "p", APIGroup: strptr("")}, want: false},
+		{name: "core group target matches a groupless exception", resources: []sev1beta1.ResourceMatch{{Kind: "Pod"}}, target: ExceptionTarget{Kind: "pod", Name: "p", APIGroup: strptr("")}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -107,12 +112,14 @@ func TestLabelSelectorMatches(t *testing.T) {
 
 func TestMatchExceptionTarget(t *testing.T) {
 	target := ExceptionTarget{
-		Namespace:       "production",
-		Kind:            "deployment",
-		Name:            "nginx",
-		Image:           "docker.io/library/nginx:1.25",
-		WorkloadLabels:  map[string]string{"app": "nginx"},
-		NamespaceLabels: map[string]string{"env": "staging"},
+		Namespace:               "production",
+		Kind:                    "deployment",
+		Name:                    "nginx",
+		Image:                   "docker.io/library/nginx:1.25",
+		WorkloadLabels:          map[string]string{"app": "nginx"},
+		NamespaceLabels:         map[string]string{"env": "staging"},
+		WorkloadLabelsResolved:  true,
+		NamespaceLabelsResolved: true,
 	}
 
 	t.Run("empty match applies to all", func(t *testing.T) {
@@ -155,6 +162,28 @@ func TestMatchExceptionTarget(t *testing.T) {
 		m := sev1beta1.ExceptionMatch{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "staging"}}}
 		assert.True(t, matchExceptionTarget(m, target, true))
 	})
+
+	t.Run("unresolved workload labels fail closed even for a negative selector", func(t *testing.T) {
+		// A negative selector matches an empty label set, so an unresolved
+		// objectSelector must NOT apply the exception.
+		neg := sev1beta1.ExceptionMatch{ObjectSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "tier", Operator: metav1.LabelSelectorOpDoesNotExist},
+		}}}
+		unresolved := ExceptionTarget{Namespace: "production", Kind: "deployment", Name: "nginx"} // WorkloadLabelsResolved == false
+		assert.False(t, matchExceptionTarget(neg, unresolved, false))
+		// Resolved-but-empty labels genuinely have no "tier" label, so the same
+		// negative selector legitimately matches.
+		resolvedEmpty := ExceptionTarget{Namespace: "production", Kind: "deployment", Name: "nginx", WorkloadLabelsResolved: true}
+		assert.True(t, matchExceptionTarget(neg, resolvedEmpty, false))
+	})
+
+	t.Run("unresolved namespace labels fail closed for cluster-scoped negative selector", func(t *testing.T) {
+		neg := sev1beta1.ExceptionMatch{NamespaceSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "env", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"prod"}},
+		}}}
+		unresolved := ExceptionTarget{Namespace: "production"} // NamespaceLabelsResolved == false
+		assert.False(t, matchExceptionTarget(neg, unresolved, true))
+	})
 }
 
 func TestConvertScopesByMatch(t *testing.T) {
@@ -181,9 +210,9 @@ func TestConvertScopesByMatch(t *testing.T) {
 				Vulnerabilities: cveEntry,
 			},
 		}}
-		matching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "nginx"}})
+		matching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "nginx"}, WorkloadLabelsResolved: true})
 		assert.Len(t, matching, 1)
-		notMatching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "redis"}})
+		notMatching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "redis"}, WorkloadLabelsResolved: true})
 		assert.Empty(t, notMatching)
 	})
 
@@ -194,9 +223,9 @@ func TestConvertScopesByMatch(t *testing.T) {
 				Vulnerabilities: cveEntry,
 			},
 		}}
-		matching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "staging"}})
+		matching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "staging"}, NamespaceLabelsResolved: true})
 		assert.Len(t, matching, 1)
-		notMatching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "prod"}})
+		notMatching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "prod"}, NamespaceLabelsResolved: true})
 		assert.Empty(t, notMatching)
 	})
 
@@ -240,6 +269,7 @@ func TestBuildExceptionTarget(t *testing.T) {
 		se := []sev1beta1.SecurityException{{Spec: sev1beta1.SecurityExceptionSpec{Match: sev1beta1.ExceptionMatch{ObjectSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}}}}}}
 		target := BuildExceptionTarget(context.Background(), workload, se, nil, repo)
 		assert.Equal(t, map[string]string{"app": "nginx"}, target.WorkloadLabels)
+		assert.True(t, target.WorkloadLabelsResolved)
 	})
 
 	t.Run("resolves namespace labels when CSE namespaceSelector present", func(t *testing.T) {
@@ -247,12 +277,23 @@ func TestBuildExceptionTarget(t *testing.T) {
 		cse := []sev1beta1.ClusterSecurityException{{Spec: sev1beta1.SecurityExceptionSpec{Match: sev1beta1.ExceptionMatch{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "staging"}}}}}}
 		target := BuildExceptionTarget(context.Background(), workload, nil, cse, repo)
 		assert.Equal(t, map[string]string{"env": "staging"}, target.NamespaceLabels)
+		assert.True(t, target.NamespaceLabelsResolved)
 		assert.Nil(t, target.WorkloadLabels)
+		assert.False(t, target.WorkloadLabelsResolved)
+	})
+
+	t.Run("label lookup error leaves labels unresolved (fail closed)", func(t *testing.T) {
+		repo := &mockSecurityExceptionRepo{workloadLabelsErr: errors.New("api error")}
+		se := []sev1beta1.SecurityException{{Spec: sev1beta1.SecurityExceptionSpec{Match: sev1beta1.ExceptionMatch{ObjectSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}}}}}}
+		target := BuildExceptionTarget(context.Background(), workload, se, nil, repo)
+		assert.Nil(t, target.WorkloadLabels)
+		assert.False(t, target.WorkloadLabelsResolved)
 	})
 
 	t.Run("nil repo yields no labels", func(t *testing.T) {
 		target := BuildExceptionTarget(context.Background(), workload, nil, nil, nil)
 		assert.Equal(t, "docker.io/library/nginx:1.25", target.Image)
 		assert.Nil(t, target.WorkloadLabels)
+		assert.False(t, target.WorkloadLabelsResolved)
 	})
 }

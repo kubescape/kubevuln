@@ -23,7 +23,11 @@ type ExceptionTarget struct {
 	Namespace string
 	Kind      string
 	Name      string
-	APIGroup  string
+	// APIGroup is the target's resolved API group. A nil pointer means the group
+	// is unknown (the kind could not be resolved); an empty string "" is the core
+	// group. These must stay distinct so a group-scoped exception never matches a
+	// core resource or an unverified one.
+	APIGroup *string
 	// Image is the fully-qualified, normalized image reference (as produced by
 	// tools.NormalizeReference), e.g. "docker.io/library/nginx:latest".
 	Image string
@@ -33,6 +37,14 @@ type ExceptionTarget struct {
 	// NamespaceLabels are the labels of the workload's namespace, resolved
 	// lazily and only when a ClusterSecurityException uses match.namespaceSelector.
 	NamespaceLabels map[string]string
+	// WorkloadLabelsResolved reports whether WorkloadLabels reflect a successful
+	// lookup. When an objectSelector is in play but resolution failed (missing
+	// workload, nil repo, lookup error), this stays false and matching fails
+	// closed — a negative selector (DoesNotExist/NotIn) would otherwise match an
+	// empty label set and wrongly suppress findings.
+	WorkloadLabelsResolved bool
+	// NamespaceLabelsResolved is the namespaceSelector equivalent.
+	NamespaceLabelsResolved bool
 }
 
 // matchExceptionTarget reports whether spec.match applies to the given target.
@@ -52,11 +64,17 @@ func matchExceptionTarget(match sev1beta1.ExceptionMatch, target ExceptionTarget
 	if !matchImages(match.Images, target.Image) {
 		return false
 	}
-	if !labelSelectorMatches(match.ObjectSelector, target.WorkloadLabels) {
-		return false
+	// objectSelector: when a selector is set but the workload's labels could not
+	// be resolved, fail closed rather than evaluate against an empty label set.
+	if match.ObjectSelector != nil {
+		if !target.WorkloadLabelsResolved || !labelSelectorMatches(match.ObjectSelector, target.WorkloadLabels) {
+			return false
+		}
 	}
-	if clusterScoped && !labelSelectorMatches(match.NamespaceSelector, target.NamespaceLabels) {
-		return false
+	if clusterScoped && match.NamespaceSelector != nil {
+		if !target.NamespaceLabelsResolved || !labelSelectorMatches(match.NamespaceSelector, target.NamespaceLabels) {
+			return false
+		}
 	}
 	return true
 }
@@ -74,9 +92,12 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 		if r.Name != "" && r.Name != target.Name {
 			continue
 		}
-		// apiGroup is optional and defaults to all groups. Only enforce it when
-		// both the exception and the resolved target group are known.
-		if r.APIGroup != "" && target.APIGroup != "" && !strings.EqualFold(r.APIGroup, target.APIGroup) {
+		// apiGroup is optional. When the exception pins a group, the target's
+		// resolved group must equal it; if the target group is unknown (nil), the
+		// exception does not apply — fail closed rather than match a resource whose
+		// group was never verified. A non-nil "" is the core group and only matches
+		// an exception that pins "" (or none).
+		if r.APIGroup != "" && (target.APIGroup == nil || !strings.EqualFold(r.APIGroup, *target.APIGroup)) {
 			continue
 		}
 		return true
@@ -138,7 +159,8 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 	// is simply skipped.
 	if kind != "" {
 		if gvr, err := k8sinterface.GetGroupVersionResource(kind); err == nil {
-			target.APIGroup = gvr.Group
+			group := gvr.Group
+			target.APIGroup = &group
 		}
 	}
 
@@ -146,21 +168,26 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 		return target
 	}
 
+	// Labels are resolved only when a selector actually needs them. A failed
+	// resolution leaves the corresponding *Resolved flag false so the selector
+	// fails closed in matchExceptionTarget.
 	if usesObjectSelector(exceptions, clusterExceptions) && namespace != "" && kind != "" && name != "" {
 		if lbls, err := repo.GetWorkloadLabels(ctx, namespace, kind, name); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to resolve workload labels for SecurityException objectSelector",
+			logger.L().Ctx(ctx).Warning("failed to resolve workload labels for SecurityException objectSelector; exception will not apply to this workload",
 				helpers.Error(err), helpers.String("namespace", namespace), helpers.String("kind", kind), helpers.String("name", name))
 		} else {
 			target.WorkloadLabels = lbls
+			target.WorkloadLabelsResolved = true
 		}
 	}
 
 	if usesNamespaceSelector(clusterExceptions) && namespace != "" {
 		if lbls, err := repo.GetNamespaceLabels(ctx, namespace); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to resolve namespace labels for ClusterSecurityException namespaceSelector",
+			logger.L().Ctx(ctx).Warning("failed to resolve namespace labels for ClusterSecurityException namespaceSelector; exception will not apply to this namespace",
 				helpers.Error(err), helpers.String("namespace", namespace))
 		} else {
 			target.NamespaceLabels = lbls
+			target.NamespaceLabelsResolved = true
 		}
 	}
 

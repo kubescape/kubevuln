@@ -2,9 +2,14 @@ package repositories
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 )
+
+// errNoClusterConnection is returned by the label resolvers so that a
+// selector-based exception fails closed when no cluster is available.
+var errNoClusterConnection = errors.New("security exception label resolution requires a cluster connection")
 
 // NoOpSecurityExceptionRepository returns empty results for environments
 // where SecurityException CRDs are not available (e.g., local/test mode).
@@ -15,9 +20,9 @@ func (n *NoOpSecurityExceptionRepository) GetSecurityExceptions(_ context.Contex
 }
 
 func (n *NoOpSecurityExceptionRepository) GetWorkloadLabels(_ context.Context, _, _, _ string) (map[string]string, error) {
-	return nil, nil
+	return nil, errNoClusterConnection
 }
 
 func (n *NoOpSecurityExceptionRepository) GetNamespaceLabels(_ context.Context, _ string) (map[string]string, error) {
-	return nil, nil
+	return nil, errNoClusterConnection
 }
