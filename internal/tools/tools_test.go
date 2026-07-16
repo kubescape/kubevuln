@@ -183,3 +183,48 @@ func TestRemoveContainerFromSlug(t *testing.T) {
 		})
 	}
 }
+
+func TestReferenceMatchForms(t *testing.T) {
+	const digest = "sha256:aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889999"
+	tests := []struct {
+		name string
+		ref  string
+		want []string
+	}{
+		{
+			name: "tag only",
+			ref:  "docker.io/library/nginx:1.25",
+			want: []string{"docker.io/library/nginx:1.25", "docker.io/library/nginx"},
+		},
+		{
+			name: "tag and digest",
+			ref:  "docker.io/library/nginx:1.25@" + digest,
+			want: []string{"docker.io/library/nginx:1.25@" + digest, "docker.io/library/nginx:1.25", "docker.io/library/nginx"},
+		},
+		{
+			name: "digest only has no tag form",
+			ref:  "docker.io/library/nginx@" + digest,
+			want: []string{"docker.io/library/nginx@" + digest, "docker.io/library/nginx"},
+		},
+		{
+			name: "registry with port keeps its port",
+			ref:  "my-registry.io:5000/team/app:v1",
+			want: []string{"my-registry.io:5000/team/app:v1", "my-registry.io:5000/team/app"},
+		},
+		{
+			name: "unparsable reference yields only itself",
+			ref:  "not a reference",
+			want: []string{"not a reference"},
+		},
+		{
+			name: "empty reference yields only itself",
+			ref:  "",
+			want: []string{""},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ReferenceMatchForms(tt.ref))
+		})
+	}
+}

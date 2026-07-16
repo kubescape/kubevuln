@@ -11,6 +11,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// testDigest is a syntactically valid sha256 digest; the reference parser
+// rejects malformed ones, which would silently skip the digest-aware forms.
+const testDigest = "aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889999"
+
 func TestMatchImages(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -21,7 +25,19 @@ func TestMatchImages(t *testing.T) {
 		{name: "no patterns matches everything", patterns: nil, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "non-empty patterns never match empty image", patterns: []string{"docker.io/library/nginx:*"}, image: "", want: false},
 		{name: "tag wildcard matches", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
-		{name: "tag wildcard matches digest suffix", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx:latest@sha256:abc", want: true},
+		{name: "tag wildcard matches digest suffix", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx:latest@sha256:" + testDigest, want: true},
+		// A tag-pinned pattern must still match a workload deployed with that tag
+		// pinned to a digest, which is what ImageTagNormalized carries.
+		{name: "exact tag pattern matches tag+digest reference", patterns: []string{"docker.io/library/nginx:1.25"}, image: "docker.io/library/nginx:1.25@sha256:" + testDigest, want: true},
+		{name: "exact tag pattern does not match a different tag pinned to a digest", patterns: []string{"docker.io/library/nginx:1.24"}, image: "docker.io/library/nginx:1.25@sha256:" + testDigest, want: false},
+		// A digest-only deployment has no tag at all, so only the repository form
+		// or an exact digest pin can match it.
+		{name: "repository pattern matches digest-only reference", patterns: []string{"docker.io/library/nginx"}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
+		{name: "repository pattern matches any tag", patterns: []string{"docker.io/library/nginx"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "repository pattern does not match another repository", patterns: []string{"docker.io/library/nginx"}, image: "docker.io/library/redis:7", want: false},
+		{name: "exact digest pin matches", patterns: []string{"docker.io/library/nginx@sha256:" + testDigest}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
+		{name: "tag wildcard does not match digest-only reference", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx@sha256:" + testDigest, want: false},
+		{name: "registry with port is not split by the repository form", patterns: []string{"my-registry.io:5000/team/app"}, image: "my-registry.io:5000/team/app:v1", want: true},
 		{name: "repo wildcard matches", patterns: []string{"docker.io/*/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "name wildcard matches", patterns: []string{"docker.io/library/*:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "star does not cross slash", patterns: []string{"*/nginx:*"}, image: "docker.io/library/nginx:1.25", want: false},
@@ -58,6 +74,9 @@ func TestMatchResources(t *testing.T) {
 		{name: "apiGroup fails closed when target group unknown", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "deployment", Name: "nginx"}, want: false},
 		{name: "core group target does not match a group-scoped exception", resources: []sev1beta1.ResourceMatch{{Kind: "Pod", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "pod", Name: "p", APIGroup: strptr("")}, want: false},
 		{name: "core group target matches a groupless exception", resources: []sev1beta1.ResourceMatch{{Kind: "Pod"}}, target: ExceptionTarget{Kind: "pod", Name: "p", APIGroup: strptr("")}, want: true},
+		{name: "fully empty entry constrains nothing and does not match", resources: []sev1beta1.ResourceMatch{{}}, target: target, want: false},
+		{name: "fully empty entry does not widen other entries", resources: []sev1beta1.ResourceMatch{{}, {Kind: "StatefulSet"}}, target: target, want: false},
+		{name: "name-only entry still matches", resources: []sev1beta1.ResourceMatch{{Name: "nginx"}}, target: target, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -75,6 +75,24 @@ This means patterns should always be written against the full form:
 - `my-registry.io/team/*:*` — matches any image under `my-registry.io/team/` (one level deep)
 - `docker.io/library/nginx:1.25` — matches exact image reference
 
+##### Digests
+
+Normalization preserves any digest the workload was deployed with, so a digest-pinned deployment (common with GitOps tooling) produces a reference like `docker.io/library/nginx:1.25@sha256:…` or, when pinned without a tag, `docker.io/library/nginx@sha256:…`.
+
+Since `path.Match` matches the whole string, each pattern is tried against every equivalent form of the reference — as deployed, without the digest, and the bare repository name:
+
+| Pattern | `nginx:1.25` | `nginx:1.25@sha256:…` | `nginx@sha256:…` |
+|---------|--------------|------------------------|-------------------|
+| `docker.io/library/nginx:1.25` | ✅ | ✅ | ❌ (no tag) |
+| `docker.io/library/nginx:*` | ✅ | ✅ | ❌ (no tag) |
+| `docker.io/library/nginx` | ✅ | ✅ | ✅ |
+| `docker.io/library/nginx@sha256:…` | ❌ | ❌ | ✅ (exact pin) |
+
+Guidance:
+- A tag pattern (`nginx:1.25`, `nginx:*`) matches that tag whether or not it is pinned to a digest, but never matches an image deployed **without** a tag.
+- To cover a repository regardless of how it is referenced, write the **bare repository** (`docker.io/library/nginx`).
+- To except one exact build, pin the digest (`docker.io/library/nginx@sha256:…`).
+
 ### Full YAML Examples
 
 #### Namespaced — target specific workloads by label and name
@@ -314,6 +332,8 @@ SecurityException CRDs suppress security findings — access should be restricte
 | Operator | `get`, `list`, `watch` | `get`, `list`, `watch` |
 
 Scanner components also need `create` and `patch` on `events` (core API group) to emit Kubernetes Events bound to SecurityException resources.
+
+Scanner components additionally need `get` on `namespaces` and on every workload kind an exception may target (`pods`, `replicationcontrollers`, `apps/deployments`, `apps/statefulsets`, `apps/daemonsets`, `apps/replicasets`, `batch/jobs`, `batch/cronjobs`) in order to read the labels that `match.objectSelector` and `match.namespaceSelector` are evaluated against. These lookups fail closed: if the scanner cannot read a workload's or namespace's labels, the exception does **not** apply and the finding is reported. A selector-based exception that targets a kind outside this list will therefore never apply until the scanner is granted `get` on that kind.
 
 Organizations should create dedicated `ClusterRole`/`Role` resources for SecurityException management rather than granting access through broad wildcard rules.
 

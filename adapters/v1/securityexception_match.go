@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -86,6 +87,12 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 		return true
 	}
 	for _, r := range resources {
+		// An entry that constrains nothing would match every workload, defeating
+		// the point of listing resources at all. CRD validation requires kind, but
+		// an explicit empty kind still satisfies that, so reject it here too.
+		if r.Kind == "" && r.Name == "" && r.APIGroup == "" {
+			continue
+		}
 		if r.Kind != "" && !strings.EqualFold(r.Kind, target.Kind) {
 			continue
 		}
@@ -108,6 +115,13 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 // matchImages returns true if the image matches any of the glob patterns (OR).
 // Patterns use path.Match syntax ('*' does not cross '/'). An empty list
 // matches everything; a non-empty list never matches an empty image.
+//
+// path.Match is a full-string match, so each pattern is tried against every
+// equivalent form of the reference (see tools.ReferenceMatchForms): a pattern
+// pinning a tag ("docker.io/library/nginx:1.25") must still match a workload
+// deployed with a digest ("docker.io/library/nginx:1.25@sha256:..."), and a
+// pattern naming the bare repository ("docker.io/library/nginx") matches that
+// repository at any tag or digest.
 func matchImages(patterns []string, image string) bool {
 	if len(patterns) == 0 {
 		return true
@@ -115,9 +129,12 @@ func matchImages(patterns []string, image string) bool {
 	if image == "" {
 		return false
 	}
+	forms := tools.ReferenceMatchForms(image)
 	for _, p := range patterns {
-		if ok, err := path.Match(p, image); err == nil && ok {
-			return true
+		for _, form := range forms {
+			if ok, err := path.Match(p, form); err == nil && ok {
+				return true
+			}
 		}
 	}
 	return false
