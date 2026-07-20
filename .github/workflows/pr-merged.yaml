@@ -8,7 +8,6 @@ permissions:
   attestations: write
 
 on:
-  workflow_dispatch:
   pull_request_target:
     types: [closed]
     branches:
