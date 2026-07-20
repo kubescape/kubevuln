@@ -9,6 +9,7 @@ concurrency:
 
 jobs:
   build-and-push-image:
+    if: ${{ secrets.QUAYIO_REGISTRY_USERNAME != '' && secrets.QUAYIO_REGISTRY_PASSWORD != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
