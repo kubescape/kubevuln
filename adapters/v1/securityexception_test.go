@@ -39,7 +39,7 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
 
 	assert.Len(t, policies, 2)
 
@@ -96,7 +96,7 @@ func TestConvertExpiredOnFix(t *testing.T) {
 				},
 			}
 
-			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 			assert.Len(t, policies, 1)
 
 			if tt.wantNil {
@@ -145,7 +145,7 @@ func TestConvertSkipsExpired(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
 
 	assert.Len(t, policies, 1)
 	assert.Equal(t, "CVE-VALID", policies[0].VulnerabilityPolicies[0].Name)
@@ -169,7 +169,9 @@ func TestConvertMatchResources(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
+	// target matches the first resource entry (Deployment/my-app)
+	target := ExceptionTarget{Namespace: "production", Kind: "Deployment", Name: "my-app"}
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, target)
 
 	assert.Len(t, policies, 1)
 	assert.Len(t, policies[0].Designatores, 2)
@@ -253,7 +255,7 @@ func TestConvertSkipsEmptyAndWhitespaceIDs(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil)
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	assert.Len(t, policies, 1)
 	assert.Equal(t, "CVE-2024-1234", policies[0].VulnerabilityPolicies[0].Name)

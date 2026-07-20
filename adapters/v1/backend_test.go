@@ -502,13 +502,25 @@ func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 }
 
 type mockSecurityExceptionRepo struct {
-	exceptions        []sev1beta1.SecurityException
-	clusterExceptions []sev1beta1.ClusterSecurityException
-	err               error
+	exceptions         []sev1beta1.SecurityException
+	clusterExceptions  []sev1beta1.ClusterSecurityException
+	err                error
+	workloadLabels     map[string]string
+	namespaceLabels    map[string]string
+	workloadLabelsErr  error
+	namespaceLabelsErr error
 }
 
 func (m *mockSecurityExceptionRepo) GetSecurityExceptions(_ context.Context, _ string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
 	return m.exceptions, m.clusterExceptions, m.err
+}
+
+func (m *mockSecurityExceptionRepo) GetWorkloadLabels(_ context.Context, _, _, _ string) (map[string]string, error) {
+	return m.workloadLabels, m.workloadLabelsErr
+}
+
+func (m *mockSecurityExceptionRepo) GetNamespaceLabels(_ context.Context, _ string) (map[string]string, error) {
+	return m.namespaceLabels, m.namespaceLabelsErr
 }
 
 func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
@@ -549,4 +561,38 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 	assert.Len(t, exceptions, 2, "should merge cloud + CRD exceptions")
 	assert.Equal(t, "CVE-CLOUD-1", exceptions[0].VulnerabilityPolicies[0].Name)
 	assert.Equal(t, "CVE-CRD-1", exceptions[1].VulnerabilityPolicies[0].Name)
+}
+
+func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
+	// A cluster exception scoped to redis images must NOT be applied to an
+	// nginx workload — this is the fail-open regression the match logic fixes.
+	mockRepo := &mockSecurityExceptionRepo{
+		clusterExceptions: []sev1beta1.ClusterSecurityException{
+			{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{Images: []string{"docker.io/library/redis:*"}},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-REDIS-ONLY"}},
+					},
+				},
+			},
+		},
+	}
+
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
+		securityExceptionRepo: mockRepo,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-test/namespace-production/deployment-nginx",
+		ImageTagNormalized: "docker.io/library/nginx:1.25",
+	})
+
+	exceptions, err := a.GetCVEExceptions(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
 }

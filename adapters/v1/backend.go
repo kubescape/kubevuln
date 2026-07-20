@@ -111,7 +111,8 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
 	} else if len(seList) > 0 || len(cseList) > 0 {
-		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList)
+		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
+		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
 	}
 

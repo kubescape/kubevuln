@@ -15,7 +15,11 @@ import (
 // ConvertToVulnerabilityExceptionPolicies converts SecurityException and
 // ClusterSecurityException CRDs into armotypes.VulnerabilityExceptionPolicy
 // slices compatible with the existing exception pipeline.
-func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException) []armotypes.VulnerabilityExceptionPolicy {
+//
+// Only exceptions whose spec.match applies to target are converted, so an
+// exception scoped by resources/images/objectSelector/namespaceSelector is not
+// applied to workloads it does not target. Expired exceptions are skipped.
+func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) []armotypes.VulnerabilityExceptionPolicy {
 	var policies []armotypes.VulnerabilityExceptionPolicy
 
 	now := time.Now()
@@ -23,6 +27,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 	for i := range exceptions {
 		se := &exceptions[i]
 		if isExpired(se.Spec.ExpiresAt, now) {
+			continue
+		}
+		if !matchExceptionTarget(se.Spec.Match, target, false) {
 			continue
 		}
 		namespace := se.Namespace
@@ -38,6 +45,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 	for i := range clusterExceptions {
 		cse := &clusterExceptions[i]
 		if isExpired(cse.Spec.ExpiresAt, now) {
+			continue
+		}
+		if !matchExceptionTarget(cse.Spec.Match, target, true) {
 			continue
 		}
 		for _, vuln := range cse.Spec.Vulnerabilities {

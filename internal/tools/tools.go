@@ -113,6 +113,37 @@ func NormalizeReference(ref string) string {
 	return reference.TagNameOnly(n).String()
 }
 
+// ReferenceMatchForms returns the equivalent forms of an image reference that a
+// user-written pattern may reasonably be matched against, most specific first:
+// the reference itself, the same reference without its digest, and the bare
+// repository name. Duplicates are omitted, so a plain "repo:tag" yields only
+// two forms and an unparsable reference only itself.
+//
+// A normalized reference keeps any digest it was deployed with
+// ("docker.io/library/nginx:1.25@sha256:..."), so matching against the
+// reference alone would never match a pattern written against the tag.
+func ReferenceMatchForms(ref string) []string {
+	forms := []string{ref}
+	n, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return forms
+	}
+	name := n.Name()
+	if tagged, ok := n.(reference.NamedTagged); ok {
+		forms = appendUnique(forms, name+":"+tagged.Tag())
+	}
+	return appendUnique(forms, name)
+}
+
+func appendUnique(forms []string, form string) []string {
+	for _, f := range forms {
+		if f == form {
+			return forms
+		}
+	}
+	return append(forms, form)
+}
+
 func RemoveContainerFromSlug(slug, container string) string {
 	i := strings.LastIndex(slug, container)
 	if i == -1 {

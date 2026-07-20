@@ -52,7 +52,8 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	}
 
 	if len(seList) > 0 || len(cseList) > 0 {
-		policies := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList)
+		target := v1.BuildExceptionTarget(ctx, workload, seList, cseList, m.securityExceptionRepo)
+		policies := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		return policies, nil
 	}
 
