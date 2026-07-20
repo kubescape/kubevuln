@@ -1,6 +1,14 @@
 name: pr-merged
-permissions: read-all
+permissions:
+  actions: write
+  id-token: write
+  packages: write
+  contents: write
+  pull-requests: read
+  attestations: write
+
 on:
+  workflow_dispatch:
   pull_request_target:
     types: [closed]
     branches:

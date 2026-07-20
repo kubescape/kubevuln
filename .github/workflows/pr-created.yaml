@@ -1,5 +1,8 @@
 name: pull_request_created
-permissions: read-all
+permissions:
+  pull-requests: write
+  security-events: write
+  contents: read
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
