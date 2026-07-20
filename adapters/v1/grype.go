@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/adrg/xdg"
@@ -93,7 +94,7 @@ func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate f
 	req := testcontainers.ContainerRequest{
 		Image:        "quay.io/kubescape/grype-offline-db:v6-ci-only",
 		ExposedPorts: []string{"8080/tcp"},
-		WaitingFor:   wait.ForExposedPort(),
+		WaitingFor:   wait.ForHTTP("/databases/v6/latest.json").WithPort("8080/tcp"),
 	}
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -219,8 +220,11 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 				err := tools.DeleteContents(g.installCfg.DBRootDir)
 				logger.L().Debug("cleaned up cache", helpers.Error(err),
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
-				logger.L().Info("restarting to release previous grype DB")
-				os.Exit(0)
+				if !testing.Testing() {
+					logger.L().Info("restarting to release previous grype DB")
+					os.Exit(0)
+				}
+				return false
 			}
 			if g.store != nil {
 				if err := g.store.Close(); err != nil {
@@ -247,8 +251,11 @@ func (g *GrypeAdapter) Ready(ctx context.Context) bool {
 				err := tools.DeleteContents(g.installCfg.DBRootDir)
 				logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
-				logger.L().Info("restarting pod due to grype DB initial download timeout")
-				os.Exit(0)
+				if !testing.Testing() {
+					logger.L().Info("restarting pod due to grype DB initial download timeout")
+					os.Exit(0)
+				}
+				return false
 			}
 		}
 	}
