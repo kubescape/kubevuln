@@ -1,0 +1,103 @@
+name: security-insights
+
+# SECURITY-INSIGHTS.yml is a hand-maintained manifest with a self-declared
+# expiry. Nothing consumes it in-tree, so it previously rotted unnoticed for
+# ~2 years (expired 2024-10-12, invalid `stage` key, emeritus maintainers).
+# This workflow makes both failure modes loud: schema drift fails on the PR
+# that introduces it, and impending expiry fails on a weekly schedule while
+# there is still time to review.
+
+on:
+  pull_request:
+    paths:
+      - 'SECURITY-INSIGHTS.yml'
+      - '.github/workflows/security-insights.yaml'
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate against the OpenSSF Security Insights schema
+        run: |
+          # Schema tag is pinned to header.schema-version. Bump both together.
+          SCHEMA_VERSION=$(yq -r '.header.schema-version' SECURITY-INSIGHTS.yml)
+          echo "Validating against Security Insights v${SCHEMA_VERSION}"
+          curl -sSfL -o /tmp/si-schema.yaml \
+            "https://raw.githubusercontent.com/ossf/security-insights/v${SCHEMA_VERSION}/security-insights-schema.yaml"
+          # The [format] extra is required, not optional: the schema constrains 21
+          # fields with `format: iri` plus `date`, `date-time` and `idn-email`, and
+          # jsonschema silently skips every one of those checks unless the extra is
+          # installed. Without it FORMAT_CHECKER below is a no-op.
+          pip install --quiet pyyaml 'jsonschema[format]'
+          # NB: check-jsonschema cannot be used here. It metaschema-validates the
+          # schema file first, and the upstream v1.0.0 schema's `pgp-key` pattern
+          # is not a valid `format: regex`, so it errors out before ever looking
+          # at the manifest. Draft7Validator validates the instance directly.
+          python3 - <<'EOF'
+          import sys, yaml
+          from jsonschema import Draft7Validator
+
+          schema = yaml.safe_load(open("/tmp/si-schema.yaml"))
+          doc = yaml.safe_load(open("SECURITY-INSIGHTS.yml"))
+          validator = Draft7Validator(schema, format_checker=Draft7Validator.FORMAT_CHECKER)
+          errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.path))
+          if not errors:
+              print("SECURITY-INSIGHTS.yml is valid")
+              sys.exit(0)
+          for e in errors:
+              loc = "/".join(str(p) for p in e.path) or "(root)"
+              print(f"::error file=SECURITY-INSIGHTS.yml::{loc}: {e.message}")
+          sys.exit(1)
+          EOF
+
+      - name: Fail if the manifest is expired or expires within 60 days
+        run: |
+          expiry=$(yq -r '.header.expiration-date' SECURITY-INSIGHTS.yml)
+          expiry_epoch=$(date -u -d "${expiry}" +%s)
+          now_epoch=$(date -u +%s)
+          days=$(( (expiry_epoch - now_epoch) / 86400 ))
+          echo "expiration-date: ${expiry} (${days} days remaining)"
+          if [ "${days}" -lt 0 ]; then
+            echo "::error file=SECURITY-INSIGHTS.yml::Manifest expired ${days#-} days ago. Re-review it against https://github.com/kubescape/project-governance/blob/main/MAINTAINERS.md and refresh header.last-reviewed / header.expiration-date."
+            exit 1
+          fi
+          if [ "${days}" -lt 60 ]; then
+            echo "::error file=SECURITY-INSIGHTS.yml::Manifest expires in ${days} days. Re-review it against https://github.com/kubescape/project-governance/blob/main/MAINTAINERS.md and refresh header.last-reviewed / header.expiration-date."
+            exit 1
+          fi
+
+      - name: Report core-maintainer drift from project-governance
+        # Advisory only: this parses a Markdown table in another repo, which is
+        # too brittle to gate a merge on. It annotates the run so the weekly
+        # schedule surfaces drift instead of waiting for the expiry to lapse.
+        continue-on-error: true
+        run: |
+          curl -sSfL -o /tmp/MAINTAINERS.md \
+            https://raw.githubusercontent.com/kubescape/project-governance/main/MAINTAINERS.md
+          # Core maintainers are the rows above the "commiters" heading.
+          sed -n '1,/commiters/p' /tmp/MAINTAINERS.md \
+            | grep -oE '\[@[A-Za-z0-9_-]+\]' | tr -d '[]@' | sort -fu > /tmp/governance.txt
+          yq -r '.project-lifecycle.core-maintainers[]' SECURITY-INSIGHTS.yml \
+            | sed 's/^github://' | sort -fu > /tmp/manifest.txt
+          if ! diff -iu /tmp/governance.txt /tmp/manifest.txt > /tmp/drift.txt; then
+            echo "::warning file=SECURITY-INSIGHTS.yml::core-maintainers differs from project-governance/MAINTAINERS.md"
+            cat /tmp/drift.txt
+          else
+            echo "core-maintainers matches project-governance/MAINTAINERS.md"
+          fi
