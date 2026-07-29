@@ -884,8 +884,8 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
 				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
+					ID:          v.Vulnerability.ID,
+					Name:        v.Vulnerability.DataSource,
 					Description: v.Vulnerability.Description,
 					Aliases:     aliases,
 				},
