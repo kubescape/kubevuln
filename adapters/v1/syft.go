@@ -231,7 +231,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
-		domainSBOM.Status = helpersv1.Incomplete
+		domainSBOM.Status = helpersv1.TooLarge
 		return domainSBOM, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		domainSBOM.Status = helpersv1.Unauthorize
@@ -252,7 +252,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
-				logger.L().Ctx(ctx).Fatal("failed to close source", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
 					helpers.String("imageID", imageID))
 			}
 		}(src)

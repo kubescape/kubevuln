@@ -65,11 +65,11 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			},
 		},
 		{
-			name:         "big image produces incomplete SBOM because of maxImageSize",
+			name:         "big image produces too large SBOM because of maxImageSize",
 			imageID:      "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:       "",
 			maxImageSize: 1,
-			wantStatus:   helpersv1.Incomplete,
+			wantStatus:   helpersv1.TooLarge,
 		},
 		{
 			name:        "big image produces too large SBOM because of maxSBOMSize",

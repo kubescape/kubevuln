@@ -174,7 +174,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.Incomplete,
+			Status: helpersv1.TooLarge,
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		return &pb.CreateSBOMResponse{
