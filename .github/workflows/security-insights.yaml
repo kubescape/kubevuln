@@ -13,7 +13,11 @@ on:
       - 'SECURITY-INSIGHTS.yml'
       - '.github/workflows/security-insights.yaml'
   schedule:
-    - cron: '0 6 * * 1'
+    # Monthly, not weekly: the pull_request trigger above only fires when someone
+    # edits the manifest, and it went untouched from 2023 until this PR -- so a
+    # schedule is the only thing that ever runs the expiry check. Against the
+    # 60-day warning window below, monthly still fires twice before expiry.
+    - cron: '0 6 1 * *'
   workflow_dispatch:
 
 concurrency:
