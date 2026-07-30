@@ -348,7 +348,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", cve.Name),
 				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		} else {
@@ -585,7 +585,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE summary manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update CVE summary manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", cve.Name),
 				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		} else {
@@ -1124,7 +1124,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				return updateErr
 			})
 			if retryErr != nil {
-				logger.L().Ctx(ctx).Warning("failed to update filtered SBOM in storage", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("failed to update filtered SBOM in storage", helpers.Error(retryErr),
 					helpers.String("name", sbom.Name))
 			} else {
 				logger.L().Debug("updated filtered SBOM in storage",
@@ -1157,7 +1157,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				return updateErr
 			})
 			if retryErr != nil {
-				logger.L().Ctx(ctx).Warning("failed to update SBOM in storage", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("failed to update SBOM in storage", helpers.Error(retryErr),
 					helpers.String("name", sbom.Name))
 			} else {
 				logger.L().Debug("updated SBOM in storage",
