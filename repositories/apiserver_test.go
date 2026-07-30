@@ -398,15 +398,64 @@ func TestAPIServerStore_storeVEX_updatePreservesFieldMapping(t *testing.T) {
 	var appended *v1beta1.Statement
 	for i := range vexContainer.Spec.Statements {
 		s := &vexContainer.Spec.Statements[i]
-		if s.Vulnerability.ID == lastMatch.Vulnerability.ID && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 &&
+		if s.Vulnerability.Name == lastMatch.Vulnerability.ID && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 &&
 			s.Products[0].Subcomponents[0].ID == lastMatch.Artifact.PURL {
 			appended = s
 			break
 		}
 	}
-	require.NotNil(t, appended, "expected the statement appended during update to have ID == Vulnerability.ID and matching PURL, matching the create-path mapping")
-	assert.Equal(t, lastMatch.Vulnerability.ID, appended.Vulnerability.ID)
-	assert.Equal(t, lastMatch.Vulnerability.DataSource, appended.Vulnerability.Name)
+	require.NotNil(t, appended, "expected the statement appended during update to have Name == Vulnerability.ID and matching PURL, matching the create-path mapping")
+	assert.Equal(t, lastMatch.Vulnerability.ID, appended.Vulnerability.Name)
+	assert.Equal(t, lastMatch.Vulnerability.DataSource, appended.Vulnerability.ID)
+}
+
+// TestAPIServerStore_updateVEX_normalizesLegacyStatements guards against a regression where
+// statements written with the pre-fix, swapped ID/Name mapping would no longer match the
+// current Name-keyed dedup in updateVEX, causing every legacy statement to be duplicated
+// (and left permanently un-promotable to "affected") on the next scan.
+func TestAPIServerStore_updateVEX_normalizesLegacyStatements(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountAfterCreate := len(vexContainer.Spec.Statements)
+
+	// Simulate a document written by the pre-fix update path: ID holds the CVE
+	// identifier and Name holds the data source URL, the opposite of the current mapping.
+	for i := range vexContainer.Spec.Statements {
+		s := &vexContainer.Spec.Statements[i]
+		s.Vulnerability.ID, s.Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	// Re-running the same scan should normalize the legacy statements in place rather
+	// than appending duplicates for each of them.
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, statementCountAfterCreate, len(vexContainerAfterUpdate.Spec.Statements))
+
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		assert.Contains(t, s.Vulnerability.ID, "://", "expected ID to hold the data source URL after normalization")
+		assert.NotContains(t, s.Vulnerability.Name, "://", "expected Name to hold the CVE identifier after normalization")
+	}
 }
 
 func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
