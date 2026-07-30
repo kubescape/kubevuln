@@ -383,22 +383,28 @@ func TestAPIServerStore_storeVEX_updatePreservesFieldMapping(t *testing.T) {
 	// Create with the subset of matches.
 	require.NoError(t, a.StoreVEX(ctx, cveManifestSubset, cveManifestFiltered, false))
 
+	vexContainerBeforeUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestSubset.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountBeforeUpdate := len(vexContainerBeforeUpdate.Spec.Statements)
+
 	// Update with the full set of matches, causing updateVEX to append a new statement
 	// for lastMatch via its "not found" branch.
 	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
 
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
 	require.NoError(t, err)
+	assert.Greater(t, len(vexContainer.Spec.Statements), statementCountBeforeUpdate)
 
 	var appended *v1beta1.Statement
 	for i := range vexContainer.Spec.Statements {
 		s := &vexContainer.Spec.Statements[i]
-		if s.Vulnerability.ID == lastMatch.Vulnerability.ID {
+		if s.Vulnerability.ID == lastMatch.Vulnerability.ID && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 &&
+			s.Products[0].Subcomponents[0].ID == lastMatch.Artifact.PURL {
 			appended = s
 			break
 		}
 	}
-	require.NotNil(t, appended, "expected the statement appended during update to have ID == Vulnerability.ID, matching the create-path mapping")
+	require.NotNil(t, appended, "expected the statement appended during update to have ID == Vulnerability.ID and matching PURL, matching the create-path mapping")
 	assert.Equal(t, lastMatch.Vulnerability.ID, appended.Vulnerability.ID)
 	assert.Equal(t, lastMatch.Vulnerability.DataSource, appended.Vulnerability.Name)
 }
