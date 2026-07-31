@@ -452,9 +452,9 @@ func TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement(t *testin
 
 // TestAPIServerStore_updateVEX_backfillsActionStatementOnStaleAffectedStatements guards against a
 // regression where a statement marked "affected" by an older kubevuln (before action_statement
-// support) - or one that fell out of the relevancy set before it could be backfilled - kept an
-// empty action_statement forever, because markRelevantVulnerabilitiesAsAffectedInVex only
-// revisits statements for CVEs present in the current filtered manifest.
+// support) kept an empty action_statement forever. Since updateVEX now resets every statement to
+// "not_affected" before reapplying the current filtered manifest, a CVE that fell out of the
+// relevancy set is expected to be reset rather than backfilled.
 func TestAPIServerStore_updateVEX_backfillsActionStatementOnStaleAffectedStatements(t *testing.T) {
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
@@ -503,9 +503,8 @@ func TestAPIServerStore_updateVEX_backfillsActionStatementOnStaleAffectedStateme
 	for _, stmt := range vexContainer.Spec.Statements {
 		if stmt.Vulnerability.Name == "CVE-2005-2541" {
 			found = true
-			assert.Equal(t, v1beta1.Status(vex.StatusAffected), stmt.Status, "stale affected statement should remain affected")
-			assert.NotEmpty(t, stmt.ActionStatement, "stale affected statement must be backfilled with an action_statement")
-			assert.Empty(t, stmt.ImpactStatement, "stale affected statement must not carry an impact_statement")
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status, "statement no longer relevant should be reset to not_affected")
+			assert.Empty(t, stmt.ActionStatement, "not_affected statement must not carry an action_statement")
 		}
 	}
 	require.True(t, found, "expected CVE-2005-2541 statement to still be present after the update")
