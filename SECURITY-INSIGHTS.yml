@@ -4,7 +4,6 @@ header:
   last-reviewed: '2026-07-29'
   expiration-date: '2027-07-29T00:00:00.000Z'
   project-url: https://github.com/kubescape/kubevuln/
-  project-release: v0.3.159
   changelog: https://github.com/kubescape/kubevuln/releases
   license: https://github.com/kubescape/kubevuln/blob/main/LICENSE
 project-lifecycle:
@@ -30,9 +29,7 @@ contribution-policy:
     path:
     - /
     comment: |
-      Dependabot opens dependency-bump PRs against main. Scanner dependencies
-      (github.com/anchore/syft, github.com/anchore/grype) are excluded from the
-      automated flow and are upgraded manually by maintainers.
+      Dependabot opens dependency-bump PRs against main.
   contributing-policy: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md
   code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
 documentation:
@@ -62,8 +59,9 @@ security-testing:
     ci: true
     before-release: false
   comment: |
-    CodeQL analysis runs on every pull request through the shared
-    kubescape/workflows go-basic-tests workflow.
+    CodeQL analysis runs on pull requests through the shared kubescape/workflows
+    go-basic-tests workflow (advisory; does not block merge), except for paths
+    excluded by that workflow's path filters.
 - tool-type: sca
   tool-name: Snyk
   tool-version: latest
@@ -72,8 +70,10 @@ security-testing:
     ci: true
     before-release: false
   comment: |
-    Snyk runs on every pull request through the shared kubescape/workflows
-    go-basic-tests workflow when the SNYK_TOKEN secret is configured.
+    Snyk runs on same-repository pull requests through the shared
+    kubescape/workflows go-basic-tests workflow (advisory; does not block merge).
+    Fork pull requests have no access to the SNYK_TOKEN secret, so the step is
+    skipped there.
 security-contacts:
 - type: email
   value: cncf-kubescape-maintainers@lists.cncf.io
