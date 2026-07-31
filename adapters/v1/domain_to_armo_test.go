@@ -238,3 +238,17 @@ func Test_suggestedVersion(t *testing.T) {
 		})
 	}
 }
+
+func Test_linkToVuln(t *testing.T) {
+	tests := []struct{ name, id, want string }{
+		{"GHSA advisory", "GHSA-jc7w-c686-c4v9", "https://github.com/advisories/GHSA-jc7w-c686-c4v9"},
+		{"EUVD advisory", "EUVD-2022-1234", "https://euvd.enisa.europa.eu/enisa/EUVD-2022-1234"},
+		{"CVE defaults to NVD", "CVE-2021-21300", "https://nvd.nist.gov/vuln/detail/CVE-2021-21300"},
+		{"short corrupt id not EUVD", "E", "https://nvd.nist.gov/vuln/detail/E"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, linkToVuln(tt.id))
+		})
+	}
+}
