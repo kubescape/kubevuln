@@ -214,7 +214,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Status = statuses[step]
 
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
-	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
+	a.sendStatusFunc(sender, report.Status, true)
 	return nil
 }
 

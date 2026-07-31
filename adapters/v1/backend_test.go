@@ -312,6 +312,7 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
 					report := sender.GetBaseReport()
 					assert.NotEqual(t, *report, tt.report) //nolint:govet
+					assert.Equal(t, statuses[tt.step], s)
 				},
 			}
 			ctx := context.TODO()
