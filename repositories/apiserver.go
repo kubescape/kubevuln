@@ -758,6 +758,7 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
 							vexDoc.Statements[i].Justification = ""
 							vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
+							vexDoc.Statements[i].ActionStatement = "Upgrade the vulnerable component to a version that is not affected"
 							foundProduct = true
 						}
 						if foundProduct {
