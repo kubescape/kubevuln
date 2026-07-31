@@ -338,8 +338,8 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 				return getErr
 			}
 			// update the vulnerability manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
 			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -576,8 +576,8 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 				return getErr
 			}
 			// update the vulnerability manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
 			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -664,8 +664,8 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 				return nil
 			}
 			// refresh annotations/labels only, keep any existing Spec
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
@@ -1132,8 +1132,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 					return getErr
 				}
 				// update the filtered sbom
-				mergeMaps(result.Annotations, filtered.Annotations)
-				mergeMaps(result.Labels, filtered.Labels)
+				result.Annotations = mergeMaps(result.Annotations, filtered.Annotations)
+				result.Labels = mergeMaps(result.Labels, filtered.Labels)
 				result.Spec = filtered.Spec
 				// try to send the updated filtered sbom
 				_, updateErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -1166,8 +1166,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 					return getErr
 				}
 				// update the sbom
-				mergeMaps(result.Annotations, manifest.Annotations)
-				mergeMaps(result.Labels, manifest.Labels)
+				result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+				result.Labels = mergeMaps(result.Labels, manifest.Labels)
 				result.Spec = manifest.Spec
 				// try to send the updated sbom
 				_, updateErr := a.StorageClient.SBOMSyfts(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -1201,9 +1201,15 @@ func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
 	}
 }
 
-// mergeMaps merges new into existing, overwriting existing keys with new values
-func mergeMaps(existing, new map[string]string) {
-	for k, v := range new {
+// mergeMaps merges incoming into existing, overwriting existing keys with new values,
+// and returns the merged map. Callers MUST use the returned value: when existing is
+// nil a fresh map is allocated, so ignoring the return silently drops the merge.
+func mergeMaps(existing, incoming map[string]string) map[string]string {
+	if existing == nil {
+		existing = make(map[string]string, len(incoming))
+	}
+	for k, v := range incoming {
 		existing[k] = v
 	}
+	return existing
 }
