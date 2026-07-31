@@ -839,6 +839,16 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 			}
 		}
 	}
+
+	// Backfill statements that were already marked "affected" by a version of kubevuln
+	// predating action_statement support, or that were left stale because their CVE fell
+	// out of the current relevancy set before the backfill could run on a prior update.
+	for i, s := range vexDoc.Statements {
+		if s.Status == v1beta1.Status(vex.StatusAffected) && s.ActionStatement == "" {
+			vexDoc.Statements[i].ImpactStatement = ""
+			vexDoc.Statements[i].ActionStatement = defaultActionStatement
+		}
+	}
 	return nil
 }
 

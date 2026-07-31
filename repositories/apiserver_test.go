@@ -450,6 +450,67 @@ func TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement(t *testin
 	require.True(t, foundAffected, "expected at least one affected statement in test fixture")
 }
 
+// TestAPIServerStore_updateVEX_backfillsActionStatementOnStaleAffectedStatements guards against a
+// regression where a statement marked "affected" by an older kubevuln (before action_statement
+// support) - or one that fell out of the relevancy set before it could be backfilled - kept an
+// empty action_statement forever, because markRelevantVulnerabilitiesAsAffectedInVex only
+// revisits statements for CVEs present in the current filtered manifest.
+func TestAPIServerStore_updateVEX_backfillsActionStatementOnStaleAffectedStatements(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First store: CVE-2005-2541 is relevant and marked affected.
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered2, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+
+	// Simulate a document written by a pre-fix kubevuln: affected but no action_statement.
+	found := false
+	for i, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-2005-2541" {
+			vexContainer.Spec.Statements[i].ActionStatement = ""
+			found = true
+		}
+	}
+	require.True(t, found, "expected CVE-2005-2541 to be present after the first store")
+
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
+	assert.Equal(t, err, nil)
+
+	// Second store: CVE-2005-2541 is no longer in the filtered manifest.
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+
+	found = false
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-2005-2541" {
+			found = true
+			assert.Equal(t, v1beta1.Status(vex.StatusAffected), stmt.Status, "stale affected statement should remain affected")
+			assert.NotEmpty(t, stmt.ActionStatement, "stale affected statement must be backfilled with an action_statement")
+			assert.Empty(t, stmt.ImpactStatement, "stale affected statement must not carry an impact_statement")
+		}
+	}
+	require.True(t, found, "expected CVE-2005-2541 statement to still be present after the update")
+}
+
 // TestAPIServerStore_storeVEX_updatePreservesFieldMapping guards against a regression where
 // updateVEX swapped Vulnerability.ID and Vulnerability.Name for statements appended during an
 // update, while createVEX used the opposite (correct) mapping for the very same match data.
