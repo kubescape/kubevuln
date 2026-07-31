@@ -346,18 +346,19 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE manifest in storage", helpers.Error(retryErr),
+			logger.L().Debug("failed to update CVE manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", cve.Name),
 				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-		} else {
-			logger.L().Debug("updated CVE manifest in storage",
-				helpers.String("name", cve.Name),
-				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			return fmt.Errorf("failed to update CVE manifest in storage: %w", retryErr)
 		}
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE manifest in storage", helpers.Error(err),
+		logger.L().Debug("updated CVE manifest in storage",
 			helpers.String("name", cve.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+	case err != nil:
+		logger.L().Debug("failed to store CVE manifest in storage", helpers.Error(err),
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		return fmt.Errorf("failed to store CVE manifest in storage: %w", err)
 	default:
 		logger.L().Debug("stored CVE manifest in storage",
 			helpers.String("name", cve.Name),
@@ -583,18 +584,19 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE summary manifest in storage", helpers.Error(retryErr),
+			logger.L().Debug("failed to update CVE summary manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", cve.Name),
 				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-		} else {
-			logger.L().Debug("updated CVE summary manifest in storage",
-				helpers.String("name", cve.Name),
-				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			return fmt.Errorf("failed to update CVE summary manifest in storage: %w", retryErr)
 		}
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE summary manifest in storage", helpers.Error(err),
+		logger.L().Debug("updated CVE summary manifest in storage",
 			helpers.String("name", cve.Name),
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+	case err != nil:
+		logger.L().Debug("failed to store CVE summary manifest in storage", helpers.Error(err),
+			helpers.String("name", cve.Name),
+			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+		return fmt.Errorf("failed to store CVE summary manifest in storage: %w", err)
 	default:
 		logger.L().Debug("stored CVE summary manifest in storage",
 			helpers.String("name", manifest.Name),
@@ -668,18 +670,19 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update CVE summary stub in storage", helpers.Error(retryErr),
+			logger.L().Debug("failed to update CVE summary stub in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name),
 				helpers.String("status", status))
-		} else {
-			logger.L().Debug("updated CVE summary stub in storage",
-				helpers.String("name", manifest.Name),
-				helpers.String("status", status))
+			return fmt.Errorf("failed to update CVE summary stub in storage: %w", retryErr)
 		}
-	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to store CVE summary stub in storage", helpers.Error(err),
+		logger.L().Debug("updated CVE summary stub in storage",
 			helpers.String("name", manifest.Name),
 			helpers.String("status", status))
+	case err != nil:
+		logger.L().Debug("failed to store CVE summary stub in storage", helpers.Error(err),
+			helpers.String("name", manifest.Name),
+			helpers.String("status", status))
+		return fmt.Errorf("failed to store CVE summary stub in storage: %w", err)
 	default:
 		logger.L().Debug("stored CVE summary stub in storage",
 			helpers.String("name", manifest.Name),
@@ -1137,15 +1140,16 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				return updateErr
 			})
 			if retryErr != nil {
-				logger.L().Ctx(ctx).Warning("failed to update filtered SBOM in storage", helpers.Error(retryErr),
+				logger.L().Debug("failed to update filtered SBOM in storage", helpers.Error(retryErr),
 					helpers.String("name", sbom.Name))
-			} else {
-				logger.L().Debug("updated filtered SBOM in storage",
-					helpers.String("name", sbom.Name))
+				return fmt.Errorf("failed to update filtered SBOM in storage: %w", retryErr)
 			}
-		case err != nil:
-			logger.L().Ctx(ctx).Warning("failed to store filtered SBOM in storage", helpers.Error(err),
+			logger.L().Debug("updated filtered SBOM in storage",
 				helpers.String("name", sbom.Name))
+		case err != nil:
+			logger.L().Debug("failed to store filtered SBOM in storage", helpers.Error(err),
+				helpers.String("name", sbom.Name))
+			return fmt.Errorf("failed to store filtered SBOM in storage: %w", err)
 		default:
 			logger.L().Debug("stored filtered SBOM in storage",
 				helpers.String("name", sbom.Name))
@@ -1170,15 +1174,16 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				return updateErr
 			})
 			if retryErr != nil {
-				logger.L().Ctx(ctx).Warning("failed to update SBOM in storage", helpers.Error(retryErr),
+				logger.L().Debug("failed to update SBOM in storage", helpers.Error(retryErr),
 					helpers.String("name", sbom.Name))
-			} else {
-				logger.L().Debug("updated SBOM in storage",
-					helpers.String("name", sbom.Name))
+				return fmt.Errorf("failed to update SBOM in storage: %w", retryErr)
 			}
-		case err != nil:
-			logger.L().Ctx(ctx).Warning("failed to store SBOM in storage", helpers.Error(err),
+			logger.L().Debug("updated SBOM in storage",
 				helpers.String("name", sbom.Name))
+		case err != nil:
+			logger.L().Debug("failed to store SBOM in storage", helpers.Error(err),
+				helpers.String("name", sbom.Name))
+			return fmt.Errorf("failed to store SBOM in storage: %w", err)
 		default:
 			logger.L().Debug("stored SBOM in storage",
 				helpers.String("name", sbom.Name))
