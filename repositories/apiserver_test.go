@@ -16,7 +16,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/util/retry"
 )
 
 const name = "k8s.gcr.io-kube-proxy-sha256-c1b13"
@@ -882,4 +884,275 @@ func TestAPIServerStore_GetSBOM_transientError(t *testing.T) {
 	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
 	_, err := a.GetSBOM(context.TODO(), name, "")
 	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVE_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "vulnerabilitymanifests", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreCVE(context.TODO(), domain.CVEManifest{Name: name}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreSBOM_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreSBOMFiltered_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, true)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVESummary_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	err := a.StoreCVESummary(ctx, cveManifest, domain.CVEManifest{}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVE_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "vulnerabilitymanifests", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "vulnerabilitymanifests"}, name)
+	})
+	clientset.PrependReactor("get", "vulnerabilitymanifests", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreCVE(context.TODO(), domain.CVEManifest{Name: name}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreSBOM_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "sbomsyfts"}, name)
+	})
+	clientset.PrependReactor("get", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreSBOMFiltered_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "sbomsyftfiltereds"}, name)
+	})
+	clientset.PrependReactor("get", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, true)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVESummary_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "vulnerabilitymanifestsummaries"}, name)
+	})
+	clientset.PrependReactor("get", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	err := a.StoreCVESummary(ctx, cveManifest, domain.CVEManifest{}, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
+	seeded := &v1beta1.VulnerabilityManifest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "vulnerabilitymanifests", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "vulnerabilitymanifests"}, name, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreCVE(context.TODO(), domain.CVEManifest{Name: name}, false)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
+	seeded := &v1beta1.SBOMSyft{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "sbomsyfts"}, name, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, false)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreSBOMFiltered_retryExhausted_transientError(t *testing.T) {
+	seeded := &v1beta1.SBOMSyftFiltered{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "sbomsyftfiltereds"}, name, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, true)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreCVESummary_retryExhausted_transientError(t *testing.T) {
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		InstanceID:    "",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+
+	resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, name)
+	require.NoError(t, err)
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	seeded := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        resourceName,
+			Namespace:   ns,
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "vulnerabilitymanifestsummaries"}, resourceName, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err = a.StoreCVESummary(ctx, cveManifest, domain.CVEManifest{}, false)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreCVESummaryStub_transientError(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err := a.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVESummaryStub_retryExhausted_transientError(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	resourceName, err := GetCVESummaryK8sResourceName(ctx)
+	require.NoError(t, err)
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	seeded := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        resourceName,
+			Namespace:   ns,
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "vulnerabilitymanifestsummaries"}, resourceName, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	err = a.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
 }
