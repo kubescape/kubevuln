@@ -2,16 +2,21 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/openvex/go-vex/pkg/vex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const name = "k8s.gcr.io-kube-proxy-sha256-c1b13"
@@ -855,4 +860,26 @@ func TestMergeMaps(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.existing)
 		})
 	}
+}
+
+func TestAPIServerStore_GetCVE_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("get", "vulnerabilitymanifests", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	_, err := a.GetCVE(context.TODO(), name, "", "", "")
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_GetSBOM_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("get", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	_, err := a.GetSBOM(context.TODO(), name, "")
+	require.ErrorIs(t, err, injectedErr)
 }

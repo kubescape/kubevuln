@@ -232,9 +232,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 			helpers.String("name", name))
 		return domain.CVEManifest{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get CVE manifest from apiserver", helpers.Error(err),
-			helpers.String("name", name))
-		return domain.CVEManifest{}, nil
+		return domain.CVEManifest{}, fmt.Errorf("failed to get CVE manifest from apiserver: %w", err)
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Annotations[helpersv1.ToolVersionMetadataKey] != SBOMCreatorVersion ||
@@ -1058,9 +1056,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 			helpers.String("name", name))
 		return domain.SBOM{}, nil
 	case err != nil:
-		logger.L().Ctx(ctx).Warning("failed to get SBOM from apiserver", helpers.Error(err),
-			helpers.String("name", name))
-		return domain.SBOM{}, nil
+		return domain.SBOM{}, fmt.Errorf("failed to get SBOM from apiserver: %w", err)
 	}
 	// discard the manifest if it was created by an older version of the scanner
 	if semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) == -1 {
