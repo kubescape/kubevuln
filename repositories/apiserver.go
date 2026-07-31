@@ -919,6 +919,16 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
+	// Reset every statement back to the baseline "not affected" status before
+	// reapplying the current filtered manifest. Without this, a statement that
+	// was marked "affected" during an earlier update stays "affected" forever,
+	// even after the corresponding CVE/package pair is no longer relevant.
+	for i := range vexDoc.Statements {
+		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
+		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
+		vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
+	}
+
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
 	if err != nil {

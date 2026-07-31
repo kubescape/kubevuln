@@ -354,6 +354,61 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	assert.Equal(t, relevant+1, relevant2)
 }
 
+// TestAPIServerStore_storeVEX_updateRestoresNotAffected guards against a regression where
+// updateVEX only ever promoted statements to "affected" and never reset them back to
+// "not_affected" once the corresponding CVE/package pair stopped being relevant.
+func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFiltered.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First store makes the filtered CVEs "affected".
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	affectedBefore := 0
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			affectedBefore++
+		}
+	}
+	assert.Equal(t, len(cveManifestFiltered.Content.Matches), affectedBefore)
+
+	// Second store with an empty filtered manifest: none of the CVEs are relevant anymore,
+	// so every previously "affected" statement should revert to "not_affected".
+	emptyFiltered := cveManifestFiltered
+	emptyContent := *cveManifestFiltered.Content
+	emptyContent.Matches = nil
+	emptyFiltered.Content = &emptyContent
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, emptyFiltered, false))
+
+	vexContainer, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	affectedAfter := 0
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			affectedAfter++
+		}
+	}
+	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
+}
+
 // TestAPIServerStore_storeVEX_updatePreservesFieldMapping guards against a regression where
 // updateVEX swapped Vulnerability.ID and Vulnerability.Name for statements appended during an
 // update, while createVEX used the opposite (correct) mapping for the very same match data.
