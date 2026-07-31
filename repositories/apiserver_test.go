@@ -347,6 +347,159 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	assert.Equal(t, relevant+1, relevant2)
 }
 
+// TestAPIServerStore_storeVEX_updatePreservesFieldMapping guards against a regression where
+// updateVEX swapped Vulnerability.ID and Vulnerability.Name for statements appended during an
+// update, while createVEX used the opposite (correct) mapping for the very same match data.
+func TestAPIServerStore_storeVEX_updatePreservesFieldMapping(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+	require.Greater(t, len(cveManifestFull.Content.Matches), 1)
+
+	// First store only a subset of the matches, so the remaining match(es) are appended
+	// later via the update path rather than the create path.
+	cveManifestSubset := cveManifestFull
+	subsetMatches := make([]v1beta1.Match, len(cveManifestFull.Content.Matches)-1)
+	copy(subsetMatches, cveManifestFull.Content.Matches[:len(cveManifestFull.Content.Matches)-1])
+	subsetContent := *cveManifestFull.Content
+	subsetContent.Matches = subsetMatches
+	cveManifestSubset.Content = &subsetContent
+
+	lastMatch := cveManifestFull.Content.Matches[len(cveManifestFull.Content.Matches)-1]
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// Create with the subset of matches.
+	require.NoError(t, a.StoreVEX(ctx, cveManifestSubset, cveManifestFiltered, false))
+
+	vexContainerBeforeUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestSubset.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountBeforeUpdate := len(vexContainerBeforeUpdate.Spec.Statements)
+
+	// Update with the full set of matches, causing updateVEX to append a new statement
+	// for lastMatch via its "not found" branch.
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Greater(t, len(vexContainer.Spec.Statements), statementCountBeforeUpdate)
+
+	var appended *v1beta1.Statement
+	for i := range vexContainer.Spec.Statements {
+		s := &vexContainer.Spec.Statements[i]
+		if s.Vulnerability.Name == lastMatch.Vulnerability.ID && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 &&
+			s.Products[0].Subcomponents[0].ID == lastMatch.Artifact.PURL {
+			appended = s
+			break
+		}
+	}
+	require.NotNil(t, appended, "expected the statement appended during update to have Name == Vulnerability.ID and matching PURL, matching the create-path mapping")
+	assert.Equal(t, lastMatch.Vulnerability.ID, appended.Vulnerability.Name)
+	assert.Equal(t, lastMatch.Vulnerability.DataSource, appended.Vulnerability.ID)
+}
+
+// TestAPIServerStore_updateVEX_normalizesLegacyStatements guards against a regression where
+// statements written with the pre-fix, swapped ID/Name mapping would no longer match the
+// current Name-keyed dedup in updateVEX, causing every legacy statement to be duplicated
+// (and left permanently un-promotable to "affected") on the next scan.
+func TestAPIServerStore_updateVEX_normalizesLegacyStatements(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountAfterCreate := len(vexContainer.Spec.Statements)
+
+	// Simulate a document written by the pre-fix update path: ID holds the CVE
+	// identifier and Name holds the data source URL, the opposite of the current mapping.
+	for i := range vexContainer.Spec.Statements {
+		s := &vexContainer.Spec.Statements[i]
+		s.Vulnerability.ID, s.Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	// Re-running the same scan should normalize the legacy statements in place rather
+	// than appending duplicates for each of them.
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, statementCountAfterCreate, len(vexContainerAfterUpdate.Spec.Statements))
+
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		assert.Contains(t, s.Vulnerability.ID, "://", "expected ID to hold the data source URL after normalization")
+		assert.NotContains(t, s.Vulnerability.Name, "://", "expected Name to hold the CVE identifier after normalization")
+	}
+}
+
+func TestAPIServerStore_updateVEX_doesNotNormalizeCorrectShapeWithNonURLDataSource(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountAfterCreate := len(vexContainer.Spec.Statements)
+
+	// A correct-shape statement whose data source happens not to be a URL (ID holds
+	// it verbatim) must not be mistaken for a legacy statement and swapped.
+	for i := range vexContainer.Spec.Statements {
+		vexContainer.Spec.Statements[i].Vulnerability.ID = "nvd"
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, statementCountAfterCreate, len(vexContainerAfterUpdate.Spec.Statements))
+
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		assert.Equal(t, "nvd", s.Vulnerability.ID)
+		assert.NotContains(t, s.Vulnerability.Name, "://")
+	}
+}
+
 func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	workload := domain.ScanCommand{
 		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",

@@ -749,7 +749,7 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
-			if s.Vulnerability.ID == v.Vulnerability.ID {
+			if s.Vulnerability.Name == v.Vulnerability.ID {
 				foundProduct := false
 				for _, p := range s.Products {
 					for _, sc := range p.Subcomponents {
@@ -810,8 +810,8 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 
 		vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
 			Vulnerability: v1beta1.VexVulnerability{
-				ID:          v.Vulnerability.ID,
-				Name:        v.Vulnerability.DataSource,
+				ID:          v.Vulnerability.DataSource,
+				Name:        v.Vulnerability.ID,
 				Description: v.Vulnerability.Description,
 				Aliases:     aliases,
 			},
@@ -862,12 +862,29 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
 	vexDoc := vexContainer.Spec
+
+	// Statements written before the ID/Name mapping was corrected to match createVEX
+	// carry the CVE identifier in ID and the data source URL in Name. Normalize them in
+	// place so the dedup below (which now keys on Name) also finds these older entries,
+	// instead of re-appending a duplicate for every one of them.
+	for i, s := range vexDoc.Statements {
+		if !strings.Contains(s.Vulnerability.ID, "://") && (s.Vulnerability.Name == "" || strings.Contains(s.Vulnerability.Name, "://")) {
+			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
+		}
+	}
+
 	for _, v := range cve.Content.Matches {
 		found := false
 		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.ID == v.Vulnerability.ID && v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				found = true
+			if s.Vulnerability.Name != v.Vulnerability.ID {
 				continue
+			}
+			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
+				continue
+			}
+			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				found = true
+				break
 			}
 		}
 		if !found {
