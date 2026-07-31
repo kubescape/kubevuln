@@ -746,6 +746,20 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+// defaultActionStatement is used when a match does not carry enough fix data to build a
+// more specific remediation string.
+const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
+
+// buildActionStatement returns a remediation string for an affected VEX statement. When the
+// match reports a fixed state with known fix versions, it names them; otherwise it falls back
+// to defaultActionStatement.
+func buildActionStatement(v v1beta1.Match) string {
+	if v.Vulnerability.Fix.State == "fixed" && len(v.Vulnerability.Fix.Versions) > 0 {
+		return fmt.Sprintf("Upgrade %s to version %s", v.Artifact.PURL, strings.Join(v.Vulnerability.Fix.Versions, " or "))
+	}
+	return defaultActionStatement
+}
+
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
@@ -757,8 +771,8 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 						if sc.ID == v.Artifact.PURL {
 							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
 							vexDoc.Statements[i].Justification = ""
-							vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
-							vexDoc.Statements[i].ActionStatement = "Upgrade the vulnerable component to a version that is not affected"
+							vexDoc.Statements[i].ImpactStatement = ""
+							vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
 							foundProduct = true
 						}
 						if foundProduct {
@@ -770,6 +784,16 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 					}
 				}
 			}
+		}
+	}
+
+	// Backfill statements that were already marked "affected" by a version of kubevuln
+	// predating action_statement support, or that were left stale because their CVE fell
+	// out of the current relevancy set before the backfill could run on a prior update.
+	for i, s := range vexDoc.Statements {
+		if s.Status == v1beta1.Status(vex.StatusAffected) && s.ActionStatement == "" {
+			vexDoc.Statements[i].ImpactStatement = ""
+			vexDoc.Statements[i].ActionStatement = defaultActionStatement
 		}
 	}
 	return nil
