@@ -868,7 +868,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	// place so the dedup below (which now keys on Name) also finds these older entries,
 	// instead of re-appending a duplicate for every one of them.
 	for i, s := range vexDoc.Statements {
-		if s.Vulnerability.ID != "" && !strings.Contains(s.Vulnerability.ID, "://") {
+		if !strings.Contains(s.Vulnerability.ID, "://") && (s.Vulnerability.Name == "" || strings.Contains(s.Vulnerability.Name, "://")) {
 			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
 		}
 	}

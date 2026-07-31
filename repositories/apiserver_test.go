@@ -458,6 +458,48 @@ func TestAPIServerStore_updateVEX_normalizesLegacyStatements(t *testing.T) {
 	}
 }
 
+func TestAPIServerStore_updateVEX_doesNotNormalizeCorrectShapeWithNonURLDataSource(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	statementCountAfterCreate := len(vexContainer.Spec.Statements)
+
+	// A correct-shape statement whose data source happens not to be a URL (ID holds
+	// it verbatim) must not be mistaken for a legacy statement and swapped.
+	for i := range vexContainer.Spec.Statements {
+		vexContainer.Spec.Statements[i].Vulnerability.ID = "nvd"
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, statementCountAfterCreate, len(vexContainerAfterUpdate.Spec.Statements))
+
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		assert.Equal(t, "nvd", s.Vulnerability.ID)
+		assert.NotContains(t, s.Vulnerability.Name, "://")
+	}
+}
+
 func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	workload := domain.ScanCommand{
 		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
