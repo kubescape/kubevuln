@@ -598,6 +598,50 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 }
 
+func TestScanService_ValidateScanCP(t *testing.T) {
+	tests := []struct {
+		name     string
+		workload domain.ScanCommand
+		wantErr  bool
+	}{
+		{
+			name:     "missing args",
+			workload: domain.ScanCommand{},
+			wantErr:  true,
+		},
+		{
+			name: "non-string name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      123,
+					domain.ArgsNamespace: true,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+			_, err := s.ValidateScanCP(context.TODO(), tt.workload)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateScanCP() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+		})
+	}
+}
+
 func TestScanService_ValidateScanCVE(t *testing.T) {
 	tests := []struct {
 		name     string

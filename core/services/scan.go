@@ -151,8 +151,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	if !ok {
 		return domain.ErrCastingWorkload
 	}
-	name := workload.Args[domain.ArgsName].(string)
-	namespace := workload.Args[domain.ArgsNamespace].(string)
+	name, _ := workload.Args[domain.ArgsName].(string)
+	namespace, _ := workload.Args[domain.ArgsNamespace].(string)
 	logger.L().Info("scan started",
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
@@ -861,8 +861,8 @@ func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCo
 	defer span.End()
 	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
-	name := workload.Args[domain.ArgsName].(string)
-	namespace := workload.Args[domain.ArgsNamespace].(string)
+	name, _ := workload.Args[domain.ArgsName].(string)
+	namespace, _ := workload.Args[domain.ArgsNamespace].(string)
 	if name == "" || namespace == "" {
 		return ctx, domain.ErrMissingCpInfo
 	}

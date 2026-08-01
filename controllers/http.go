@@ -102,8 +102,8 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 	}
 
 	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
-	name := newScan.Args[domain.ArgsName].(string)
-	namespace := newScan.Args[domain.ArgsNamespace].(string)
+	name, _ := newScan.Args[domain.ArgsName].(string)
+	namespace, _ := newScan.Args[domain.ArgsNamespace].(string)
 
 	details := problem.Detailf("Wlid=%s, Name=%s, Namespace=%s", newScan.Wlid, name, namespace)
 
