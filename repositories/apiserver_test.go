@@ -405,8 +405,47 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
 			affectedAfter++
 		}
+		assert.Empty(t, stmt.ActionStatement, "not_affected statement %q must not carry an action_statement", stmt.Vulnerability.Name)
 	}
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
+}
+
+// TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement guards against a regression
+// where markRelevantVulnerabilitiesAsAffectedInVex set an "affected" status without also setting
+// an ActionStatement, which the storage API type comments require for that status.
+func TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NotEmpty(t, cveManifestFiltered.Content.Matches)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+
+	foundAffected := false
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			foundAffected = true
+			assert.NotEmpty(t, stmt.ActionStatement, "affected statement %q must carry an action_statement", stmt.Vulnerability.Name)
+			assert.Empty(t, stmt.ImpactStatement, "affected statement %q must not carry an impact_statement", stmt.Vulnerability.Name)
+		}
+	}
+	require.True(t, foundAffected, "expected at least one affected statement in test fixture")
 }
 
 // TestAPIServerStore_storeVEX_updatePreservesFieldMapping guards against a regression where
