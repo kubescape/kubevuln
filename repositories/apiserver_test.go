@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -1210,4 +1211,84 @@ func TestAPIServerStore_StoreCVESummaryStub_retryExhausted_transientError(t *tes
 	err = a.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema)
 	require.True(t, apierrors.IsConflict(err))
 	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreVEX_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreVEX_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name)
+	})
+	clientset.PrependReactor("get", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreVEX_retryExhausted_transientError(t *testing.T) {
+	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+		Spec: v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+// TestAPIServerStore_StoreVEX_concurrentCreateRace guards against a regression where a
+// caller that loses a concurrent create race (the VEX container was created by a concurrent
+// writer between this caller's earlier NotFound check and its own Create call) received the
+// raw AlreadyExists error instead of falling back to an update, unlike every other Store*
+// method in this file.
+func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
+	// Seed the container as if a concurrent writer already created it, so this caller's
+	// own Create call naturally races and loses with AlreadyExists.
+	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "kubescape",
+		},
+		Spec: v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, vexContainer)
 }

@@ -700,30 +700,33 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 		return nil
 	}
 
-	// Check if VEX already exists
-	// If it does, update it
-	// If it doesn't, create it
-	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create VEX
-			err = a.createVEX(ctx, cve, cvep)
-			if err != nil {
-				return err
+	err := a.createVEX(ctx, cve, cvep)
+	switch {
+	case errors.IsAlreadyExists(err):
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			vexContainer, getErr := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			if getErr != nil {
+				return getErr
 			}
-		} else {
-			return err
+			return a.updateVEX(ctx, cve, cvep, vexContainer)
+		})
+		if retryErr != nil {
+			logger.L().Debug("failed to update VEX in storage", helpers.Error(retryErr),
+				helpers.String("name", cvep.Name))
+			return fmt.Errorf("failed to update VEX in storage: %w", retryErr)
 		}
-	} else {
-		// Update VEX
-		err = a.updateVEX(ctx, cve, cvep, vexContainer)
-		if err != nil {
-			return err
-		}
+		logger.L().Debug("updated VEX in storage", helpers.String("name", cvep.Name))
+	case err != nil:
+		logger.L().Debug("failed to store VEX in storage", helpers.Error(err),
+			helpers.String("name", cvep.Name))
+		return fmt.Errorf("failed to store VEX in storage: %w", err)
+	default:
+		logger.L().Debug("stored VEX in storage", helpers.String("name", cvep.Name))
 	}
 
 	return nil
-
 }
 
 func createProductStructForImageAndPackage(imagePullable string, packagePURL string) (*v1beta1.Product, error) {
