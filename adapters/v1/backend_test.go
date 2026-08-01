@@ -287,14 +287,16 @@ func TestNewBackendAdapter(t *testing.T) {
 
 func TestBackendAdapter_SendStatus(t *testing.T) {
 	tests := []struct {
-		name    string
-		step    int
-		report  sysreport.BaseReport
-		wantErr bool
+		name       string
+		step       int
+		report     sysreport.BaseReport
+		wantStatus string
+		wantErr    bool
 	}{
 		{
-			name: "send status",
-			step: 1,
+			name:       "send status",
+			step:       1,
+			wantStatus: sysreport.JobStarted,
 			report: sysreport.BaseReport{
 				Reporter:   ReporterName,
 				Target:     "vuln scan:: scanning wlid: wlid , container: container imageTag: imageTag imageHash: imageHash",
@@ -305,6 +307,21 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 				Details:    "started",
 			},
 		},
+		{
+			name:       "inqueueing step reports started",
+			step:       0,
+			wantStatus: sysreport.JobStarted,
+		},
+		{
+			name:       "second dequeueing step reports success",
+			step:       2,
+			wantStatus: sysreport.JobSuccess,
+		},
+		{
+			name:       "final dequeueing step reports done",
+			step:       3,
+			wantStatus: sysreport.JobDone,
+		},
 	}
 	for _, tt := range tests { //nolint:govet
 		t.Run(tt.name, func(t *testing.T) {
@@ -312,7 +329,7 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
 					report := sender.GetBaseReport()
 					assert.NotEqual(t, *report, tt.report) //nolint:govet
-					assert.Equal(t, statuses[tt.step], s)
+					assert.Equal(t, tt.wantStatus, s)
 				},
 			}
 			ctx := context.TODO()
