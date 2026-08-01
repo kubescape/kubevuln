@@ -1231,7 +1231,15 @@ func TestAPIServerStore_StoreVEX_updateGetFailure_transientError(t *testing.T) {
 	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name)
 	})
+	var getCalls int
 	clientset.PrependReactor("get", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		getCalls++
+		if getCalls == 1 {
+			// the initial existence check: let it fall through to the tracker, which
+			// reports NotFound since nothing has been created yet
+			return false, nil, nil
+		}
+		// the Get inside the retry-on-conflict loop, after createVEX raced to AlreadyExists
 		return true, nil, injectedErr
 	})
 	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
@@ -1266,32 +1274,69 @@ func TestAPIServerStore_StoreVEX_retryExhausted_transientError(t *testing.T) {
 }
 
 // TestAPIServerStore_StoreVEX_concurrentCreateRace guards against a regression where a
-// caller that loses a concurrent create race (the VEX container was created by a concurrent
-// writer between this caller's earlier NotFound check and its own Create call) received the
-// raw AlreadyExists error instead of falling back to an update, unlike every other Store*
-// method in this file.
+// caller whose Create lost the race (another writer created the container between this
+// caller's own NotFound-returning Get and its Create call) received the raw AlreadyExists
+// error instead of falling back to an update, unlike every other Store* method in this file.
 func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
-	// Seed the container as if a concurrent writer already created it, so this caller's
-	// own Create call naturally races and loses with AlreadyExists.
-	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: "kubescape",
-		},
-		Spec: v1beta1.VEX{
-			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
-		},
-	}
-	clientset := fake.NewSimpleClientset(seeded)
+	clientset := fake.NewSimpleClientset()
+	var createCalls int
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createCalls++
+		// Simulate a concurrent writer's createVEX beating this caller's Create:
+		// insert the object directly into the tracker (bypassing the Fake's own
+		// action-invocation lock, which is already held while this reactor runs,
+		// to avoid deadlocking on a reentrant call through the client) and report
+		// AlreadyExists back to the caller, exactly as the real apiserver would.
+		created := action.(k8stesting.CreateAction).GetObject().(*v1beta1.OpenVulnerabilityExchangeContainer).DeepCopy()
+		require.NoError(t, clientset.Tracker().Create(action.GetResource(), created, action.GetNamespace()))
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name)
+	})
 	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
 	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
 	err := a.StoreVEX(context.TODO(), cve, cve, false)
 	require.NoError(t, err)
+	require.Equal(t, 1, createCalls)
 
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, vexContainer)
 	// updateVEX bumps Metadata.Version on every successful update, so a version > 0
 	// confirms the fallback actually went through updateVEX rather than a no-op.
+	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+}
+
+// TestAPIServerStore_StoreVEX_recoversFromTransientConflict guards against a regression
+// where the retry loop stops actually retrying (e.g. a future refactor hoists the Get
+// outside the closure and keeps retrying against a stale resourceVersion). It asserts the
+// headline behaviour promised by RetryOnConflict: a single transient conflict is absorbed
+// and the second attempt succeeds.
+func TestAPIServerStore_StoreVEX_recoversFromTransientConflict(t *testing.T) {
+	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+		Spec: v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		if updateCalls == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
+		}
+		return false, nil, nil // fall through to the tracker's default update handling
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	require.NoError(t, a.StoreVEX(context.TODO(), cve, cve, false))
+	require.Equal(t, 2, updateCalls)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
 	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
 }

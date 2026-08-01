@@ -700,31 +700,57 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 		return nil
 	}
 
-	err := a.createVEX(ctx, cve, cvep)
+	// Check for an existing container first so the common "VEX already exists" path
+	// (every scan after the first one for a given image) goes straight to the cheap
+	// update below, instead of paying for building the full VEX document, hashing it,
+	// and POSTing it via createVEX only to discard the result on AlreadyExists.
+	_, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
 	switch {
-	case errors.IsAlreadyExists(err):
-		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			// retrieve the latest version before attempting update
-			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			vexContainer, getErr := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
-			if getErr != nil {
-				return getErr
-			}
-			return a.updateVEX(ctx, cve, cvep, vexContainer)
-		})
-		if retryErr != nil {
-			logger.L().Debug("failed to update VEX in storage", helpers.Error(retryErr),
+	case errors.IsNotFound(err):
+		err = a.createVEX(ctx, cve, cvep)
+		switch {
+		case err == nil:
+			logger.L().Debug("stored VEX in storage", helpers.String("name", cvep.Name))
+			return nil
+		case errors.IsAlreadyExists(err):
+			// A concurrent writer created the container between our Get and our
+			// Create; fall through to the retry-on-conflict update path below
+			// instead of surfacing the raw AlreadyExists error.
+		default:
+			logger.L().Debug("failed to store VEX in storage", helpers.Error(err),
 				helpers.String("name", cvep.Name))
-			return fmt.Errorf("failed to update VEX in storage: %w", retryErr)
+			return fmt.Errorf("failed to store VEX in storage: %w", err)
 		}
-		logger.L().Debug("updated VEX in storage", helpers.String("name", cvep.Name))
 	case err != nil:
-		logger.L().Debug("failed to store VEX in storage", helpers.Error(err),
+		logger.L().Debug("failed to get VEX from storage", helpers.Error(err),
 			helpers.String("name", cvep.Name))
-		return fmt.Errorf("failed to store VEX in storage: %w", err)
-	default:
-		logger.L().Debug("stored VEX in storage", helpers.String("name", cvep.Name))
+		return fmt.Errorf("failed to get VEX from storage: %w", err)
 	}
+
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// retrieve the latest version before attempting update
+		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+		//
+		// NOTE: this must NOT use GetOptions{ResourceVersion: "metadata"} like the
+		// sibling Store* methods do. That option returns an ObjectMeta-only object
+		// with a zero Spec in kubescape/storage's apiserver, which is safe for the
+		// siblings because they overwrite Spec wholesale. updateVEX instead merges
+		// into vexContainer.Spec.Statements, so a metadata-only read would silently
+		// drop every previously stored statement and then fail when it tries to
+		// parse the zeroed Spec.Metadata.Timestamp. The fake clientset used in tests
+		// ignores GetOptions entirely, so no test can catch a regression here.
+		vexContainer, getErr := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		return a.updateVEX(ctx, cve, cvep, vexContainer)
+	})
+	if retryErr != nil {
+		logger.L().Debug("failed to update VEX in storage", helpers.Error(retryErr),
+			helpers.String("name", cvep.Name))
+		return fmt.Errorf("failed to update VEX in storage: %w", retryErr)
+	}
+	logger.L().Debug("updated VEX in storage", helpers.String("name", cvep.Name))
 
 	return nil
 }
