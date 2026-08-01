@@ -704,7 +704,10 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 	// (every scan after the first one for a given image) goes straight to the cheap
 	// update below, instead of paying for building the full VEX document, hashing it,
 	// and POSTing it via createVEX only to discard the result on AlreadyExists.
-	_, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
+	existing, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cvep.Name, metav1.GetOptions{})
+	// Get returns a non-nil (but empty) object even on error, so success must be
+	// tracked explicitly rather than by checking the returned pointer for nil.
+	haveExisting := err == nil
 	switch {
 	case errors.IsNotFound(err):
 		err = a.createVEX(ctx, cve, cvep)
@@ -728,20 +731,29 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 	}
 
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// retrieve the latest version before attempting update
-		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		//
-		// NOTE: this must NOT use GetOptions{ResourceVersion: "metadata"} like the
-		// sibling Store* methods do. That option returns an ObjectMeta-only object
-		// with a zero Spec in kubescape/storage's apiserver, which is safe for the
-		// siblings because they overwrite Spec wholesale. updateVEX instead merges
-		// into vexContainer.Spec.Statements, so a metadata-only read would silently
-		// drop every previously stored statement and then fail when it tries to
-		// parse the zeroed Spec.Metadata.Timestamp. The fake clientset used in tests
-		// ignores GetOptions entirely, so no test can catch a regression here.
-		vexContainer, getErr := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
-		if getErr != nil {
-			return getErr
+		// Reuse the object already fetched above on the first attempt, so the common
+		// "VEX already exists" path only costs a single Get. Any retry (after a real
+		// conflict) forces a fresh Get for the latest resourceVersion.
+		vexContainer := existing
+		alreadyHadExisting := haveExisting
+		haveExisting = false
+		if !alreadyHadExisting {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			//
+			// NOTE: this must NOT use GetOptions{ResourceVersion: "metadata"} like the
+			// sibling Store* methods do. That option returns an ObjectMeta-only object
+			// with a zero Spec in kubescape/storage's apiserver, which is safe for the
+			// siblings because they overwrite Spec wholesale. updateVEX instead merges
+			// into vexContainer.Spec.Statements, so a metadata-only read would silently
+			// drop every previously stored statement and then fail when it tries to
+			// parse the zeroed Spec.Metadata.Timestamp. The fake clientset used in tests
+			// ignores GetOptions entirely, so no test can catch a regression here.
+			var getErr error
+			vexContainer, getErr = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cvep.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
 		}
 		return a.updateVEX(ctx, cve, cvep, vexContainer)
 	})
