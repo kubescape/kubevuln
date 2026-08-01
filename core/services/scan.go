@@ -113,7 +113,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -220,7 +220,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			if sbom.Content == nil {
 				if s.sbomGeneration {
 					// create SBOM
-					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(workload))
+					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
 					s.checkCreateSBOM(err, scan.ImageID)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
@@ -433,7 +433,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if sbom.Content == nil {
 			if s.sbomGeneration {
 				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
 					reason := classifySBOMError(err)
@@ -559,7 +559,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 	s.checkCreateSBOM(err, workload.ImageTagNormalized)
 	if err != nil {
 		repErr := s.platform.ReportError(ctx, err)
@@ -673,15 +673,29 @@ func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 	return uuid.New().String()
 }
 
-func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
+func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
 	options.Credentials = registryCredentialsFromCredentialsList(workload.CredentialsList)
 
 	if useHTTP, ok := workload.Args[domain.AttributeUseHTTP]; ok {
-		options.InsecureUseHTTP = useHTTP.(bool)
+		if b, isBool := useHTTP.(bool); isBool {
+			options.InsecureUseHTTP = b
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-boolean value for registry option",
+				helpers.String("key", domain.AttributeUseHTTP),
+				helpers.String("type", fmt.Sprintf("%T", useHTTP)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 	}
 	if skipTLSVerify, ok := workload.Args[domain.AttributeSkipTLSVerify]; ok {
-		options.InsecureSkipTLSVerify = skipTLSVerify.(bool)
+		if b, isBool := skipTLSVerify.(bool); isBool {
+			options.InsecureSkipTLSVerify = b
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-boolean value for registry option",
+				helpers.String("key", domain.AttributeSkipTLSVerify),
+				helpers.String("type", fmt.Sprintf("%T", skipTLSVerify)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 	}
 
 	logger.L().Debug("created registryOptions from workload",
