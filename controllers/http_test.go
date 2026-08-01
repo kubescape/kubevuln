@@ -51,8 +51,8 @@ func TestHTTPController_GenerateSBOM(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{
@@ -136,8 +136,8 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{
@@ -186,8 +186,8 @@ func TestHTTPController_ScanRegistry(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{

@@ -56,7 +56,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 			helpers.String("wlid", newScan.Wlid),
 			helpers.String("name", name),
 			helpers.String("namespace", namespace))
-		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -230,7 +230,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusInternalServerError).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
 		return
 	}
 
