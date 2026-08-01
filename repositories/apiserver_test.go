@@ -1291,4 +1291,7 @@ func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, vexContainer)
+	// updateVEX bumps Metadata.Version on every successful update, so a version > 0
+	// confirms the fallback actually went through updateVEX rather than a no-op.
+	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
 }
