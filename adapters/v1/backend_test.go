@@ -289,7 +289,6 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		step       int
-		report     sysreport.BaseReport
 		wantStatus string
 		wantErr    bool
 	}{
@@ -297,15 +296,6 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			name:       "send status",
 			step:       1,
 			wantStatus: sysreport.JobStarted,
-			report: sysreport.BaseReport{
-				Reporter:   ReporterName,
-				Target:     "vuln scan:: scanning wlid: wlid , container: container imageTag: imageTag imageHash: imageHash",
-				Status:     "Dequeueing",
-				ActionName: ActionName,
-				ActionID:   "1",
-				ActionIDN:  1,
-				Details:    "started",
-			},
 		},
 		{
 			name:       "inqueueing step reports started",
@@ -323,12 +313,12 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			wantStatus: sysreport.JobDone,
 		},
 	}
-	for _, tt := range tests { //nolint:govet
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var called bool
 			a := &BackendAdapter{
 				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
-					report := sender.GetBaseReport()
-					assert.NotEqual(t, *report, tt.report) //nolint:govet
+					called = true
 					assert.Equal(t, tt.wantStatus, s)
 				},
 			}
@@ -344,6 +334,7 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			if err := a.SendStatus(ctx, tt.step); (err != nil) != tt.wantErr {
 				t.Errorf("SendStatus() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			assert.True(t, called, "sendStatusFunc was never invoked")
 		})
 	}
 }
