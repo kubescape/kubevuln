@@ -1,30 +1,43 @@
 header:
   schema-version: 1.0.0
-  last-updated: '2023-10-12'
-  last-reviewed: '2023-10-12'
-  expiration-date: '2024-10-12T01:00:00.000Z'
+  last-updated: '2026-07-29'
+  last-reviewed: '2026-07-29'
+  expiration-date: '2027-07-29T00:00:00.000Z'
   project-url: https://github.com/kubescape/kubevuln/
-  project-release: 1.0.0
+  changelog: https://github.com/kubescape/kubevuln/releases
+  license: https://github.com/kubescape/kubevuln/blob/main/LICENSE
 project-lifecycle:
-  stage: active
+  # Source of truth for this list:
+  # https://github.com/kubescape/project-governance/blob/main/MAINTAINERS.md
+  # Emeritus maintainers are tracked there and must not be listed here.
+  status: active
   bug-fixes-only: false
   core-maintainers:
   - github:amirmalka
-  - github:amitschendel
-  - github:bezbran
-  - github:craigbox
-  - github:dwertent
+  - github:Bezbran
   - github:matthyx
   - github:rotemamsa
   - github:slashben
 contribution-policy:
   accepts-pull-requests: true
-  accepts-automated-pull-requests: false
-  code-of-conduct: https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md
+  # Dependabot pull requests are routinely reviewed and merged (e.g. #384-#386),
+  # so the policy is declared explicitly rather than left as a bare boolean.
+  accepts-automated-pull-requests: true
+  automated-tools-list:
+  - automated-tool: dependabot
+    action: allowed
+    path:
+    - /
+    comment: |
+      Dependabot opens dependency-bump PRs against main.
+  contributing-policy: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md
+  code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
 documentation:
-- https://github.com/kubescape/kubescape/tree/master/docs
+- https://github.com/kubescape/kubevuln/tree/main/docs
+- https://kubescape.io/docs/
 distribution-points:
 - https://github.com/kubescape/kubevuln/
+- https://quay.io/repository/kubescape/kubevuln
 security-artifacts:
   threat-model:
     threat-model-created: false
@@ -38,12 +51,35 @@ security-testing:
     before-release: true
   comment: |
     Dependabot is enabled for this repo.
+- tool-type: sast
+  tool-name: CodeQL
+  tool-version: latest
+  integration:
+    ad-hoc: false
+    ci: true
+    before-release: false
+  comment: |
+    CodeQL analysis runs on pull requests through the shared kubescape/workflows
+    go-basic-tests workflow (advisory; does not block merge), except for paths
+    excluded by that workflow's path filters.
+- tool-type: sca
+  tool-name: Snyk
+  tool-version: latest
+  integration:
+    ad-hoc: false
+    ci: true
+    before-release: false
+  comment: |
+    Snyk runs on same-repository pull requests through the shared
+    kubescape/workflows go-basic-tests workflow (advisory; does not block merge).
+    Fork pull requests have no access to the SNYK_TOKEN secret, so the step is
+    skipped there.
 security-contacts:
 - type: email
   value: cncf-kubescape-maintainers@lists.cncf.io
 vulnerability-reporting:
   accepts-vulnerability-reports: true
-  security-policy: https://github.com/kubescape/kubescape/security/policy
+  security-policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
   email-contact: cncf-kubescape-maintainers@lists.cncf.io
   comment: |
     The first and best way to report a vulnerability is by using private security issues in GitHub.

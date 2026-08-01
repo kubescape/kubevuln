@@ -1,0 +1,159 @@
+name: security-insights
+
+# SECURITY-INSIGHTS.yml is a hand-maintained manifest with a self-declared
+# expiry. Nothing consumes it in-tree, so it previously rotted unnoticed for
+# ~2 years (expired 2024-10-12, invalid `stage` key, emeritus maintainers).
+# This workflow makes both failure modes loud: schema drift fails on the PR
+# that introduces it, and impending expiry fails on a monthly schedule while
+# there is still time to review.
+
+on:
+  pull_request:
+    paths:
+      - 'SECURITY-INSIGHTS.yml'
+      - '.github/workflows/security-insights.yaml'
+  schedule:
+    # Monthly, not weekly: the pull_request trigger above only fires when someone
+    # edits the manifest, and it went untouched from 2023 until this PR -- so a
+    # schedule is the only thing that ever runs the expiry check. Against the
+    # 60-day warning window below, monthly still fires twice before expiry.
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Needed by the tracking-issue step below. Scheduled-run failure notifications
+  # go only to whoever last committed to this file, who may not be a maintainer,
+  # so a red run alone would leave the manifest rotting exactly as before.
+  issues: write
+
+jobs:
+  validate:
+    name: validate manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate against the OpenSSF Security Insights schema
+        run: |
+          # Schema tag is pinned to header.schema-version. Bump both together.
+          SCHEMA_VERSION=$(yq -r '.header.schema-version' SECURITY-INSIGHTS.yml)
+          echo "Validating against Security Insights v${SCHEMA_VERSION}"
+          curl -sSfL --connect-timeout 10 --max-time 60 -o /tmp/si-schema.yaml \
+            "https://raw.githubusercontent.com/ossf/security-insights/v${SCHEMA_VERSION}/security-insights-schema.yaml"
+          # The [format] extra is required, not optional: the schema constrains 21
+          # fields with `format: iri` plus `date`, `date-time` and `idn-email`, and
+          # jsonschema silently skips every one of those checks unless the extra is
+          # installed. Without it FORMAT_CHECKER below is a no-op.
+          pip install --quiet pyyaml 'jsonschema[format]'
+          # NB: check-jsonschema cannot be used here. It metaschema-validates the
+          # schema file first, and the upstream v1.0.0 schema's `pgp-key` pattern
+          # is not a valid `format: regex`, so it errors out before ever looking
+          # at the manifest. Draft7Validator validates the instance directly.
+          python3 - <<'EOF'
+          import sys, yaml
+          from jsonschema import Draft7Validator
+
+          schema = yaml.safe_load(open("/tmp/si-schema.yaml"))
+          doc = yaml.safe_load(open("SECURITY-INSIGHTS.yml"))
+          validator = Draft7Validator(schema, format_checker=Draft7Validator.FORMAT_CHECKER)
+          errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.path))
+          if not errors:
+              print("SECURITY-INSIGHTS.yml is valid")
+              sys.exit(0)
+          for e in errors:
+              loc = "/".join(str(p) for p in e.path) or "(root)"
+              print(f"::error file=SECURITY-INSIGHTS.yml::{loc}: {e.message}")
+          sys.exit(1)
+          EOF
+
+      - name: Fail if the manifest is expired or expires within 60 days
+        id: expiry
+        run: |
+          expiry=$(yq -r '.header.expiration-date' SECURITY-INSIGHTS.yml)
+          expiry_epoch=$(date -u -d "${expiry}" +%s)
+          now_epoch=$(date -u +%s)
+          days=$(( (expiry_epoch - now_epoch) / 86400 ))
+          echo "expiration-date: ${expiry} (${days} days remaining)"
+          # Classify on epoch seconds, not the truncated day count: a manifest that
+          # expired a few hours ago yields days=0, which would fall through to the
+          # "expires in 0 days" branch and report an already-invalid file as merely
+          # expiring soon.
+          if [ "${expiry_epoch}" -le "${now_epoch}" ]; then
+            message="SECURITY-INSIGHTS.yml EXPIRED on ${expiry}."
+          elif [ "${days}" -lt 60 ]; then
+            message="SECURITY-INSIGHTS.yml expires on ${expiry} (in ${days} days)."
+          else
+            exit 0
+          fi
+          message="${message} Re-review it against https://github.com/kubescape/project-governance/blob/main/MAINTAINERS.md and refresh header.last-reviewed / header.expiration-date."
+          echo "message=${message}" >> "$GITHUB_OUTPUT"
+          echo "::error file=SECURITY-INSIGHTS.yml::${message}"
+          exit 1
+
+      - name: Open or refresh the expiry tracking issue
+        # Only on scheduled runs: on a pull_request the red check is already in
+        # front of someone who can act on it. On a schedule nothing else routes
+        # this to a maintainer, so raise an issue they will actually see.
+        if: ${{ always() && github.event_name == 'schedule' && steps.expiry.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MESSAGE: ${{ steps.expiry.outputs.message }}
+          TITLE: 'SECURITY-INSIGHTS.yml needs review'
+        run: |
+          body="${MESSAGE}
+
+          Raised automatically by \`${GITHUB_WORKFLOW}\`: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # Match on title rather than a label, so the step does not depend on a
+          # label existing in the repo.
+          existing=$(gh issue list --state open --search "in:title \"${TITLE}\"" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            echo "refreshing existing issue #${existing}"
+            gh issue comment "${existing}" --body "${body}"
+          else
+            echo "opening a new tracking issue"
+            gh issue create --title "${TITLE}" --body "${body}"
+          fi
+
+      - name: Report core-maintainer drift from project-governance
+        # Advisory only: this parses a Markdown table in another repo, which is
+        # too brittle to gate a merge on. It annotates the run so the monthly
+        # schedule surfaces drift instead of waiting for the expiry to lapse.
+        continue-on-error: true
+        run: |
+          curl -sSfL --connect-timeout 10 --max-time 60 -o /tmp/MAINTAINERS.md \
+            https://raw.githubusercontent.com/kubescape/project-governance/main/MAINTAINERS.md
+          # Core maintainers are the rows above the committers heading. The range
+          # end is anchored to that heading and tolerates both spellings, so
+          # correcting the current upstream typo ("commiters") does not silently
+          # widen the range to the whole file and fold committers and emeritus
+          # maintainers into the comparison.
+          heading='^The following table lists the Kubescape project committ?ers'
+          if ! grep -qE "${heading}" /tmp/MAINTAINERS.md; then
+            echo "::warning file=SECURITY-INSIGHTS.yml::could not locate the committers heading in project-governance/MAINTAINERS.md; core-maintainer drift not checked"
+            exit 0
+          fi
+          # `|| true` keeps a no-match from tripping pipefail before the emptiness
+          # check below can distinguish "format changed" from "no drift".
+          sed -nE "1,/${heading}/p" /tmp/MAINTAINERS.md \
+            | grep -oE '\[@[A-Za-z0-9_-]+\]' | tr -d '[]@' | sort -fu > /tmp/governance.txt || true
+          if [ ! -s /tmp/governance.txt ]; then
+            echo "::warning file=SECURITY-INSIGHTS.yml::parsed no maintainers from project-governance/MAINTAINERS.md (link format may have changed); core-maintainer drift not checked"
+            exit 0
+          fi
+          yq -r '.project-lifecycle.core-maintainers[]' SECURITY-INSIGHTS.yml \
+            | sed 's/^github://' | sort -fu > /tmp/manifest.txt
+          if ! diff -iu /tmp/governance.txt /tmp/manifest.txt > /tmp/drift.txt; then
+            echo "::warning file=SECURITY-INSIGHTS.yml::core-maintainers differs from project-governance/MAINTAINERS.md"
+            cat /tmp/drift.txt
+          else
+            echo "core-maintainers matches project-governance/MAINTAINERS.md"
+          fi

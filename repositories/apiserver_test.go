@@ -405,6 +405,7 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
 			affectedAfter++
 		}
+		assert.Empty(t, stmt.ActionStatement, "not_affected statement %q must not carry an action_statement", stmt.Vulnerability.Name)
 	}
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
 }
@@ -1007,14 +1008,49 @@ func TestMergeMaps(t *testing.T) {
 			new:      map[string]string{},
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil existing map",
+			existing: nil,
+			new:      map[string]string{"key1": "value1"},
+			expected: map[string]string{"key1": "value1"},
+		},
+		{
+			name:     "merge with nil existing and nil new maps",
+			existing: nil,
+			new:      nil,
+			expected: map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mergeMaps(tt.existing, tt.new)
-			assert.Equal(t, tt.expected, tt.existing)
+			got := mergeMaps(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestAPIServerStore_StoreCVE_mergesMetadataOnUpdate(t *testing.T) {
+	seeded := &v1beta1.VulnerabilityManifest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "kubescape",
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"k1": "v1"},
+		Labels:      map[string]string{"l1": "v2"},
+	}
+	require.NoError(t, a.StoreCVE(context.TODO(), cve, false))
+
+	got, err := a.StorageClient.VulnerabilityManifests("kubescape").Get(context.TODO(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "v1", got.Annotations["k1"])
+	assert.Equal(t, "v2", got.Labels["l1"])
 }
 
 func TestAPIServerStore_GetCVE_transientError(t *testing.T) {
@@ -1159,13 +1195,16 @@ func TestAPIServerStore_StoreCVESummary_updateGetFailure_transientError(t *testi
 	require.ErrorIs(t, err, injectedErr)
 }
 
+// NOTE: the missing Annotations/Labels seeds here are load-bearing — they drive the
+// nil-map update path (the mergeMaps crash). See also the SBOM/summary/stub
+// retryExhausted tests. Do NOT re-add empty map seeds; that silently deletes the
+// regression coverage. The "merged and saved" half is covered by
+// TestAPIServerStore_StoreCVE_mergesMetadataOnUpdate.
 func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1183,10 +1222,8 @@ func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
 func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1204,10 +1241,8 @@ func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
 func TestAPIServerStore_StoreSBOMFiltered_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.SBOMSyftFiltered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1241,10 +1276,8 @@ func TestAPIServerStore_StoreCVESummary_retryExhausted_transientError(t *testing
 
 	seeded := &v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        resourceName,
-			Namespace:   ns,
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      resourceName,
+			Namespace: ns,
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1292,10 +1325,8 @@ func TestAPIServerStore_StoreCVESummaryStub_retryExhausted_transientError(t *tes
 
 	seeded := &v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        resourceName,
-			Namespace:   ns,
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      resourceName,
+			Namespace: ns,
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
