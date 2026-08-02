@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anchore/grype/grype/distro"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
@@ -121,3 +122,56 @@ func Test_grypeAdapter_resolveUseDefaultMatchers(t *testing.T) {
 		})
 	}
 }
+
+type mockProvider struct {
+	vulnerability.Provider
+}
+
+func (m *mockProvider) Close() error { return nil }
+
+func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
+	ctx := context.Background()
+	mockStore := &mockProvider{}
+	g := &GrypeAdapter{
+		store:        mockStore,
+		dbStatus:     &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
+		lastDbUpdate: time.Now(),
+	}
+
+	// Initial check with valid DB returns ready immediately
+	require.True(t, g.Ready(ctx))
+	assert.Equal(t, "test-checksum", g.DBVersion(ctx))
+
+	// Manually set lastDbUpdate to past 24h to trigger background update check
+	g.mu.Lock()
+	g.lastDbUpdate = time.Now().Add(-25 * time.Hour)
+	g.mu.Unlock()
+
+	// Trigger Ready - should launch background update without blocking
+	readyCh := make(chan bool, 1)
+	go func() {
+		readyCh <- g.Ready(ctx)
+	}()
+
+	select {
+	case isReady := <-readyCh:
+		// With an existing DB, Ready returns immediately true while update runs in background
+		assert.True(t, isReady)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Ready() blocked waiting for DB update, causing lock contention")
+	}
+
+	// Verify DBVersion can acquire read locks concurrently while background update is active
+	version := g.DBVersion(ctx)
+	assert.Equal(t, "test-checksum", version)
+
+	// Verify single-flight: while updating is true, another Ready call returns immediately
+	g.mu.RLock()
+	isUpdating := g.updating
+	g.mu.RUnlock()
+	if isUpdating {
+		require.True(t, g.Ready(ctx))
+	}
+}
+
+
