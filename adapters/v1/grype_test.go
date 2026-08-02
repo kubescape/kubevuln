@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/distro"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/google/uuid"
@@ -132,10 +134,16 @@ func (m *mockProvider) Close() error { return nil }
 func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
 	ctx := context.Background()
 	mockStore := &mockProvider{}
+	blockLoad := make(chan struct{})
+	
 	g := &GrypeAdapter{
 		store:        mockStore,
 		dbStatus:     &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
 		lastDbUpdate: time.Now(),
+		loadDB: func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			<-blockLoad
+			return mockStore, &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"}, nil
+		},
 	}
 
 	// Initial check with valid DB returns ready immediately
@@ -165,13 +173,15 @@ func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
 	version := g.DBVersion(ctx)
 	assert.Equal(t, "test-checksum", version)
 
-	// Verify single-flight: while updating is true, another Ready call returns immediately
+	// Verify background update is active under RLock
 	g.mu.RLock()
 	isUpdating := g.updating
 	g.mu.RUnlock()
-	if isUpdating {
-		require.True(t, g.Ready(ctx))
-	}
+	assert.True(t, isUpdating, "background update should be active")
+
+	// Unblock background loadDB and clean up
+	close(blockLoad)
 }
+
 
 

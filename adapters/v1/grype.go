@@ -50,6 +50,12 @@ const (
 	VendorTrustedMatchMetadataKey = "kubescape.io/vendor-trusted-match"
 )
 
+type loadDBFunc func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error)
+
+func defaultLoadDB(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+	return grype.LoadVulnerabilityDB(distCfg, installCfg, true)
+}
+
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
 	lastDbUpdate   time.Time
@@ -62,6 +68,7 @@ type GrypeAdapter struct {
 	trustedVendors map[distro.Type]bool
 	updating       bool
 	updateChan     chan struct{}
+	loadDB         loadDBFunc
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -78,6 +85,7 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
+		loadDB:         defaultLoadDB,
 	}
 	return g
 }
@@ -136,6 +144,7 @@ func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, tru
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
+		loadDB:         defaultLoadDB,
 	}
 	return g, terminate, nil
 }
@@ -227,6 +236,11 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 	}
 	resultCh := make(chan updateResult, 1)
 
+	loadFn := g.loadDB
+	if loadFn == nil {
+		loadFn = defaultLoadDB
+	}
+
 	go func() {
 		if logger.L().GetLevel() == "debug" {
 			if distClient, err := distribution.NewClient(g.distCfg); err == nil {
@@ -242,25 +256,24 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 				helpers.Error(err),
 				helpers.String("dbRootDir", g.installCfg.DBRootDir))
 		}
-		store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
+		store, dbStatus, err := loadFn(g.distCfg, g.installCfg)
 		resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
 	}()
 
-	now := time.Now()
 	select {
 	case result := <-resultCh:
+		now := time.Now()
 		if result.err != nil {
 			logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(result.err))
+			g.mu.Lock()
 			if !hasExistingDB {
 				err := tools.DeleteContents(g.installCfg.DBRootDir)
 				logger.L().Debug("cleaned up cache", helpers.Error(err),
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
-			} else {
-				g.mu.Lock()
-				// Schedule retry in 5 minutes if update failed but existing DB is available
-				g.lastDbUpdate = now.Add(-24*time.Hour + 5*time.Minute)
-				g.mu.Unlock()
 			}
+			// Schedule retry in 5 minutes on update failure
+			g.lastDbUpdate = now.Add(-24*time.Hour + 5*time.Minute)
+			g.mu.Unlock()
 			return
 		}
 		g.mu.Lock()
@@ -277,6 +290,15 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 		}
 		logger.L().Info("grype DB updated")
 	case <-updateCtx.Done():
+		// Drain resultCh asynchronously in case LoadVulnerabilityDB completes after timeout, preventing provider leak
+		go func() {
+			res := <-resultCh
+			if res.store != nil {
+				_ = res.store.Close()
+			}
+		}()
+
+		now := time.Now()
 		g.mu.Lock()
 		if hasExistingDB {
 			logger.L().Ctx(ctx).Warning("grype DB update timed out after 15 minutes, continuing with existing DB",
@@ -288,6 +310,8 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 			err := tools.DeleteContents(g.installCfg.DBRootDir)
 			logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
 				helpers.String("DBRootDir", g.installCfg.DBRootDir))
+			// Back-date to retry in 5 minutes
+			g.lastDbUpdate = now.Add(-24*time.Hour + 5*time.Minute)
 		}
 		g.mu.Unlock()
 	}
