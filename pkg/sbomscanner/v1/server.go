@@ -26,7 +26,73 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"golang.org/x/oauth2/google"
 )
+
+func isGCPRegistry(imageID string) bool {
+	host, _, _ := strings.Cut(imageID, "/")
+	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
+}
+
+func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, err
+	}
+	token, err := creds.TokenSource.Token()
+	if err != nil {
+		return nil, err
+	}
+	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
+}
+
+// gcpCredsFn is an indirection over gcpCredentials so resolveSource can be
+// unit-tested without a live GCP environment.
+var gcpCredsFn = gcpCredentials
+
+// sourceGetter abstracts the syft.GetSource call so the fallback ordering in
+// resolveSource is testable with a scripted implementation.
+type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error)
+
+// resolveSource downloads an image source, applying the MANIFEST_UNKNOWN and
+// 401/ADC/anonymous fallbacks in order. It mirrors the retry chain in
+// adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
+func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
+	pullRef := imageID
+	src, err := get(ctx, pullRef, &opts)
+	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
+			helpers.String("imageTag", imageTag),
+			helpers.String("imageID", imageID))
+		pullRef = imageTag
+		src, err = get(ctx, pullRef, &opts)
+	}
+	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+		unauthorizedErr := err
+		if isGCPRegistry(imageID) {
+			if gcpCreds, gcpErr := gcpCredsFn(ctx); gcpErr != nil {
+				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
+					helpers.Error(gcpErr),
+					helpers.String("imageID", imageID))
+			} else {
+				opts.Credentials = []image.RegistryCredentials{*gcpCreds}
+				src, err = get(ctx, pullRef, &opts)
+			}
+		}
+		// If GCP ADC was not attempted, succeeded in auth but still got 401, or
+		// the image is not a GCP registry, fall back to anonymous access.
+		if err != nil {
+			logger.L().Debug("retrying without credentials",
+				helpers.String("imageID", imageID))
+			opts.Credentials = nil
+			src, err = get(ctx, pullRef, &opts)
+			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
+				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
+			}
+		}
+	}
+	return src, err
+}
 
 type scannerServer struct {
 	pb.UnimplementedSBOMScannerServer
@@ -95,25 +161,12 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 
 	// Download image from registry
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
-	src, err := syft.GetSource(ctxWithSize, imageID,
-		syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
-		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
-			helpers.String("imageID", imageID))
-		src, err = syft.GetSource(ctxWithSize, imageTag,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-	}
-
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		logger.L().Debug("got 401, retrying without credentials",
-			helpers.String("imageID", imageID))
-		registryOptions.Credentials = nil
-		src, err = syft.GetSource(ctxWithSize, imageID,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-	}
+	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for gcpCredentials inside resolveSource.
+		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+		return syft.GetSource(ctxWithSize, ref,
+			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+	}, imageID, imageTag, registryOptions)
 
 	switch {
 	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
