@@ -328,9 +328,10 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 	defer cleanup()
 
 	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
-		ImageId:      u.Host + "/test-image",
-		ImageTag:     u.Host + "/test-image:latest",
-		MaxImageSize: 1, // Exceeded by layer size
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		MaxImageSize:    1, // Exceeded by layer size
+		InsecureUseHttp: true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
