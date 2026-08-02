@@ -126,6 +126,7 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		SBOMSize:     resp.SbomSize,
 		Status:       resp.Status,
 		ErrorMessage: resp.ErrorMessage,
+		StatusReason: resp.StatusReason,
 	}
 
 	// Deserialize SBOM document if present

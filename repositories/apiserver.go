@@ -1279,6 +1279,31 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	return nil
 }
 
+func (a *APIServerStore) DeleteSBOM(ctx context.Context, name string) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.DeleteSBOM")
+	defer span.End()
+
+	var deleteErr error
+
+	// Delete unfiltered SBOM
+	err := a.StorageClient.SBOMSyfts(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		logger.L().Ctx(ctx).Warning("failed to delete SBOM", helpers.Error(err), helpers.String("name", name))
+		deleteErr = err
+	}
+
+	// Delete filtered SBOM
+	err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		logger.L().Ctx(ctx).Warning("failed to delete filtered SBOM", helpers.Error(err), helpers.String("name", name))
+		if deleteErr == nil {
+			deleteErr = err
+		}
+	}
+
+	return deleteErr
+}
+
 func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
 	return &v1beta1.SBOMSyftFiltered{
 		TypeMeta:   sbom.TypeMeta,

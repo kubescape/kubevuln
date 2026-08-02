@@ -68,3 +68,15 @@ func (m MockSBOMAdapter) Version() string {
 	logger.L().Info("MockSBOMAdapter.Version")
 	return "Mock SBOM 1.0"
 }
+
+func (m MockSBOMAdapter) GetMaxImageSize() int64 {
+	return 0
+}
+
+func (m MockSBOMAdapter) GetMaxSBOMSize() int {
+	return 0
+}
+
+func (m MockSBOMAdapter) GetMemoryLimit() string {
+	return ""
+}

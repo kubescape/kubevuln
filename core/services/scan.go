@@ -103,7 +103,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	var err error
 	if s.storage {
-		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+		sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
@@ -208,7 +208,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		if cve.Content == nil || s.storage {
 			// check if SBOM is already available
 			if s.storage {
-				sbom, err = s.sbomRepository.GetSBOM(ctx, slug, s.sbomCreator.Version())
+				sbom, err = s.getSBOM(ctx, slug, s.sbomCreator.Version())
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 						helpers.String("imageSlug", slug))
@@ -422,7 +422,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if cve.Content == nil || (s.storage && workload.InstanceID != "") {
 		// check if SBOM is already available
 		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
@@ -941,4 +941,70 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 
 func (s *ScanService) Version() string {
 	return s.sbomCreator.Version() + "-" + s.cveScanner.Version()
+}
+
+func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
+	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
+	if err != nil {
+		return sbom, err
+	}
+	if sbom.Content == nil {
+		return sbom, nil
+	}
+
+	if sbom.Status == helpersv1.TooLarge {
+		reason := sbom.Annotations[domain.StatusReasonAnnotationKey]
+		stale := false
+
+		switch reason {
+		case domain.ReasonImageTooLarge:
+			limitStr, ok := sbom.Annotations[domain.MaxImageSizeAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMaxImageSize()
+				if limitStr != fmt.Sprintf("%d", currentLimit) {
+					stale = true
+				}
+			}
+		case domain.ReasonSBOMTooLarge:
+			limitStr, ok := sbom.Annotations[domain.MaxSBOMSizeAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMaxSBOMSize()
+				if limitStr != fmt.Sprintf("%d", currentLimit) {
+					stale = true
+				}
+			}
+		case domain.ReasonScannerOOM:
+			limitStr, ok := sbom.Annotations[domain.ScannerMemoryLimitAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMemoryLimit()
+				if limitStr != currentLimit {
+					stale = true
+				}
+			}
+		default:
+			// No status reason annotation or unrecognized reason.
+			// Treat as stale to ensure retroactive cleanup.
+			stale = true
+		}
+
+		if stale {
+			logger.L().Ctx(ctx).Info("SBOM is stale/frozen due to changed limits, deleting to trigger a fresh scan",
+				helpers.String("name", name),
+				helpers.String("reason", reason))
+			// Delete both unfiltered and filtered SBOMs
+			if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to delete stale SBOM", helpers.Error(delErr), helpers.String("name", name))
+			}
+			// Return empty domain.SBOM to trigger a fresh scan
+			return domain.SBOM{}, nil
+		}
+	}
+
+	return sbom, nil
 }

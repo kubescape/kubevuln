@@ -26,6 +26,7 @@ type CVERepository interface {
 type SBOMRepository interface {
 	GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error)
 	StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error
+	DeleteSBOM(ctx context.Context, name string) error
 }
 
 // SecurityExceptionRepository reads SecurityException CRDs from the cluster and

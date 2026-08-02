@@ -450,6 +450,10 @@ func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string
 
 func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
 
+func (schemaUnsupportedSBOMAdapter) GetMaxImageSize() int64 { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMemoryLimit() string { return "" }
+
 func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 	imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
 	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"

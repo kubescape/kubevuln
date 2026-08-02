@@ -169,12 +169,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}, imageID, imageTag, registryOptions)
 
 	switch {
-	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
+	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		logger.L().Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.TooLarge,
+			Status:       helpersv1.TooLarge,
+			StatusReason: "image-too-large",
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		return &pb.CreateSBOMResponse{
@@ -248,8 +249,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status:   helpersv1.TooLarge,
-			SbomSize: int64(sz),
+			Status:       helpersv1.TooLarge,
+			SbomSize:     int64(sz),
+			StatusReason: "sbom-too-large",
 		}, nil
 	}
 

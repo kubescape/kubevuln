@@ -164,6 +164,30 @@ func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
 			expected: scanfailure.ReasonScannerOOMKilled,
 		},
 		{
+			name:   "TooLarge with status-reason image-too-large",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				"kubescape.io/status-reason": "image-too-large",
+			},
+			expected: scanfailure.ReasonImageTooLarge,
+		},
+		{
+			name:   "TooLarge with status-reason sbom-too-large",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				"kubescape.io/status-reason": "sbom-too-large",
+			},
+			expected: scanfailure.ReasonSBOMTooLarge,
+		},
+		{
+			name:   "TooLarge with status-reason scanner-oom",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				"kubescape.io/status-reason": "scanner-oom",
+			},
+			expected: scanfailure.ReasonScannerOOMKilled,
+		},
+		{
 			name:   "TooLarge without OOM annotation falls back to SBOM too large",
 			status: helpersv1.TooLarge,
 			annotations: map[string]string{

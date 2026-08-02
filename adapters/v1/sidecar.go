@@ -103,11 +103,22 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	domainSBOM.Status = result.Status
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", result.SBOMSize)
 
+	if result.Status == helpersv1.TooLarge {
+		if result.StatusReason != "" {
+			domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = result.StatusReason
+			if result.StatusReason == domain.ReasonImageTooLarge {
+				domainSBOM.Annotations[domain.MaxImageSizeAnnotationKey] = fmt.Sprintf("%d", s.maxImageSize)
+			} else if result.StatusReason == domain.ReasonSBOMTooLarge {
+				domainSBOM.Annotations[domain.MaxSBOMSizeAnnotationKey] = fmt.Sprintf("%d", s.maxSBOMSize)
+			}
+		}
+	}
+
 	if result.SyftDocument != nil {
 		domainSBOM.Content = result.SyftDocument
 	}
 
-	if result.ErrorMessage != "" && result.Status != helpersv1.Learning {
+	if result.ErrorMessage != "" && result.Status != helpersv1.Learning && result.Status != helpersv1.TooLarge {
 		return domainSBOM, fmt.Errorf("%s", result.ErrorMessage)
 	}
 
@@ -137,9 +148,11 @@ func (s *SidecarSBOMAdapter) handleCrash(ctx context.Context, name, imageID, ima
 		s.mu.Unlock()
 
 		domainSBOM.Status = helpersv1.TooLarge
+		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonScannerOOM
 		if s.memoryLimit != "" {
 			domainSBOM.Annotations[helpersv1.StatusMetadataKey] = fmt.Sprintf(
 				"scanner OOM after %d retries (memory limit: %s)", maxCrashRetries, s.memoryLimit)
+			domainSBOM.Annotations[domain.ScannerMemoryLimitAnnotationKey] = s.memoryLimit
 		}
 		logger.L().Warning("SBOM scanner exhausted retries, marking as TooLarge",
 			helpers.String("imageID", imageID))
@@ -163,4 +176,16 @@ func (s *SidecarSBOMAdapter) Version() string {
 		s.versionStr = version
 	})
 	return s.versionStr
+}
+
+func (s *SidecarSBOMAdapter) GetMaxImageSize() int64 {
+	return s.maxImageSize
+}
+
+func (s *SidecarSBOMAdapter) GetMaxSBOMSize() int {
+	return s.maxSBOMSize
+}
+
+func (s *SidecarSBOMAdapter) GetMemoryLimit() string {
+	return s.memoryLimit
 }

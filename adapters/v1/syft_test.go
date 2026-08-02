@@ -3,10 +3,13 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft/format/syftjson/model"
 	"github.com/kinbiko/jsonassert"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -372,4 +375,15 @@ func TestRewriteImageRef(t *testing.T) {
 			assert.Equal(t, tt.want, rewriteImageRef(tt.imageRef, tt.proxyMap))
 		})
 	}
+}
+
+func TestErrImageTooLarge_ErrorsIs_Or_Fallback(t *testing.T) {
+	// 1. ErrorsIs path (when wrapped with %w)
+	errWrapped := fmt.Errorf("getting source: %w", image.ErrImageTooLarge)
+	assert.True(t, errors.Is(errWrapped, image.ErrImageTooLarge))
+
+	// 2. Fallback strings.Contains path (mimicking multi-error where chain breaks)
+	errStringOnly := fmt.Errorf("multi provider error: %s", image.ErrImageTooLarge.Error())
+	assert.False(t, errors.Is(errStringOnly, image.ErrImageTooLarge))
+	assert.Contains(t, errStringOnly.Error(), image.ErrImageTooLarge.Error())
 }

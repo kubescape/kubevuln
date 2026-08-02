@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
@@ -77,6 +78,17 @@ func classifySBOMStatus(status string) string {
 // When the sidecar exhausts crash retries, it sets TooLarge + "scanner OOM" annotation.
 func classifySBOMStatusWithAnnotation(status string, annotations map[string]string) string {
 	if status == helpersv1.TooLarge {
+		if ann, ok := annotations[domain.StatusReasonAnnotationKey]; ok {
+			switch ann {
+			case domain.ReasonImageTooLarge:
+				return scanfailure.ReasonImageTooLarge
+			case domain.ReasonSBOMTooLarge:
+				return scanfailure.ReasonSBOMTooLarge
+			case domain.ReasonScannerOOM:
+				return scanfailure.ReasonScannerOOMKilled
+			}
+		}
+		// Fallback for older OOM-marked SBOMs
 		if ann, ok := annotations[helpersv1.StatusMetadataKey]; ok && strings.Contains(ann, "scanner OOM") {
 			return scanfailure.ReasonScannerOOMKilled
 		}

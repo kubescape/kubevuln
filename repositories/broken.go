@@ -74,3 +74,9 @@ func (b BrokenStore) StoreVEX(ctx context.Context, _ domain.CVEManifest, _ domai
 	defer span.End()
 	return domain.ErrExpectedError
 }
+
+func (b BrokenStore) DeleteSBOM(ctx context.Context, _ string) error {
+	_, span := otel.Tracer("").Start(ctx, "BrokenStore.DeleteSBOM")
+	defer span.End()
+	return domain.ErrExpectedError
+}
