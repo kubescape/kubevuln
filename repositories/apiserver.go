@@ -963,6 +963,8 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	vexDoc.Metadata.ID = calculatedId
 
 	// Update the VEX container
+	vexContainer.Annotations = mergeMaps(vexContainer.Annotations, cvep.Annotations)
+	vexContainer.Labels = mergeMaps(vexContainer.Labels, cvep.Labels)
 	vexContainer.Spec = vexDoc
 	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
 
