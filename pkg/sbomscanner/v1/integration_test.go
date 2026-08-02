@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
@@ -92,4 +93,20 @@ func TestIntegration_ReadyCheck(t *testing.T) {
 	assert.False(t, client.Ready())
 
 	client.Close()
+}
+
+func TestNewSBOMScannerClient_CancelableReadinessWait(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "unreachable.sock")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	client, err := NewSBOMScannerClient(ctx, sock)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Nil(t, client)
+	assert.Less(t, elapsed, readinessTimeout, "readiness wait must respect the caller's context instead of blocking for the full readiness timeout")
 }

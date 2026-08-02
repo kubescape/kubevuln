@@ -72,7 +72,7 @@ func main() {
 	var sbomAdapter ports.SBOMCreator
 	if socketPath := os.Getenv("SBOM_SCANNER_SOCKET"); socketPath != "" {
 		logger.L().Info("connecting to SBOM scanner sidecar", helpers.String("socket", socketPath))
-		scannerClient, err := sbomscanner.NewSBOMScannerClient(socketPath)
+		scannerClient, err := sbomscanner.NewSBOMScannerClient(ctx, socketPath)
 		if err != nil {
 			logger.L().Warning("failed to connect to SBOM scanner sidecar, falling back to in-process Syft",
 				helpers.Error(err))

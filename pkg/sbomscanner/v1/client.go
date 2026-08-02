@@ -20,6 +20,10 @@ import (
 const (
 	healthCheckTimeout = 5 * time.Second
 	MaxgRPCMessageSize = 128 * 1024 * 1024
+	// readinessTimeout bounds how long NewSBOMScannerClient waits for the
+	// sidecar to report ready, so a permanently unhealthy sidecar fails
+	// startup instead of blocking it.
+	readinessTimeout = 60 * time.Second
 )
 
 type sbomScannerClient struct {
@@ -28,8 +32,9 @@ type sbomScannerClient struct {
 }
 
 // NewSBOMScannerClient creates a gRPC client connected to the scanner sidecar via Unix socket.
-// It performs a health check with exponential backoff before returning.
-func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
+// It performs a health check with exponential backoff before returning. The wait is bounded by
+// readinessTimeout and cancelable via ctx, so it cannot block process startup indefinitely.
+func NewSBOMScannerClient(ctx context.Context, socketPath string) (SBOMScannerClient, error) {
 	target := fmt.Sprintf("unix://%s", socketPath)
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -47,11 +52,14 @@ func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
 		client: pb.NewSBOMScannerClient(conn),
 	}
 
-	// Wait for the sidecar to become ready
-	_, err = backoff.Retry(context.Background(), func() (struct{}, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
+	// Wait for the sidecar to become ready, bounded by readinessTimeout and
+	// cancelable via ctx so an unhealthy sidecar cannot hang startup.
+	readinessCtx, readinessCancel := context.WithTimeout(ctx, readinessTimeout)
+	defer readinessCancel()
+	_, err = backoff.Retry(readinessCtx, func() (struct{}, error) {
+		healthCtx, cancel := context.WithTimeout(readinessCtx, healthCheckTimeout)
 		defer cancel()
-		resp, err := c.client.Health(ctx, &pb.HealthRequest{})
+		resp, err := c.client.Health(healthCtx, &pb.HealthRequest{})
 		if err != nil {
 			return struct{}{}, fmt.Errorf("health check failed: %w", err)
 		}
@@ -59,7 +67,7 @@ func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
 			return struct{}{}, fmt.Errorf("scanner not ready")
 		}
 		return struct{}{}, nil
-	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()), backoff.WithMaxElapsedTime(readinessTimeout))
 	if err != nil {
 		logger.L().Error("SBOM scanner sidecar health check failed after retries", helpers.Error(err))
 		conn.Close()
