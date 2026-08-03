@@ -42,26 +42,27 @@ const (
 var defaultTrustedVendors = []string{"echo", "chainguard", "wolfi", "minimos"}
 
 type Config struct {
-	AccountID          string            `mapstructure:"accountID"`
-	ClusterName        string            `mapstructure:"clusterName"`
-	KeepLocal          bool              `mapstructure:"keepLocal"`
-	ListingURL         string            `mapstructure:"listingURL"`
-	MaxImageSize       int64             `mapstructure:"maxImageSize"`
-	MaxSBOMSize        int               `mapstructure:"maxSBOMSize"`
-	Namespace          string            `mapstructure:"namespace"`
-	NodeSbomGeneration bool              `mapstructure:"nodeSbomGeneration"`
-	PartialRelevancy   bool              `mapstructure:"partialRelevancy"`
-	ScanConcurrency    int               `mapstructure:"scanConcurrency"`
-	ProxyRegistryMap   map[string]string `mapstructure:"proxyRegistryMap"`
-	ScanEmbeddedSboms  bool              `mapstructure:"scanEmbeddedSBOMs"`
-	ScanTimeout        time.Duration     `mapstructure:"scanTimeout"`
-	RiskAcceptance     bool              `mapstructure:"riskAcceptance"`
-	Storage            bool              `mapstructure:"storage"`
-	StoreFilteredSbom  bool              `mapstructure:"storeFilteredSbom"`
-	UseDefaultMatchers bool              `mapstructure:"useDefaultMatchers"` // Deprecated: use CVEMatchingMode. Kept for backward compatibility (true -> off, false -> on).
-	CVEMatchingMode    CVEMatchingMode   `mapstructure:"cveMatchingMode"`
-	TrustedVendors     []string          `mapstructure:"trustedVendors"` // distro slugs trusted in adaptive mode; empty/unset reverts to defaultTrustedVendors
-	VexGeneration      bool              `mapstructure:"vexGeneration"`
+	AccountID               string            `mapstructure:"accountID"`
+	ClusterName             string            `mapstructure:"clusterName"`
+	KeepLocal               bool              `mapstructure:"keepLocal"`
+	ListingURL              string            `mapstructure:"listingURL"`
+	MaxImageSize            int64             `mapstructure:"maxImageSize"`
+	MaxSBOMSize             int               `mapstructure:"maxSBOMSize"`
+	Namespace               string            `mapstructure:"namespace"`
+	NodeSbomGeneration      bool              `mapstructure:"nodeSbomGeneration"`
+	PartialRelevancy        bool              `mapstructure:"partialRelevancy"`
+	ScanConcurrency         int               `mapstructure:"scanConcurrency"`
+	ProxyRegistryMap        map[string]string `mapstructure:"proxyRegistryMap"`
+	ScanEmbeddedSboms       bool              `mapstructure:"scanEmbeddedSBOMs"`
+	ScanTimeout             time.Duration     `mapstructure:"scanTimeout"`
+	ScannerReadinessTimeout time.Duration     `mapstructure:"scannerReadinessTimeout"`
+	RiskAcceptance          bool              `mapstructure:"riskAcceptance"`
+	Storage                 bool              `mapstructure:"storage"`
+	StoreFilteredSbom       bool              `mapstructure:"storeFilteredSbom"`
+	UseDefaultMatchers      bool              `mapstructure:"useDefaultMatchers"` // Deprecated: use CVEMatchingMode. Kept for backward compatibility (true -> off, false -> on).
+	CVEMatchingMode         CVEMatchingMode   `mapstructure:"cveMatchingMode"`
+	TrustedVendors          []string          `mapstructure:"trustedVendors"` // distro slugs trusted in adaptive mode; empty/unset reverts to defaultTrustedVendors
+	VexGeneration           bool              `mapstructure:"vexGeneration"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -77,6 +78,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("maxSBOMSize", 20*1024*1024)
 	v.SetDefault("scanConcurrency", 1)
 	v.SetDefault("scanTimeout", 5*time.Minute)
+	v.SetDefault("scannerReadinessTimeout", 60*time.Second)
 	v.SetDefault("vexGeneration", false)
 	v.SetDefault("namespace", "kubescape")
 	v.SetDefault("scanEmbeddedSBOMs", false)
