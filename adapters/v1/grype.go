@@ -289,8 +289,11 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 // gave up on it. It owns every mutation of shared state for this update - installing a
 // successful result, scheduling the next attempt, and releasing the single-flight guard -
 // so nothing else can delete DBRootDir or start a second update while this one is still
-// writing to it. State mutation happens under g.mu, but the actual I/O (closing providers,
-// deleting DBRootDir) happens after unlocking, so scans only block for the pointer swap.
+// writing to it. Installing the new state happens under g.mu, but the actual I/O (closing
+// providers, deleting DBRootDir) happens after unlocking, so scans only block for the pointer
+// swap. The single-flight guard is released only after that I/O completes: Ready() unblocks
+// cold-start callers as soon as updateChan closes, so closing it any earlier would let a
+// caller observe g.store before an unusable one has actually been Close()'d.
 func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, store vulnerability.Provider, dbStatus *vulnerability.ProviderStatus, err error) {
 	now := time.Now()
 
@@ -302,18 +305,19 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 	}
 
 	releaseGuard := func() {
+		g.mu.Lock()
 		g.updating = false
 		if g.updateChan != nil {
 			close(g.updateChan)
 			g.updateChan = nil
 		}
+		g.mu.Unlock()
 	}
 
 	if err != nil {
 		g.mu.Lock()
 		// Schedule retry in 5 minutes on update failure
 		g.nextUpdateAttempt = now.Add(5 * time.Minute)
-		releaseGuard()
 		g.mu.Unlock()
 
 		logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
@@ -328,6 +332,7 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
 			}
 		}
+		releaseGuard()
 		return
 	}
 
@@ -337,8 +342,9 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 	g.dbStatus = dbStatus
 	// Schedule the next routine refresh in 24 hours
 	g.nextUpdateAttempt = now.Add(24 * time.Hour)
-	releaseGuard()
 	g.mu.Unlock()
+
+	defer releaseGuard()
 
 	if oldStore != nil && oldStore != store {
 		if closeErr := oldStore.Close(); closeErr != nil {
