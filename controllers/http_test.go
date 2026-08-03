@@ -168,6 +168,30 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 	}
 }
 
+func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
+	c := HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+	defer c.Shutdown()
+
+	// gin.New() rather than gin.Default() so a regression that panics surfaces
+	// as an unrecovered panic in this test instead of being masked by
+	// gin.Recovery() into the same 400 the validation path returns.
+	router := gin.New()
+	router.POST("/v1/scanCP", c.ScanCP)
+
+	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(`{
+		"wlid": "wlid://cluster-x/namespace-y/deployment-z",
+		"imageTag": "nginx:latest"
+	}`))
+	w := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		router.ServeHTTP(w, req)
+	})
+}
+
 func TestHTTPController_ScanRegistry(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -415,4 +439,3 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 		t.Fatal("ScanRegistry worker was not executed in time")
 	}
 }
-
