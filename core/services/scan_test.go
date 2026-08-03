@@ -292,6 +292,89 @@ func TestScanService_ScanCP(t *testing.T) {
 	}
 }
 
+func TestScanService_ScanCP_invalidArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]interface{}
+	}{
+		{
+			name: "float64 name",
+			args: map[string]interface{}{
+				domain.ArgsName:      float64(123),
+				domain.ArgsNamespace: "kube-system",
+			},
+		},
+		{
+			name: "nil name",
+			args: map[string]interface{}{
+				domain.ArgsName:      nil,
+				domain.ArgsNamespace: "kube-system",
+			},
+		},
+		{
+			name: "float64 namespace",
+			args: map[string]interface{}{
+				domain.ArgsName:      "kube-proxy",
+				domain.ArgsNamespace: float64(123),
+			},
+		},
+		{
+			name: "nil namespace",
+			args: map[string]interface{}{
+				domain.ArgsName:      "kube-proxy",
+				domain.ArgsNamespace: nil,
+			},
+		},
+		{
+			name: "missing name key",
+			args: map[string]interface{}{
+				domain.ArgsNamespace: "kube-system",
+			},
+		},
+		{
+			name: "missing namespace key",
+			args: map[string]interface{}{
+				domain.ArgsName: "kube-proxy",
+			},
+		},
+		{
+			name: "empty name",
+			args: map[string]interface{}{
+				domain.ArgsName:      "",
+				domain.ArgsNamespace: "kube-system",
+			},
+		},
+		{
+			name: "empty namespace",
+			args: map[string]interface{}{
+				domain.ArgsName:      "kube-proxy",
+				domain.ArgsNamespace: "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+			cveAdapter := adapters.NewMockCVEAdapter()
+			storageCP := repositories.NewMemoryStorage(false, false)
+			storageSBOM := repositories.NewMemoryStorage(false, false)
+			storageCVE := repositories.NewMemoryStorage(false, false)
+			s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(storageCP), false, false, true, false, false)
+			ctx := context.TODO()
+			s.Ready(ctx)
+
+			workload := domain.ScanCommand{
+				Args: tt.args,
+				Wlid: "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+			}
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+			err := s.ScanCP(ctx)
+			require.ErrorIs(t, err, domain.ErrMissingCpInfo)
+		})
+	}
+}
+
 func TestScanService_ScanCVE(t *testing.T) {
 	tests := []struct {
 		createSBOMError bool
