@@ -946,6 +946,16 @@ func (s *ScanService) Version() string {
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
 	if err != nil {
+		if errors.Is(err, domain.ErrOutdatedSBOM) {
+			logger.L().Ctx(ctx).Info("SBOM is outdated, deleting to trigger a fresh scan",
+				helpers.String("name", name))
+			// Delete both unfiltered and filtered SBOMs
+			if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to delete outdated SBOM", helpers.Error(delErr), helpers.String("name", name))
+				return sbom, nil
+			}
+			return domain.SBOM{}, nil
+		}
 		return sbom, err
 	}
 	if sbom.Content == nil {
@@ -1000,6 +1010,7 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 			// Delete both unfiltered and filtered SBOMs
 			if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
 				logger.L().Ctx(ctx).Warning("failed to delete stale SBOM", helpers.Error(delErr), helpers.String("name", name))
+				return sbom, nil
 			}
 			// Return empty domain.SBOM to trigger a fresh scan
 			return domain.SBOM{}, nil

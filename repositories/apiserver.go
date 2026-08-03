@@ -1148,7 +1148,17 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 			helpers.String("name", name),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
 			helpers.String("wanted scanner version", SBOMCreatorVersion))
-		return domain.SBOM{}, nil
+		result := domain.SBOM{
+			Name:               name,
+			Annotations:        manifest.Annotations,
+			Labels:             manifest.Labels,
+			SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+			Content:            &manifest.Spec.Syft,
+		}
+		if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
+			result.Status = status
+		}
+		return result, domain.ErrOutdatedSBOM
 	}
 	result := domain.SBOM{
 		Name:               name,

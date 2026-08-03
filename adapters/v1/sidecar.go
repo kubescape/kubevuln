@@ -149,10 +149,10 @@ func (s *SidecarSBOMAdapter) handleCrash(ctx context.Context, name, imageID, ima
 
 		domainSBOM.Status = helpersv1.TooLarge
 		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonScannerOOM
+		domainSBOM.Annotations[domain.ScannerMemoryLimitAnnotationKey] = s.memoryLimit
 		if s.memoryLimit != "" {
 			domainSBOM.Annotations[helpersv1.StatusMetadataKey] = fmt.Sprintf(
 				"scanner OOM after %d retries (memory limit: %s)", maxCrashRetries, s.memoryLimit)
-			domainSBOM.Annotations[domain.ScannerMemoryLimitAnnotationKey] = s.memoryLimit
 		}
 		logger.L().Warning("SBOM scanner exhausted retries, marking as TooLarge",
 			helpers.String("imageID", imageID))

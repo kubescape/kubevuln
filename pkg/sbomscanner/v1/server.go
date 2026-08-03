@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"golang.org/x/oauth2/google"
 )
@@ -175,7 +176,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.TooLarge,
-			StatusReason: "image-too-large",
+			StatusReason: domain.ReasonImageTooLarge,
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		return &pb.CreateSBOMResponse{
@@ -251,7 +252,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.TooLarge,
 			SbomSize:     int64(sz),
-			StatusReason: "sbom-too-large",
+			StatusReason: domain.ReasonSBOMTooLarge,
 		}, nil
 	}
 
