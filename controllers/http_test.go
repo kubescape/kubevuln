@@ -416,3 +416,71 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 	}
 }
 
+func TestValidationStatusCode(t *testing.T) {
+	assert.Equal(t, http.StatusTooManyRequests, validationStatusCode(domain.ErrTooManyRequests))
+	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMissingCpInfo))
+	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMockError))
+}
+
+// validateErrScanService returns a fixed error from every Validate* method so
+// handler tests can exercise a specific validation error without depending on
+// MockScanService's generic sad path.
+type validateErrScanService struct {
+	*services.MockScanService
+	err error
+}
+
+func (s validateErrScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func (s validateErrScanService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func (s validateErrScanService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
+	c := HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrTooManyRequests},
+		workerPool:  workerpool.New(1),
+	}
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+}
+
+func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
+	c := HTTPController{
+		scanService: &contextSpyScanService{
+			scanCPCh: make(chan struct{}),
+		},
+		workerPool: workerpool.New(1),
+	}
+	defer c.Shutdown()
+
+	// gin.New() rather than gin.Default() so a regression that panics surfaces
+	// as an unrecovered panic in the test instead of being masked by
+	// gin.Recovery() into the same 500 the (removed) validation path would
+	// have returned via a good validation error.
+	router := gin.New()
+	router.POST("/v1/scanCP", c.ScanCP)
+
+	payload := `{
+		"wlid": "wlid://cluster-x/namespace-y/deployment-z",
+		"imageTag": "nginx:latest"
+	}`
+	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(payload))
+	w := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		router.ServeHTTP(w, req)
+	})
+}

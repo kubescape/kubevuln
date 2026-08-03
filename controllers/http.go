@@ -56,7 +56,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -102,8 +102,8 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 	}
 
 	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
-	name := newScan.Args[domain.ArgsName].(string)
-	namespace := newScan.Args[domain.ArgsNamespace].(string)
+	name, _ := newScan.Args[domain.ArgsName].(string)
+	namespace, _ := newScan.Args[domain.ArgsNamespace].(string)
 
 	details := problem.Detailf("Wlid=%s, Name=%s, Namespace=%s", newScan.Wlid, name, namespace)
 
@@ -113,7 +113,7 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 			helpers.String("wlid", newScan.Wlid),
 			helpers.String("name", name),
 			helpers.String("namespace", namespace))
-		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
 
@@ -177,6 +177,16 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 				helpers.String("imageHash", newScan.ImageHash))
 		}
 	})
+}
+
+// validationStatusCode maps a validation error to the HTTP status code that best
+// describes it. ErrTooManyRequests reflects transient registry back-pressure, not
+// a malformed request, so it maps to 429 rather than 400.
+func validationStatusCode(err error) int {
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		return http.StatusTooManyRequests
+	}
+	return http.StatusBadRequest
 }
 
 func websocketScanCommandToScanCommand(c wssc.WebsocketScanCommand) domain.ScanCommand {
@@ -230,7 +240,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		_, _ = problem.Of(http.StatusBadRequest).Append(details).WriteTo(c.Writer)
+		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
 
