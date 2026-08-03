@@ -1700,3 +1700,30 @@ func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].createCtx)
 }
+
+func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+
+	// VulnerabilityManifests: different namespaces must return different wrappers,
+	// repeated access to one namespace must return the same wrapper.
+	vm1 := wrapped.VulnerabilityManifests("ns-a")
+	vm2 := wrapped.VulnerabilityManifests("ns-b")
+	vm1Again := wrapped.VulnerabilityManifests("ns-a")
+	require.NotSame(t, vm1, vm2, "different namespaces must return different wrappers")
+	require.Same(t, vm1, vm1Again, "same namespace must return the memoized wrapper")
+
+	// SBOMSyfts
+	ss1 := wrapped.SBOMSyfts("ns-a")
+	ss2 := wrapped.SBOMSyfts("ns-b")
+	ss1Again := wrapped.SBOMSyfts("ns-a")
+	require.NotSame(t, ss1, ss2)
+	require.Same(t, ss1, ss1Again)
+
+	// OpenVulnerabilityExchangeContainers
+	ov1 := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	ov2 := wrapped.OpenVulnerabilityExchangeContainers("ns-b")
+	ov1Again := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	require.NotSame(t, ov1, ov2)
+	require.Same(t, ov1, ov1Again)
+}
