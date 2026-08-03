@@ -373,3 +373,13 @@ func TestRewriteImageRef(t *testing.T) {
 		})
 	}
 }
+
+func Test_syftAdapter_ContextCancellation(t *testing.T) {
+	s := NewSyftAdapter(10*time.Second, 1000000, 1000000, false, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := s.CreateSBOM(ctx, "test", "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501", "", domain.RegistryOptions{})
+	require.Error(t, err)
+}
+

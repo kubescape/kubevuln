@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -55,12 +54,15 @@ type SyftAdapter struct {
 	maxImageSize      int64
 	maxSBOMSize       int
 	proxyRegistryMap  map[string]string
-	pullMutex         sync.Mutex
+	concurrencySem    chan struct{}
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
 }
 
-const digestDelim = "@"
+const (
+	digestDelim                = "@"
+	defaultMaxConcurrentPulls = 10
+)
 
 var _ ports.SBOMCreator = (*SyftAdapter)(nil)
 
@@ -72,6 +74,7 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 		proxyRegistryMap:  proxyRegistryMap,
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
+		concurrencySem:    make(chan struct{}, defaultMaxConcurrentPulls),
 	}
 }
 
@@ -189,7 +192,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
-	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
+	ctxWithSize := context.WithValue(ctx, image.MaxImageSize, s.maxImageSize)
 	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
 	src, err := syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 
@@ -239,15 +242,23 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// use a deadline to prevent the process from hanging for too long
 	// TODO check memory usage and see if we can kill the goroutine
 	var syftSBOM *sbom.SBOM
-	// ensure no parallel pulls
-	s.pullMutex.Lock()
-	defer s.pullMutex.Unlock()
+	// Bounded concurrency control to prevent disk/memory exhaustion while enabling parallel processing
+	if s.concurrencySem == nil {
+		s.concurrencySem = make(chan struct{}, defaultMaxConcurrentPulls)
+	}
+	select {
+	case s.concurrencySem <- struct{}{}:
+		defer func() { <-s.concurrencySem }()
+	case <-ctx.Done():
+		return domainSBOM, ctx.Err()
+	}
+
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
-		// make sure we clean the temp dir
+		// make sure we clean the temp dir safely without crashing on cleanup warnings
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
-				logger.L().Ctx(ctx).Fatal("failed to close source", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
 					helpers.String("imageID", imageID))
 			}
 		}(src)
@@ -268,7 +279,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			// ask Syft to also scan the image for embedded SBOMs
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}
-		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
+		syftSBOM, err = syft.CreateSBOM(ctx, src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
 		}
