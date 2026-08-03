@@ -985,3 +985,87 @@ func Test_filterSBOM(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionsFromWorkload(t *testing.T) {
+	tests := []struct {
+		name                string
+		args                map[string]interface{}
+		wantInsecureUseHTTP bool
+		wantInsecureSkipTLS bool
+	}{
+		{
+			name: "bool true values are applied",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       true,
+				domain.AttributeSkipTLSVerify: true,
+			},
+			wantInsecureUseHTTP: true,
+			wantInsecureSkipTLS: true,
+		},
+		{
+			name: "bool false values are applied",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       false,
+				domain.AttributeSkipTLSVerify: false,
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "string value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       "true",
+				domain.AttributeSkipTLSVerify: "true",
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "numeric value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       float64(1),
+				domain.AttributeSkipTLSVerify: float64(1),
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "nil value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       nil,
+				domain.AttributeSkipTLSVerify: nil,
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name:                "missing keys default to false",
+			args:                map[string]interface{}{},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "extra unrelated keys are ignored",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       true,
+				domain.AttributeSkipTLSVerify: false,
+				"some.other.attribute":        "noise",
+			},
+			wantInsecureUseHTTP: true,
+			wantInsecureSkipTLS: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := domain.ScanCommand{
+				ImageSlug: "test-image-slug",
+				Args:      tt.args,
+			}
+			got := optionsFromWorkload(context.Background(), workload)
+			assert.Equal(t, tt.wantInsecureUseHTTP, got.InsecureUseHTTP,
+				"InsecureUseHTTP mismatch for args: %v", tt.args)
+			assert.Equal(t, tt.wantInsecureSkipTLS, got.InsecureSkipTLSVerify,
+				"InsecureSkipTLSVerify mismatch for args: %v", tt.args)
+		})
+	}
+}
