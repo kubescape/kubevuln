@@ -947,12 +947,14 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
 	if err != nil {
 		if errors.Is(err, domain.ErrOutdatedSBOM) {
-			logger.L().Ctx(ctx).Info("SBOM is outdated, deleting to trigger a fresh scan",
-				helpers.String("name", name))
-			// Delete both unfiltered and filtered SBOMs
-			if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
-				logger.L().Ctx(ctx).Warning("failed to delete outdated SBOM", helpers.Error(delErr), helpers.String("name", name))
-				return sbom, nil
+			if sbom.Status == helpersv1.TooLarge {
+				logger.L().Ctx(ctx).Info("SBOM is outdated and too large, deleting to trigger a fresh scan",
+					helpers.String("name", name))
+				// Delete both unfiltered and filtered SBOMs
+				if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
+					logger.L().Ctx(ctx).Warning("failed to delete outdated SBOM", helpers.Error(delErr), helpers.String("name", name))
+					return domain.SBOM{}, nil
+				}
 			}
 			return domain.SBOM{}, nil
 		}
