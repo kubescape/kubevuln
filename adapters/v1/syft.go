@@ -202,22 +202,27 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		if isGCPRegistry(imageID) {
+		unauthorizedErr := err
+		if isGCPRegistry(pullRef) {
 			if gcpCreds, gcpErr := gcpCredentials(ctx); gcpErr != nil {
 				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
+					helpers.Error(gcpErr),
 					helpers.String("imageID", imageID))
 			} else {
 				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
-				src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+				src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 			}
 		}
 		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
 		// fall back to anonymous access. err/src retain the result of the last attempt.
-		if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-			logger.L().Debug("got 401, retrying without credentials",
+		if err != nil {
+			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))
 			registryOptions.Credentials = nil
-			src, err = syft.GetSource(ctxWithSize, rewriteImageRef(imageID, s.proxyRegistryMap), syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
+				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
+			}
 		}
 	}
 
