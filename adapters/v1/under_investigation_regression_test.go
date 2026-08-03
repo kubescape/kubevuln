@@ -46,3 +46,39 @@ func TestUnderInvestigationSecurityExceptionDoesNotSuppress(t *testing.T) {
 	require.Len(t, doc.Matches, 1)
 	require.Empty(t, doc.IgnoredMatches)
 }
+
+func TestUnderInvestigationClusterSecurityExceptionDoesNotSuppress(t *testing.T) {
+	const vulnerabilityID = "CVE-2023-44487"
+
+	exceptions := []sev1beta1.ClusterSecurityException{
+		{
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: vulnerabilityID},
+						Status:        sev1beta1.VulnerabilityStatusUnderInvestigation,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(nil, exceptions, ExceptionTarget{})
+
+	doc := &storagev1beta1.GrypeDocument{
+		Matches: []storagev1beta1.Match{
+			{
+				Vulnerability: storagev1beta1.Vulnerability{
+					VulnerabilityMetadata: storagev1beta1.VulnerabilityMetadata{
+						ID: vulnerabilityID,
+					},
+				},
+			},
+		},
+	}
+
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+
+	require.Len(t, doc.Matches, 1)
+	require.Empty(t, doc.IgnoredMatches)
+}
