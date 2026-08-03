@@ -1495,7 +1495,7 @@ type ctxCapturingClient struct {
 	vulnManifests *ctxCapturingVulnerabilityManifests
 	sbomSyfts     *ctxCapturingSBOMSyfts
 	ovecs         *ctxCapturingOVECs
-	vulnSummaries *ctxCapturingVulnerabilityManifestSummaries
+	vulnSummaries map[string]*ctxCapturingVulnerabilityManifestSummaries
 }
 
 // The accessor methods below are called once per storage operation (e.g. StoreVEX calls
@@ -1526,9 +1526,12 @@ func (c *ctxCapturingClient) OpenVulnerabilityExchangeContainers(namespace strin
 
 func (c *ctxCapturingClient) VulnerabilityManifestSummaries(namespace string) spdxv1beta1.VulnerabilityManifestSummaryInterface {
 	if c.vulnSummaries == nil {
-		c.vulnSummaries = &ctxCapturingVulnerabilityManifestSummaries{VulnerabilityManifestSummaryInterface: c.SpdxV1beta1Interface.VulnerabilityManifestSummaries(namespace)}
+		c.vulnSummaries = map[string]*ctxCapturingVulnerabilityManifestSummaries{}
 	}
-	return c.vulnSummaries
+	if _, ok := c.vulnSummaries[namespace]; !ok {
+		c.vulnSummaries[namespace] = &ctxCapturingVulnerabilityManifestSummaries{VulnerabilityManifestSummaryInterface: c.SpdxV1beta1Interface.VulnerabilityManifestSummaries(namespace)}
+	}
+	return c.vulnSummaries[namespace]
 }
 
 type ctxCanaryKey struct{}
@@ -1575,7 +1578,7 @@ func TestAPIServerStore_GetCVESummary_ctxPropagated(t *testing.T) {
 	ctx := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
 	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
 	_, _ = a.GetCVESummary(ctx)
-	requireCanaryCtx(t, wrapped.vulnSummaries.getCtx)
+	requireCanaryCtx(t, wrapped.vulnSummaries[a.Namespace].getCtx)
 }
 
 func TestAPIServerStore_GetCVESummary_returnsTransientError(t *testing.T) {
