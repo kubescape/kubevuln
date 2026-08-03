@@ -76,10 +76,10 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 }
 
 func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
-	if a.httpClient == nil {
-		a.httpClient = &http.Client{}
+	if a.httpClient != nil {
+		return a.httpClient
 	}
-	return a.httpClient
+	return http.DefaultClient
 }
 
 const ActionName = "vuln scan"

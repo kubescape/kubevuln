@@ -28,6 +28,9 @@ func sendError(ctx context.Context, errorChan chan<- error, err error) {
 	if errorChan == nil || err == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	select {
 	case errorChan <- err:
 	case <-ctx.Done():
