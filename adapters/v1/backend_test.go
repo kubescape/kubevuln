@@ -92,6 +92,38 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	}
 }
 
+func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-c/namespace-ns/deployment-d",
+		ContainerName: "container",
+	})
+
+	got1, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, got1, 1)
+	assert.Equal(t, 1, calls, "first call should hit the backend")
+
+	got2, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, got1, got2)
+	assert.Equal(t, 1, calls, "second call for the same workload should be served from cache")
+
+	// a different workload must not be served from the other workload's cache entry
+	otherCtx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-c/namespace-ns2/deployment-d2",
+		ContainerName: "container2",
+	})
+	_, err = a.GetCVEExceptions(otherCtx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
+}
+
 func fileToType[T any](path string) *T {
 	var t *T
 	b, err := os.ReadFile(path)

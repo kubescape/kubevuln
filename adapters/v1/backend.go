@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
@@ -40,9 +41,19 @@ type BackendAdapter struct {
 	sendStatusFunc            func(*backendClientV1.BaseReportSender, string, bool)
 	accessKey                 string
 	securityExceptionRepo     ports.SecurityExceptionRepository
+	exceptionsCache           *cache.Cache
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
+
+// exceptionsCacheCleaningInterval controls how often expired entries are swept from exceptionsCache.
+// exceptionsCacheTTL bounds how stale a cached exceptions/CRD merge can be before the next scan
+// re-fetches from the backend and cluster; exceptions rarely change within a scan burst, so this
+// avoids a network + CRD round trip on every single container scan.
+const (
+	exceptionsCacheCleaningInterval = 1 * time.Minute
+	exceptionsCacheTTL              = 5 * time.Minute
+)
 
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
 	return &BackendAdapter{
@@ -58,6 +69,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		},
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
+		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
 	}
 }
 
@@ -88,12 +100,28 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		return nil, domain.ErrCastingWorkload
 	}
 
+	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	cacheKey := strings.Join([]string{
+		a.clusterConfig.AccountID,
+		wlidpkg.GetClusterFromWlid(workload.Wlid),
+		namespace,
+		strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
+		wlidpkg.GetNameFromWlid(workload.Wlid),
+		workload.ContainerName,
+	}, "/")
+
+	if a.exceptionsCache != nil {
+		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
+			return cached.(domain.CVEExceptions), nil
+		}
+	}
+
 	designator := identifiers.PortalDesignator{
 		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
-			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
+			"scope.namespace":     namespace,
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
 			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
 			"scope.containerName": workload.ContainerName,
@@ -106,7 +134,6 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	// Merge CRD-based exceptions
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
 	seList, cseList, err := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
@@ -114,6 +141,10 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+	}
+
+	if a.exceptionsCache != nil {
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
 	}
 
 	return vulnExceptionList, nil
