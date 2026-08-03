@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +21,6 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
-	"github.com/stretchr/testify/require"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
@@ -30,8 +30,44 @@ import (
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type testSecurityExceptionRepo struct {
+	getSecurityExceptions func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error)
+	getWorkloadLabels     func(context.Context, string, string, string) (map[string]string, error)
+	getNamespaceLabels    func(context.Context, string) (map[string]string, error)
+}
+
+func (r *testSecurityExceptionRepo) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	if r != nil && r.getSecurityExceptions != nil {
+		return r.getSecurityExceptions(ctx, namespace)
+	}
+	return nil, nil, nil
+}
+
+func (r *testSecurityExceptionRepo) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
+	if r != nil && r.getWorkloadLabels != nil {
+		return r.getWorkloadLabels(ctx, namespace, kind, name)
+	}
+	return nil, nil
+}
+
+func (r *testSecurityExceptionRepo) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
+	if r != nil && r.getNamespaceLabels != nil {
+		return r.getNamespaceLabels(ctx, name)
+	}
+	return nil, nil
+}
+
+func scanContext(wlid, containerName, image string) context.Context {
+	return context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               wlid,
+		ContainerName:      containerName,
+		ImageTagNormalized: image,
+	})
+}
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
@@ -122,6 +158,116 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 	_, err = a.GetCVEExceptions(otherCtx)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
+}
+
+func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheEntries(t *testing.T) {
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, []sev1beta1.ClusterSecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						Images: []string{"docker.io/library/nginx:*"},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+					}},
+				},
+			}}, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+
+	nginx, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
+	assert.NoError(t, err)
+	assert.Len(t, nginx, 1)
+
+	redis, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
+	assert.NoError(t, err)
+	assert.Empty(t, redis, "different images for the same workload must not share cached exception results")
+}
+
+func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults(t *testing.T) {
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, []sev1beta1.ClusterSecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						Images: []string{"docker.io/library/nginx:*"},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+					}},
+				},
+			}}, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+
+	nginx, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
+	assert.NoError(t, err)
+	assert.Len(t, nginx, 1)
+
+	redis, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
+	assert.NoError(t, err)
+	assert.Empty(t, redis, "registry scans for different images must not share cached exception results")
+}
+
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, nil, errors.New("boom")
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	_, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
+}
+
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return []sev1beta1.SecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						ObjectSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "nginx"},
+						},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2026-1"},
+					}},
+				},
+			}}, nil, nil
+		},
+		getWorkloadLabels: func(context.Context, string, string, string) (map[string]string, error) {
+			return nil, errors.New("lookup failed")
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	_, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
 
 func fileToType[T any](path string) *T {
