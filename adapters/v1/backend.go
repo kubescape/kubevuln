@@ -42,6 +42,7 @@ type BackendAdapter struct {
 	accessKey             string
 	securityExceptionRepo ports.SecurityExceptionRepository
 	exceptionsCache       *cache.Cache
+	httpClient            httputils.IHttpClient
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -70,7 +71,15 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
 		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
+		httpClient:            &http.Client{},
 	}
+}
+
+func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
+	if a.httpClient == nil {
+		a.httpClient = &http.Client{}
+	}
+	return a.httpClient
 }
 
 const ActionName = "vuln scan"
@@ -180,7 +189,7 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	report.Errors = append(report.Errors, err.Error())
 	report.Status = sysreport.JobFailed
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobFailed, true)
 	return nil
 }
@@ -261,7 +270,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 	report.Status = statuses[step]
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, statuses[step], true)
 	return nil
 }

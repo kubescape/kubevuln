@@ -783,3 +783,25 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
 }
+
+func TestBackendAdapter_HTTPClientReuseAndSendErrorNonBlocking(t *testing.T) {
+	customClient := &http.Client{}
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
+		httpClient:    customClient,
+	}
+
+	assert.Equal(t, customClient, a.getHTTPClient(), "should reuse configured httpClient")
+
+	// Test non-blocking sendError when context is cancelled and channel is full
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ch := make(chan error, 1)
+	ch <- fmt.Errorf("initial error")
+
+	// Must not block even when ch is full because ctx is cancelled
+	sendError(cancelledCtx, ch, fmt.Errorf("overflow error"))
+	assert.Len(t, ch, 1, "channel should still contain only initial error")
+}
+

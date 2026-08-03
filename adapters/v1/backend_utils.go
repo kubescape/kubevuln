@@ -24,6 +24,17 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
+func sendError(ctx context.Context, errorChan chan<- error, err error) {
+	if errorChan == nil || err == nil {
+		return
+	}
+	select {
+	case errorChan <- err:
+	case <-ctx.Done():
+		logger.L().Ctx(ctx).Warning("context cancelled while sending error to channel", helpers.Error(err))
+	}
+}
+
 func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
@@ -77,7 +88,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 
@@ -85,16 +96,16 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
+	resp, err := a.httpPostFunc(a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -105,7 +116,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 		} else {
 			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
 		}
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
@@ -139,8 +150,8 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 
 	//verify that all vulnerabilities received and sent
 	if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
-		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
-			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount)
+		sendError(ctx, errorChan, fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
+			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount))
 	}
 }
 
