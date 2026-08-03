@@ -268,19 +268,22 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 		// silently dropping any Timeout we set on distCfg). A connection that stalls
 		// mid-download therefore hangs the load goroutine forever, so finishUpdate would
 		// never run: updating would stay true and DBRootDir would never be retried.
-		// Restart here - the one case where this loses non-blocking behaviour is a
-		// download that is genuinely stuck, not merely slow, which is the same condition
-		// that used to trigger os.Exit(0) unconditionally before this PR.
+		//
+		// On a cold start there is nothing to lose, so restart - the one case where this
+		// loses non-blocking behaviour is a download that is genuinely stuck, not merely
+		// slow, which is the same condition that used to trigger os.Exit(0) unconditionally
+		// before this PR. With an existing DB, though, the pod is healthy and serving: keep
+		// it that way instead of dropping in-flight scans, and let finishUpdate install the
+		// stuck load whenever (if ever) it returns.
+		if !hasExistingDB {
+			logger.L().Ctx(ctx).Error("grype DB initial download stuck past 15 minutes with an uncancellable load in flight, restarting to recover")
+			os.Exit(0)
+		}
 		g.mu.RLock()
 		existingVersion := g.dbVersionLocked()
 		g.mu.RUnlock()
-		if hasExistingDB {
-			logger.L().Ctx(ctx).Error("grype DB update stuck past 15 minutes with an uncancellable load in flight, restarting to recover",
-				helpers.String("existingDBVersion", existingVersion))
-		} else {
-			logger.L().Ctx(ctx).Error("grype DB initial download stuck past 15 minutes with an uncancellable load in flight, restarting to recover")
-		}
-		os.Exit(0)
+		logger.L().Ctx(ctx).Error("grype DB update stuck past 15 minutes with an uncancellable load in flight, continuing with existing DB",
+			helpers.String("existingDBVersion", existingVersion))
 	}
 }
 
@@ -297,14 +300,10 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, store vulnerability.Provider, dbStatus *vulnerability.ProviderStatus, err error) {
 	now := time.Now()
 
-	// A successful load whose reported status still carries an error is not usable: treat
-	// it the same as a load failure so Ready() keeps reporting not-ready and a retry gets
-	// scheduled, instead of wedging the pod NotReady for 24h with nothing to recover it.
-	if err == nil && dbStatus != nil && dbStatus.Error != nil {
-		err = dbStatus.Error
-	}
-
-	releaseGuard := func() {
+	// Released last via defer, after any I/O below, no matter which branch runs or how it
+	// returns: a leaked updating=true would permanently wedge future updates, since nothing
+	// else ever clears it, so this must not depend on every branch remembering to call it.
+	defer func() {
 		g.mu.Lock()
 		g.updating = false
 		if g.updateChan != nil {
@@ -312,6 +311,13 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 			g.updateChan = nil
 		}
 		g.mu.Unlock()
+	}()
+
+	// A successful load whose reported status still carries an error is not usable: treat
+	// it the same as a load failure so Ready() keeps reporting not-ready and a retry gets
+	// scheduled, instead of wedging the pod NotReady for 24h with nothing to recover it.
+	if err == nil && dbStatus != nil && dbStatus.Error != nil {
+		err = dbStatus.Error
 	}
 
 	if err != nil {
@@ -332,7 +338,6 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
 			}
 		}
-		releaseGuard()
 		return
 	}
 
@@ -343,8 +348,6 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 	// Schedule the next routine refresh in 24 hours
 	g.nextUpdateAttempt = now.Add(24 * time.Hour)
 	g.mu.Unlock()
-
-	defer releaseGuard()
 
 	if oldStore != nil && oldStore != store {
 		if closeErr := oldStore.Close(); closeErr != nil {
