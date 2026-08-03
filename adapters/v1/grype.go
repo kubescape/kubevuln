@@ -81,10 +81,10 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
 func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, trustedVendors []string) *GrypeAdapter {
+	distCfg := distribution.DefaultConfig()
+	distCfg.LatestURL = listingURL
 	g := &GrypeAdapter{
-		distCfg: distribution.Config{
-			LatestURL: listingURL,
-		},
+		distCfg: distCfg,
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype", "db"),
 		},
@@ -140,10 +140,10 @@ func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, tru
 	if err != nil {
 		return nil, nil, err
 	}
+	distCfg := distribution.DefaultConfig()
+	distCfg.LatestURL = fmt.Sprintf("http://localhost:%s/databases", port)
 	g := &GrypeAdapter{
-		distCfg: distribution.Config{
-			LatestURL: fmt.Sprintf("http://localhost:%s/databases", port),
-		},
+		distCfg: distCfg,
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
@@ -262,15 +262,25 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 	select {
 	case <-done:
 	case <-time.After(15 * time.Minute):
+		// grype.LoadVulnerabilityDB takes no context and cannot be cancelled, and the
+		// pinned grype's HTTP client bounds only dial/TLS handshake, not response-body
+		// reads (its withUserAgent post-processor replaces the *http.Client wholesale,
+		// silently dropping any Timeout we set on distCfg). A connection that stalls
+		// mid-download therefore hangs the load goroutine forever, so finishUpdate would
+		// never run: updating would stay true and DBRootDir would never be retried.
+		// Restart here - the one case where this loses non-blocking behaviour is a
+		// download that is genuinely stuck, not merely slow, which is the same condition
+		// that used to trigger os.Exit(0) unconditionally before this PR.
 		g.mu.RLock()
 		existingVersion := g.dbVersionLocked()
 		g.mu.RUnlock()
 		if hasExistingDB {
-			logger.L().Ctx(ctx).Warning("grype DB update taking longer than 15 minutes, continuing with existing DB",
+			logger.L().Ctx(ctx).Error("grype DB update stuck past 15 minutes with an uncancellable load in flight, restarting to recover",
 				helpers.String("existingDBVersion", existingVersion))
 		} else {
-			logger.L().Ctx(ctx).Error("grype DB initial download taking longer than 15 minutes")
+			logger.L().Ctx(ctx).Error("grype DB initial download stuck past 15 minutes with an uncancellable load in flight, restarting to recover")
 		}
+		os.Exit(0)
 	}
 }
 
@@ -279,7 +289,8 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
 // gave up on it. It owns every mutation of shared state for this update - installing a
 // successful result, scheduling the next attempt, and releasing the single-flight guard -
 // so nothing else can delete DBRootDir or start a second update while this one is still
-// writing to it.
+// writing to it. State mutation happens under g.mu, but the actual I/O (closing providers,
+// deleting DBRootDir) happens after unlocking, so scans only block for the pointer swap.
 func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, store vulnerability.Provider, dbStatus *vulnerability.ProviderStatus, err error) {
 	now := time.Now()
 
@@ -290,17 +301,21 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 		err = dbStatus.Error
 	}
 
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	defer func() {
+	releaseGuard := func() {
 		g.updating = false
 		if g.updateChan != nil {
 			close(g.updateChan)
 			g.updateChan = nil
 		}
-	}()
+	}
 
 	if err != nil {
+		g.mu.Lock()
+		// Schedule retry in 5 minutes on update failure
+		g.nextUpdateAttempt = now.Add(5 * time.Minute)
+		releaseGuard()
+		g.mu.Unlock()
+
 		logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
 		if store != nil {
 			if closeErr := store.Close(); closeErr != nil {
@@ -309,20 +324,21 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, sto
 		}
 		if !hasExistingDB {
 			if delErr := tools.DeleteContents(g.installCfg.DBRootDir); delErr != nil {
-				logger.L().Debug("cleaned up cache", helpers.Error(delErr),
+				logger.L().Ctx(ctx).Warning("failed to clean up grype DB cache", helpers.Error(delErr),
 					helpers.String("DBRootDir", g.installCfg.DBRootDir))
 			}
 		}
-		// Schedule retry in 5 minutes on update failure
-		g.nextUpdateAttempt = now.Add(5 * time.Minute)
 		return
 	}
 
+	g.mu.Lock()
 	oldStore := g.store
 	g.store = store
 	g.dbStatus = dbStatus
 	// Schedule the next routine refresh in 24 hours
 	g.nextUpdateAttempt = now.Add(24 * time.Hour)
+	releaseGuard()
+	g.mu.Unlock()
 
 	if oldStore != nil && oldStore != store {
 		if closeErr := oldStore.Close(); closeErr != nil {
