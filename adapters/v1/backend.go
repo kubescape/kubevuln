@@ -71,7 +71,15 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
 		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
-		httpClient:            &http.Client{},
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 32,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 

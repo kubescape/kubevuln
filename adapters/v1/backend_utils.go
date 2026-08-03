@@ -24,6 +24,11 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
+// sendError delivers err to errorChan. It always wins the send when the channel has room,
+// even if ctx is already cancelled, so a cancelled context never causes a real error to be
+// dropped in favor of a stale one already sitting in the channel. Only once the channel is
+// actually saturated do we fall back to waiting for room or for ctx cancellation, logging a
+// warning if we ultimately have to give up.
 func sendError(ctx context.Context, errorChan chan<- error, err error) {
 	if errorChan == nil || err == nil {
 		return
@@ -33,8 +38,14 @@ func sendError(ctx context.Context, errorChan chan<- error, err error) {
 	}
 	select {
 	case errorChan <- err:
+		return
+	default:
+	}
+	// only now consider giving up
+	select {
+	case errorChan <- err:
 	case <-ctx.Done():
-		logger.L().Ctx(ctx).Warning("context cancelled while sending error to channel", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("dropping error, context cancelled", helpers.Error(err))
 	}
 }
 
@@ -53,8 +64,9 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
 		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount == 0
 	}
-	//send the summary report
-	a.postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
+	//send the summary report synchronously so it is always received before any chunk report,
+	//preventing the backend from rejecting a chunk that arrives before its summary (#437)
+	a.postResults(ctx, *report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan)
 	nextPartNum++
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
