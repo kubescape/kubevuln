@@ -171,6 +171,7 @@ The main configuration file. All options can be overridden via environment varia
 | `scanConcurrency` | int | `1` | Number of concurrent scans |
 | `scanTimeout` | duration | `5m` | Timeout for SBOM generation |
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
+| `scannerReadinessTimeout` | duration | `60s` | Maximum time to wait for the SBOM scanner sidecar to become ready at startup. A value of `0` or less does not mean "wait forever": it makes the readiness deadline expire immediately, causing startup to fall back to the built-in Syft scanner right away. |
 
 #### Vulnerability Database Options
 
@@ -254,6 +255,11 @@ The main configuration file. All options can be overridden via environment varia
     "scanTimeout": {
       "type": "string",
       "default": "5m",
+      "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "scannerReadinessTimeout": {
+      "type": "string",
+      "default": "60s",
       "pattern": "^[0-9]+(s|m|h)$"
     },
     "storage": {

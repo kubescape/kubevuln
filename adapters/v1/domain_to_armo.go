@@ -242,9 +242,9 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 func linkToVuln(id string) string {
 	switch {
-	case strings.HasPrefix("EUVD-", id):
+	case strings.HasPrefix(id, "EUVD-"):
 		return "https://euvd.enisa.europa.eu/enisa/" + id
-	case strings.HasPrefix("GHSA-", id):
+	case strings.HasPrefix(id, "GHSA-"):
 		return "https://github.com/advisories/" + id
 	default:
 		return "https://nvd.nist.gov/vuln/detail/" + id

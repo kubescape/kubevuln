@@ -72,10 +72,14 @@ func main() {
 	var sbomAdapter ports.SBOMCreator
 	if socketPath := os.Getenv("SBOM_SCANNER_SOCKET"); socketPath != "" {
 		logger.L().Info("connecting to SBOM scanner sidecar", helpers.String("socket", socketPath))
-		scannerClient, err := sbomscanner.NewSBOMScannerClient(socketPath)
+		scannerClient, err := sbomscanner.NewSBOMScannerClient(ctx, socketPath, c.ScannerReadinessTimeout)
 		if err != nil {
-			logger.L().Warning("failed to connect to SBOM scanner sidecar, falling back to in-process Syft",
-				helpers.Error(err))
+			if ctx.Err() != nil {
+				logger.L().Info("shutdown requested while waiting for SBOM scanner sidecar")
+				return
+			}
+			logger.L().Error("SBOM scanner sidecar not ready after readiness timeout, falling back to in-process Syft",
+				helpers.Error(err), helpers.String("readinessTimeout", c.ScannerReadinessTimeout.String()))
 			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 		} else {
 			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")

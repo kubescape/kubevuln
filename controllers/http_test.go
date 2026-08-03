@@ -51,8 +51,8 @@ func TestHTTPController_GenerateSBOM(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{
@@ -136,8 +136,8 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"Wlid=wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy, ImageHash=k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{
@@ -210,8 +210,8 @@ func TestHTTPController_ScanRegistry(t *testing.T) {
 		{
 			name:         "validation error",
 			scanService:  services.NewMockScanService(false),
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			expectedCode: http.StatusBadRequest,
+			expectedBody: "{\"detail\":\"ImageTag=k8s.gcr.io/kube-proxy:v1.24.3\",\"status\":400,\"title\":\"Bad Request\"}",
 			yamlFile:     "../api/v1/testdata/scan.yaml",
 		},
 		{
@@ -438,4 +438,45 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("ScanRegistry worker was not executed in time")
 	}
+}
+
+func TestValidationStatusCode(t *testing.T) {
+	assert.Equal(t, http.StatusTooManyRequests, validationStatusCode(domain.ErrTooManyRequests))
+	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMissingCpInfo))
+	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMockError))
+}
+
+// validateErrScanService returns a fixed error from every Validate* method so
+// handler tests can exercise a specific validation error without depending on
+// MockScanService's generic sad path.
+type validateErrScanService struct {
+	*services.MockScanService
+	err error
+}
+
+func (s validateErrScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func (s validateErrScanService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func (s validateErrScanService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, s.err
+}
+
+func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
+	c := HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrTooManyRequests},
+		workerPool:  workerpool.New(1),
+	}
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
 }
