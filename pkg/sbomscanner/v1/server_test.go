@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -17,10 +18,35 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// maxUnixSockPathLen is the largest sockaddr_un.sun_path length (including the
+// NUL terminator) that bind(2)/listen(2) will accept: 104 on Darwin, 108 on Linux.
+func maxUnixSockPathLen() int {
+	if runtime.GOOS == "darwin" {
+		return 104
+	}
+	return 108
+}
+
+// newTestSocketPath returns a short-lived path for a Unix domain socket used in tests.
+// t.TempDir() embeds the full test (and subtest) name, which on macOS's long default
+// $TMPDIR can push the path past sun_path's limit and make net.Listen fail with a
+// confusing "bind: invalid argument" unrelated to the test itself.
+func newTestSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "kv-sbom-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	sock := filepath.Join(dir, "s.sock")
+	if max := maxUnixSockPathLen(); len(sock) >= max {
+		t.Fatalf("socket path %q (%d bytes) exceeds sun_path limit (%d bytes) on %s", sock, len(sock), max, runtime.GOOS)
+	}
+	return sock
+}
+
 func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
 	t.Helper()
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "scanner.sock")
+	sock := newTestSocketPath(t)
 
 	lis, err := net.Listen("unix", sock)
 	require.NoError(t, err)
