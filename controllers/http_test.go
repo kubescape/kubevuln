@@ -168,6 +168,30 @@ func TestHTTPController_ScanCVE(t *testing.T) {
 	}
 }
 
+func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
+	c := HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+	defer c.Shutdown()
+
+	// gin.New() rather than gin.Default() so a regression that panics surfaces
+	// as an unrecovered panic in this test instead of being masked by
+	// gin.Recovery() into the same 400 the validation path returns.
+	router := gin.New()
+	router.POST("/v1/scanCP", c.ScanCP)
+
+	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(`{
+		"wlid": "wlid://cluster-x/namespace-y/deployment-z",
+		"imageTag": "nginx:latest"
+	}`))
+	w := httptest.NewRecorder()
+
+	assert.NotPanics(t, func() {
+		router.ServeHTTP(w, req)
+	})
+}
+
 func TestHTTPController_ScanRegistry(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -455,32 +479,4 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
-}
-
-func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
-	c := HTTPController{
-		scanService: &contextSpyScanService{
-			scanCPCh: make(chan struct{}),
-		},
-		workerPool: workerpool.New(1),
-	}
-	defer c.Shutdown()
-
-	// gin.New() rather than gin.Default() so a regression that panics surfaces
-	// as an unrecovered panic in the test instead of being masked by
-	// gin.Recovery() into the same 500 the (removed) validation path would
-	// have returned via a good validation error.
-	router := gin.New()
-	router.POST("/v1/scanCP", c.ScanCP)
-
-	payload := `{
-		"wlid": "wlid://cluster-x/namespace-y/deployment-z",
-		"imageTag": "nginx:latest"
-	}`
-	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(payload))
-	w := httptest.NewRecorder()
-
-	assert.NotPanics(t, func() {
-		router.ServeHTTP(w, req)
-	})
 }

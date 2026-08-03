@@ -598,6 +598,89 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 }
 
+func TestScanService_ValidateScanCP(t *testing.T) {
+	tests := []struct {
+		name     string
+		workload domain.ScanCommand
+		wantErr  error
+	}{
+		{
+			name:     "missing args",
+			workload: domain.ScanCommand{},
+			wantErr:  domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      123,
+					domain.ArgsNamespace: true,
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string name only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      123,
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string namespace only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: true,
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "missing name only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "missing namespace only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName: "daemonset-kube-proxy",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "with name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+			_, err := s.ValidateScanCP(context.TODO(), tt.workload)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestScanService_ValidateScanCVE(t *testing.T) {
 	tests := []struct {
 		name     string
