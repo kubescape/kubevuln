@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1408,4 +1409,216 @@ func TestAPIServerStore_StoreVEX_recoversFromTransientConflict(t *testing.T) {
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+}
+
+// The k8s fake clientset's generated typed clients (k8s.io/client-go/gentype) drop the
+// caller's ctx before it ever reaches a PrependReactor, so a reactor cannot observe
+// cancellation and can't be used to prove ctx propagation. These wrappers instead record
+// the exact ctx.Context each call received, so tests can assert the caller's ctx (tagged
+// with a canary value) is the one that actually reaches the storage client, rather than
+// some context.Background()/context.TODO() substitute.
+type ctxCapturingVulnerabilityManifests struct {
+	spdxv1beta1.VulnerabilityManifestInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.getCtx = ctx
+	return w.VulnerabilityManifestInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Create(ctx context.Context, obj *v1beta1.VulnerabilityManifest, opts metav1.CreateOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.createCtx = ctx
+	return w.VulnerabilityManifestInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Update(ctx context.Context, obj *v1beta1.VulnerabilityManifest, opts metav1.UpdateOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.updateCtx = ctx
+	return w.VulnerabilityManifestInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingSBOMSyfts struct {
+	spdxv1beta1.SBOMSyftInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingSBOMSyfts) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.SBOMSyft, error) {
+	w.getCtx = ctx
+	return w.SBOMSyftInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingSBOMSyfts) Create(ctx context.Context, obj *v1beta1.SBOMSyft, opts metav1.CreateOptions) (*v1beta1.SBOMSyft, error) {
+	w.createCtx = ctx
+	return w.SBOMSyftInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingSBOMSyfts) Update(ctx context.Context, obj *v1beta1.SBOMSyft, opts metav1.UpdateOptions) (*v1beta1.SBOMSyft, error) {
+	w.updateCtx = ctx
+	return w.SBOMSyftInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingOVECs struct {
+	spdxv1beta1.OpenVulnerabilityExchangeContainerInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingOVECs) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.getCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingOVECs) Create(ctx context.Context, obj *v1beta1.OpenVulnerabilityExchangeContainer, opts metav1.CreateOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.createCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingOVECs) Update(ctx context.Context, obj *v1beta1.OpenVulnerabilityExchangeContainer, opts metav1.UpdateOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.updateCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingVulnerabilityManifestSummaries struct {
+	spdxv1beta1.VulnerabilityManifestSummaryInterface
+	getCtx context.Context
+}
+
+func (w *ctxCapturingVulnerabilityManifestSummaries) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifestSummary, error) {
+	w.getCtx = ctx
+	return w.VulnerabilityManifestSummaryInterface.Get(ctx, name, opts)
+}
+
+// ctxCapturingClient wraps a real (fake) SpdxV1beta1Interface, swapping in ctx-recording
+// wrappers for the sub-clients exercised by the ctxPropagated tests below, while delegating
+// everything else untouched.
+type ctxCapturingClient struct {
+	spdxv1beta1.SpdxV1beta1Interface
+	vulnManifests *ctxCapturingVulnerabilityManifests
+	sbomSyfts     *ctxCapturingSBOMSyfts
+	ovecs         *ctxCapturingOVECs
+	vulnSummaries *ctxCapturingVulnerabilityManifestSummaries
+}
+
+// The accessor methods below are called once per storage operation (e.g. StoreVEX calls
+// OpenVulnerabilityExchangeContainers(ns) separately for its Get and then again for its
+// Create/Update), so the wrapper must be memoized rather than replaced on every call, or
+// later calls' captured ctx would clobber earlier ones.
+
+func (c *ctxCapturingClient) VulnerabilityManifests(namespace string) spdxv1beta1.VulnerabilityManifestInterface {
+	if c.vulnManifests == nil {
+		c.vulnManifests = &ctxCapturingVulnerabilityManifests{VulnerabilityManifestInterface: c.SpdxV1beta1Interface.VulnerabilityManifests(namespace)}
+	}
+	return c.vulnManifests
+}
+
+func (c *ctxCapturingClient) SBOMSyfts(namespace string) spdxv1beta1.SBOMSyftInterface {
+	if c.sbomSyfts == nil {
+		c.sbomSyfts = &ctxCapturingSBOMSyfts{SBOMSyftInterface: c.SpdxV1beta1Interface.SBOMSyfts(namespace)}
+	}
+	return c.sbomSyfts
+}
+
+func (c *ctxCapturingClient) OpenVulnerabilityExchangeContainers(namespace string) spdxv1beta1.OpenVulnerabilityExchangeContainerInterface {
+	if c.ovecs == nil {
+		c.ovecs = &ctxCapturingOVECs{OpenVulnerabilityExchangeContainerInterface: c.SpdxV1beta1Interface.OpenVulnerabilityExchangeContainers(namespace)}
+	}
+	return c.ovecs
+}
+
+func (c *ctxCapturingClient) VulnerabilityManifestSummaries(namespace string) spdxv1beta1.VulnerabilityManifestSummaryInterface {
+	if c.vulnSummaries == nil {
+		c.vulnSummaries = &ctxCapturingVulnerabilityManifestSummaries{VulnerabilityManifestSummaryInterface: c.SpdxV1beta1Interface.VulnerabilityManifestSummaries(namespace)}
+	}
+	return c.vulnSummaries
+}
+
+type ctxCanaryKey struct{}
+
+// canaryCtx returns a context carrying a unique, per-call marker value so tests can assert
+// on referential identity (via the canary) rather than just "a context was passed" - a nil
+// or unrelated context.Context would not carry this value.
+func canaryCtx() context.Context {
+	return context.WithValue(context.Background(), ctxCanaryKey{}, "canary")
+}
+
+func requireCanaryCtx(t *testing.T, got context.Context) {
+	t.Helper()
+	require.NotNil(t, got)
+	require.Equal(t, "canary", got.Value(ctxCanaryKey{}))
+}
+
+func TestAPIServerStore_GetCVE_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	_, _ = a.GetCVE(canaryCtx(), name, "", "", "")
+	requireCanaryCtx(t, wrapped.vulnManifests.getCtx)
+}
+
+func TestAPIServerStore_GetSBOM_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	_, _ = a.GetSBOM(canaryCtx(), name, "")
+	requireCanaryCtx(t, wrapped.sbomSyfts.getCtx)
+}
+
+func TestAPIServerStore_GetCVESummary_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	_, _ = a.GetCVESummary(ctx)
+	requireCanaryCtx(t, wrapped.vulnSummaries.getCtx)
+}
+
+func TestAPIServerStore_GetCVESummary_returnsTransientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("get", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	_, err := a.GetCVESummary(ctx)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVE_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	require.NoError(t, a.StoreCVE(canaryCtx(), domain.CVEManifest{Name: name}, false))
+	requireCanaryCtx(t, wrapped.vulnManifests.createCtx)
+}
+
+func TestAPIServerStore_StoreSBOM_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	require.NoError(t, a.StoreSBOM(canaryCtx(), domain.SBOM{Name: name}, false))
+	requireCanaryCtx(t, wrapped.sbomSyfts.createCtx)
+}
+
+func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	require.NoError(t, a.StoreVEX(canaryCtx(), cve, cve, false))
+	requireCanaryCtx(t, wrapped.ovecs.getCtx)
+	requireCanaryCtx(t, wrapped.ovecs.createCtx)
 }
