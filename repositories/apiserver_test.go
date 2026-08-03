@@ -603,6 +603,72 @@ func TestAPIServerStore_updateVEX_doesNotNormalizeCorrectShapeWithNonURLDataSour
 	}
 }
 
+func TestAPIServerStore_updateVEX_mergesMetadataOnUpdate(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// Create with initial annotations/labels preserving existing metadata
+	if cveManifestFull.Annotations == nil {
+		cveManifestFull.Annotations = make(map[string]string)
+	}
+	cveManifestFull.Annotations["keep-me"] = "init-val"
+	cveManifestFull.Annotations["k1"] = "v1"
+
+	if cveManifestFiltered.Annotations == nil {
+		cveManifestFiltered.Annotations = make(map[string]string)
+	}
+	cveManifestFiltered.Annotations["keep-me"] = "init-val"
+	cveManifestFiltered.Annotations["k1"] = "v1"
+
+	if cveManifestFull.Labels == nil {
+		cveManifestFull.Labels = make(map[string]string)
+	}
+	cveManifestFull.Labels["l1"] = "v2"
+
+	if cveManifestFiltered.Labels == nil {
+		cveManifestFiltered.Labels = make(map[string]string)
+	}
+	cveManifestFiltered.Labels["l1"] = "v2"
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	// Verify they are created correctly
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "v1", vexContainer.Annotations["k1"])
+	assert.Equal(t, "v2", vexContainer.Labels["l1"])
+	assert.Equal(t, "init-val", vexContainer.Annotations["keep-me"])
+
+	// Update with new annotations/labels (omitting keep-me to verify merge retention)
+	cveManifestFull.Annotations = map[string]string{"k1": "new-v1", "k2": "v2"}
+	cveManifestFull.Labels = map[string]string{"l1": "new-v2", "l2": "v3"}
+	cveManifestFiltered.Annotations = map[string]string{"k1": "new-v1", "k2": "v2"}
+	cveManifestFiltered.Labels = map[string]string{"l1": "new-v2", "l2": "v3"}
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	// Verify they are merged on update
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "new-v1", vexContainerAfterUpdate.Annotations["k1"])
+	assert.Equal(t, "v2", vexContainerAfterUpdate.Annotations["k2"])
+	assert.Equal(t, "init-val", vexContainerAfterUpdate.Annotations["keep-me"])
+	assert.Equal(t, "new-v2", vexContainerAfterUpdate.Labels["l1"])
+	assert.Equal(t, "v3", vexContainerAfterUpdate.Labels["l2"])
+}
+
 func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	workload := domain.ScanCommand{
 		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
