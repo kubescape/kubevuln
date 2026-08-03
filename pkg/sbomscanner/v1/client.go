@@ -40,6 +40,8 @@ type sbomScannerClient struct {
 // If ctx is canceled before readiness is reached, the returned error satisfies
 // errors.Is(err, context.Cause(ctx)) so callers can distinguish cancellation from a genuinely
 // unhealthy sidecar.
+// A readinessTimeout of zero or less does not mean "wait indefinitely": it makes the
+// readiness deadline expire immediately, so the sidecar is treated as unready right away.
 func NewSBOMScannerClient(ctx context.Context, socketPath string, readinessTimeout time.Duration) (SBOMScannerClient, error) {
 	target := fmt.Sprintf("unix://%s", socketPath)
 	conn, err := grpc.NewClient(target,
