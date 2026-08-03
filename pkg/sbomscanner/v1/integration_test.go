@@ -103,10 +103,10 @@ func TestNewSBOMScannerClient_CancelableReadinessWait(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	client, err := NewSBOMScannerClient(ctx, sock)
+	client, err := NewSBOMScannerClient(ctx, sock, DefaultReadinessTimeout)
 	elapsed := time.Since(start)
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, client)
-	assert.Less(t, elapsed, readinessTimeout, "readiness wait must respect the caller's context instead of blocking for the full readiness timeout")
+	assert.Less(t, elapsed, 5*time.Second, "readiness wait must return on the caller's context, not on the readiness timeout")
 }
