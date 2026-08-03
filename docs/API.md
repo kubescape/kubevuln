@@ -148,8 +148,8 @@ POST /v1/sbomCreation
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Request accepted, SBOM generation started |
-| `400 Bad Request` | Invalid request payload |
-| `500 Internal Server Error` | Validation failed |
+| `400 Bad Request` | Invalid request payload or validation failed |
+| `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 
 #### Example
 
@@ -201,8 +201,8 @@ POST /v1/scanImage
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Request accepted, CVE scan started |
-| `400 Bad Request` | Invalid request payload |
-| `500 Internal Server Error` | Validation failed |
+| `400 Bad Request` | Invalid request payload or validation failed |
+| `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 
 #### Example
 
@@ -251,8 +251,8 @@ POST /v1/scanRegistryImage
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Request accepted, registry scan started |
-| `400 Bad Request` | Invalid request payload |
-| `500 Internal Server Error` | Validation failed |
+| `400 Bad Request` | Invalid request payload or validation failed |
+| `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 
 #### Example
 
@@ -306,8 +306,7 @@ POST /v1/applicationProfileScan
 | Status | Description |
 |--------|-------------|
 | `200 OK` | Request accepted, profile scan started |
-| `400 Bad Request` | Invalid request payload |
-| `500 Internal Server Error` | Validation failed |
+| `400 Bad Request` | Invalid request payload or validation failed |
 
 #### Example
 
@@ -405,8 +404,9 @@ All responses follow RFC 7807.
 | Code | Meaning | When |
 |------|---------|------|
 | `200` | OK | Request accepted |
-| `400` | Bad Request | Invalid JSON or missing required fields |
-| `500` | Internal Server Error | Validation failed or internal error |
+| `400` | Bad Request | Invalid JSON, missing required fields, or validation failed |
+| `429` | Too Many Requests | Registry rate limit hit on a previous pull for this image |
+| `500` | Internal Server Error | Internal error |
 | `503` | Service Unavailable | Service not ready (vulnerability DB not loaded) |
 
 ### Common Errors
@@ -424,8 +424,8 @@ All responses follow RFC 7807.
 
 ```json
 {
-  "status": 500,
-  "title": "Internal Server Error",
+  "status": 400,
+  "title": "Bad Request",
   "detail": "ImageHash=..."
 }
 ```
