@@ -34,6 +34,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 		namespace := se.Namespace
 		for _, vuln := range se.Spec.Vulnerabilities {
+			if vuln.Status == sev1beta1.VulnerabilityStatusUnderInvestigation {
+				continue
+			}
 			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
 				continue
 			}
@@ -51,6 +54,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			continue
 		}
 		for _, vuln := range cse.Spec.Vulnerabilities {
+			if vuln.Status == sev1beta1.VulnerabilityStatusUnderInvestigation {
+				continue
+			}
 			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
 				continue
 			}
