@@ -836,6 +836,9 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
 	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
 
+	require.NoError(t, a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, nil))
+	assert.Equal(t, 4, stub.Calls(), "ReportScanFailure should use the shared httpClient")
+
 	assert.Same(t, stub, a.getHTTPClient(), "getHTTPClient should keep returning the exact configured instance")
 }
 

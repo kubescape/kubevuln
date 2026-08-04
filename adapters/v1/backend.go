@@ -250,7 +250,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
-	resp, err := a.httpPostFunc(http.DefaultClient, url, a.getRequestHeaders(), payload, 30*time.Second)
+	resp, err := a.httpPostFunc(a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
