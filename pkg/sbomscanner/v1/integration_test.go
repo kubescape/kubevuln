@@ -18,8 +18,7 @@ import (
 
 func startIntegrationServer(t *testing.T) (SBOMScannerClient, *grpc.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "scanner.sock")
+	sock := newTestSocketPath(t)
 
 	lis, err := net.Listen("unix", sock)
 	require.NoError(t, err)
