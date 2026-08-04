@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,7 +325,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mu := &sync.Mutex{}
 			seenCVE := map[string]struct{}{}
-			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
+			httpPostFunc := func(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
 				var report v1.ScanResultReport
 				err := json.Unmarshal(body, &report)
 				if err != nil {
@@ -522,7 +523,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 	var capturedURL string
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, fullURL string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, fullURL string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		capturedURL = fullURL
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
@@ -570,7 +571,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
 			StatusCode: 200,
@@ -615,7 +616,7 @@ func TestBackendAdapter_ReportScanFailure_NoWorkloadInContext(t *testing.T) {
 }
 
 func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
 		return nil, assert.AnError
 	}
 
@@ -636,7 +637,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
 }
 
 func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 500,
 			Body:       io.NopCloser(bytes.NewBufferString("internal server error")),
@@ -663,7 +664,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
 func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
 			StatusCode: 200,
@@ -812,7 +813,7 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
 		eventReceiverRestURL: "http://example.invalid",
 		httpClient:           stub,
-		httpPostFunc:         httputils.HttpPostWithRetry,
+		httpPostFunc:         httpPostWithContext,
 		sendStatusFunc: func(sender *beClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport)
 		},
@@ -832,7 +833,7 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 	assert.Equal(t, 2, stub.Calls(), "SendStatus should use the shared httpClient")
 
 	errChan := make(chan error, 1)
-	a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan))
 	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
 	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
 
@@ -886,4 +887,114 @@ func TestSendError_BlocksOnFullChannelUntilCtxCancelledThenDrops(t *testing.T) {
 
 	require.Len(t, ch, 1, "second error should have been dropped since the channel stayed full")
 	assert.EqualError(t, <-ch, "first error")
+}
+
+// blockingHTTPClient's Do blocks until the request's own context is done, simulating how a real
+// net/http.Transport aborts an in-flight request once its context is cancelled. It lets tests
+// prove that cancelling the caller's ctx actually reaches the request (and the retry loop around
+// it), instead of the call quietly running to completion regardless (#446).
+type blockingHTTPClient struct {
+	calls int32
+}
+
+func (c *blockingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&c.calls, 1)
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func (c *blockingHTTPClient) Calls() int32 {
+	return atomic.LoadInt32(&c.calls)
+}
+
+func TestBackendAdapter_PostResultsAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	client := &blockingHTTPClient{}
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://example.invalid",
+		httpClient:           client,
+		httpPostFunc:         httpPostWithContext,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errChan := make(chan error, 1)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+	}()
+
+	// give postResults time to reach the (blocking) HTTP call before cancelling
+	require.Eventually(t, func() bool { return client.Calls() > 0 }, time.Second, time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err, "postResults should return an error once the request is aborted by ctx cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("postResults did not return promptly after ctx was cancelled; the retry loop is not ctx-aware")
+	}
+}
+
+func TestBackendAdapter_ReportScanFailureAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	client := &blockingHTTPClient{}
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://example.invalid",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpClient:           client,
+		httpPostFunc:         httpPostWithContext,
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:latest",
+	}))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, scanfailure.ReasonResultUploadFailed, fmt.Errorf("connection refused"))
+	}()
+
+	require.Eventually(t, func() bool { return client.Calls() > 0 }, time.Second, time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err, "ReportScanFailure should return an error once the request is aborted by ctx cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReportScanFailure did not return promptly after ctx was cancelled; the retry loop is not ctx-aware")
+	}
+}
+
+func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
+	var chunkPosts int32
+	httpPostFunc := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+		var report v1.ScanResultReport
+		require.NoError(t, json.Unmarshal(body, &report))
+		if report.Summary != nil {
+			// this is the summary report (possibly combined with the first chunk) - fail it
+			return nil, fmt.Errorf("simulated summary post failure")
+		}
+		atomic.AddInt32(&chunkPosts, 1)
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
+		httpPostFunc:          httpPostFunc,
+		securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
+	}
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	cve := *fileToType[domain.CVEManifest]("testdata/nginx-cve.json")
+	err := a.SubmitCVE(ctx, cve, domain.CVEManifest{})
+
+	require.Error(t, err, "SubmitCVE should surface the summary post failure")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&chunkPosts), "no vulnerability chunk should be posted once the summary failed")
 }

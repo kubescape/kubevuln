@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/armosec/utils-go/httputils"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
@@ -37,7 +39,7 @@ type BackendAdapter struct {
 	apiServerRestURL      string
 	clusterConfig         pkgcautils.ClusterConfig
 	getCVEExceptionsFunc  func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc          func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
+	httpPostFunc          func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
 	sendStatusFunc        func(*backendClientV1.BaseReportSender, string, bool)
 	accessKey             string
 	securityExceptionRepo ports.SecurityExceptionRepository
@@ -64,7 +66,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		eventReceiverRestURL: eventReceiverRestURL,
 		apiServerRestURL:     apiServerRestURL,
 		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
-		httpPostFunc:         httputils.HttpPostWithRetry,
+		httpPostFunc:         httpPostWithContext,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
@@ -88,6 +90,47 @@ func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
 		return a.httpClient
 	}
 	return http.DefaultClient
+}
+
+// httpPostWithContext is the default httpPostFunc. Unlike httputils.HttpPostWithRetry (which
+// binds context.Background() to the request and retries on a plain, non-cancellable
+// backoff.Retry loop), it threads the caller's ctx through the request AND the retry loop, so
+// cancelling ctx aborts both an in-flight attempt and any further retries promptly instead of
+// running the full retry budget to completion regardless of cancellation (#446).
+func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, maxElapsedTime time.Duration) (*http.Response, error) {
+	bo := backoff.NewExponentialBackOff()
+	return backoff.Retry(ctx, func() (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, backoff.Permanent(err)
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			defer resp.Body.Close()
+			retryErr := fmt.Errorf("received status code: %d", resp.StatusCode)
+			if !shouldRetryReport(resp) {
+				return nil, backoff.Permanent(retryErr)
+			}
+			return nil, retryErr
+		}
+		return resp, nil
+	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
+}
+
+// shouldRetryReport mirrors the unexported defaultShouldRetry in armosec/utils-go: retry on any
+// response except the ones that are never going to succeed on a retry.
+func shouldRetryReport(resp *http.Response) bool {
+	return resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusForbidden &&
+		resp.StatusCode != http.StatusNotFound &&
+		resp.StatusCode != http.StatusInternalServerError
 }
 
 const ActionName = "vuln scan"
@@ -197,6 +240,12 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	report.Errors = append(report.Errors, err.Error())
 	report.Status = sysreport.JobFailed
 
+	// NOTE: unlike postResults/ReportScanFailure, this call is not ctx-cancellation-aware.
+	// backendClientV1.NewBaseReportSender builds its own *http.Request bound to
+	// context.Background() inside armosec/utils-go, before it ever reaches our IHttpClient, so
+	// there's no seam here to inject ctx without either bypassing the sender or a ctx-accepting
+	// constructor upstream in kubescape/backend. Tracked separately (#450) rather than silently
+	// left unaddressed.
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobFailed, true)
 	return nil
@@ -250,7 +299,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
-	resp, err := a.httpPostFunc(a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
+	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
@@ -278,6 +327,8 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 	report.Status = statuses[step]
 
+	// NOTE: see the same comment on ReportError above — this call has the same ctx-cancellation
+	// gap for the same reason.
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, statuses[step], true)
 	return nil
@@ -430,7 +481,19 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.eventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum, summaryErr := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.eventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	if summaryErr != nil {
+		// Nothing was sent, so no chunk goroutine was dispatched and nothing will ever drain
+		// chunksChan or close errChan on its own. Drain chunksChan ourselves so the producer
+		// goroutine started by SplitSlice2Chunks doesn't block forever trying to hand off the
+		// remaining chunks (#446), and return directly instead of ranging over an errChan
+		// nothing will close.
+		go func() {
+			for range chunksChan {
+			}
+		}()
+		return summaryErr
+	}
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent

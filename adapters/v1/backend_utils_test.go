@@ -667,7 +667,7 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 			sendWG.Add(len(tc.expectedPaginationMarks))
 			var reports []v1.ScanResultReport
 			mu := &sync.Mutex{}
-			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
+			httpPostFunc := func(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
 				mu.Lock()
 				var report v1.ScanResultReport
 				err := json.Unmarshal(body, &report)
@@ -697,7 +697,8 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 				httpPostFunc:  httpPostFunc,
 			}
 			report.Vulnerabilities = []containerscan.CommonContainerVulnerabilityResult{}
-			actualNextPartNum := a.sendSummaryAndVulnerabilities(ctx, report, "", tc.totalVulnerabilities, "1234", tc.firstVulnerabilitiesChunk, errChan, sendWG)
+			actualNextPartNum, err := a.sendSummaryAndVulnerabilities(ctx, report, "", tc.totalVulnerabilities, "1234", tc.firstVulnerabilitiesChunk, errChan, sendWG)
+			assert.NoError(t, err)
 			sendWG.Wait()
 			assert.Equal(t, tc.expectedNextPartNum, actualNextPartNum)
 			assert.Equal(t, len(tc.expectedPaginationMarks), len(reports))
