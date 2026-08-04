@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -782,4 +783,107 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 	exceptions, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
+}
+
+// recordingHTTPClient counts how many times it served a request, so tests can prove that the
+// exact same client instance was reused across multiple call sites instead of merely asserting
+// that a getter echoes back the field it was handed.
+type recordingHTTPClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *recordingHTTPClient) Do(_ *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+}
+
+func (c *recordingHTTPClient) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
+	stub := &recordingHTTPClient{}
+	a := &BackendAdapter{
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		eventReceiverRestURL: "http://example.invalid",
+		httpClient:           stub,
+		httpPostFunc:         httputils.HttpPostWithRetry,
+		sendStatusFunc: func(sender *beClientV1.BaseReportSender, status string, sendReport bool) {
+			sender.SendStatus(status, sendReport)
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid",
+		ContainerName: "container",
+		ImageTag:      "imageTag",
+		ImageHash:     "imageHash",
+	})
+
+	require.NoError(t, a.ReportError(ctx, fmt.Errorf("boom")))
+	assert.Equal(t, 1, stub.Calls(), "ReportError should use the shared httpClient")
+
+	require.NoError(t, a.SendStatus(ctx, 0))
+	assert.Equal(t, 2, stub.Calls(), "SendStatus should use the shared httpClient")
+
+	errChan := make(chan error, 1)
+	a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
+	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
+
+	require.NoError(t, a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, nil))
+	assert.Equal(t, 4, stub.Calls(), "ReportScanFailure should use the shared httpClient")
+
+	assert.Same(t, stub, a.getHTTPClient(), "getHTTPClient should keep returning the exact configured instance")
+}
+
+func TestSendError_DeliversImmediatelyWhenChannelHasRoom(t *testing.T) {
+	// Realistic shape from the reported bug: a buffered channel with free space, hit while ctx
+	// is already cancelled. The send must still win deterministically instead of racing a
+	// random select against ctx.Done().
+	ch := make(chan error, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sendError(ctx, ch, fmt.Errorf("overflow error"))
+
+	require.Len(t, ch, 1)
+	assert.EqualError(t, <-ch, "overflow error")
+}
+
+func TestSendError_BlocksOnFullChannelUntilCtxCancelledThenDrops(t *testing.T) {
+	// This is the scenario the PR description actually claims to guard: a full channel with a
+	// live context. sendError must block until either the channel drains or ctx is cancelled,
+	// only dropping the error once that happens.
+	ch := make(chan error, 1)
+	ch <- fmt.Errorf("first error")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		sendError(ctx, ch, fmt.Errorf("second error"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendError returned before the channel had room or ctx was cancelled")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sendError did not return after context cancellation")
+	}
+
+	require.Len(t, ch, 1, "second error should have been dropped since the channel stayed full")
+	assert.EqualError(t, <-ch, "first error")
 }

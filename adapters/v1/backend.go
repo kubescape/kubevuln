@@ -42,6 +42,7 @@ type BackendAdapter struct {
 	accessKey             string
 	securityExceptionRepo ports.SecurityExceptionRepository
 	exceptionsCache       *cache.Cache
+	httpClient            httputils.IHttpClient
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -70,7 +71,23 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
 		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 32,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
+}
+
+func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
+	if a.httpClient != nil {
+		return a.httpClient
+	}
+	return http.DefaultClient
 }
 
 const ActionName = "vuln scan"
@@ -180,7 +197,7 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	report.Errors = append(report.Errors, err.Error())
 	report.Status = sysreport.JobFailed
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobFailed, true)
 	return nil
 }
@@ -233,7 +250,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
-	resp, err := a.httpPostFunc(http.DefaultClient, url, a.getRequestHeaders(), payload, 30*time.Second)
+	resp, err := a.httpPostFunc(a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
@@ -261,7 +278,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 	report.Status = statuses[step]
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, statuses[step], true)
 	return nil
 }

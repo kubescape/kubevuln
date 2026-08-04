@@ -24,6 +24,31 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
+// sendError delivers err to errorChan. It always wins the send when the channel has room,
+// even if ctx is already cancelled, so a cancelled context never causes a real error to be
+// dropped in favor of a stale one already sitting in the channel. Only once the channel is
+// actually saturated do we fall back to waiting for room or for ctx cancellation, logging a
+// warning if we ultimately have to give up.
+func sendError(ctx context.Context, errorChan chan<- error, err error) {
+	if errorChan == nil || err == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case errorChan <- err:
+		return
+	default:
+	}
+	// only now consider giving up
+	select {
+	case errorChan <- err:
+	case <-ctx.Done():
+		logger.L().Ctx(ctx).Warning("dropping error, context cancelled", helpers.Error(err))
+	}
+}
+
 func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
@@ -39,8 +64,9 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
 		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount == 0
 	}
-	//send the summary report
-	a.postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
+	//send the summary report synchronously so it is always received before any chunk report,
+	//preventing the backend from rejecting a chunk that arrives before its summary (#437)
+	a.postResults(ctx, *report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan)
 	nextPartNum++
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
@@ -77,7 +103,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 
@@ -85,16 +111,16 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
+	resp, err := a.httpPostFunc(a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),
 			helpers.String("wlid", wlid))
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -105,7 +131,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 		} else {
 			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
 		}
-		errorChan <- err
+		sendError(ctx, errorChan, err)
 		return
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
@@ -139,8 +165,8 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 
 	//verify that all vulnerabilities received and sent
 	if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
-		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
-			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount)
+		sendError(ctx, errorChan, fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
+			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount))
 	}
 }
 
