@@ -1,9 +1,17 @@
 package v1
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +19,7 @@ import (
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft/source"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,7 +67,7 @@ func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
 	go srv.Serve(lis)
 
-	conn, err := grpc.NewClient("unix://"+sock,
+	conn, err := grpc.NewClient("unix:"+sock,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(MaxgRPCMessageSize),
@@ -242,4 +251,117 @@ func TestResolveSource(t *testing.T) {
 			}
 		})
 	}
+}
+
+func makeDummyTarGz(fileSize int) ([]byte, string, string, error) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	header := &tar.Header{
+		Name: "dummy.txt",
+		Mode: 0600,
+		Size: int64(fileSize),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		return nil, "", "", err
+	}
+
+	data := bytes.Repeat([]byte("a"), fileSize)
+	if _, err := tw.Write(data); err != nil {
+		return nil, "", "", err
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, "", "", err
+	}
+	if err := gw.Close(); err != nil {
+		return nil, "", "", err
+	}
+
+	blobBytes := buf.Bytes()
+	hash := sha256.Sum256(blobBytes)
+	hashStr := fmt.Sprintf("%x", hash)
+
+	var tarBuf bytes.Buffer
+	tarTw := tar.NewWriter(&tarBuf)
+	if err := tarTw.WriteHeader(header); err != nil {
+		return nil, "", "", err
+	}
+	if _, err := tarTw.Write(data); err != nil {
+		return nil, "", "", err
+	}
+	if err := tarTw.Close(); err != nil {
+		return nil, "", "", err
+	}
+	tarHash := sha256.Sum256(tarBuf.Bytes())
+	diffIdStr := fmt.Sprintf("%x", tarHash)
+
+	return blobBytes, hashStr, diffIdStr, nil
+}
+
+func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(1000)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	// Start local mock registry
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/v2/test-image/manifests/latest" {
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {
+					"mediaType": "application/vnd.docker.container.image.v1+json",
+					"size": %d,
+					"digest": "sha256:%s"
+				},
+				"layers": [
+					{
+						"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+						"size": %d,
+						"digest": "sha256:%s"
+					}
+				]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+			return
+		}
+		if r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash) {
+			w.Write(configBytes)
+			return
+		}
+		if r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash) {
+			w.Write(layerBytes)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		MaxImageSize:    1, // Exceeded by layer size
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, helpersv1.TooLarge, resp.Status)
+	assert.Equal(t, "image-too-large", resp.StatusReason)
+	assert.Empty(t, resp.ErrorMessage)
 }

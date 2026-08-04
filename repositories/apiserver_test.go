@@ -160,6 +160,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 		name          string
 		args          args
 		sbom          domain.SBOM
+		wantErr       error
 		wantEmptySBOM bool
 	}{
 		{
@@ -172,6 +173,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				Name:    name,
 				Content: &v1beta1.SyftDocument{},
 			},
+			nil,
 			false,
 		},
 		{
@@ -184,6 +186,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				Name:    name,
 				Content: &v1beta1.SyftDocument{},
 			},
+			nil,
 			false,
 		},
 		{
@@ -198,7 +201,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				SBOMCreatorVersion: "v1.0.0",
 				Content:            &v1beta1.SyftDocument{},
 			},
-			true,
+			domain.ErrOutdatedSBOM,
+			false,
 		},
 		{
 			"empty name",
@@ -212,6 +216,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				SBOMCreatorVersion: "v1.0.0",
 				Content:            &v1beta1.SyftDocument{},
 			},
+			nil,
 			true,
 		},
 	}
@@ -222,7 +227,12 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			require.NoError(t, err)
 			err = a.StoreSBOM(tt.args.ctx, tt.sbom, false)
 			require.NoError(t, err)
-			gotSBOM, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			gotSBOM, err := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
 			if (gotSBOM.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSBOM.Content = %v, wantEmptySBOM %v", gotSBOM.Content, tt.wantEmptySBOM)
 				return

@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -449,6 +450,10 @@ func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string
 }
 
 func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
+
+func (schemaUnsupportedSBOMAdapter) GetMaxImageSize() int64 { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMemoryLimit() string { return "" }
 
 func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 	imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
@@ -1149,6 +1154,93 @@ func TestOptionsFromWorkload(t *testing.T) {
 				"InsecureUseHTTP mismatch for args: %v", tt.args)
 			assert.Equal(t, tt.wantInsecureSkipTLS, got.InsecureSkipTLSVerify,
 				"InsecureSkipTLSVerify mismatch for args: %v", tt.args)
+		})
+	}
+}
+
+type mockSBOMRepository struct {
+	ports.SBOMRepository
+	getSBOMSBOM domain.SBOM
+	getSBOMErr  error
+	deleteErr   error
+	deleteCalled bool
+}
+
+func (m *mockSBOMRepository) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
+	return m.getSBOMSBOM, m.getSBOMErr
+}
+
+func (m *mockSBOMRepository) DeleteSBOM(ctx context.Context, name string) error {
+	m.deleteCalled = true
+	return m.deleteErr
+}
+
+func TestScanService_getSBOM_Outdated(t *testing.T) {
+	tests := []struct {
+		name          string
+		sbom          domain.SBOM
+		getErr        error
+		deleteErr     error
+		wantDelete    bool
+		wantSBOM      domain.SBOM
+		wantErr       error
+	}{
+		{
+			name: "outdated, too large, delete succeeds",
+			sbom: domain.SBOM{
+				Status:  helpersv1.TooLarge,
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  nil,
+			wantDelete: true,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+		{
+			name: "outdated, too large, delete fails",
+			sbom: domain.SBOM{
+				Status:  helpersv1.TooLarge,
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  fmt.Errorf("delete error"),
+			wantDelete: true,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+		{
+			name: "outdated, not too large, delete not called",
+			sbom: domain.SBOM{
+				Status:  "",
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  nil,
+			wantDelete: false,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockSBOMRepository{
+				getSBOMSBOM: tt.sbom,
+				getSBOMErr:  tt.getErr,
+				deleteErr:   tt.deleteErr,
+			}
+			s := &ScanService{
+				sbomRepository: repo,
+			}
+			gotSBOM, err := s.getSBOM(context.Background(), "test-sbom", "v1.0.0")
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantSBOM, gotSBOM)
+			assert.Equal(t, tt.wantDelete, repo.deleteCalled)
 		})
 	}
 }

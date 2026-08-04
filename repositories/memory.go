@@ -218,6 +218,22 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) e
 	return nil
 }
 
+func (m *MemoryStore) DeleteSBOM(ctx context.Context, name string) error {
+	_, span := otel.Tracer("").Start(ctx, "MemoryStore.DeleteSBOM")
+	defer span.End()
+
+	if m.storeError {
+		return domain.ErrMockError
+	}
+
+	for id := range m.sboms {
+		if id.Name == name {
+			delete(m.sboms, id)
+		}
+	}
+	return nil
+}
+
 // StoreVEX stores a VEX to an in-memory map
 func (m *MemoryStore) StoreVEX(_ context.Context, _ domain.CVEManifest, _ domain.CVEManifest, _ bool) error {
 	return nil

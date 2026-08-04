@@ -24,6 +24,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"golang.org/x/oauth2/google"
@@ -169,12 +170,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}, imageID, imageTag, registryOptions)
 
 	switch {
-	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
+	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		logger.L().Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.Incomplete,
+			Status:       helpersv1.TooLarge,
+			StatusReason: domain.ReasonImageTooLarge,
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		return &pb.CreateSBOMResponse{
@@ -248,8 +250,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status:   helpersv1.TooLarge,
-			SbomSize: int64(sz),
+			Status:       helpersv1.TooLarge,
+			SbomSize:     int64(sz),
+			StatusReason: domain.ReasonSBOMTooLarge,
 		}, nil
 	}
 

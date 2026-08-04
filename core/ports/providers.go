@@ -21,6 +21,9 @@ type CVEScanner interface {
 type SBOMCreator interface {
 	CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error)
 	Version() string
+	GetMaxImageSize() int64
+	GetMaxSBOMSize() int
+	GetMemoryLimit() string
 }
 
 // Platform is the port implemented by adapters to be used in ScanService to report scan results and send telemetry data

@@ -214,7 +214,9 @@ type CreateSBOMResponse struct {
 	// Size of the in-memory SBOM before serialization
 	SbomSize int64 `protobuf:"varint,3,opt,name=sbom_size,json=sbomSize,proto3" json:"sbom_size,omitempty"`
 	// Error message (for non-terminal errors that should be propagated)
-	ErrorMessage  string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	ErrorMessage string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	// The status reason if status is TooLarge
+	StatusReason  string `protobuf:"bytes,5,opt,name=status_reason,json=statusReason,proto3" json:"status_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +275,13 @@ func (x *CreateSBOMResponse) GetSbomSize() int64 {
 func (x *CreateSBOMResponse) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *CreateSBOMResponse) GetStatusReason() string {
+	if x != nil {
+		return x.StatusReason
 	}
 	return ""
 }
@@ -386,12 +395,13 @@ const file_scanner_proto_rawDesc = "" +
 	"\rmax_sbom_size\x18\b \x01(\x05R\vmaxSbomSize\x122\n" +
 	"\x15enable_embedded_sboms\x18\t \x01(\bR\x13enableEmbeddedSboms\x12'\n" +
 	"\x0ftimeout_seconds\x18\n" +
-	" \x01(\x03R\x0etimeoutSeconds\"\x93\x01\n" +
+	" \x01(\x03R\x0etimeoutSeconds\"\xb8\x01\n" +
 	"\x12CreateSBOMResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12#\n" +
 	"\rsbom_document\x18\x02 \x01(\fR\fsbomDocument\x12\x1b\n" +
 	"\tsbom_size\x18\x03 \x01(\x03R\bsbomSize\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x0f\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12#\n" +
+	"\rstatus_reason\x18\x05 \x01(\tR\fstatusReason\"\x0f\n" +
 	"\rHealthRequest\"@\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x14\n" +
