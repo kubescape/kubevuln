@@ -1074,6 +1074,41 @@ func Test_filterSBOM(t *testing.T) {
 	}
 }
 
+func BenchmarkFilterSBOM(b *testing.B) {
+	nginxSBOM := domain.SBOM{
+		Name: "nginx-sbom",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:  "docker.io/library/nginx@sha256:04ba374043ccd2fc5c593885c0eacddebabd5ca375f9323666f28dfd5a9710e3",
+			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
+			helpersv1.StatusMetadataKey:   helpersv1.Learning,
+		},
+		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+	}
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
+	)
+	require.NoError(b, err)
+	labels := map[string]string{
+		helpersv1.ContainerNameMetadataKey: "nginx",
+	}
+	wlid := "wlid://cluster-test/namespace-default/deployment-nginx"
+
+	for _, dynamicPathCount := range []int{10, 100, 1000} {
+		dynamicPathCount := dynamicPathCount
+		b.Run(fmt.Sprintf("dynamicPaths=%d", dynamicPathCount), func(b *testing.B) {
+			relevantFiles := mapset.NewSet[string]()
+			for i := 0; i < dynamicPathCount; i++ {
+				relevantFiles.Add(fmt.Sprintf("/var/lib/%s/segment-%d/data", dynamicpathdetector.DynamicIdentifier, i))
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := filterSBOM(nginxSBOM, instanceID, wlid, relevantFiles, labels, helpersv1.Full)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
 func TestOptionsFromWorkload(t *testing.T) {
 	tests := []struct {
 		name                string
