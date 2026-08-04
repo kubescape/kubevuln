@@ -884,4 +884,3 @@ func TestSendError_BlocksOnFullChannelUntilCtxCancelledThenDrops(t *testing.T) {
 	require.Len(t, ch, 1, "second error should have been dropped since the channel stayed full")
 	assert.EqualError(t, <-ch, "first error")
 }
-
