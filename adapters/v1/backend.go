@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
@@ -32,32 +33,43 @@ import (
 )
 
 type BackendAdapter struct {
-	eventReceiverRestURL      string
-	apiServerRestURL          string
-	clusterConfig             pkgcautils.ClusterConfig
-	getCVEExceptionsFunc      func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc              func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
-	sendStatusFunc            func(*backendClientV1.BaseReportSender, string, bool)
-	accessKey                 string
-	securityExceptionRepo     ports.SecurityExceptionRepository
+	eventReceiverRestURL  string
+	apiServerRestURL      string
+	clusterConfig         pkgcautils.ClusterConfig
+	getCVEExceptionsFunc  func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	httpPostFunc          func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
+	sendStatusFunc        func(*backendClientV1.BaseReportSender, string, bool)
+	accessKey             string
+	securityExceptionRepo ports.SecurityExceptionRepository
+	exceptionsCache       *cache.Cache
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
+
+// exceptionsCacheCleaningInterval controls how often expired entries are swept from exceptionsCache.
+// exceptionsCacheTTL bounds how stale a cached exceptions/CRD merge can be before the next scan
+// re-fetches from the backend and cluster; exceptions rarely change within a scan burst, so this
+// avoids a network + CRD round trip on every single container scan.
+const (
+	exceptionsCacheCleaningInterval = 1 * time.Minute
+	exceptionsCacheTTL              = 5 * time.Minute
+)
 
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID: accountID,
 		},
-		eventReceiverRestURL:  eventReceiverRestURL,
-		apiServerRestURL:      apiServerRestURL,
-		getCVEExceptionsFunc:  backendClientV1.GetCVEExceptionByDesignator,
-		httpPostFunc:          httputils.HttpPostWithRetry,
+		eventReceiverRestURL: eventReceiverRestURL,
+		apiServerRestURL:     apiServerRestURL,
+		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
+		httpPostFunc:         httputils.HttpPostWithRetry,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
+		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
 	}
 }
 
@@ -88,12 +100,34 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		return nil, domain.ErrCastingWorkload
 	}
 
+	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	// Registry scans carry no Wlid (registryScanCommandToScanCommand never sets
+	// it), which would otherwise collapse every scanned image onto the same
+	// cache key ("<accountID>/////"). Skip caching entirely for them rather than
+	// let unrelated images share exceptions.
+	cacheable := workload.Wlid != ""
+	cacheKey := strings.Join([]string{
+		a.clusterConfig.AccountID,
+		wlidpkg.GetClusterFromWlid(workload.Wlid),
+		namespace,
+		strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
+		wlidpkg.GetNameFromWlid(workload.Wlid),
+		workload.ContainerName,
+		workload.ImageTagNormalized,
+	}, "/")
+
+	if cacheable && a.exceptionsCache != nil {
+		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
+			return cached.(domain.CVEExceptions), nil
+		}
+	}
+
 	designator := identifiers.PortalDesignator{
 		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
-			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
+			"scope.namespace":     namespace,
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
 			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
 			"scope.containerName": workload.ContainerName,
@@ -106,14 +140,28 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	// Merge CRD-based exceptions
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
-	seList, cseList, err := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
-	if err != nil {
-		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
+	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
+	if crdErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
+		// This is a best-effort degradation that self-heals on the next scan;
+		// caching it would suppress valid CRD exceptions for the full TTL.
+		cacheable = false
 	} else if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+
+		// A selector-based exception whose labels failed to resolve fails closed
+		// (see matchExceptionTarget), which is also a self-healing degradation and
+		// must not be cached as if it were the authoritative result.
+		if (usesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
+			(usesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
+			cacheable = false
+		}
+	}
+
+	if cacheable && a.exceptionsCache != nil {
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
 	}
 
 	return vulnExceptionList, nil
