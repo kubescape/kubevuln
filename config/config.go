@@ -80,11 +80,13 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("scanConcurrency", 1)
 	v.SetDefault("scanTimeout", 5*time.Minute)
 	v.SetDefault("scannerReadinessTimeout", 60*time.Second)
-	// Kept safely under Kubernetes' typical terminationGracePeriodSeconds (30s
-	// default) so the worker-pool drain (see controllers.HTTPController.Shutdown)
-	// has a chance to log an explicit abandonment before the kubelet SIGKILLs the
-	// process, instead of the drain silently running out the clock unbounded.
-	v.SetDefault("shutdownTimeout", 25*time.Second)
+	// cmd/http/main.go spends up to 5s on the HTTP server's own Shutdown before this
+	// phase (the worker-pool drain, see controllers.HTTPController.Shutdown) even
+	// starts. 20s here keeps the combined worst case at 25s, safely under Kubernetes'
+	// typical terminationGracePeriodSeconds (30s default), so the drain has a chance
+	// to log an explicit abandonment before the kubelet SIGKILLs the process, instead
+	// of silently running out the clock past the grace period.
+	v.SetDefault("shutdownTimeout", 20*time.Second)
 	v.SetDefault("vexGeneration", false)
 	v.SetDefault("namespace", "kubescape")
 	v.SetDefault("scanEmbeddedSBOMs", false)

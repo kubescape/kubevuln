@@ -22,7 +22,7 @@ func TestLoadConfigShutdownTimeoutDefault(t *testing.T) {
 	viper.Reset()
 	c, err := LoadConfig("testdata")
 	assert.NoError(t, err)
-	assert.Equal(t, 25*time.Second, c.ShutdownTimeout)
+	assert.Equal(t, 20*time.Second, c.ShutdownTimeout)
 }
 
 func TestLoadConfigNotFound(t *testing.T) {
