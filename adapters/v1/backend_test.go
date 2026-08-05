@@ -172,6 +172,7 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 					},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					}},
 				},
 			}}, nil
@@ -200,6 +201,7 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 					},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					}},
 				},
 			}}, nil
