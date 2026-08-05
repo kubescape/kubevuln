@@ -240,11 +240,71 @@ func Test_suggestedVersion(t *testing.T) {
 }
 
 func Test_linkToVuln(t *testing.T) {
-	tests := []struct{ name, id, want string }{
-		{"GHSA advisory", "GHSA-jc7w-c686-c4v9", "https://github.com/advisories/GHSA-jc7w-c686-c4v9"},
-		{"EUVD advisory", "EUVD-2022-1234", "https://euvd.enisa.europa.eu/enisa/EUVD-2022-1234"},
-		{"CVE defaults to NVD", "CVE-2021-21300", "https://nvd.nist.gov/vuln/detail/CVE-2021-21300"},
-		{"short corrupt id not EUVD", "E", "https://nvd.nist.gov/vuln/detail/E"},
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{
+			name: "GHSA advisory",
+			id:   "GHSA-jc7w-c686-c4v9",
+			want: "https://github.com/advisories/GHSA-jc7w-c686-c4v9",
+		},
+		{
+			name: "EUVD advisory",
+			id:   "EUVD-2022-1234",
+			want: "https://euvd.enisa.europa.eu/enisa/EUVD-2022-1234",
+		},
+		{
+			name: "RHSA advisory",
+			id:   "RHSA-2026:49525",
+			want: "https://access.redhat.com/errata/RHSA-2026:49525",
+		},
+		{
+			name: "USN advisory",
+			id:   "USN-6896-1",
+			want: "https://ubuntu.com/security/notices/USN-6896-1/",
+		},
+		{
+			name: "DSA advisory",
+			id:   "DSA-1234",
+			want: "https://security-tracker.debian.org/tracker/DSA-1234",
+		},
+		{
+			name: "ELSA advisory",
+			id:   "ELSA-2026-1234",
+			want: "https://linux.oracle.com/errata/ELSA-2026-1234.html",
+		},
+		{
+			name: "RLSA advisory",
+			id:   "RLSA-2026:1111",
+			want: "https://errata.rockylinux.org/RLSA-2026:1111",
+		},
+		{
+			name: "ALAS advisory",
+			id:   "ALAS-2026-123",
+			want: "https://alas.aws.amazon.com/ALAS-2026-123.html",
+		},
+		{
+			name: "ALAS2 advisory",
+			id:   "ALAS2-2026-123",
+			want: "https://alas.aws.amazon.com/ALAS2-2026-123.html",
+		},
+		{
+			name: "ALAS2023 advisory",
+			id:   "ALAS2023-2026-123",
+			want: "https://alas.aws.amazon.com/ALAS2023-2026-123.html",
+		},
+		{
+			name: "CVE defaults to NVD",
+			id:   "CVE-2021-21300",
+			want: "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
+		},
+		{
+			name: "short corrupt id not EUVD",
+			id:   "E",
+			want: "https://nvd.nist.gov/vuln/detail/E",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
