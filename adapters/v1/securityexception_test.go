@@ -249,10 +249,11 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 // (empty, under_investigation, unrecognised values, blank IDs) does not.
 func TestConvertShouldSuppressAllowlist(t *testing.T) {
 	tests := []struct {
-		name        string
-		id          string
-		status      sev1beta1.VulnerabilityStatus
+		name         string
+		id           string
+		status       sev1beta1.VulnerabilityStatus
 		wantPolicies int
+		wantName     string // non-empty: assert the emitted policy name equals this value
 	}{
 		{name: "empty ID is skipped", id: "", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 0},
 		{name: "whitespace ID is skipped", id: "   ", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 0},
@@ -261,6 +262,8 @@ func TestConvertShouldSuppressAllowlist(t *testing.T) {
 		{name: "under_investigation does not suppress", id: "CVE-2024-0003", status: sev1beta1.VulnerabilityStatusUnderInvestigation, wantPolicies: 0},
 		{name: "empty status does not suppress", id: "CVE-2024-0004", status: "", wantPolicies: 0},
 		{name: "unrecognised status does not suppress", id: "CVE-2024-0005", status: "typo", wantPolicies: 0},
+		// Guards strings.TrimSpace inside buildPolicy (regression from 6784e9b).
+		{name: "padded ID is trimmed in policy name", id: "  CVE-2024-1234  ", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 1, wantName: "CVE-2024-1234"},
 	}
 
 	for _, tt := range tests {
@@ -277,6 +280,9 @@ func TestConvertShouldSuppressAllowlist(t *testing.T) {
 			}
 			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 			assert.Len(t, policies, tt.wantPolicies, "status=%q id=%q", tt.status, tt.id)
+			if tt.wantName != "" {
+				assert.Equal(t, tt.wantName, policies[0].VulnerabilityPolicies[0].Name, "policy name should be trimmed")
+			}
 		})
 	}
 }
@@ -379,8 +385,8 @@ func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
 	const vulnerabilityID = "CVE-2023-44487"
 
 	tests := []struct {
-		name             string
-		namespaced       bool
+		name       string
+		namespaced bool
 	}{
 		{name: "namespaced SecurityException", namespaced: true},
 		{name: "cluster-scoped ClusterSecurityException", namespaced: false},
