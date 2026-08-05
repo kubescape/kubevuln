@@ -3,10 +3,10 @@ package ports
 import (
 	"context"
 
+	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/armosec/armoapi-go/scanfailure"
 )
 
 // CVEScanner is the port implemented by adapters to be used in ScanService to generate CVE manifests

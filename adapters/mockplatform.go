@@ -85,4 +85,3 @@ func (m MockPlatform) SubmitCVE(ctx context.Context, _ domain.CVEManifest, _ dom
 	defer span.End()
 	return nil
 }
-

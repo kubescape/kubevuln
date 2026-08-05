@@ -95,7 +95,9 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 		defer wg.Done()
 		// failure is reported to the caller via errorChan, not the return value, for chunks
 		// sent from a goroutine
-		_ = a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
+		if err := a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, nil); err != nil {
+			sendError(ctx, errorChan, err)
+		}
 	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 

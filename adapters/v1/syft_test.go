@@ -373,4 +373,3 @@ func TestRewriteImageRef(t *testing.T) {
 		})
 	}
 }
-

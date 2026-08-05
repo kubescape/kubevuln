@@ -452,7 +452,7 @@ func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string
 func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
 
 func (schemaUnsupportedSBOMAdapter) GetMaxImageSize() int64 { return 0 }
-func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int    { return 0 }
 func (schemaUnsupportedSBOMAdapter) GetMemoryLimit() string { return "" }
 
 func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
@@ -1195,9 +1195,9 @@ func TestOptionsFromWorkload(t *testing.T) {
 
 type mockSBOMRepository struct {
 	ports.SBOMRepository
-	getSBOMSBOM domain.SBOM
-	getSBOMErr  error
-	deleteErr   error
+	getSBOMSBOM  domain.SBOM
+	getSBOMErr   error
+	deleteErr    error
 	deleteCalled bool
 }
 
@@ -1212,13 +1212,13 @@ func (m *mockSBOMRepository) DeleteSBOM(ctx context.Context, name string) error 
 
 func TestScanService_getSBOM_Outdated(t *testing.T) {
 	tests := []struct {
-		name          string
-		sbom          domain.SBOM
-		getErr        error
-		deleteErr     error
-		wantDelete    bool
-		wantSBOM      domain.SBOM
-		wantErr       error
+		name       string
+		sbom       domain.SBOM
+		getErr     error
+		deleteErr  error
+		wantDelete bool
+		wantSBOM   domain.SBOM
+		wantErr    error
 	}{
 		{
 			name: "outdated, too large, delete succeeds",
