@@ -166,8 +166,9 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
 	}
 
-	// Purging the controller worker queue
-	controller.Shutdown()
+	// Purging the controller worker queue, bounded by ShutdownTimeout so this
+	// doesn't silently run past the pod's terminationGracePeriodSeconds
+	controller.Shutdown(c.ShutdownTimeout)
 
 	logger.L().Info("kubevuln exiting")
 }

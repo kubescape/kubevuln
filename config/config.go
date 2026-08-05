@@ -56,6 +56,7 @@ type Config struct {
 	ScanEmbeddedSboms       bool              `mapstructure:"scanEmbeddedSBOMs"`
 	ScanTimeout             time.Duration     `mapstructure:"scanTimeout"`
 	ScannerReadinessTimeout time.Duration     `mapstructure:"scannerReadinessTimeout"`
+	ShutdownTimeout         time.Duration     `mapstructure:"shutdownTimeout"`
 	RiskAcceptance          bool              `mapstructure:"riskAcceptance"`
 	Storage                 bool              `mapstructure:"storage"`
 	StoreFilteredSbom       bool              `mapstructure:"storeFilteredSbom"`
@@ -79,6 +80,11 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("scanConcurrency", 1)
 	v.SetDefault("scanTimeout", 5*time.Minute)
 	v.SetDefault("scannerReadinessTimeout", 60*time.Second)
+	// Kept safely under Kubernetes' typical terminationGracePeriodSeconds (30s
+	// default) so the worker-pool drain (see controllers.HTTPController.Shutdown)
+	// has a chance to log an explicit abandonment before the kubelet SIGKILLs the
+	// process, instead of the drain silently running out the clock unbounded.
+	v.SetDefault("shutdownTimeout", 25*time.Second)
 	v.SetDefault("vexGeneration", false)
 	v.SetDefault("namespace", "kubescape")
 	v.SetDefault("scanEmbeddedSBOMs", false)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/gammazero/workerpool"
@@ -274,8 +275,31 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 	return command
 }
 
-func (h HTTPController) Shutdown() {
+// Shutdown drains the worker pool's queued and running scans, but bounds how long it
+// waits. workerPool.StopWait() alone has no deadline of its own — it waits for the
+// entire queued backlog to finish, not just the task currently running — which for
+// scanConcurrency=1 with a full queue can run far longer than Kubernetes'
+// terminationGracePeriodSeconds. Without a bound here, that difference is invisible: the
+// process just gets SIGKILLed mid-drain with no log trace of what was abandoned. timeout
+// should be kept safely under the pod's terminationGracePeriodSeconds so this path has a
+// chance to log before that happens.
+func (h HTTPController) Shutdown(timeout time.Duration) {
 	logger.L().Info("purging SBOM creation queue",
-		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())))
-	h.workerPool.StopWait()
+		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
+		helpers.String("timeout", timeout.String()))
+
+	drained := make(chan struct{})
+	go func() {
+		h.workerPool.StopWait()
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		logger.L().Info("SBOM creation queue drained")
+	case <-time.After(timeout):
+		logger.L().Warning("shutdown timeout reached, abandoning queued/running scans",
+			helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
+			helpers.String("timeout", timeout.String()))
+	}
 }

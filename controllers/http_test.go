@@ -173,7 +173,7 @@ func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
 		scanService: services.NewMockScanService(true),
 		workerPool:  workerpool.New(1),
 	}
-	defer c.Shutdown()
+	defer c.Shutdown(5 * time.Second)
 
 	// gin.New() rather than gin.Default() so a regression that panics surfaces
 	// as an unrecovered panic in this test instead of being masked by
@@ -190,6 +190,38 @@ func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		router.ServeHTTP(w, req)
 	})
+}
+
+// TestHTTPController_Shutdown_BoundedByTimeout is a regression test for #467: Shutdown
+// used to delegate straight to workerPool.StopWait(), which blocks until every queued and
+// currently-running task finishes with no deadline of its own. A single stuck task (e.g. a
+// scan blocked on a backend call that ignores ctx cancellation, see #450) could therefore
+// hang shutdown indefinitely, well past Kubernetes' terminationGracePeriodSeconds, ending in
+// a silent SIGKILL instead of a bounded, logged abandonment.
+func TestHTTPController_Shutdown_BoundedByTimeout(t *testing.T) {
+	c := HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+
+	blocked := make(chan struct{})
+	c.workerPool.Submit(func() {
+		<-blocked
+	})
+	// Unblock the stuck task once the test is done so the pool's background dispatcher
+	// goroutine (still draining in the background after Shutdown's timeout fires) can
+	// actually finish instead of leaking for the rest of the test binary's lifetime.
+	defer close(blocked)
+
+	const timeout = 100 * time.Millisecond
+	start := time.Now()
+	c.Shutdown(timeout)
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 2*time.Second,
+		"Shutdown should return once its timeout elapses instead of blocking on a stuck task")
+	assert.GreaterOrEqual(t, elapsed, timeout,
+		"Shutdown should not return before its timeout when the pool hasn't drained yet")
 }
 
 func TestHTTPController_ScanRegistry(t *testing.T) {
@@ -377,7 +409,7 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 		scanService: spy,
 		workerPool:  workerpool.New(4),
 	}
-	defer c.Shutdown()
+	defer c.Shutdown(5 * time.Second)
 
 	router := gin.Default()
 	router.POST("/v1/generateSBOM", c.GenerateSBOM)
