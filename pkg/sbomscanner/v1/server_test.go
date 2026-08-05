@@ -19,6 +19,7 @@ import (
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft/source"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
@@ -364,4 +365,49 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 	assert.Equal(t, helpersv1.TooLarge, resp.Status)
 	assert.Equal(t, "image-too-large", resp.StatusReason)
 	assert.Empty(t, resp.ErrorMessage)
+}
+
+// TestIsRegistryRateLimited is a regression test for the sidecar path losing registry
+// rate-limit statuses: a 429 from the registry must be recognized so CreateSBOM can surface
+// StatusReason == domain.ReasonTooManyRequests over gRPC, letting the caller
+// (adapters/v1 SidecarSBOMAdapter.CreateSBOM) reconstruct a *transport.Error and allow
+// ScanService.checkCreateSBOM to record the backoff, the same way it already does for the
+// in-process syft adapter.
+func TestIsRegistryRateLimited(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "429 transport error",
+			err:  &transport.Error{StatusCode: http.StatusTooManyRequests},
+			want: true,
+		},
+		{
+			name: "429 transport error wrapped",
+			err:  fmt.Errorf("pulling image: %w", &transport.Error{StatusCode: http.StatusTooManyRequests}),
+			want: true,
+		},
+		{
+			name: "401 transport error is not rate limiting",
+			err:  &transport.Error{StatusCode: http.StatusUnauthorized},
+			want: false,
+		},
+		{
+			name: "plain error is not rate limiting",
+			err:  errors.New("received status code: 429"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRegistryRateLimited(tt.err))
+		})
+	}
 }

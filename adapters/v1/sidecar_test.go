@@ -3,9 +3,11 @@ package v1
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/kubevuln/core/domain"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -87,6 +89,33 @@ func TestSidecarSBOMAdapter_CreateSBOM_TooLarge(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, helpersv1.TooLarge, sbom.Status)
 	assert.Nil(t, sbom.Content)
+}
+
+// TestSidecarSBOMAdapter_CreateSBOM_TooManyRequests is a regression test: the sidecar
+// scanner reports a registry 429 as a plain StatusReason string over gRPC (see
+// pkg/sbomscanner/v1/server.go), which loses the original *transport.Error's StatusCode.
+// The adapter must reconstruct that error type so ScanService.checkCreateSBOM's
+// errors.As(...) check recognizes it and records the image as rate limited, exactly as it
+// already does for the in-process syft adapter's pull errors.
+func TestSidecarSBOMAdapter_CreateSBOM_TooManyRequests(t *testing.T) {
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			return &sbomscanner.ScanResult{
+				ErrorMessage: "received status code: 429",
+				StatusReason: domain.ReasonTooManyRequests,
+			}, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "rate-limited-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+	var transportErr *transport.Error
+	require.True(t, errors.As(err, &transportErr), "expected a *transport.Error to be recoverable via errors.As, got: %v", err)
+	assert.Equal(t, http.StatusTooManyRequests, transportErr.StatusCode)
 }
 
 func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry(t *testing.T) {
