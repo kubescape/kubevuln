@@ -141,6 +141,7 @@ func TestScanService_ScanCP(t *testing.T) {
 		storeErrorCVE   bool
 		storeErrorSBOM  bool
 		timeout         bool
+		toomanyrequests bool
 		workload        bool
 		wantCvep        bool
 		wantEmptyReport bool
@@ -157,6 +158,11 @@ func TestScanService_ScanCP(t *testing.T) {
 		{
 			name:            "create SBOM error",
 			createSBOMError: true,
+			workload:        true,
+		},
+		{
+			name:            "create SBOM too many requests",
+			toomanyrequests: true,
 			workload:        true,
 		},
 		{
@@ -224,7 +230,7 @@ func TestScanService_ScanCP(t *testing.T) {
 			if tt.emptyWlid {
 				wlid = ""
 			}
-			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, false)
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			cveAdapter := adapters.NewMockCVEAdapter()
 			storageCP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
@@ -240,6 +246,8 @@ func TestScanService_ScanCP(t *testing.T) {
 				},
 				Wlid: wlid,
 			}
+			imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+			imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
 			if tt.workload {
 				var err error
 				ctx, err = s.ValidateScanCP(ctx, workload)
@@ -274,8 +282,8 @@ func TestScanService_ScanCP(t *testing.T) {
 					Opens: []v1beta1.OpenCalls{
 						{Path: "/etc/kubernetes/kube-proxy.conf"},
 					},
-					ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
-					ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+					ImageID:  imageID,
+					ImageTag: imageTag,
 				},
 			}
 			err := storageCP.StoreContainerProfile(ctx, ap)
@@ -284,6 +292,13 @@ func TestScanService_ScanCP(t *testing.T) {
 			if err := s.ScanCP(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			if tt.toomanyrequests {
+				// the 429 marker must be recorded under the same normalized key every
+				// other flow uses (ImageHash via NormalizeImageID), not the raw
+				// container-profile ImageID, otherwise nothing will ever read it back
+				_, ok := s.tooManyRequests.Get(v1.NormalizeImageID(imageID, imageTag))
+				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized ImageHash")
+			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 				require.NoError(t, err)
@@ -291,6 +306,75 @@ func TestScanService_ScanCP(t *testing.T) {
 			}
 		})
 	}
+}
+
+// countingSBOMCreator wraps a ports.SBOMCreator and counts CreateSBOM invocations, so tests can
+// assert a pull was (or wasn't) attempted without depending on ScanCP's returned error.
+type countingSBOMCreator struct {
+	ports.SBOMCreator
+	calls int
+}
+
+func (c *countingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error) {
+	c.calls++
+	return c.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
+}
+
+// TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage verifies that once an image has been
+// recorded as rate limited (matching the key ScanCP itself writes under, see the
+// "create SBOM too many requests" case above), a later ScanCP call for that same image does not
+// attempt another pull. This is the read side of the bug: ValidateScanCP has no image identity to
+// check ahead of time, so the gate has to live at the point ScanCP actually knows which image it's
+// about to pull.
+func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	sbomAdapter := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageCP := repositories.NewMemoryStorage(false, false)
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(storageCP), true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err := s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	ap := v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "daemonset-kube-proxy",
+			Namespace: "kube-system",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
+				helpersv1.StatusMetadataKey:     helpersv1.Learning,
+				helpersv1.WlidMetadataKey:       wlid,
+			},
+			Labels: map[string]string{"foo": "bar"},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			ImageID:  imageID,
+			ImageTag: imageTag,
+		},
+	}
+	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
+
+	// simulate a prior pull of this exact image having already come back 429, recorded under
+	// the normalized key ScanCP writes to
+	s.tooManyRequests.Set(v1.NormalizeImageID(imageID, imageTag), true, ttl)
+
+	require.NoError(t, s.ScanCP(ctx))
+	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
 }
 
 func TestScanService_ScanCVE(t *testing.T) {

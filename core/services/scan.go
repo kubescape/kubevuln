@@ -219,9 +219,19 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// if SBOM is not available, create it
 			if sbom.Content == nil {
 				if s.sbomGeneration {
+					// a previous container in this loop (or a previous request) may have
+					// already recorded this exact image as rate limited; skip pulling it
+					// again instead of hammering the registry with another attempt
+					if _, ok := s.tooManyRequests.Get(subWorkload.ImageHash); ok {
+						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+							helpers.String("imageSlug", slug))
+						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+							classifySBOMError(domain.ErrTooManyRequests), domain.ErrTooManyRequests)
+						continue
+					}
 					// create SBOM
 					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, scan.ImageID)
+					s.checkCreateSBOM(err, subWorkload.ImageHash)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
