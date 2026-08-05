@@ -784,11 +784,13 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	addedFileIDs := mapset.NewSet[string]()
 	addedRelationshipIDs := mapset.NewSet[string]()
 
-	// filter relevant files with dynamic paths
-	var dynamicPaths []string
+	// filter relevant files with dynamic paths, indexed by segment count since
+	// CompareDynamic only ever matches paths with the same number of segments
+	dynamicPathsBySegmentCount := make(map[int][]string)
 	relevantFiles.Each(func(file string) bool {
 		if strings.Contains(file, dynamicpathdetector.DynamicIdentifier) {
-			dynamicPaths = append(dynamicPaths, file)
+			segmentCount := strings.Count(file, "/")
+			dynamicPathsBySegmentCount[segmentCount] = append(dynamicPathsBySegmentCount[segmentCount], file)
 		}
 		return false
 	})
@@ -803,8 +805,8 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 				continue
 			}
-			// then try dynamic match (expensive lookup)
-			for _, dynamicPath := range dynamicPaths {
+			// then try dynamic match (expensive lookup), limited to candidates with a matching segment count
+			for _, dynamicPath := range dynamicPathsBySegmentCount[strings.Count(f.Location.RealPath, "/")] {
 				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
 					addedFileIDs.Add(f.ID)
 					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
