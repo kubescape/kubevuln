@@ -21,6 +21,7 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
 					{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					},
 				},
 			},
@@ -33,6 +34,7 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
 					{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2022-12345"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					},
 				},
 			},
@@ -89,6 +91,7 @@ func TestConvertExpiredOnFix(t *testing.T) {
 						Vulnerabilities: []sev1beta1.VulnerabilityException{
 							{
 								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-0001"},
+								Status:        sev1beta1.VulnerabilityStatusNotAffected,
 								ExpiredOnFix:  tt.expiredOnFix,
 							},
 						},
@@ -119,7 +122,7 @@ func TestConvertSkipsExpired(t *testing.T) {
 			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &past,
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED"}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 				},
 			},
 		},
@@ -128,7 +131,7 @@ func TestConvertSkipsExpired(t *testing.T) {
 			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &future,
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-VALID"}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-VALID"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 				},
 			},
 		},
@@ -139,7 +142,7 @@ func TestConvertSkipsExpired(t *testing.T) {
 			Spec: sev1beta1.SecurityExceptionSpec{
 				ExpiresAt: &past,
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 				},
 			},
 		},
@@ -163,7 +166,7 @@ func TestConvertMatchResources(t *testing.T) {
 					},
 				},
 				Vulnerabilities: []sev1beta1.VulnerabilityException{
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"}},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 				},
 			},
 		},
@@ -241,24 +244,41 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 	assert.Len(t, doc.IgnoredMatches, 0, "nothing should be ignored when fix is available and expiredOnFix is set")
 }
 
-func TestConvertSkipsEmptyAndWhitespaceIDs(t *testing.T) {
-	exceptions := []sev1beta1.SecurityException{
-		{
-			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
-			Spec: sev1beta1.SecurityExceptionSpec{
-				Vulnerabilities: []sev1beta1.VulnerabilityException{
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: ""}},
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "   "}},
-					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "  CVE-2024-1234  "}},
-				},
-			},
-		},
+// TestConvertShouldSuppressAllowlist verifies the allowlist semantics of shouldSuppress:
+// only not_affected and fixed produce a suppression policy; everything else
+// (empty, under_investigation, unrecognised values, blank IDs) does not.
+func TestConvertShouldSuppressAllowlist(t *testing.T) {
+	tests := []struct {
+		name        string
+		id          string
+		status      sev1beta1.VulnerabilityStatus
+		wantPolicies int
+	}{
+		{name: "empty ID is skipped", id: "", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 0},
+		{name: "whitespace ID is skipped", id: "   ", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 0},
+		{name: "not_affected suppresses", id: "CVE-2024-0001", status: sev1beta1.VulnerabilityStatusNotAffected, wantPolicies: 1},
+		{name: "fixed suppresses", id: "CVE-2024-0002", status: sev1beta1.VulnerabilityStatusFixed, wantPolicies: 1},
+		{name: "under_investigation does not suppress", id: "CVE-2024-0003", status: sev1beta1.VulnerabilityStatusUnderInvestigation, wantPolicies: 0},
+		{name: "empty status does not suppress", id: "CVE-2024-0004", status: "", wantPolicies: 0},
+		{name: "unrecognised status does not suppress", id: "CVE-2024-0005", status: "typo", wantPolicies: 0},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
-
-	assert.Len(t, policies, 1)
-	assert.Equal(t, "CVE-2024-1234", policies[0].VulnerabilityPolicies[0].Name)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exceptions := []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{Vulnerability: sev1beta1.VulnerabilityRef{ID: tt.id}, Status: tt.status},
+						},
+					},
+				},
+			}
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			assert.Len(t, policies, tt.wantPolicies, "status=%q id=%q", tt.status, tt.id)
+		})
+	}
 }
 
 func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
@@ -300,4 +320,111 @@ func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
 	ApplySecurityExceptions(doc, nil)
 
 	assert.Len(t, doc.Matches, 1, "no filtering when no exceptions")
+}
+
+// TestConvertMixedStatusException verifies that within a single SecurityException,
+// an under_investigation entry stays visible while a not_affected entry is suppressed.
+// This is the critical regression case: it proves the per-entry filter is correct and
+// not accidentally dropping the whole exception object.
+func TestConvertMixedStatusException(t *testing.T) {
+	const underInvestigationID = "CVE-2023-11111"
+	const notAffectedID = "CVE-2023-22222"
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: underInvestigationID},
+						Status:        sev1beta1.VulnerabilityStatusUnderInvestigation,
+					},
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: notAffectedID},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	// Only not_affected produces a policy; under_investigation must not.
+	assert.Len(t, policies, 1)
+	assert.Equal(t, notAffectedID, policies[0].VulnerabilityPolicies[0].Name)
+
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: underInvestigationID}}},
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: notAffectedID}}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+
+	// under_investigation stays in Matches.
+	assert.Len(t, doc.Matches, 1)
+	assert.Equal(t, underInvestigationID, doc.Matches[0].Vulnerability.ID)
+
+	// not_affected moves to IgnoredMatches.
+	assert.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, notAffectedID, doc.IgnoredMatches[0].Vulnerability.ID)
+}
+
+// TestUnderInvestigationDoesNotSuppress is a table-driven regression test covering
+// both namespaced (SecurityException) and cluster-scoped (ClusterSecurityException)
+// paths, replacing the standalone under_investigation_regression_test.go file.
+func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
+	const vulnerabilityID = "CVE-2023-44487"
+
+	tests := []struct {
+		name             string
+		namespaced       bool
+	}{
+		{name: "namespaced SecurityException", namespaced: true},
+		{name: "cluster-scoped ClusterSecurityException", namespaced: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vulns := []sev1beta1.VulnerabilityException{
+				{
+					Vulnerability: sev1beta1.VulnerabilityRef{ID: vulnerabilityID},
+					Status:        sev1beta1.VulnerabilityStatusUnderInvestigation,
+				},
+			}
+
+			var policies []armotypes.VulnerabilityExceptionPolicy
+			if tt.namespaced {
+				exceptions := []sev1beta1.SecurityException{
+					{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+						Spec:       sev1beta1.SecurityExceptionSpec{Vulnerabilities: vulns},
+					},
+				}
+				policies = ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			} else {
+				clusterExceptions := []sev1beta1.ClusterSecurityException{
+					{
+						Spec: sev1beta1.SecurityExceptionSpec{Vulnerabilities: vulns},
+					},
+				}
+				policies = ConvertToVulnerabilityExceptionPolicies(nil, clusterExceptions, ExceptionTarget{})
+			}
+
+			assert.Empty(t, policies, "under_investigation must not produce a suppression policy")
+
+			doc := &v1beta1.GrypeDocument{
+				Matches: []v1beta1.Match{
+					{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: vulnerabilityID}}},
+				},
+			}
+
+			ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+
+			assert.Len(t, doc.Matches, 1, "under_investigation CVE must remain in Matches")
+			assert.Empty(t, doc.IgnoredMatches, "under_investigation CVE must not appear in IgnoredMatches")
+		})
+	}
 }
