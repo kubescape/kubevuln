@@ -3,12 +3,15 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -375,6 +378,59 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 
 	require.NoError(t, s.ScanCP(ctx))
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
+}
+
+// TestIsRegistryRateLimitedErr is a regression test: checkCreateSBOM's rate-limit detection
+// must not rely on errors.As(err, &transport.Error{}) alone, since a real pull error never
+// reaches it in that shape. stereoscope's registry provider formats the go-containerregistry
+// pull error with %+v, not %w, which severs the errors.As chain before CreateSBOM's error
+// ever gets here — so a text fallback is required (mirrors
+// pkg/sbomscanner/v1.isRegistryRateLimited, which has the identical problem on the sidecar
+// side of the same pull path). This also covers the sidecar adapter's own signal:
+// domain.ErrTooManyRequests, which adapters/v1 SidecarSBOMAdapter.CreateSBOM wraps instead of
+// trying to reconstruct a *transport.Error across the gRPC boundary.
+func TestIsRegistryRateLimitedErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "429 transport error",
+			err:  &transport.Error{StatusCode: http.StatusTooManyRequests},
+			want: true,
+		},
+		{
+			name: "401 transport error is not rate limiting",
+			err:  &transport.Error{StatusCode: http.StatusUnauthorized},
+			want: false,
+		},
+		{
+			name: "domain.ErrTooManyRequests sentinel wrapped (sidecar path)",
+			err:  fmt.Errorf("sidecar reported 429: %w", domain.ErrTooManyRequests),
+			want: true,
+		},
+		{
+			name: "wrapped via stereoscope's real %+v formatting (in-process syft path)",
+			err:  fmt.Errorf("failed to get image descriptor from registry: %+v", &transport.Error{StatusCode: http.StatusTooManyRequests}),
+			want: true,
+		},
+		{
+			name: "generic message mentioning 429 alone is not enough",
+			err:  errors.New("received status code: 429"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRegistryRateLimitedErr(tt.err))
+		})
+	}
 }
 
 func TestScanService_ScanCVE(t *testing.T) {

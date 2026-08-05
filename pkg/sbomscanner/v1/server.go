@@ -38,9 +38,25 @@ func isGCPRegistry(imageID string) bool {
 }
 
 // isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
+//
+// The typed check alone is not enough: stereoscope's registry provider formats the
+// go-containerregistry pull error with %+v, not %w (see
+// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
+// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
+// registry error code emitted when the response carries a JSON error body (e.g. Docker
+// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
+// Error() text when the response body was empty.
 func isRegistryRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
 	var transportErr *transport.Error
-	return errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests
+	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {

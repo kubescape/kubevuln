@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -122,12 +120,10 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 
 	if result.ErrorMessage != "" && result.Status != helpersv1.Learning && result.Status != helpersv1.TooLarge {
 		if result.StatusReason == domain.ReasonTooManyRequests {
-			// StatusReason crossed the gRPC boundary as a plain string, which lost the
-			// original *transport.Error's StatusCode; reconstruct it here so
-			// ScanService.checkCreateSBOM's errors.As(...) check still recognizes this
-			// as a 429 and records the backoff, exactly as it does for the in-process
-			// syft adapter's pull errors.
-			return domainSBOM, fmt.Errorf("%s: %w", result.ErrorMessage, &transport.Error{StatusCode: http.StatusTooManyRequests})
+			// StatusReason crossed the gRPC boundary as a plain string; wrap the
+			// domain.ErrTooManyRequests sentinel so ScanService.checkCreateSBOM can
+			// recognize this as a 429 (via errors.Is) and record the backoff.
+			return domainSBOM, fmt.Errorf("%s: %w", result.ErrorMessage, domain.ErrTooManyRequests)
 		}
 		return domainSBOM, fmt.Errorf("%s", result.ErrorMessage)
 	}
