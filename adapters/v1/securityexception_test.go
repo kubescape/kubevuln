@@ -9,6 +9,7 @@ import (
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -495,4 +496,88 @@ func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
 	assert.Len(t, doc.IgnoredMatches, 1)
 	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Vulnerability.ID)
+}
+
+func TestRestoreSuppressedMatches(t *testing.T) {
+	t.Run("restores every ignored match and clears IgnoredMatches", func(t *testing.T) {
+		doc := &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-KEEP"}}},
+			},
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{
+					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-A"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-A"}},
+				},
+				{
+					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-B"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-B"}},
+				},
+			},
+		}
+
+		restored := RestoreSuppressedMatches(doc)
+
+		// the input document is not mutated
+		assert.Len(t, doc.Matches, 1, "input document must not be mutated")
+		assert.Len(t, doc.IgnoredMatches, 2, "input document must not be mutated")
+
+		require.NotNil(t, restored)
+		assert.Len(t, restored.IgnoredMatches, 0, "all ignored matches are restored")
+		require.Len(t, restored.Matches, 3)
+		// existing matches are preserved first, restored matches appended after
+		assert.Equal(t, "CVE-KEEP", restored.Matches[0].Vulnerability.ID)
+		assert.Equal(t, "CVE-A", restored.Matches[1].Vulnerability.ID)
+		assert.Equal(t, "CVE-B", restored.Matches[2].Vulnerability.ID)
+	})
+
+	t.Run("nil document returns nil", func(t *testing.T) {
+		assert.Nil(t, RestoreSuppressedMatches(nil))
+	})
+
+	t.Run("no ignored matches returns a copy with Matches intact", func(t *testing.T) {
+		doc := &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-1"}}},
+			},
+		}
+
+		restored := RestoreSuppressedMatches(doc)
+
+		require.NotNil(t, restored)
+		assert.Len(t, restored.Matches, 1)
+		assert.Len(t, restored.IgnoredMatches, 0)
+	})
+}
+
+func TestIgnoredVulnIDs(t *testing.T) {
+	t.Run("collects non-empty ignored vulnerability IDs", func(t *testing.T) {
+		doc := &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-A"}}}},
+				{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: ""}}}},
+			},
+		}
+
+		assert.Equal(t, map[string]struct{}{"CVE-A": {}}, IgnoredVulnIDs(doc))
+	})
+
+	t.Run("nil document returns an empty set", func(t *testing.T) {
+		assert.Empty(t, IgnoredVulnIDs(nil))
+	})
+}
+
+func TestIgnoredVulnIDs_MultiPackageSameCVE(t *testing.T) {
+	// Pins the match-by-CVE invariant: a SecurityException policy matches on vulnerability
+	// name only, so it suppresses every match of that CVE or none. Multiple packages sharing
+	// a CVE therefore collapse into a single set entry, which is sufficient to detect
+	// exception-set changes on cache hits.
+	doc := &v1beta1.GrypeDocument{
+		IgnoredMatches: []v1beta1.IgnoredMatch{
+			{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}}},
+			{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}}},
+		},
+	}
+
+	assert.Equal(t, map[string]struct{}{"CVE-2021-44228": {}}, IgnoredVulnIDs(doc))
 }

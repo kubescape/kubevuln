@@ -155,6 +155,46 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	doc.Matches = remaining
 }
 
+// RestoreSuppressedMatches is the inverse of ApplySecurityExceptions: it returns a copy of doc
+// with every ignored match moved back into Matches and IgnoredMatches cleared, reconstructing the
+// original unfiltered manifest so a cached (filtered) manifest can be re-evaluated against the
+// current SecurityException set. The input document is not mutated, mirroring
+// ApplySecurityExceptions' copy semantics.
+//
+// Restoring every ignored match is safe: grype produces no ignored matches here (GrypeAdapter
+// sets neither VulnerabilityMatcher.IgnoreRules nor VexProcessor — grype vulnerability_matcher.go
+// applyIgnoreRules/findVEXMatches), so each stored ignored match is exception-applied. It is also
+// the fail-open direction for a security tool: if that assumption ever breaks, findings surface
+// rather than stay hidden. Reconstruction is lossless because IgnoredMatch embeds the full Match.
+func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument {
+	if doc == nil {
+		return nil
+	}
+	restored := doc.DeepCopy()
+	for _, im := range restored.IgnoredMatches {
+		restored.Matches = append(restored.Matches, im.Match)
+	}
+	restored.IgnoredMatches = nil
+	return restored
+}
+
+// IgnoredVulnIDs returns the set of vulnerability IDs in a manifest's ignored matches. Keyed by
+// ID because SecurityException policies match on vulnerability name only
+// (getCVEExceptionMatchCVENameFromList), so a policy suppresses every match of that CVE or none —
+// an ID set is sufficient to detect exception-set changes on cache hits.
+func IgnoredVulnIDs(doc *v1beta1.GrypeDocument) map[string]struct{} {
+	ids := map[string]struct{}{}
+	if doc == nil {
+		return ids
+	}
+	for _, im := range doc.IgnoredMatches {
+		if im.Match.Vulnerability.ID != "" {
+			ids[im.Match.Vulnerability.ID] = struct{}{}
+		}
+	}
+	return ids
+}
+
 func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []identifiers.PortalDesignator {
 	if len(resources) == 0 {
 		// No specific resource match — create a namespace-only designator
