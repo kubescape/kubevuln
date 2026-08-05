@@ -1568,9 +1568,9 @@ func (w *ctxCapturingVulnerabilityManifestSummaries) Get(ctx context.Context, na
 // everything else untouched.
 type ctxCapturingClient struct {
 	spdxv1beta1.SpdxV1beta1Interface
-	vulnManifests *ctxCapturingVulnerabilityManifests
-	sbomSyfts     *ctxCapturingSBOMSyfts
-	ovecs         *ctxCapturingOVECs
+	vulnManifests map[string]*ctxCapturingVulnerabilityManifests
+	sbomSyfts     map[string]*ctxCapturingSBOMSyfts
+	ovecs         map[string]*ctxCapturingOVECs
 	vulnSummaries map[string]*ctxCapturingVulnerabilityManifestSummaries
 }
 
@@ -1581,23 +1581,32 @@ type ctxCapturingClient struct {
 
 func (c *ctxCapturingClient) VulnerabilityManifests(namespace string) spdxv1beta1.VulnerabilityManifestInterface {
 	if c.vulnManifests == nil {
-		c.vulnManifests = &ctxCapturingVulnerabilityManifests{VulnerabilityManifestInterface: c.SpdxV1beta1Interface.VulnerabilityManifests(namespace)}
+		c.vulnManifests = map[string]*ctxCapturingVulnerabilityManifests{}
 	}
-	return c.vulnManifests
+	if _, ok := c.vulnManifests[namespace]; !ok {
+		c.vulnManifests[namespace] = &ctxCapturingVulnerabilityManifests{VulnerabilityManifestInterface: c.SpdxV1beta1Interface.VulnerabilityManifests(namespace)}
+	}
+	return c.vulnManifests[namespace]
 }
 
 func (c *ctxCapturingClient) SBOMSyfts(namespace string) spdxv1beta1.SBOMSyftInterface {
 	if c.sbomSyfts == nil {
-		c.sbomSyfts = &ctxCapturingSBOMSyfts{SBOMSyftInterface: c.SpdxV1beta1Interface.SBOMSyfts(namespace)}
+		c.sbomSyfts = map[string]*ctxCapturingSBOMSyfts{}
 	}
-	return c.sbomSyfts
+	if _, ok := c.sbomSyfts[namespace]; !ok {
+		c.sbomSyfts[namespace] = &ctxCapturingSBOMSyfts{SBOMSyftInterface: c.SpdxV1beta1Interface.SBOMSyfts(namespace)}
+	}
+	return c.sbomSyfts[namespace]
 }
 
 func (c *ctxCapturingClient) OpenVulnerabilityExchangeContainers(namespace string) spdxv1beta1.OpenVulnerabilityExchangeContainerInterface {
 	if c.ovecs == nil {
-		c.ovecs = &ctxCapturingOVECs{OpenVulnerabilityExchangeContainerInterface: c.SpdxV1beta1Interface.OpenVulnerabilityExchangeContainers(namespace)}
+		c.ovecs = map[string]*ctxCapturingOVECs{}
 	}
-	return c.ovecs
+	if _, ok := c.ovecs[namespace]; !ok {
+		c.ovecs[namespace] = &ctxCapturingOVECs{OpenVulnerabilityExchangeContainerInterface: c.SpdxV1beta1Interface.OpenVulnerabilityExchangeContainers(namespace)}
+	}
+	return c.ovecs[namespace]
 }
 
 func (c *ctxCapturingClient) VulnerabilityManifestSummaries(namespace string) spdxv1beta1.VulnerabilityManifestSummaryInterface {
@@ -1630,7 +1639,7 @@ func TestAPIServerStore_GetCVE_ctxPropagated(t *testing.T) {
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
 	_, _ = a.GetCVE(canaryCtx(), name, "", "", "")
-	requireCanaryCtx(t, wrapped.vulnManifests.getCtx)
+	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].getCtx)
 }
 
 func TestAPIServerStore_GetSBOM_ctxPropagated(t *testing.T) {
@@ -1638,7 +1647,7 @@ func TestAPIServerStore_GetSBOM_ctxPropagated(t *testing.T) {
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
 	_, _ = a.GetSBOM(canaryCtx(), name, "")
-	requireCanaryCtx(t, wrapped.sbomSyfts.getCtx)
+	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].getCtx)
 }
 
 func TestAPIServerStore_GetCVESummary_ctxPropagated(t *testing.T) {
@@ -1681,7 +1690,7 @@ func TestAPIServerStore_StoreCVE_ctxPropagated(t *testing.T) {
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
 	require.NoError(t, a.StoreCVE(canaryCtx(), domain.CVEManifest{Name: name}, false))
-	requireCanaryCtx(t, wrapped.vulnManifests.createCtx)
+	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].createCtx)
 }
 
 func TestAPIServerStore_StoreSBOM_ctxPropagated(t *testing.T) {
@@ -1689,7 +1698,7 @@ func TestAPIServerStore_StoreSBOM_ctxPropagated(t *testing.T) {
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
 	require.NoError(t, a.StoreSBOM(canaryCtx(), domain.SBOM{Name: name}, false))
-	requireCanaryCtx(t, wrapped.sbomSyfts.createCtx)
+	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].createCtx)
 }
 
 func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
@@ -1698,6 +1707,33 @@ func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
 	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
 	require.NoError(t, a.StoreVEX(canaryCtx(), cve, cve, false))
-	requireCanaryCtx(t, wrapped.ovecs.getCtx)
-	requireCanaryCtx(t, wrapped.ovecs.createCtx)
+	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
+	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].createCtx)
+}
+
+func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+
+	// VulnerabilityManifests: different namespaces must return different wrappers,
+	// repeated access to one namespace must return the same wrapper.
+	vm1 := wrapped.VulnerabilityManifests("ns-a")
+	vm2 := wrapped.VulnerabilityManifests("ns-b")
+	vm1Again := wrapped.VulnerabilityManifests("ns-a")
+	require.NotSame(t, vm1, vm2, "different namespaces must return different wrappers")
+	require.Same(t, vm1, vm1Again, "same namespace must return the memoized wrapper")
+
+	// SBOMSyfts
+	ss1 := wrapped.SBOMSyfts("ns-a")
+	ss2 := wrapped.SBOMSyfts("ns-b")
+	ss1Again := wrapped.SBOMSyfts("ns-a")
+	require.NotSame(t, ss1, ss2)
+	require.Same(t, ss1, ss1Again)
+
+	// OpenVulnerabilityExchangeContainers
+	ov1 := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	ov2 := wrapped.OpenVulnerabilityExchangeContainers("ns-b")
+	ov1Again := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	require.NotSame(t, ov1, ov2)
+	require.Same(t, ov1, ov1Again)
 }
