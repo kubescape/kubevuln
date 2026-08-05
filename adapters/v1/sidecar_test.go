@@ -89,6 +89,31 @@ func TestSidecarSBOMAdapter_CreateSBOM_TooLarge(t *testing.T) {
 	assert.Nil(t, sbom.Content)
 }
 
+// TestSidecarSBOMAdapter_CreateSBOM_TooManyRequests is a regression test: the sidecar
+// scanner reports a registry 429 as a plain StatusReason string over gRPC (see
+// pkg/sbomscanner/v1/server.go). The adapter must wrap the domain.ErrTooManyRequests
+// sentinel around that so ScanService.checkCreateSBOM's errors.Is(...) check recognizes it
+// and records the image as rate limited, exactly as it already does for the in-process
+// syft adapter's pull errors.
+func TestSidecarSBOMAdapter_CreateSBOM_TooManyRequests(t *testing.T) {
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			return &sbomscanner.ScanResult{
+				ErrorMessage: "received status code: 429",
+				StatusReason: domain.ReasonTooManyRequests,
+			}, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "rate-limited-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, domain.ErrTooManyRequests), "expected domain.ErrTooManyRequests to be recoverable via errors.Is, got: %v", err)
+}
+
 func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry(t *testing.T) {
 	callCount := 0
 	mock := &mockScannerClient{

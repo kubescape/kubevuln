@@ -119,6 +119,12 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	}
 
 	if result.ErrorMessage != "" && result.Status != helpersv1.Learning && result.Status != helpersv1.TooLarge {
+		if result.StatusReason == domain.ReasonTooManyRequests {
+			// StatusReason crossed the gRPC boundary as a plain string; wrap the
+			// domain.ErrTooManyRequests sentinel so ScanService.checkCreateSBOM can
+			// recognize this as a 429 (via errors.Is) and record the backoff.
+			return domainSBOM, fmt.Errorf("%s: %w", result.ErrorMessage, domain.ErrTooManyRequests)
+		}
 		return domainSBOM, fmt.Errorf("%s", result.ErrorMessage)
 	}
 

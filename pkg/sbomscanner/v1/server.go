@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -33,6 +35,28 @@ import (
 func isGCPRegistry(imageID string) bool {
 	host, _, _ := strings.Cut(imageID, "/")
 	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
+}
+
+// isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
+//
+// The typed check alone is not enough: stereoscope's registry provider formats the
+// go-containerregistry pull error with %+v, not %w (see
+// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
+// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
+// registry error code emitted when the response carries a JSON error body (e.g. Docker
+// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
+// Error() text when the response body was empty.
+func isRegistryRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	var transportErr *transport.Error
+	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
@@ -182,6 +206,15 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
+		}, nil
+	case err != nil && isRegistryRateLimited(err):
+		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
+		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
+		// ScanService.checkCreateSBOM's errors.As(...) check working the same way it does
+		// for the in-process syft adapter.
+		return &pb.CreateSBOMResponse{
+			ErrorMessage: err.Error(),
+			StatusReason: domain.ReasonTooManyRequests,
 		}, nil
 	case err != nil:
 		return &pb.CreateSBOMResponse{
