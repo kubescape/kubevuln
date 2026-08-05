@@ -825,17 +825,14 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 		ImageTag:      "imageTag",
 		ImageHash:     "imageHash",
 	})
-
 	require.NoError(t, a.ReportError(ctx, fmt.Errorf("boom")))
 	assert.Equal(t, 1, stub.Calls(), "ReportError should use the shared httpClient")
 
 	require.NoError(t, a.SendStatus(ctx, 0))
 	assert.Equal(t, 2, stub.Calls(), "SendStatus should use the shared httpClient")
 
-	errChan := make(chan error, 1)
-	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan))
+	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid"))
 	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
-	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
 
 	require.NoError(t, a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, nil))
 	assert.Equal(t, 4, stub.Calls(), "ReportScanFailure should use the shared httpClient")
@@ -915,11 +912,10 @@ func TestBackendAdapter_PostResultsAbortsPromptlyOnCtxCancellation(t *testing.T)
 		httpPostFunc:         httpPostWithContext,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	errChan := make(chan error, 1)
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid")
 	}()
 
 	// give postResults time to reach the (blocking) HTTP call before cancelling

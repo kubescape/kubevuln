@@ -70,7 +70,7 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
 		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount == 0
 	}
-	if err := a.postResults(ctx, *report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan); err != nil {
+	if err := a.postResults(ctx, *report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID); err != nil {
 		return 0, fmt.Errorf("failed to send summary report: %w", err)
 	}
 	nextPartNum = 1
@@ -93,9 +93,12 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 	wg.Add(1)
 	go func(report v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
-		// failure is reported to the caller via errorChan, not the return value, for chunks
-		// sent from a goroutine
-		_ = a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
+		// postResults returns errors to the caller. Since this function runs in a
+		// goroutine and nothing is synchronously waiting on the return value, it
+		// forwards any returned error to errorChan.
+		if err := a.postResults(ctx, report, eventReceiverURL, imagetag, wlid); err != nil {
+			sendError(ctx, errorChan, err)
+		}
 	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
@@ -106,16 +109,15 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	}
 }
 
-// postResults posts a single report and returns the failure, if any, so a synchronous caller
-// (sendSummaryAndVulnerabilities, for the summary report) can react to it. Goroutine-wrapped
-// callers (postResultsAsGoroutine, for chunk reports) additionally get the same failure via
-// errorChan, since nothing is synchronously waiting on their return value.
-func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) error {
+// postResults posts a single report and returns any error to the caller.
+// Synchronous callers handle the returned error directly, while
+// postResultsAsGoroutine forwards returned errors to errorChan because
+// nothing is synchronously waiting on the goroutine's return value.
+func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string) error {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		sendError(ctx, errorChan, err)
 		return err
 	}
 
@@ -123,7 +125,6 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		sendError(ctx, errorChan, err)
 		return err
 	}
 
@@ -132,7 +133,6 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),
 			helpers.String("wlid", wlid))
-		sendError(ctx, errorChan, err)
 		return err
 	}
 	defer resp.Body.Close()
@@ -143,7 +143,7 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 		} else {
 			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
 		}
-		sendError(ctx, errorChan, err)
+		// return the error to the caller
 		return err
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
