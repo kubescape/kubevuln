@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -511,4 +512,64 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+}
+
+func TestHTTPController_MetricsEndpoint(t *testing.T) {
+	c := NewHTTPController(services.NewMockScanService(true), 1)
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	c.Shutdown()
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, "kubevuln_scan_requests_total"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_worker_pool_queue_depth"), body)
+}
+
+func TestHTTPController_MetricsEndpoint_RecordsRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrTooManyRequests},
+		workerPool:  workerpool.New(1),
+	}
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, strings.Contains(w.Body.String(), "kubevuln_scan_rejections_total"), w.Body.String())
 }

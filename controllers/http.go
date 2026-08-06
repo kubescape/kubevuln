@@ -16,7 +16,10 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"schneider.vip/problem"
 )
 
@@ -25,6 +28,7 @@ import (
 type HTTPController struct {
 	scanService ports.ScanService
 	workerPool  *workerpool.WorkerPool
+	metrics     *metrics.Metrics
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -33,6 +37,47 @@ func NewHTTPController(scanService ports.ScanService, concurrency int) *HTTPCont
 		scanService: scanService,
 		workerPool:  workerpool.New(concurrency),
 	}
+}
+
+// WithMetrics attaches an OTel-backed metrics recorder to the controller, enabling
+// per-endpoint scan counters/durations, rejection counts, and a worker-pool queue
+// depth gauge. It is a no-op to call the handlers without this having been set.
+func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error) {
+	h.metrics = m
+
+	_, err := m.Meter().Int64ObservableGauge(
+		"kubevuln_worker_pool_queue_depth",
+		metric.WithDescription("Number of scan jobs currently waiting in the HTTP controller's worker pool"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			o.Observe(int64(h.workerPool.WaitingQueueSize()))
+			return nil
+		}),
+	)
+	if err != nil {
+		return h, err
+	}
+	return h, nil
+}
+
+// recordScan records the outcome and duration of a background scan job for the given endpoint.
+func (h HTTPController) recordScan(endpoint string, start time.Time, success bool) {
+	if h.metrics == nil {
+		return
+	}
+	attrs := metric.WithAttributes(
+		attribute.String("endpoint", endpoint),
+		attribute.Bool("success", success),
+	)
+	h.metrics.ScanCounter.Add(context.Background(), 1, attrs)
+	h.metrics.ScanDuration.Record(context.Background(), time.Since(start).Seconds(), attrs)
+}
+
+// recordRejection records a validation-time rejection for the given endpoint.
+func (h HTTPController) recordRejection(endpoint string) {
+	if h.metrics == nil {
+		return
+	}
+	h.metrics.RejectCounter.Add(context.Background(), 1, metric.WithAttributes(attribute.String("endpoint", endpoint)))
 }
 
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
@@ -57,6 +102,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
+		h.recordRejection("generateSBOM")
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -64,8 +110,10 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
+	start := time.Now()
 	h.workerPool.Submit(func() {
 		err = h.scanService.GenerateSBOM(bgCtx)
+		h.recordScan("generateSBOM", start, err == nil)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
@@ -114,6 +162,7 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 			helpers.String("wlid", newScan.Wlid),
 			helpers.String("name", name),
 			helpers.String("namespace", namespace))
+		h.recordRejection("scanCP")
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -121,8 +170,10 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
+	start := time.Now()
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCP(bgCtx)
+		h.recordScan("scanCP", start, err == nil)
 		if err != nil {
 			if errors.Is(err, domain.ErrPartialContainerProfile) {
 				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
@@ -161,6 +212,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
+		h.recordRejection("scanCVE")
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -168,8 +220,10 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
+	start := time.Now()
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanCVE(bgCtx)
+		h.recordScan("scanCVE", start, err == nil)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
@@ -241,6 +295,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
+		h.recordRejection("scanRegistry")
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -248,8 +303,10 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
+	start := time.Now()
 	h.workerPool.Submit(func() {
 		err = h.scanService.ScanRegistry(bgCtx)
+		h.recordScan("scanRegistry", start, err == nil)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
