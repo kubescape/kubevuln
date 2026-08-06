@@ -1436,10 +1436,7 @@ type recordingPlatform struct {
 var _ ports.Platform = (*recordingPlatform)(nil)
 
 func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, error) {
-	if p.getExceptionsErr != nil {
-		return nil, p.getExceptionsErr
-	}
-	return p.exceptions, nil
+	return p.exceptions, p.getExceptionsErr
 }
 
 func (p *recordingPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
@@ -1622,6 +1619,124 @@ func TestScanService_ScanCVE_CacheHit_ExceptionFetchFailureDoesNotWipe(t *testin
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
 
+// TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch is the reproduction matthyx
+// provided during review: an ExpiredOnFix policy suppresses only the matches of a CVE whose
+// Fix.State != "fixed". When one CVE hits two packages with different fix states, the ignored-ID
+// set stays identical while the ignored-match set changes, so change detection must be keyed by
+// match identity, not CVE ID.
+func TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch(t *testing.T) {
+	fixedMatch := matchForTest("CVE-X")
+	fixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgA", Version: "1.0.0"}
+	fixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "fixed", Versions: []string{"1.0.1"}}
+
+	unfixedMatch := matchForTest("CVE-X")
+	unfixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgB", Version: "2.0.0"}
+	unfixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "not-fixed"}
+
+	expiredOnFix := true
+	platform := &recordingPlatform{exceptions: domain.CVEExceptions{{
+		PolicyType:            "vulnerabilityExceptionPolicy",
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-X"}},
+		ExpiredOnFix:          &expiredOnFix,
+	}}}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	// cached: both matches suppressed by the earlier, wider policy (no ExpiredOnFix)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		IgnoredMatches: []v1beta1.IgnoredMatch{
+			{Match: fixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+		},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.Matches, 1, "pkgA (fixed) must be restored into Matches")
+	assert.Equal(t, "pkgA", stored.Content.Matches[0].Artifact.Name)
+	require.Len(t, stored.Content.IgnoredMatches, 1)
+	assert.Equal(t, "pkgB", stored.Content.IgnoredMatches[0].Match.Artifact.Name)
+}
+
+// TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression is the mirror case:
+// widening the exception (dropping ExpiredOnFix) must suppress the previously-visible fixed match.
+func TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression(t *testing.T) {
+	fixedMatch := matchForTest("CVE-X")
+	fixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgA", Version: "1.0.0"}
+	fixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "fixed", Versions: []string{"1.0.1"}}
+
+	unfixedMatch := matchForTest("CVE-X")
+	unfixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgB", Version: "2.0.0"}
+	unfixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "not-fixed"}
+
+	// new, wider policy: no ExpiredOnFix → both pkgA and pkgB suppressed
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-X")}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	// cached: only pkgB was suppressed under the earlier ExpiredOnFix policy
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{fixedMatch},
+		IgnoredMatches: []v1beta1.IgnoredMatch{
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+		},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	assert.Empty(t, stored.Content.Matches, "widening the exception must suppress pkgA too")
+	require.Len(t, stored.Content.IgnoredMatches, 2)
+}
+
+// TestScanService_ScanCVE_CacheHit_DegradedFetchDoesNotPersistRemoval verifies Blocker 1: a
+// transient SecurityException CRD list failure (ErrExceptionsDegraded, partial set) must not be
+// mistaken for an exception deletion and wipe suppression from the stored manifest.
+func TestScanService_ScanCVE_CacheHit_DegradedFetchDoesNotPersistRemoval(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       domain.CVEExceptions{}, // partial set: CVE-A exception missing (CRD list failed)
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "a degraded fetch must not persist an apparent removal")
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+// TestScanService_ScanCVE_CacheHit_DegradedFetchPersistsAddition verifies that a purely additive
+// change is persisted even when the exception set is incomplete.
+func TestScanService_ScanCVE_CacheHit_DegradedFetchPersistsAddition(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"), // partial set still includes CVE-A
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "a purely additive change must be persisted even when degraded")
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
 // TestScanService_ScanCVE_CacheMiss_UnfilteredToBackend guards the primary path: a fresh scan
 // stores the exception-filtered manifest but submits the unfiltered original to the backend.
 func TestScanService_ScanCVE_CacheMiss_UnfilteredToBackend(t *testing.T) {
@@ -1640,9 +1755,11 @@ func TestScanService_ScanCVE_CacheMiss_UnfilteredToBackend(t *testing.T) {
 }
 
 // TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch is the ScanCP mirror of
-// the ScanCVE regression test. The manifest handed to StoreVEX is the same object passed to
-// SubmitCVE (scan.go), so the unfiltered submission assertion covers the VEX consequence
-// transitively (createVEX builds statements from cve.Content.Matches).
+// the ScanCVE regression test, run with vexGeneration enabled so the StoreVEX path is exercised.
+// The manifest handed to StoreVEX is the same object passed to SubmitCVE (scan.go), so the
+// unfiltered submission assertion covers the VEX consequence transitively; that VEX statements
+// are built from cve.Content.Matches (i.e. the restored manifest) is asserted directly by
+// TestAPIServerStore_storeVEX (repositories/apiserver_test.go).
 func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *testing.T) {
 	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
 	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
@@ -1657,7 +1774,7 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 	storageCP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, v1.NewContainerProfileAdapter(storageCP), true, false, true, false, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, v1.NewContainerProfileAdapter(storageCP), true, true, true, false, false)
 	ctx := context.TODO()
 	s.Ready(ctx)
 

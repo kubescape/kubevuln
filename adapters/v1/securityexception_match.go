@@ -188,7 +188,7 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 	// Labels are resolved only when a selector actually needs them. A failed
 	// resolution leaves the corresponding *Resolved flag false so the selector
 	// fails closed in matchExceptionTarget.
-	if usesObjectSelector(exceptions, clusterExceptions) && namespace != "" && kind != "" && name != "" {
+	if UsesObjectSelector(exceptions, clusterExceptions) && namespace != "" && kind != "" && name != "" {
 		if lbls, err := repo.GetWorkloadLabels(ctx, namespace, kind, name); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to resolve workload labels for SecurityException objectSelector; exception will not apply to this workload",
 				helpers.Error(err), helpers.String("namespace", namespace), helpers.String("kind", kind), helpers.String("name", name))
@@ -198,7 +198,7 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 		}
 	}
 
-	if usesNamespaceSelector(clusterExceptions) && namespace != "" {
+	if UsesNamespaceSelector(clusterExceptions) && namespace != "" {
 		if lbls, err := repo.GetNamespaceLabels(ctx, namespace); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to resolve namespace labels for ClusterSecurityException namespaceSelector; exception will not apply to this namespace",
 				helpers.Error(err), helpers.String("namespace", namespace))
@@ -211,7 +211,10 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 	return target
 }
 
-func usesObjectSelector(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException) bool {
+// UsesObjectSelector reports whether any of the given exceptions targets workloads by
+// objectSelector. Such exceptions fail closed when the workload's labels cannot be
+// resolved, making the merged exception set incomplete.
+func UsesObjectSelector(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException) bool {
 	for i := range exceptions {
 		if exceptions[i].Spec.Match.ObjectSelector != nil {
 			return true
@@ -225,7 +228,10 @@ func usesObjectSelector(exceptions []sev1beta1.SecurityException, clusterExcepti
 	return false
 }
 
-func usesNamespaceSelector(clusterExceptions []sev1beta1.ClusterSecurityException) bool {
+// UsesNamespaceSelector reports whether any of the given cluster exceptions targets
+// namespaces by namespaceSelector. Such exceptions fail closed when the namespace's
+// labels cannot be resolved, making the merged exception set incomplete.
+func UsesNamespaceSelector(clusterExceptions []sev1beta1.ClusterSecurityException) bool {
 	for i := range clusterExceptions {
 		if clusterExceptions[i].Spec.Match.NamespaceSelector != nil {
 			return true

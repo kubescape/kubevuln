@@ -499,7 +499,7 @@ func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
 }
 
 func TestRestoreSuppressedMatches(t *testing.T) {
-	t.Run("restores every ignored match and clears IgnoredMatches", func(t *testing.T) {
+	t.Run("restores exception-applied ignored matches and clears IgnoredMatches", func(t *testing.T) {
 		doc := &v1beta1.GrypeDocument{
 			Matches: []v1beta1.Match{
 				{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-KEEP"}}},
@@ -523,7 +523,7 @@ func TestRestoreSuppressedMatches(t *testing.T) {
 		assert.Len(t, doc.IgnoredMatches, 2, "input document must not be mutated")
 
 		require.NotNil(t, restored)
-		assert.Len(t, restored.IgnoredMatches, 0, "all ignored matches are restored")
+		assert.Len(t, restored.IgnoredMatches, 0, "all exception-applied ignored matches are restored")
 		require.Len(t, restored.Matches, 3)
 		// existing matches are preserved first, restored matches appended after
 		assert.Equal(t, "CVE-KEEP", restored.Matches[0].Vulnerability.ID)
@@ -535,7 +535,7 @@ func TestRestoreSuppressedMatches(t *testing.T) {
 		assert.Nil(t, RestoreSuppressedMatches(nil))
 	})
 
-	t.Run("no ignored matches returns a copy with Matches intact", func(t *testing.T) {
+	t.Run("no ignored matches returns the input document unchanged (no copy)", func(t *testing.T) {
 		doc := &v1beta1.GrypeDocument{
 			Matches: []v1beta1.Match{
 				{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-1"}}},
@@ -545,13 +545,38 @@ func TestRestoreSuppressedMatches(t *testing.T) {
 		restored := RestoreSuppressedMatches(doc)
 
 		require.NotNil(t, restored)
+		assert.Same(t, doc, restored, "no ignored matches must not trigger a deep copy")
 		assert.Len(t, restored.Matches, 1)
 		assert.Len(t, restored.IgnoredMatches, 0)
 	})
+
+	t.Run("preserves non-exception-applied ignored matches", func(t *testing.T) {
+		doc := &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{
+					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-A"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-A"}},
+				},
+				{
+					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-NATIVE"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-NATIVE", FixState: "not-fixed"}},
+				},
+			},
+		}
+
+		restored := RestoreSuppressedMatches(doc)
+
+		require.NotNil(t, restored)
+		// only the exception-shaped entry is restored; the other is preserved
+		assert.Len(t, restored.Matches, 1)
+		assert.Equal(t, "CVE-A", restored.Matches[0].Vulnerability.ID)
+		require.Len(t, restored.IgnoredMatches, 1)
+		assert.Equal(t, "CVE-NATIVE", restored.IgnoredMatches[0].Match.Vulnerability.ID)
+	})
 }
 
-func TestIgnoredVulnIDs(t *testing.T) {
-	t.Run("collects non-empty ignored vulnerability IDs", func(t *testing.T) {
+func TestIgnoredMatchKeys(t *testing.T) {
+	t.Run("collects match-identity keys for non-empty ignored IDs", func(t *testing.T) {
 		doc := &v1beta1.GrypeDocument{
 			IgnoredMatches: []v1beta1.IgnoredMatch{
 				{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-A"}}}},
@@ -559,25 +584,37 @@ func TestIgnoredVulnIDs(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, map[string]struct{}{"CVE-A": {}}, IgnoredVulnIDs(doc))
+		assert.Equal(t, map[string]struct{}{"CVE-A\x00\x00": {}}, IgnoredMatchKeys(doc))
 	})
 
 	t.Run("nil document returns an empty set", func(t *testing.T) {
-		assert.Empty(t, IgnoredVulnIDs(nil))
+		assert.Empty(t, IgnoredMatchKeys(nil))
 	})
 }
 
-func TestIgnoredVulnIDs_MultiPackageSameCVE(t *testing.T) {
-	// Pins the match-by-CVE invariant: a SecurityException policy matches on vulnerability
-	// name only, so it suppresses every match of that CVE or none. Multiple packages sharing
-	// a CVE therefore collapse into a single set entry, which is sufficient to detect
-	// exception-set changes on cache hits.
+func TestIgnoredMatchKeys_DistinctKeysPerPackage(t *testing.T) {
+	// Keys include artifact name and version so that ExpiredOnFix transitions, which can
+	// suppress only some matches of a CVE, are detected (see IgnoredMatchKeys doc).
 	doc := &v1beta1.GrypeDocument{
 		IgnoredMatches: []v1beta1.IgnoredMatch{
-			{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}}},
-			{Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}}},
+			{Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-api", Version: "2.17.0"},
+			}},
+			{Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-core", Version: "2.17.0"},
+			}},
+			{Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-api", Version: "2.15.0"},
+			}},
 		},
 	}
 
-	assert.Equal(t, map[string]struct{}{"CVE-2021-44228": {}}, IgnoredVulnIDs(doc))
+	assert.Equal(t, map[string]struct{}{
+		"CVE-2021-44228\x00log4j-api\x002.17.0":  {},
+		"CVE-2021-44228\x00log4j-core\x002.17.0": {},
+		"CVE-2021-44228\x00log4j-api\x002.15.0":  {},
+	}, IgnoredMatchKeys(doc))
 }

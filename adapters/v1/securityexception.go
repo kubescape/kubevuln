@@ -156,43 +156,67 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 }
 
 // RestoreSuppressedMatches is the inverse of ApplySecurityExceptions: it returns a copy of doc
-// with every ignored match moved back into Matches and IgnoredMatches cleared, reconstructing the
-// original unfiltered manifest so a cached (filtered) manifest can be re-evaluated against the
-// current SecurityException set. The input document is not mutated, mirroring
-// ApplySecurityExceptions' copy semantics.
+// with exception-applied ignored matches moved back into Matches, reconstructing the original
+// unfiltered manifest so a cached (filtered) manifest can be re-evaluated against the current
+// SecurityException set. The input document is not mutated, mirroring ApplySecurityExceptions'
+// copy semantics. When there is nothing to restore, the input document is returned unchanged —
+// the only caller hands the result to applyExceptionsToManifest, which copies before mutating,
+// so the shared stored object is never modified.
 //
-// Restoring every ignored match is safe: grype produces no ignored matches here (GrypeAdapter
-// sets neither VulnerabilityMatcher.IgnoreRules nor VexProcessor — grype vulnerability_matcher.go
-// applyIgnoreRules/findVEXMatches), so each stored ignored match is exception-applied. It is also
-// the fail-open direction for a security tool: if that assumption ever breaks, findings surface
-// rather than stay hidden. Reconstruction is lossless because IgnoredMatch embeds the full Match.
+// Only ignored matches carrying the signature ApplySecurityExceptions writes (a single ignore
+// rule with only the vulnerability ID set) are restored. Any other entry (e.g. one that would be
+// produced if GrypeAdapter ever wired up IgnoreRules/VexProcessor) is preserved, so the helper is
+// self-guarding instead of relying on an assumption. Reconstruction is lossless because
+// IgnoredMatch embeds the full Match.
 func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument {
 	if doc == nil {
 		return nil
 	}
-	restored := doc.DeepCopy()
-	for _, im := range restored.IgnoredMatches {
-		restored.Matches = append(restored.Matches, im.Match)
+	if len(doc.IgnoredMatches) == 0 {
+		return doc
 	}
-	restored.IgnoredMatches = nil
+	restored := doc.DeepCopy()
+	var kept []v1beta1.IgnoredMatch
+	for _, im := range restored.IgnoredMatches {
+		if isExceptionSourcedIgnore(im) {
+			restored.Matches = append(restored.Matches, im.Match)
+		} else {
+			kept = append(kept, im)
+		}
+	}
+	restored.IgnoredMatches = kept
 	return restored
 }
 
-// IgnoredVulnIDs returns the set of vulnerability IDs in a manifest's ignored matches. Keyed by
-// ID because SecurityException policies match on vulnerability name only
-// (getCVEExceptionMatchCVENameFromList), so a policy suppresses every match of that CVE or none —
-// an ID set is sufficient to detect exception-set changes on cache hits.
-func IgnoredVulnIDs(doc *v1beta1.GrypeDocument) map[string]struct{} {
-	ids := map[string]struct{}{}
+// isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
+// signature ApplySecurityExceptions writes: exactly one rule whose only field is the
+// vulnerability ID.
+func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
+	if len(im.AppliedIgnoreRules) != 1 {
+		return false
+	}
+	r := im.AppliedIgnoreRules[0]
+	return r.FixState == "" && r.Package == nil
+}
+
+// IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
+// Keyed by vulnerability ID + artifact name + version (via \x00 separators) rather than CVE ID
+// alone, because an ExpiredOnFix policy suppresses only the matches of a CVE whose
+// Fix.State != "fixed" (getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
+// have different suppression states. The manifest content is fixed across a cache hit, so these
+// keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
+func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
+	keys := map[string]struct{}{}
 	if doc == nil {
-		return ids
+		return keys
 	}
 	for _, im := range doc.IgnoredMatches {
-		if im.Match.Vulnerability.ID != "" {
-			ids[im.Match.Vulnerability.ID] = struct{}{}
+		m := im.Match
+		if m.Vulnerability.ID != "" {
+			keys[m.Vulnerability.ID+"\x00"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
 		}
 	}
-	return ids
+	return keys
 }
 
 func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []identifiers.PortalDesignator {

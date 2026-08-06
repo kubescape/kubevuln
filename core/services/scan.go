@@ -333,23 +333,39 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		} else {
 			// A cached manifest was filtered against the exception set at store time.
 			// Reconstruct the unfiltered manifest so the CURRENT exception set is
-			// re-evaluated (deleted exceptions un-suppress findings) and
-			// SubmitCVE/StoreVEX receive the same unfiltered data a cache miss would
-			// produce.
-			prevIgnored := v1.IgnoredVulnIDs(cve.Content)
+			// re-evaluated (deleted exceptions and ExpiredOnFix transitions
+			// un-suppress findings) and SubmitCVE/StoreVEX receive the same
+			// unfiltered data a cache miss would produce.
+			prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 			cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-			filteredCve, exceptionsFetched := s.applyExceptionsToManifest(ctx, cve)
+			filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
-			if s.storage && exceptionsFetched && !maps.Equal(prevIgnored, v1.IgnoredVulnIDs(filteredCve.Content)) {
-				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-				}
-				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", slug))
+			if s.storage {
+				curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+				if !maps.Equal(prevIgnored, curIgnored) {
+					// Persist additions freely, but never persist removals when the
+					// exception set is incomplete: a transient SecurityException CRD
+					// list failure must not look like a deletion and wipe suppression
+					// from the stored manifest.
+					hasRemovals := false
+					for k := range prevIgnored {
+						if _, ok := curIgnored[k]; !ok {
+							hasRemovals = true
+							break
+						}
+					}
+					if exceptionsComplete || !hasRemovals {
+						err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+						if err != nil {
+							logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+								helpers.String("imageSlug", slug))
+						}
+						err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+						if err != nil {
+							logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+								helpers.String("imageSlug", slug))
+						}
+					}
 				}
 			}
 		}
@@ -547,22 +563,39 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	} else {
 		// A cached manifest was filtered against the exception set at store time.
 		// Reconstruct the unfiltered manifest so the CURRENT exception set is
-		// re-evaluated (deleted exceptions un-suppress findings) and SubmitCVE
-		// receives the same unfiltered data a cache miss would produce.
-		prevIgnored := v1.IgnoredVulnIDs(cve.Content)
+		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
+		// un-suppress findings) and SubmitCVE receives the same unfiltered data a
+		// cache miss would produce.
+		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-		filteredCve, exceptionsFetched := s.applyExceptionsToManifest(ctx, cve)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
-		if s.storage && exceptionsFetched && !maps.Equal(prevIgnored, v1.IgnoredVulnIDs(filteredCve.Content)) {
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
+		if s.storage {
+			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+			if !maps.Equal(prevIgnored, curIgnored) {
+				// Persist additions freely, but never persist removals when the
+				// exception set is incomplete: a transient SecurityException CRD
+				// list failure must not look like a deletion and wipe suppression
+				// from the stored manifest.
+				hasRemovals := false
+				for k := range prevIgnored {
+					if _, ok := curIgnored[k]; !ok {
+						hasRemovals = true
+						break
+					}
+				}
+				if exceptionsComplete || !hasRemovals {
+					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+				}
 			}
 		}
 	}
@@ -669,27 +702,29 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
 // SecurityException policies applied. The original manifest is not mutated,
 // so callers can still use it for SubmitCVE (cloud reporting). The returned
-// bool reports whether the current exception set was fetched successfully;
-// cache-hit callers must not persist the result on a failed fetch, so a
-// transient error cannot wipe previously applied exceptions from the stored
-// manifest.
+// bool reports whether the current exception set is known complete. A hard
+// fetch failure returns the manifest unfiltered with complete=false; a degraded
+// fetch (ErrExceptionsDegraded) still applies the partial set but reports
+// complete=false, so callers never persist "removals" computed from an
+// incomplete set.
 func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.CVEManifest) (domain.CVEManifest, bool) {
 	if cve.Content == nil {
 		return cve, false
 	}
 	exceptions, err := s.platform.GetCVEExceptions(ctx)
-	if err != nil {
+	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
+	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
 	}
 	if len(exceptions) == 0 {
-		return cve, true
+		return cve, !degraded
 	}
 	filtered := cve
 	docCopy := cve.Content.DeepCopy()
 	v1.ApplySecurityExceptions(docCopy, exceptions)
 	filtered.Content = docCopy
-	return filtered, true
+	return filtered, !degraded
 }
 
 func addTimestamp(ctx context.Context) context.Context {
