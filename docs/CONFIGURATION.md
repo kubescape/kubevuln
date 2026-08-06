@@ -271,7 +271,7 @@ The main configuration file. All options can be overridden via environment varia
     "shutdownTimeout": {
       "type": "string",
       "default": "20s",
-      "pattern": "^[0-9]+(s|m|h)$"
+      "pattern": "^-?[0-9]+(s|m|h)$"
     },
     "storage": {
       "type": "boolean",
