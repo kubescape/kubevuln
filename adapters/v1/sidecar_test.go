@@ -3,6 +3,8 @@ package v1
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 // mockScannerClient implements sbomscanner.SBOMScannerClient for testing
 type mockScannerClient struct {
 	createSBOMFunc func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error)
+	healthFunc     func(ctx context.Context) (string, bool, error)
 	healthVersion  string
 	healthReady    bool
 	healthErr      error
@@ -31,6 +34,9 @@ func (m *mockScannerClient) CreateSBOM(ctx context.Context, req sbomscanner.Scan
 }
 
 func (m *mockScannerClient) Health(ctx context.Context) (string, bool, error) {
+	if m.healthFunc != nil {
+		return m.healthFunc(ctx)
+	}
 	return m.healthVersion, m.healthReady, m.healthErr
 }
 
@@ -67,6 +73,35 @@ func TestSidecarSBOMAdapter_CreateSBOM_Success(t *testing.T) {
 	assert.NotNil(t, sbom.Content)
 	assert.Len(t, sbom.Content.Artifacts, 1)
 	assert.Equal(t, "test-pkg", sbom.Content.Artifacts[0].Name)
+}
+
+// TestSidecarSBOMAdapter_CreateSBOM_UsesOneVersionForBothFields is a CodeRabbit regression
+// test: CreateSBOM used to call s.Version() twice — once for SBOMCreatorVersion, once for the
+// ToolVersionMetadataKey annotation — so two independently-resolved calls could disagree
+// (e.g. the first hits a transient Health() failure and returns "unknown" while a second,
+// concurrent call already knows the real version). CreateSBOM must resolve the version once
+// and use that single value for both fields, so a stored SBOM never carries two different
+// creator versions.
+func TestSidecarSBOMAdapter_CreateSBOM_UsesOneVersionForBothFields(t *testing.T) {
+	var callCount int32
+	mock := &mockScannerClient{
+		healthFunc: func(ctx context.Context) (string, bool, error) {
+			atomic.AddInt32(&callCount, 1)
+			return "", false, errors.New("transient health check failure")
+		},
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			return &sbomscanner.ScanResult{Status: helpersv1.Learning}, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "nginx:latest", domain.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), callCount, "CreateSBOM must resolve the version once, not once per field")
+	assert.Equal(t, "unknown", sbom.SBOMCreatorVersion)
+	assert.Equal(t, sbom.SBOMCreatorVersion, sbom.Annotations[helpersv1.ToolVersionMetadataKey],
+		"SBOMCreatorVersion and the ToolVersionMetadataKey annotation must always agree")
 }
 
 func TestSidecarSBOMAdapter_CreateSBOM_TooLarge(t *testing.T) {
@@ -177,4 +212,124 @@ func TestSidecarSBOMAdapter_Version(t *testing.T) {
 
 	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
 	assert.Equal(t, "v0.100.0", adapter.Version())
+}
+
+// TestSidecarSBOMAdapter_Version_RecoversAfterTransientFailure is a regression test for
+// #473: Version() used to cache its result behind a sync.Once, so a single failed/timed-out
+// Health() call (e.g. a cold-start blip) permanently pinned every later call to "unknown" for
+// the adapter's lifetime — corrupting the SBOM/CVE storage cache key. Version() must retry on
+// the next call after a failure and only cache once Health() actually succeeds.
+func TestSidecarSBOMAdapter_Version_RecoversAfterTransientFailure(t *testing.T) {
+	callCount := 0
+	mock := &mockScannerClient{
+		healthFunc: func(ctx context.Context) (string, bool, error) {
+			callCount++
+			if callCount == 1 {
+				return "", false, errors.New("transient health check failure")
+			}
+			return "v0.100.0", true, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	assert.Equal(t, "unknown", adapter.Version(), "first call hits the transient failure")
+	assert.Equal(t, "v0.100.0", adapter.Version(), "second call must retry, not replay the cached failure")
+	assert.Equal(t, "v0.100.0", adapter.Version(), "once resolved, the real version stays cached")
+	assert.Equal(t, 2, callCount, "a resolved version must not trigger further Health() calls")
+}
+
+// TestSidecarSBOMAdapter_Version_CoalescesConcurrentCalls is a regression test for a
+// CodeRabbit follow-up on #473: Version() released versionMu before calling Health(), so two
+// overlapping callers that both raced past the "not yet cached" check would each run their
+// own independent Health() call. If one of those independent calls happened to fail while the
+// other succeeded, the failing caller returned "unknown" even though the version was, at that
+// same moment, already known via its sibling call. Overlapping callers must instead be
+// coalesced into a single in-flight Health() call (via singleflight), so every caller in the
+// race observes the same, single outcome.
+//
+// The two calls are deliberately ordered rather than merely fired concurrently: the second
+// call is only started once the first is provably already inside Health() (via the started
+// channel), which guarantees — by singleflight's own locking, not by timing luck — that the
+// second call's Do() finds the first call already registered and joins it instead of racing
+// to register its own. A bare "launch N goroutines and hope they overlap" design would be
+// flaky, since a goroutine that arrives after the in-flight call has already completed
+// legitimately starts a fresh call rather than a bug.
+func TestSidecarSBOMAdapter_Version_CoalescesConcurrentCalls(t *testing.T) {
+	var callCount int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mock := &mockScannerClient{
+		healthFunc: func(ctx context.Context) (string, bool, error) {
+			atomic.AddInt32(&callCount, 1)
+			close(started)
+			<-release
+			return "v0.100.0", true, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[0] = adapter.Version()
+	}()
+
+	<-started // the first call is now registered in singleflight and blocked inside Health()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[1] = adapter.Version()
+	}()
+
+	// Give the second call a moment to reach Do() and join the in-flight call before it's
+	// allowed to complete. The first call is held open the whole time, so there is no window
+	// in which the second call could observe it as already finished.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), callCount, "the second, overlapping call must join the first instead of running its own Health()")
+	assert.Equal(t, "v0.100.0", results[0])
+	assert.Equal(t, "v0.100.0", results[1])
+}
+
+// TestSidecarSBOMAdapter_CreateSBOM_CrashRetry_EvictsStaleEntries is a regression test for
+// #473: retryCount entries were only ever cleared on success or once maxCrashRetries was hit,
+// so an image that crashed once and was never retried left a permanent entry, growing the map
+// unboundedly over the adapter's lifetime (common with CI-generated unique tags/digests).
+func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry_EvictsStaleEntries(t *testing.T) {
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			return nil, sbomscanner.ErrScannerCrashed
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	// A one-off crash for an image that is never retried.
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "one-shot-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+	require.Len(t, adapter.retryCount, 1)
+
+	// Simulate that entry going stale.
+	adapter.mu.Lock()
+	adapter.retryCount["one-shot-image:latest"].lastSeen = time.Now().Add(-retryCountTTL - time.Minute)
+	adapter.mu.Unlock()
+
+	// A crash for a different image should sweep the stale entry out while recording its own.
+	_, err = adapter.CreateSBOM(context.Background(), "test-sbom", "", "another-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	assert.NotContains(t, adapter.retryCount, "one-shot-image:latest", "stale entry must be evicted")
+	assert.Contains(t, adapter.retryCount, "another-image:latest")
 }

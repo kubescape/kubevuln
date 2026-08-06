@@ -167,7 +167,7 @@ The main configuration file. All options can be overridden via environment varia
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `maxImageSize` | int | `536870912` | Maximum image size to scan in bytes (default: 512 MB) |
-| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB) |
+| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB). Enforced after SBOM generation completes, not during it — Syft doesn't expose an incremental size hook, so an oversized SBOM is rejected only once it has already been built in memory. During generation, actual memory use is bounded by the memory limit of whichever container runs Syft, not by this value: the `sbom-scanner` sidecar container when `SBOM_SCANNER_SOCKET` is configured, or the main kubevuln container otherwise (in-process `SyftAdapter`). |
 | `scanConcurrency` | int | `1` | Number of concurrent scans |
 | `scanTimeout` | duration | `5m` | Timeout for SBOM generation |
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
