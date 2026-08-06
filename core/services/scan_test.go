@@ -666,6 +666,9 @@ func TestScanService_NginxTest(t *testing.T) {
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	cveAdapter, terminate, err := v1.NewGrypeAdapterFixedDB()
+	if errors.Is(err, v1.ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
 	require.NoError(t, err)
 	defer terminate()
 	storageCP := repositories.NewMemoryStorage(false, false)
