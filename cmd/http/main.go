@@ -186,5 +186,9 @@ func main() {
 	// doesn't silently run past the pod's terminationGracePeriodSeconds
 	controller.Shutdown(c.ShutdownTimeout)
 
+	if err := m.Shutdown(srvCtx); err != nil {
+		logger.L().Ctx(srvCtx).Error("metrics provider shutdown error", helpers.Error(err))
+	}
+
 	logger.L().Info("kubevuln exiting")
 }

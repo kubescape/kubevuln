@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"net/http"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
@@ -8,7 +9,15 @@ import (
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
+
+// scanDurationBuckets are explicit histogram boundaries (in seconds) for
+// kubevuln_scan_duration_seconds. The OTel SDK default boundaries are
+// millisecond-shaped ([0, 5, 10, 25, ...]) and collapse every scan under 5s into
+// a single bucket, which is most of the traffic on this instrument.
+var scanDurationBuckets = []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800}
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -26,12 +35,26 @@ type Metrics struct {
 // with a fresh OTel MeterProvider.
 func New() (*Metrics, error) {
 	registry := promclient.NewRegistry()
-	exporter, err := prometheus.New(prometheus.WithRegisterer(registry))
+	exporter, err := prometheus.New(
+		prometheus.WithRegisterer(registry),
+		prometheus.WithoutScopeInfo(),
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName("kubevuln"))
+
+	provider := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(exporter),
+		sdkmetric.WithResource(res),
+		sdkmetric.WithView(sdkmetric.NewView(
+			sdkmetric.Instrument{Name: "kubevuln_scan_duration_seconds"},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: scanDurationBuckets,
+			}},
+		)),
+	)
 	meter := provider.Meter("kubevuln")
 
 	scanDuration, err := meter.Float64Histogram(
@@ -44,8 +67,8 @@ func New() (*Metrics, error) {
 	}
 
 	scanCounter, err := meter.Int64Counter(
-		"kubevuln_scan_requests_total",
-		metric.WithDescription("Total number of scan requests handled by the HTTP controller"),
+		"kubevuln_scans_completed_total",
+		metric.WithDescription("Total number of scans completed by the HTTP controller, by outcome"),
 	)
 	if err != nil {
 		return nil, err
@@ -53,7 +76,7 @@ func New() (*Metrics, error) {
 
 	rejectCounter, err := meter.Int64Counter(
 		"kubevuln_scan_rejections_total",
-		metric.WithDescription("Total number of scan requests rejected with ErrTooManyRequests"),
+		metric.WithDescription("Total number of scan requests rejected at validation time, by reason"),
 	)
 	if err != nil {
 		return nil, err
@@ -66,6 +89,12 @@ func New() (*Metrics, error) {
 		ScanCounter:   scanCounter,
 		RejectCounter: rejectCounter,
 	}, nil
+}
+
+// Shutdown flushes and releases the underlying MeterProvider's resources. It should be
+// called alongside the rest of the process's graceful-shutdown sequence.
+func (m *Metrics) Shutdown(ctx context.Context) error {
+	return m.provider.Shutdown(ctx)
 }
 
 // Meter exposes the underlying OTel meter, e.g. so callers can register

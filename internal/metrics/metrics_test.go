@@ -26,7 +26,7 @@ func TestNewAndHandler(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 	body := w.Body.String()
-	assert.True(t, strings.Contains(body, "kubevuln_scan_requests_total"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_scans_completed_total"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_scan_rejections_total"), body)
 }

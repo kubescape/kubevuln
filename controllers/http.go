@@ -60,24 +60,36 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 }
 
 // recordScan records the outcome and duration of a background scan job for the given endpoint.
-func (h HTTPController) recordScan(endpoint string, start time.Time, success bool) {
+// outcome is one of "success", "partial", or "error" -- see the ScanCP call site, where a
+// domain.ErrPartialContainerProfile result is a warning-level expected outcome, not a failure.
+func (h HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string) {
 	if h.metrics == nil {
 		return
 	}
 	attrs := metric.WithAttributes(
 		attribute.String("endpoint", endpoint),
-		attribute.Bool("success", success),
+		attribute.String("outcome", outcome),
 	)
-	h.metrics.ScanCounter.Add(context.Background(), 1, attrs)
-	h.metrics.ScanDuration.Record(context.Background(), time.Since(start).Seconds(), attrs)
+	h.metrics.ScanCounter.Add(ctx, 1, attrs)
+	h.metrics.ScanDuration.Record(ctx, time.Since(start).Seconds(), attrs)
 }
 
-// recordRejection records a validation-time rejection for the given endpoint.
-func (h HTTPController) recordRejection(endpoint string) {
+// recordRejection records a validation-time rejection for the given endpoint. reason is
+// "too_many_requests" for registry back-pressure (ErrTooManyRequests) and "invalid_request"
+// for every other validation error, keeping the rejection-rate signal distinct from
+// malformed-payload noise while staying low cardinality.
+func (h HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
 	if h.metrics == nil {
 		return
 	}
-	h.metrics.RejectCounter.Add(context.Background(), 1, metric.WithAttributes(attribute.String("endpoint", endpoint)))
+	reason := "invalid_request"
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		reason = "too_many_requests"
+	}
+	h.metrics.RejectCounter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("endpoint", endpoint),
+		attribute.String("reason", reason),
+	))
 }
 
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
@@ -102,7 +114,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection("generateSBOM")
+		h.recordRejection(ctx, "generateSBOM", err)
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -110,10 +122,14 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
-	start := time.Now()
 	h.workerPool.Submit(func() {
+		start := time.Now()
 		err = h.scanService.GenerateSBOM(bgCtx)
-		h.recordScan("generateSBOM", start, err == nil)
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		h.recordScan(bgCtx, "generateSBOM", start, outcome)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
@@ -162,7 +178,7 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 			helpers.String("wlid", newScan.Wlid),
 			helpers.String("name", name),
 			helpers.String("namespace", namespace))
-		h.recordRejection("scanCP")
+		h.recordRejection(ctx, "scanCP", err)
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -170,22 +186,25 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
-	start := time.Now()
 	h.workerPool.Submit(func() {
+		start := time.Now()
 		err = h.scanService.ScanCP(bgCtx)
-		h.recordScan("scanCP", start, err == nil)
 		if err != nil {
 			if errors.Is(err, domain.ErrPartialContainerProfile) {
+				h.recordScan(bgCtx, "scanCP", start, "partial")
 				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			} else {
+				h.recordScan(bgCtx, "scanCP", start, "error")
 				logger.L().Ctx(bgCtx).Error("service error - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			}
+		} else {
+			h.recordScan(bgCtx, "scanCP", start, "success")
 		}
 	})
 }
@@ -212,7 +231,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection("scanCVE")
+		h.recordRejection(ctx, "scanCVE", err)
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -220,10 +239,14 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
-	start := time.Now()
 	h.workerPool.Submit(func() {
+		start := time.Now()
 		err = h.scanService.ScanCVE(bgCtx)
-		h.recordScan("scanCVE", start, err == nil)
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		h.recordScan(bgCtx, "scanCVE", start, outcome)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
@@ -295,7 +318,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection("scanRegistry")
+		h.recordRejection(ctx, "scanRegistry", err)
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
 		return
 	}
@@ -303,10 +326,14 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(ctx)
-	start := time.Now()
 	h.workerPool.Submit(func() {
+		start := time.Now()
 		err = h.scanService.ScanRegistry(bgCtx)
-		h.recordScan("scanRegistry", start, err == nil)
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		}
+		h.recordScan(bgCtx, "scanRegistry", start, outcome)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),

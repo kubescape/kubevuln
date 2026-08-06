@@ -15,6 +15,7 @@ Kubevuln exposes a REST API on port **8080** for vulnerability scanning operatio
 - [Health Endpoints](#health-endpoints)
   - [Liveness Probe](#liveness-probe)
   - [Readiness Probe](#readiness-probe)
+  - [Metrics](#metrics)
 - [Scan Endpoints](#scan-endpoints)
   - [Generate SBOM](#generate-sbom)
   - [Scan Image for CVEs](#scan-image-for-cves)
@@ -113,6 +114,36 @@ Not ready response:
   "status": 503,
   "title": "Service Unavailable"
 }
+```
+
+---
+
+### Metrics
+
+Prometheus exposition-format metrics for the HTTP controller and its worker pool. Served
+on the same port as the health endpoints, with no auth or network guard -- fine for how
+kubevuln is deployed today (the Service isn't public and the metrics carry no
+tenant/image identifiers), but scraping it in a cluster requires a chart-side change
+(`prometheus.io/scrape` annotations or a `ServiceMonitor`) since the endpoint shipping
+here doesn't by itself get collected.
+
+```
+GET /metrics
+```
+
+#### Instruments
+
+| Name | Type | Labels | Description |
+|------|------|--------|-------------|
+| `kubevuln_scans_completed_total` | counter | `endpoint`, `outcome` (`success`/`partial`/`error`) | Scans completed by the HTTP controller's worker pool |
+| `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
+| `kubevuln_scan_rejections_total` | counter | `endpoint`, `reason` (`too_many_requests`/`invalid_request`) | Requests rejected at validation time, before being queued |
+| `kubevuln_worker_pool_queue_depth` | gauge | - | Number of scan jobs currently waiting in the worker pool |
+
+#### Example
+
+```bash
+curl http://localhost:8080/metrics
 ```
 
 ---
