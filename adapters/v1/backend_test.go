@@ -172,6 +172,7 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 					},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					}},
 				},
 			}}, nil
@@ -200,6 +201,7 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 					},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{{
 						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
 					}},
 				},
 			}}, nil
@@ -726,7 +728,7 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
 				Spec: sev1beta1.SecurityExceptionSpec{
 					Vulnerabilities: []sev1beta1.VulnerabilityException{
-						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CRD-1"}},
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CRD-1"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 					},
 				},
 			},
@@ -761,7 +763,7 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 				Spec: sev1beta1.SecurityExceptionSpec{
 					Match: sev1beta1.ExceptionMatch{Images: []string{"docker.io/library/redis:*"}},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{
-						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-REDIS-ONLY"}},
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-REDIS-ONLY"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 					},
 				},
 			},

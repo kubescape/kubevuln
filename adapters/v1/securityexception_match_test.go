@@ -206,7 +206,7 @@ func TestMatchExceptionTarget(t *testing.T) {
 }
 
 func TestConvertScopesByMatch(t *testing.T) {
-	cveEntry := []sev1beta1.VulnerabilityException{{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"}}}
+	cveEntry := []sev1beta1.VulnerabilityException{{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"}, Status: sev1beta1.VulnerabilityStatusNotAffected}}
 
 	t.Run("CSE images scope filters by image", func(t *testing.T) {
 		cse := []sev1beta1.ClusterSecurityException{{
