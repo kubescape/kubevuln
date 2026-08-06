@@ -136,7 +136,15 @@ func NewScannerServer() pb.SBOMScannerServer {
 // mutated, so it's safe to read concurrently without a lock. Do not add a mutex/semaphore
 // around this method — a previous version serialized the whole RPC (pull + generation) behind
 // a single process-wide lock, which defeated the caller's scanConcurrency entirely regardless
-// of its configured value (see #473); concurrency is bounded by the caller instead.
+// of its configured value (see #473); the number of concurrent in-flight RPCs is bounded by
+// the caller instead, matching scanConcurrency.
+//
+// That bound is on in-flight RPCs, not on actual Syft resource usage: syft.CreateSBOM below
+// runs on context.Background() and Syft's catalogers don't support cancellation, so when
+// dl.Run times out and this RPC returns Incomplete, the abandoned Syft goroutine can keep
+// consuming CPU/memory in the background after the caller already considers that slot free
+// and starts another scan. scanConcurrency therefore bounds concurrent requests, not peak
+// concurrent Syft memory/CPU use, on this path.
 func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMRequest) (*pb.CreateSBOMResponse, error) {
 	// imageID is already the final, normalized pull reference. The SidecarSBOMAdapter
 	// normalizes it (NormalizeImageID) before sending the request - that is the single

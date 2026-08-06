@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -47,8 +48,9 @@ type SidecarSBOMAdapter struct {
 	mu         sync.Mutex
 	retryCount map[string]*crashRetry
 
-	versionMu  sync.Mutex
-	versionStr string
+	versionMu    sync.Mutex
+	versionStr   string
+	versionGroup singleflight.Group
 }
 
 var _ ports.SBOMCreator = (*SidecarSBOMAdapter)(nil)
@@ -211,6 +213,13 @@ func (s *SidecarSBOMAdapter) evictStaleRetriesLocked() {
 // on this pod to "unknown" and starve the storage cache (see #473) — the next call simply
 // retries instead of returning a value baked in by sync.Once for the rest of the process's
 // life.
+//
+// Concurrent callers that miss the cache are coalesced through versionGroup into a single
+// in-flight Health() call: without this, two overlapping callers could each run their own
+// Health() independently, and if one happened to fail while the other succeeded, the failing
+// caller would return "unknown" even though the version was, at that same moment, already
+// known — an avoidable cache miss for whatever that caller was about to look up. Coalescing
+// means every overlapping caller observes the same outcome as the single underlying call.
 func (s *SidecarSBOMAdapter) Version() string {
 	s.versionMu.Lock()
 	if s.versionStr != "" {
@@ -219,14 +228,21 @@ func (s *SidecarSBOMAdapter) Version() string {
 	}
 	s.versionMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	version, _, err := s.client.Health(ctx)
+	v, err, _ := s.versionGroup.Do("version", func() (any, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		version, _, err := s.client.Health(ctx)
+		if err != nil {
+			return "", err
+		}
+		return version, nil
+	})
 	if err != nil {
 		logger.L().Warning("failed to get scanner version", helpers.Error(err))
 		return "unknown"
 	}
 
+	version := v.(string)
 	s.versionMu.Lock()
 	s.versionStr = version
 	s.versionMu.Unlock()

@@ -3,6 +3,8 @@ package v1
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -206,6 +208,66 @@ func TestSidecarSBOMAdapter_Version_RecoversAfterTransientFailure(t *testing.T) 
 	assert.Equal(t, "v0.100.0", adapter.Version(), "second call must retry, not replay the cached failure")
 	assert.Equal(t, "v0.100.0", adapter.Version(), "once resolved, the real version stays cached")
 	assert.Equal(t, 2, callCount, "a resolved version must not trigger further Health() calls")
+}
+
+// TestSidecarSBOMAdapter_Version_CoalescesConcurrentCalls is a regression test for a
+// CodeRabbit follow-up on #473: Version() released versionMu before calling Health(), so two
+// overlapping callers that both raced past the "not yet cached" check would each run their
+// own independent Health() call. If one of those independent calls happened to fail while the
+// other succeeded, the failing caller returned "unknown" even though the version was, at that
+// same moment, already known via its sibling call. Overlapping callers must instead be
+// coalesced into a single in-flight Health() call (via singleflight), so every caller in the
+// race observes the same, single outcome.
+//
+// The two calls are deliberately ordered rather than merely fired concurrently: the second
+// call is only started once the first is provably already inside Health() (via the started
+// channel), which guarantees — by singleflight's own locking, not by timing luck — that the
+// second call's Do() finds the first call already registered and joins it instead of racing
+// to register its own. A bare "launch N goroutines and hope they overlap" design would be
+// flaky, since a goroutine that arrives after the in-flight call has already completed
+// legitimately starts a fresh call rather than a bug.
+func TestSidecarSBOMAdapter_Version_CoalescesConcurrentCalls(t *testing.T) {
+	var callCount int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mock := &mockScannerClient{
+		healthFunc: func(ctx context.Context) (string, bool, error) {
+			atomic.AddInt32(&callCount, 1)
+			close(started)
+			<-release
+			return "v0.100.0", true, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[0] = adapter.Version()
+	}()
+
+	<-started // the first call is now registered in singleflight and blocked inside Health()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[1] = adapter.Version()
+	}()
+
+	// Give the second call a moment to reach Do() and join the in-flight call before it's
+	// allowed to complete. The first call is held open the whole time, so there is no window
+	// in which the second call could observe it as already finished.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), callCount, "the second, overlapping call must join the first instead of running its own Health()")
+	assert.Equal(t, "v0.100.0", results[0])
+	assert.Equal(t, "v0.100.0", results[1])
 }
 
 // TestSidecarSBOMAdapter_CreateSBOM_CrashRetry_EvictsStaleEntries is a regression test for
