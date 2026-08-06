@@ -757,6 +757,49 @@ func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	})
 }
 
+// TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet guards the
+// data-preservation guard in StoreCVESummaryStub: its retry-path Get must fetch
+// the full object, not request ResourceVersion "metadata" (which kubescape/
+// storage returns as an ObjectMeta-only object with a zeroed Spec). The fake
+// clientset ignores GetOptions, so a behavioral test cannot reproduce the
+// resulting data loss; only an assertion on the requested GetOptions can.
+func TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
+		ContainerName: "local-path-provisioner",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+	resourceName, err := GetCVESummaryK8sResourceName(ctx)
+	require.NoError(t, err)
+
+	// Seed a real summary so the stub's Create returns AlreadyExists and the
+	// retry-path Get executes.
+	real := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: v1beta1.SeveritySummary{
+				High: v1beta1.VulnerabilityCounters{All: 3, Relevant: 1},
+			},
+		},
+	}
+	_, err = wrapped.VulnerabilityManifestSummaries(ns).Create(context.Background(), real, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+
+	require.NotNil(t, wrapped.vulnSummaries[ns], "summary sub-client must have been exercised")
+	require.Empty(t, wrapped.vulnSummaries[ns].getResourceVersion,
+		"StoreCVESummaryStub must not request the metadata-only Get")
+}
+
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 	ctx := context.Background()
 
@@ -1556,10 +1599,12 @@ func (w *ctxCapturingOVECs) Update(ctx context.Context, obj *v1beta1.OpenVulnera
 type ctxCapturingVulnerabilityManifestSummaries struct {
 	spdxv1beta1.VulnerabilityManifestSummaryInterface
 	getCtx, createCtx, updateCtx context.Context
+	getResourceVersion           string
 }
 
 func (w *ctxCapturingVulnerabilityManifestSummaries) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifestSummary, error) {
 	w.getCtx = ctx
+	w.getResourceVersion = opts.ResourceVersion
 	return w.VulnerabilityManifestSummaryInterface.Get(ctx, name, opts)
 }
 
@@ -1618,12 +1663,12 @@ func (w *ctxCapturingContainerProfiles) Update(ctx context.Context, obj *v1beta1
 // everything else untouched.
 type ctxCapturingClient struct {
 	spdxv1beta1.SpdxV1beta1Interface
-	vulnManifests      map[string]*ctxCapturingVulnerabilityManifests
-	sbomSyfts          map[string]*ctxCapturingSBOMSyfts
-	ovecs              map[string]*ctxCapturingOVECs
-	vulnSummaries      map[string]*ctxCapturingVulnerabilityManifestSummaries
-	sbomSyftFiltereds  map[string]*ctxCapturingSBOMSyftFiltereds
-	containerProfiles  map[string]*ctxCapturingContainerProfiles
+	vulnManifests     map[string]*ctxCapturingVulnerabilityManifests
+	sbomSyfts         map[string]*ctxCapturingSBOMSyfts
+	ovecs             map[string]*ctxCapturingOVECs
+	vulnSummaries     map[string]*ctxCapturingVulnerabilityManifestSummaries
+	sbomSyftFiltereds map[string]*ctxCapturingSBOMSyftFiltereds
+	containerProfiles map[string]*ctxCapturingContainerProfiles
 }
 
 // The accessor methods below are called once per storage operation (e.g. StoreVEX calls
@@ -1798,7 +1843,7 @@ func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	requireCanaryCtx(t, wrapped.containerProfiles["my-namespace"].getCtx)
 }
 
-func TestAPIServerStore_StoreSBOM_Filtered_ctxPropagated(t *testing.T) {
+func TestAPIServerStore_StoreSBOMFiltered_ctxPropagated(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
 	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
@@ -1865,6 +1910,16 @@ func TestAPIServerStore_StoreVEX_RetryConflict_ctxPropagated(t *testing.T) {
 	wrapped.ovecs[a.Namespace].createCtx = nil
 	wrapped.ovecs[a.Namespace].updateCtx = nil
 
+	conflicts := 0
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "openvulnerabilityexchangecontainers"}, name, nil)
+		}
+		return false, nil, nil
+	})
+
 	// Second store with canary context (triggers conflict retry)
 	canary := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
 	require.NoError(t, a.StoreVEX(canary, cve, cve, false))
@@ -1886,6 +1941,16 @@ func TestAPIServerStore_StoreCVE_RetryConflict_ctxPropagated(t *testing.T) {
 	wrapped.vulnManifests[a.Namespace].getCtx = nil
 	wrapped.vulnManifests[a.Namespace].createCtx = nil
 	wrapped.vulnManifests[a.Namespace].updateCtx = nil
+
+	conflicts := 0
+	clientset.PrependReactor("update", "vulnerabilitymanifests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifests"}, name, nil)
+		}
+		return false, nil, nil
+	})
 
 	// Second store
 	require.NoError(t, a.StoreCVE(canaryCtx(), domain.CVEManifest{Name: name}, false))
@@ -1909,6 +1974,16 @@ func TestAPIServerStore_StoreSBOM_RetryConflict_ctxPropagated(t *testing.T) {
 	wrapped.sbomSyfts[a.Namespace].createCtx = nil
 	wrapped.sbomSyfts[a.Namespace].updateCtx = nil
 
+	conflicts := 0
+	clientset.PrependReactor("update", "sbomsyfts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "sbomsyfts"}, name, nil)
+		}
+		return false, nil, nil
+	})
+
 	// Second store
 	require.NoError(t, a.StoreSBOM(canaryCtx(), domain.SBOM{Name: name}, false))
 
@@ -1930,6 +2005,16 @@ func TestAPIServerStore_StoreSBOMFiltered_RetryConflict_ctxPropagated(t *testing
 	wrapped.sbomSyftFiltereds[a.Namespace].getCtx = nil
 	wrapped.sbomSyftFiltereds[a.Namespace].createCtx = nil
 	wrapped.sbomSyftFiltereds[a.Namespace].updateCtx = nil
+
+	conflicts := 0
+	clientset.PrependReactor("update", "sbomsyftfiltereds", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "sbomsyftfiltereds"}, name, nil)
+		}
+		return false, nil, nil
+	})
 
 	// Second store
 	require.NoError(t, a.StoreSBOM(canaryCtx(), domain.SBOM{Name: name}, true))
@@ -1962,6 +2047,16 @@ func TestAPIServerStore_StoreCVESummary_RetryConflict_ctxPropagated(t *testing.T
 	wrapped.vulnSummaries["anyNamespaceJob"].createCtx = nil
 	wrapped.vulnSummaries["anyNamespaceJob"].updateCtx = nil
 
+	conflicts := 0
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifestsummaries"}, name, nil)
+		}
+		return false, nil, nil
+	})
+
 	// Second store
 	canary := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
 	canary = context.WithValue(canary, domain.TimestampKey{}, int64(1734957372))
@@ -1993,6 +2088,16 @@ func TestAPIServerStore_StoreCVESummaryStub_RetryConflict_ctxPropagated(t *testi
 	wrapped.vulnSummaries["anyNamespaceJob"].getCtx = nil
 	wrapped.vulnSummaries["anyNamespaceJob"].createCtx = nil
 	wrapped.vulnSummaries["anyNamespaceJob"].updateCtx = nil
+
+	conflicts := 0
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts < 1 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(
+				schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifestsummaries"}, name, nil)
+		}
+		return false, nil, nil
+	})
 
 	// Second store
 	canary := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)

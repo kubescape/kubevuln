@@ -73,7 +73,7 @@ Kubevuln follows the hexagonal architecture pattern to achieve:
 |----------|-----------|
 | Async processing | Scan requests return immediately; work is queued |
 | Worker pool | Prevents resource exhaustion with concurrent scans |
-| Graceful shutdown | Waits for in-flight scans to complete |
+| Graceful shutdown | Abandons queued scans and waits for in-flight scans to complete, bounded by `shutdownTimeout` |
 | Modular adapters | Easy to upgrade Syft/Grype versions |
 | Interface-driven | All external dependencies accessed via ports |
 

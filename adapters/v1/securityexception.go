@@ -34,7 +34,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 		namespace := se.Namespace
 		for _, vuln := range se.Spec.Vulnerabilities {
-			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
+			if !shouldSuppress(vuln) {
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace)
@@ -51,7 +51,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			continue
 		}
 		for _, vuln := range cse.Spec.Vulnerabilities {
-			if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
+			if !shouldSuppress(vuln) {
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "")
@@ -66,14 +66,41 @@ func isExpired(expiresAt *metav1.Time, now time.Time) bool {
 	return expiresAt != nil && expiresAt.Time.Before(now)
 }
 
+// shouldSuppress reports whether a VulnerabilityException entry may be
+// converted into an ignore policy.
+//
+// The allowlist approach (fail-closed): only the two VEX statuses that
+// definitively resolve a CVE – not_affected and fixed – produce a
+// suppression policy. Every other value, including the empty string,
+// under_investigation, and any future status that is not yet in the
+// enum, leaves the finding visible in the scan results.
+func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
+	if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
+		return false
+	}
+	switch vuln.Status {
+	case sev1beta1.VulnerabilityStatusNotAffected, sev1beta1.VulnerabilityStatusFixed:
+		return true
+	default:
+		return false
+	}
+}
+
 func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string) armotypes.VulnerabilityExceptionPolicy {
+	vulnerabilityPolicies := []armotypes.VulnerabilityPolicy{
+		{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
+	}
+	for _, alias := range vuln.Vulnerability.Aliases {
+		if a := strings.TrimSpace(alias); a != "" {
+			vulnerabilityPolicies = append(vulnerabilityPolicies, armotypes.VulnerabilityPolicy{Name: a})
+		}
+	}
+
 	p := armotypes.VulnerabilityExceptionPolicy{
-		PolicyType: "vulnerabilityExceptionPolicy",
-		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
-		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
-			{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
-		},
-		Reason: spec.Reason,
+		PolicyType:            "vulnerabilityExceptionPolicy",
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: vulnerabilityPolicies,
+		Reason:                spec.Reason,
 	}
 
 	if spec.ExpiresAt != nil {

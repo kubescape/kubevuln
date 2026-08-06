@@ -167,11 +167,17 @@ The main configuration file. All options can be overridden via environment varia
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `maxImageSize` | int | `536870912` | Maximum image size to scan in bytes (default: 512 MB) |
-| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB) |
+| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB). Enforced after SBOM generation completes, not during it — Syft doesn't expose an incremental size hook, so an oversized SBOM is rejected only once it has already been built in memory. During generation, actual memory use is bounded by the memory limit of whichever container runs Syft, not by this value: the `sbom-scanner` sidecar container when `SBOM_SCANNER_SOCKET` is configured, or the main kubevuln container otherwise (in-process `SyftAdapter`). |
 | `scanConcurrency` | int | `1` | Number of concurrent scans |
 | `scanTimeout` | duration | `5m` | Timeout for SBOM generation |
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
 | `scannerReadinessTimeout` | duration | `60s` | Maximum time to wait for the SBOM scanner sidecar to become ready at startup. A value of `0` or less does not mean "wait forever": it makes the readiness deadline expire immediately, causing startup to fall back to the built-in Syft scanner right away. |
+
+#### Shutdown Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `shutdownTimeout` | duration | `20s` | Maximum time to wait for in-flight scans to finish when the process receives a shutdown signal; any not-yet-started, queued scans are abandoned immediately. This is added on top of the HTTP server's own fixed 5s shutdown window (hardcoded in `cmd/http/main.go`), not a replacement for it — budget `5s + shutdownTimeout` when sizing your pod's `terminationGracePeriodSeconds`. A value of `0` or less does not mean "wait forever": like `scannerReadinessTimeout`, it makes the deadline expire immediately, so the drain races the abandonment path from the start. |
 
 #### Vulnerability Database Options
 
@@ -261,6 +267,11 @@ The main configuration file. All options can be overridden via environment varia
       "type": "string",
       "default": "60s",
       "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "shutdownTimeout": {
+      "type": "string",
+      "default": "20s",
+      "pattern": "^-?[0-9]+(s|m|h)$"
     },
     "storage": {
       "type": "boolean",
