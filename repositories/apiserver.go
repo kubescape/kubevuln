@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"crypto/sha256"
+	stderrors "errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -105,11 +106,25 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	return &APIServerStore{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
-		DynamicClient: fakedynamic.NewSimpleDynamicClient(runtime.NewScheme()),
-		Namespace:     namespace,
+		// The fake dynamic client requires every GVR it will List() to have a registered
+		// list kind up front (fakedynamic.NewSimpleDynamicClient's default of an empty
+		// scheme panics on List() otherwise) - register the two GVRs GetSecurityExceptions
+		// uses so callers can exercise it against this fake store.
+		DynamicClient: fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			securityExceptionGVR:        "SecurityExceptionList",
+			clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+		}),
+		Namespace: namespace,
 	}
 }
 
+// GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
+// ClusterSecurityExceptions. A List() failure is returned as an error rather than only
+// logged: the caller (BackendAdapter.GetCVEExceptions) relies on a non-nil error here to
+// avoid caching a degraded, incomplete exception set for exceptionsCacheTTL — see #477. A
+// conversion failure on an individual item is still only logged and skipped, since that's a
+// malformed single object rather than a listing-wide failure, and skipping it doesn't risk
+// masking a systemic API problem the way swallowing a List() error would.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
 	// Use a detached context with timeout — the scan context may be canceled
 	// before the CRD listing completes due to rate limiting.
@@ -117,12 +132,14 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	defer cancel()
 
 	var exceptions []sev1beta1.SecurityException
+	var listErrs []error
 
 	// Only list namespaced exceptions when namespace is provided
 	if namespace != "" {
 		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
+			listErrs = append(listErrs, fmt.Errorf("failed to list SecurityExceptions: %w", err))
 		} else {
 			for i := range seList.Items {
 				var se sev1beta1.SecurityException
@@ -140,6 +157,7 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
+		listErrs = append(listErrs, fmt.Errorf("failed to list ClusterSecurityExceptions: %w", err))
 	} else {
 		for i := range cseList.Items {
 			var cse sev1beta1.ClusterSecurityException
@@ -151,7 +169,7 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 		}
 	}
 
-	return exceptions, clusterExceptions, nil
+	return exceptions, clusterExceptions, stderrors.Join(listErrs...)
 }
 
 // GetWorkloadLabels resolves the labels of a workload so that a
