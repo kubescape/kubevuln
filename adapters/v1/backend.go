@@ -407,16 +407,8 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		if err != nil {
 			return fmt.Errorf("failed to convert filtered vulnerabilities to report: %w", err)
 		}
-		// index relevantVulnerabilities
-		cvepIndices := map[string]struct{}{}
-		for _, v := range relevantVulnerabilities {
-			cvepIndices[v.Name] = struct{}{}
-		}
 		// mark common vulnerabilities as relevant
-		for i, v := range vulnerabilities {
-			_, isRelevant := cvepIndices[v.Name]
-			vulnerabilities[i].IsRelevant = &isRelevant
-		}
+		markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities)
 	}
 
 	finalReport := v1.ScanResultReport{
@@ -519,4 +511,20 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
 	logger.L().Debug("httpPostDebug", helpers.String("fullURL", fullURL), helpers.Interface("headers", headers), helpers.String("body", string(body)))
 	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
+}
+
+// markRelevantVulnerabilities annotates each vulnerability with IsRelevant=true iff the same
+// (CVE, package) pair also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would
+// mark a CVE relevant on every package it affects even when only one of those packages was
+// executed; the pair is the record identity (see RelatedPackageName in DomainToArmo and the
+// uniqueness assertion in backend_test.go).
+func markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities []cs.CommonContainerVulnerabilityResult) {
+	cvepIndices := make(map[string]struct{}, len(relevantVulnerabilities))
+	for _, v := range relevantVulnerabilities {
+		cvepIndices[v.Name+"+"+v.RelatedPackageName] = struct{}{}
+	}
+	for i, v := range vulnerabilities {
+		_, isRelevant := cvepIndices[v.Name+"+"+v.RelatedPackageName]
+		vulnerabilities[i].IsRelevant = &isRelevant
+	}
 }
