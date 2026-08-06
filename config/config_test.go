@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,13 @@ func TestLoadConfig(t *testing.T) {
 	viper.Reset()
 	_, err := LoadConfig("testdata")
 	assert.NoError(t, err)
+}
+
+func TestLoadConfigShutdownTimeoutDefault(t *testing.T) {
+	viper.Reset()
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, 20*time.Second, c.ShutdownTimeout)
 }
 
 func TestLoadConfigNotFound(t *testing.T) {

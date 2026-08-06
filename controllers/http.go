@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/gammazero/workerpool"
@@ -274,8 +275,30 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 	return command
 }
 
-func (h HTTPController) Shutdown() {
+// Shutdown abandons queued-but-not-started scans immediately and waits only for
+// currently running scans to finish, bounded by timeout. workerPool.Stop() (as opposed
+// to StopWait()) already caps the wait at "currently running tasks", matching this
+// package's acceptance criteria of abandoning pending work rather than racing through
+// the whole backlog; timeout is the backstop for a running task that ignores ctx
+// cancellation (see #450) and would otherwise block Stop() indefinitely. timeout should
+// be kept safely under the pod's terminationGracePeriodSeconds so this path has a
+// chance to log before the kubelet SIGKILLs the process.
+func (h HTTPController) Shutdown(timeout time.Duration) {
 	logger.L().Info("purging SBOM creation queue",
-		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())))
-	h.workerPool.StopWait()
+		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
+		helpers.String("timeout", timeout.String()))
+
+	drained := make(chan struct{})
+	go func() {
+		h.workerPool.Stop() // abandon the queue, wait only for in-flight scans
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		logger.L().Info("SBOM creation queue drained")
+	case <-time.After(timeout):
+		logger.L().Warning("shutdown timeout reached, abandoning in-flight scans",
+			helpers.String("timeout", timeout.String()))
+	}
 }

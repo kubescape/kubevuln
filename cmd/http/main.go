@@ -158,16 +158,22 @@ func main() {
 	stop()
 	logger.L().Info("shutting down gracefully")
 
-	// modify context to inform the server it has 5 seconds to finish
-	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
+	// Give the HTTP server up to 5 seconds to finish in-flight requests. This must be
+	// derived from context.Background(), not the signal ctx above: that one is already
+	// Done() by this point (we only got here via <-ctx.Done()), so deriving from it
+	// would hand srv.Shutdown an already-expired context and return immediately.
+	srvCtx, srvCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer srvCancel()
+	if err := srv.Shutdown(srvCtx); err != nil {
+		// Log and continue rather than exit: a failed/timed-out HTTP shutdown must not
+		// skip the worker-pool drain below, since that's where actual queued/running
+		// scan work would otherwise be silently lost (#467).
+		logger.L().Ctx(srvCtx).Error("server shutdown error", helpers.Error(err))
 	}
 
-	// Purging the controller worker queue
-	controller.Shutdown()
+	// Purging the controller worker queue, bounded by ShutdownTimeout so this
+	// doesn't silently run past the pod's terminationGracePeriodSeconds
+	controller.Shutdown(c.ShutdownTimeout)
 
 	logger.L().Info("kubevuln exiting")
 }
