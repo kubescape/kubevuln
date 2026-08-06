@@ -173,6 +173,12 @@ The main configuration file. All options can be overridden via environment varia
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
 | `scannerReadinessTimeout` | duration | `60s` | Maximum time to wait for the SBOM scanner sidecar to become ready at startup. A value of `0` or less does not mean "wait forever": it makes the readiness deadline expire immediately, causing startup to fall back to the built-in Syft scanner right away. |
 
+#### Shutdown Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `shutdownTimeout` | duration | `20s` | Maximum time to wait for in-flight scans to finish when the process receives a shutdown signal; any not-yet-started, queued scans are abandoned immediately. This is added on top of the HTTP server's own fixed 5s shutdown window (hardcoded in `cmd/http/main.go`), not a replacement for it — budget `5s + shutdownTimeout` when sizing your pod's `terminationGracePeriodSeconds`. A value of `0` or less does not mean "wait forever": like `scannerReadinessTimeout`, it makes the deadline expire immediately, so the drain races the abandonment path from the start. |
+
 #### Vulnerability Database Options
 
 | Option | Type | Default | Description |
@@ -260,6 +266,11 @@ The main configuration file. All options can be overridden via environment varia
     "scannerReadinessTimeout": {
       "type": "string",
       "default": "60s",
+      "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "shutdownTimeout": {
+      "type": "string",
+      "default": "20s",
       "pattern": "^[0-9]+(s|m|h)$"
     },
     "storage": {

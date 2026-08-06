@@ -275,14 +275,14 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 	return command
 }
 
-// Shutdown drains the worker pool's queued and running scans, but bounds how long it
-// waits. workerPool.StopWait() alone has no deadline of its own — it waits for the
-// entire queued backlog to finish, not just the task currently running — which for
-// scanConcurrency=1 with a full queue can run far longer than Kubernetes'
-// terminationGracePeriodSeconds. Without a bound here, that difference is invisible: the
-// process just gets SIGKILLed mid-drain with no log trace of what was abandoned. timeout
-// should be kept safely under the pod's terminationGracePeriodSeconds so this path has a
-// chance to log before that happens.
+// Shutdown abandons queued-but-not-started scans immediately and waits only for
+// currently running scans to finish, bounded by timeout. workerPool.Stop() (as opposed
+// to StopWait()) already caps the wait at "currently running tasks", matching this
+// package's acceptance criteria of abandoning pending work rather than racing through
+// the whole backlog; timeout is the backstop for a running task that ignores ctx
+// cancellation (see #450) and would otherwise block Stop() indefinitely. timeout should
+// be kept safely under the pod's terminationGracePeriodSeconds so this path has a
+// chance to log before the kubelet SIGKILLs the process.
 func (h HTTPController) Shutdown(timeout time.Duration) {
 	logger.L().Info("purging SBOM creation queue",
 		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
@@ -290,7 +290,7 @@ func (h HTTPController) Shutdown(timeout time.Duration) {
 
 	drained := make(chan struct{})
 	go func() {
-		h.workerPool.StopWait()
+		h.workerPool.Stop() // abandon the queue, wait only for in-flight scans
 		close(drained)
 	}()
 
@@ -298,8 +298,7 @@ func (h HTTPController) Shutdown(timeout time.Duration) {
 	case <-drained:
 		logger.L().Info("SBOM creation queue drained")
 	case <-time.After(timeout):
-		logger.L().Warning("shutdown timeout reached, abandoning queued/running scans",
-			helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
+		logger.L().Warning("shutdown timeout reached, abandoning in-flight scans",
 			helpers.String("timeout", timeout.String()))
 	}
 }
