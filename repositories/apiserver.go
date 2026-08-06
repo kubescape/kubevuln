@@ -664,7 +664,7 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 				return err
 			}
 			// retrieve the latest version before attempting update
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
