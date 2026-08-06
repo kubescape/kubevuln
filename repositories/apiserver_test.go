@@ -757,6 +757,49 @@ func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	})
 }
 
+// TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet guards the
+// data-preservation guard in StoreCVESummaryStub: its retry-path Get must fetch
+// the full object, not request ResourceVersion "metadata" (which kubescape/
+// storage returns as an ObjectMeta-only object with a zeroed Spec). The fake
+// clientset ignores GetOptions, so a behavioral test cannot reproduce the
+// resulting data loss; only an assertion on the requested GetOptions can.
+func TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
+		ContainerName: "local-path-provisioner",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+	resourceName, err := GetCVESummaryK8sResourceName(ctx)
+	require.NoError(t, err)
+
+	// Seed a real summary so the stub's Create returns AlreadyExists and the
+	// retry-path Get executes.
+	real := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: v1beta1.SeveritySummary{
+				High: v1beta1.VulnerabilityCounters{All: 3, Relevant: 1},
+			},
+		},
+	}
+	_, err = wrapped.VulnerabilityManifestSummaries(ns).Create(context.Background(), real, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+
+	require.NotNil(t, wrapped.vulnSummaries[ns], "summary sub-client must have been exercised")
+	require.Empty(t, wrapped.vulnSummaries[ns].getResourceVersion,
+		"StoreCVESummaryStub must not request the metadata-only Get")
+}
+
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 	ctx := context.Background()
 
@@ -1555,11 +1598,13 @@ func (w *ctxCapturingOVECs) Update(ctx context.Context, obj *v1beta1.OpenVulnera
 
 type ctxCapturingVulnerabilityManifestSummaries struct {
 	spdxv1beta1.VulnerabilityManifestSummaryInterface
-	getCtx context.Context
+	getCtx             context.Context
+	getResourceVersion string
 }
 
 func (w *ctxCapturingVulnerabilityManifestSummaries) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifestSummary, error) {
 	w.getCtx = ctx
+	w.getResourceVersion = opts.ResourceVersion
 	return w.VulnerabilityManifestSummaryInterface.Get(ctx, name, opts)
 }
 
