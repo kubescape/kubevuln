@@ -1926,6 +1926,7 @@ func TestAPIServerStore_StoreVEX_RetryConflict_ctxPropagated(t *testing.T) {
 
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestAPIServerStore_StoreCVE_RetryConflict_ctxPropagated(t *testing.T) {
@@ -1958,6 +1959,7 @@ func TestAPIServerStore_StoreCVE_RetryConflict_ctxPropagated(t *testing.T) {
 	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].createCtx)
 	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestAPIServerStore_StoreSBOM_RetryConflict_ctxPropagated(t *testing.T) {
@@ -1990,6 +1992,7 @@ func TestAPIServerStore_StoreSBOM_RetryConflict_ctxPropagated(t *testing.T) {
 	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].createCtx)
 	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestAPIServerStore_StoreSBOMFiltered_RetryConflict_ctxPropagated(t *testing.T) {
@@ -2022,6 +2025,7 @@ func TestAPIServerStore_StoreSBOMFiltered_RetryConflict_ctxPropagated(t *testing
 	requireCanaryCtx(t, wrapped.sbomSyftFiltereds[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.sbomSyftFiltereds[a.Namespace].createCtx)
 	requireCanaryCtx(t, wrapped.sbomSyftFiltereds[a.Namespace].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestAPIServerStore_StoreCVESummary_RetryConflict_ctxPropagated(t *testing.T) {
@@ -2065,6 +2069,7 @@ func TestAPIServerStore_StoreCVESummary_RetryConflict_ctxPropagated(t *testing.T
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].getCtx)
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].createCtx)
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestAPIServerStore_StoreCVESummaryStub_RetryConflict_ctxPropagated(t *testing.T) {
@@ -2107,6 +2112,7 @@ func TestAPIServerStore_StoreCVESummaryStub_RetryConflict_ctxPropagated(t *testi
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].getCtx)
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].createCtx)
 	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].updateCtx)
+	require.Equal(t, 1, conflicts)
 }
 
 func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
