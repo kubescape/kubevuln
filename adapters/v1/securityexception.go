@@ -87,13 +87,20 @@ func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
 }
 
 func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string) armotypes.VulnerabilityExceptionPolicy {
+	vulnerabilityPolicies := []armotypes.VulnerabilityPolicy{
+		{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
+	}
+	for _, alias := range vuln.Vulnerability.Aliases {
+		if a := strings.TrimSpace(alias); a != "" {
+			vulnerabilityPolicies = append(vulnerabilityPolicies, armotypes.VulnerabilityPolicy{Name: a})
+		}
+	}
+
 	p := armotypes.VulnerabilityExceptionPolicy{
-		PolicyType: "vulnerabilityExceptionPolicy",
-		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
-		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
-			{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
-		},
-		Reason: spec.Reason,
+		PolicyType:            "vulnerabilityExceptionPolicy",
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: vulnerabilityPolicies,
+		Reason:                spec.Reason,
 	}
 
 	if spec.ExpiresAt != nil {

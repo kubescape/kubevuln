@@ -335,7 +335,6 @@ func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
 func TestConvertMixedStatusException(t *testing.T) {
 	const underInvestigationID = "CVE-2023-11111"
 	const notAffectedID = "CVE-2023-22222"
-
 	exceptions := []sev1beta1.SecurityException{
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
@@ -433,4 +432,67 @@ func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
 			assert.Empty(t, doc.IgnoredMatches, "under_investigation CVE must not appear in IgnoredMatches")
 		})
 	}
+}
+
+func TestConvertVulnerabilityExceptions_Aliases(t *testing.T) {
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{
+							ID:      "CVE-2021-44228",
+							Aliases: []string{"GHSA-jfh8-c2jp-5v3q", "  GHSA-xxxx-xxxx-xxxx  ", ""},
+						},
+						Status: sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	assert.Len(t, policies, 1)
+	names := make([]string, 0, len(policies[0].VulnerabilityPolicies))
+	for _, vp := range policies[0].VulnerabilityPolicies {
+		names = append(names, vp.Name)
+	}
+	assert.Equal(t, []string{"CVE-2021-44228", "GHSA-jfh8-c2jp-5v3q", "GHSA-xxxx-xxxx-xxxx"}, names)
+}
+
+func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-jfh8-c2jp-5v3q"}}},
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-9999"}}},
+		},
+	}
+
+	// CRD declares the CVE as primary ID and the GHSA grype reports as an alias
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{
+							ID:      "CVE-2021-44228",
+							Aliases: []string{"GHSA-jfh8-c2jp-5v3q"},
+						},
+						Status: sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+
+	assert.Len(t, doc.Matches, 1)
+	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
+	assert.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Vulnerability.ID)
 }
