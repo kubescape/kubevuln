@@ -16,7 +16,22 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
-const maxCrashRetries = 3
+const (
+	maxCrashRetries = 3
+	// retryCountTTL bounds how long a crashed image's retry count is remembered. Without
+	// this, an image that crashes the scanner once or twice and is then never scanned
+	// again (common with CI-generated unique tags/digests) would leave a permanent entry
+	// in retryCount, since the map was previously only ever cleared on success or once
+	// maxCrashRetries was hit (see #473).
+	retryCountTTL = 1 * time.Hour
+)
+
+// crashRetry tracks a per-image crash-retry count and when it was last touched, so stale
+// entries (images that crashed once and were never retried) can be evicted.
+type crashRetry struct {
+	count    int
+	lastSeen time.Time
+}
 
 // SidecarSBOMAdapter implements ports.SBOMCreator by delegating SBOM generation
 // to the sbom-scanner sidecar container via gRPC over a Unix domain socket.
@@ -30,10 +45,10 @@ type SidecarSBOMAdapter struct {
 	memoryLimit       string
 
 	mu         sync.Mutex
-	retryCount map[string]int
+	retryCount map[string]*crashRetry
 
-	versionOnce sync.Once
-	versionStr  string
+	versionMu  sync.Mutex
+	versionStr string
 }
 
 var _ ports.SBOMCreator = (*SidecarSBOMAdapter)(nil)
@@ -56,7 +71,7 @@ func NewSidecarSBOMAdapter(
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 		memoryLimit:       memoryLimit,
-		retryCount:        make(map[string]int),
+		retryCount:        make(map[string]*crashRetry),
 	}
 }
 
@@ -138,8 +153,15 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 
 func (s *SidecarSBOMAdapter) handleCrash(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions, domainSBOM domain.SBOM, crashErr error) (domain.SBOM, error) {
 	s.mu.Lock()
-	s.retryCount[imageID]++
-	retries := s.retryCount[imageID]
+	s.evictStaleRetriesLocked()
+	entry := s.retryCount[imageID]
+	if entry == nil {
+		entry = &crashRetry{}
+		s.retryCount[imageID] = entry
+	}
+	entry.count++
+	entry.lastSeen = time.Now()
+	retries := entry.count
 	s.mu.Unlock()
 
 	logger.L().Warning("SBOM scanner sidecar crashed during scan",
@@ -169,19 +191,46 @@ func (s *SidecarSBOMAdapter) handleCrash(ctx context.Context, name, imageID, ima
 	return domainSBOM, crashErr
 }
 
-func (s *SidecarSBOMAdapter) Version() string {
-	s.versionOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		version, _, err := s.client.Health(ctx)
-		if err != nil {
-			logger.L().Warning("failed to get scanner version", helpers.Error(err))
-			s.versionStr = "unknown"
-			return
+// evictStaleRetriesLocked removes retry-count entries untouched for longer than
+// retryCountTTL, bounding the map's growth for images that crash once and are never
+// scanned again. Called with s.mu held; piggybacks on handleCrash rather than a background
+// goroutine since crashes are rare and this keeps the map bounded without extra machinery.
+func (s *SidecarSBOMAdapter) evictStaleRetriesLocked() {
+	cutoff := time.Now().Add(-retryCountTTL)
+	for imageID, entry := range s.retryCount {
+		if entry.lastSeen.Before(cutoff) {
+			delete(s.retryCount, imageID)
 		}
-		s.versionStr = version
-	})
-	return s.versionStr
+	}
+}
+
+// Version returns the sidecar's Syft version, used as the SBOM/CVE storage cache key
+// (see repositories/apiserver.go's semver comparison against the stored manifest). It only
+// caches a successful Health() result: a failed/timed-out health check is never written to
+// versionStr, so a transient blip (e.g. on cold start) does not permanently pin every scan
+// on this pod to "unknown" and starve the storage cache (see #473) — the next call simply
+// retries instead of returning a value baked in by sync.Once for the rest of the process's
+// life.
+func (s *SidecarSBOMAdapter) Version() string {
+	s.versionMu.Lock()
+	if s.versionStr != "" {
+		defer s.versionMu.Unlock()
+		return s.versionStr
+	}
+	s.versionMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	version, _, err := s.client.Health(ctx)
+	if err != nil {
+		logger.L().Warning("failed to get scanner version", helpers.Error(err))
+		return "unknown"
+	}
+
+	s.versionMu.Lock()
+	s.versionStr = version
+	s.versionMu.Unlock()
+	return version
 }
 
 func (s *SidecarSBOMAdapter) GetMaxImageSize() int64 {

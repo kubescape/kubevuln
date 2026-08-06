@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -121,7 +120,6 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 
 type scannerServer struct {
 	pb.UnimplementedSBOMScannerServer
-	mu      sync.Mutex
 	version string
 }
 
@@ -132,10 +130,14 @@ func NewScannerServer() pb.SBOMScannerServer {
 	}
 }
 
+// CreateSBOM handles one scan per call, with no state shared across concurrent calls: each
+// invocation downloads into its own temp dir (via its own file.NewTempDirGenerator) and builds
+// its own SBOM from its own source. s.version is set once in NewScannerServer and never
+// mutated, so it's safe to read concurrently without a lock. Do not add a mutex/semaphore
+// around this method — a previous version serialized the whole RPC (pull + generation) behind
+// a single process-wide lock, which defeated the caller's scanConcurrency entirely regardless
+// of its configured value (see #473); concurrency is bounded by the caller instead.
 func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMRequest) (*pb.CreateSBOMResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// imageID is already the final, normalized pull reference. The SidecarSBOMAdapter
 	// normalizes it (NormalizeImageID) before sending the request - that is the single
 	// normalization point. Do not normalize again here: re-normalizing an
@@ -275,7 +277,11 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Strip the SBOM to reduce size
 	v1beta1.StripSBOM(syftSBOM)
 
-	// Check in-memory size
+	// Check in-memory size. This is necessarily a post-hoc check: Syft doesn't expose an
+	// incremental/streaming size hook to check MaxSbomSize during cataloging, only once
+	// syft.CreateSBOM above has already returned a complete result (see #473 and the
+	// maxSBOMSize caveat in docs/CONFIGURATION.md). Memory used while generating is bounded
+	// by the scanner container's memory limit, not by MaxSbomSize.
 	sz := size.Of(syftSBOM)
 	if sz > int(req.MaxSbomSize) {
 		logger.L().Warning("SBOM exceeds size limit",

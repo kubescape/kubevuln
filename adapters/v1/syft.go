@@ -244,7 +244,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	// generate SBOM
 	// use a deadline to prevent the process from hanging for too long
-	// TODO check memory usage and see if we can kill the goroutine
 	var syftSBOM *sbom.SBOM
 	// ensure no parallel pulls
 	s.pullMutex.Lock()
@@ -297,7 +296,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	// strip the SBOM to reduce size
 	v1beta1.StripSBOM(syftSBOM)
-	// check the size of the SBOM
+	// check the size of the SBOM. This is necessarily a post-hoc check: Syft doesn't expose
+	// an incremental/streaming size hook to check maxSBOMSize during cataloging, only once
+	// syft.CreateSBOM above has already returned a complete result (see #473 and the
+	// maxSBOMSize caveat in docs/CONFIGURATION.md). Memory used while generating is bounded
+	// by the process's memory limit, not by maxSBOMSize.
 	sz := size.Of(syftSBOM)
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
 	if sz > s.maxSBOMSize {
