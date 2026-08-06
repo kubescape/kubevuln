@@ -83,13 +83,18 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 		imageID = NormalizeImageID(imageID, imageTag)
 	}
 
+	// Resolved once and reused for both fields below: two separate s.Version() calls could
+	// otherwise observe different results (e.g. the first hits a transient Health() failure
+	// and returns "unknown" while a concurrent call succeeds moments later), tagging the same
+	// SBOM with two different creator versions.
+	version := s.Version()
 	domainSBOM := domain.SBOM{
 		Name:               name,
-		SBOMCreatorVersion: s.Version(),
+		SBOMCreatorVersion: version,
 		SBOMCreatorName:    "syft",
 		Annotations: map[string]string{
 			helpersv1.ImageIDMetadataKey:     imageID,
-			helpersv1.ToolVersionMetadataKey: s.Version(),
+			helpersv1.ToolVersionMetadataKey: version,
 		},
 		Labels: tools.LabelsFromImageID(imageID),
 	}

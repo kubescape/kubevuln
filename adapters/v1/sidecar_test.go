@@ -75,6 +75,35 @@ func TestSidecarSBOMAdapter_CreateSBOM_Success(t *testing.T) {
 	assert.Equal(t, "test-pkg", sbom.Content.Artifacts[0].Name)
 }
 
+// TestSidecarSBOMAdapter_CreateSBOM_UsesOneVersionForBothFields is a CodeRabbit regression
+// test: CreateSBOM used to call s.Version() twice — once for SBOMCreatorVersion, once for the
+// ToolVersionMetadataKey annotation — so two independently-resolved calls could disagree
+// (e.g. the first hits a transient Health() failure and returns "unknown" while a second,
+// concurrent call already knows the real version). CreateSBOM must resolve the version once
+// and use that single value for both fields, so a stored SBOM never carries two different
+// creator versions.
+func TestSidecarSBOMAdapter_CreateSBOM_UsesOneVersionForBothFields(t *testing.T) {
+	var callCount int32
+	mock := &mockScannerClient{
+		healthFunc: func(ctx context.Context) (string, bool, error) {
+			atomic.AddInt32(&callCount, 1)
+			return "", false, errors.New("transient health check failure")
+		},
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			return &sbomscanner.ScanResult{Status: helpersv1.Learning}, nil
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "nginx:latest", domain.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), callCount, "CreateSBOM must resolve the version once, not once per field")
+	assert.Equal(t, "unknown", sbom.SBOMCreatorVersion)
+	assert.Equal(t, sbom.SBOMCreatorVersion, sbom.Annotations[helpersv1.ToolVersionMetadataKey],
+		"SBOMCreatorVersion and the ToolVersionMetadataKey annotation must always agree")
+}
+
 func TestSidecarSBOMAdapter_CreateSBOM_TooLarge(t *testing.T) {
 	mock := &mockScannerClient{
 		healthVersion: "v0.100.0",
