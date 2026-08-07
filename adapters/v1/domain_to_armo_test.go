@@ -288,12 +288,12 @@ func Test_linkToVuln(t *testing.T) {
 		{
 			name: "ALAS2 advisory",
 			id:   "ALAS2-2026-123",
-			want: "https://alas.aws.amazon.com/ALAS2-2026-123.html",
+			want: "https://alas.aws.amazon.com/AL2/ALAS-2026-123.html",
 		},
 		{
 			name: "ALAS2023 advisory",
 			id:   "ALAS2023-2026-123",
-			want: "https://alas.aws.amazon.com/ALAS2023-2026-123.html",
+			want: "https://alas.aws.amazon.com/AL2023/ALAS-2026-123.html",
 		},
 		{
 			name: "CVE defaults to NVD",

@@ -263,9 +263,15 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "RLSA-"):
 		return "https://errata.rockylinux.org/" + id
 
-	case strings.HasPrefix(id, "ALAS2023-"),
-		strings.HasPrefix(id, "ALAS2-"),
-		strings.HasPrefix(id, "ALAS-"):
+	case strings.HasPrefix(id, "ALAS2023-"):
+		return "https://alas.aws.amazon.com/AL2023/ALAS-" +
+			strings.TrimPrefix(id, "ALAS2023-") + ".html"
+
+	case strings.HasPrefix(id, "ALAS2-"):
+		return "https://alas.aws.amazon.com/AL2/ALAS-" +
+			strings.TrimPrefix(id, "ALAS2-") + ".html"
+
+	case strings.HasPrefix(id, "ALAS-"):
 		return "https://alas.aws.amazon.com/" + id + ".html"
 
 	default:

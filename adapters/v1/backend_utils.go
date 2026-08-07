@@ -108,10 +108,9 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	}
 }
 
-// postResults posts a single report and returns the failure, if any, so a synchronous caller
-// (sendSummaryAndVulnerabilities, for the summary report) can react to it. Goroutine-wrapped
-// callers (postResultsAsGoroutine, for chunk reports) additionally get the same failure via
-// errorChan, since nothing is synchronously waiting on their return value.
+// postResults returns any posting error to the caller.
+// Goroutine callers are responsible for forwarding the returned
+// error to errorChan if needed.
 func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) error {
 	payload, err := json.Marshal(report)
 	if err != nil {
