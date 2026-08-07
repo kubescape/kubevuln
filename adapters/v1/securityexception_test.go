@@ -63,6 +63,60 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 	assert.Nil(t, policies[1].Designatores)
 }
 
+func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-log4shell", Namespace: "prod"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Reason: "accepted risk",
+				Match: sev1beta1.ExceptionMatch{
+					Resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "web"}},
+				},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability:   sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:          sev1beta1.VulnerabilityStatusNotAffected,
+						Justification:   "vulnerable code path is unreachable",
+						ImpactStatement: "no network exposure",
+					},
+				},
+			},
+		},
+	}
+	clusterExceptions := []sev1beta1.ClusterSecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-cluster-wide"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Reason: "cluster-wide",
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2022-12345"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{Kind: "Deployment", Name: "web"})
+	require.Len(t, policies, 2)
+
+	nsPolicy := policies[0]
+	assert.Equal(t, "allow-log4shell", nsPolicy.Name)
+	assert.Equal(t, "SecurityException", nsPolicy.Attributes["sourceKind"])
+	assert.Equal(t, "prod", nsPolicy.Attributes["sourceNamespace"])
+	assert.Equal(t, "vulnerable code path is unreachable", nsPolicy.Attributes["justification"])
+	assert.Equal(t, "no network exposure", nsPolicy.Attributes["impactStatement"])
+	assert.Equal(t, "prod/Deployment/web", nsPolicy.Attributes["normalizedTarget"])
+
+	clusterPolicy := policies[1]
+	assert.Equal(t, "allow-cluster-wide", clusterPolicy.Name)
+	assert.Equal(t, "ClusterSecurityException", clusterPolicy.Attributes["sourceKind"])
+	_, hasNamespace := clusterPolicy.Attributes["sourceNamespace"]
+	assert.False(t, hasNamespace, "cluster-scoped exceptions have no source namespace")
+	assert.Equal(t, "cluster-wide", clusterPolicy.Attributes["normalizedTarget"])
+}
+
 func TestConvertExpiredOnFix(t *testing.T) {
 	tests := []struct {
 		name         string
