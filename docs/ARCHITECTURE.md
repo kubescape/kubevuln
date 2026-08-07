@@ -243,6 +243,7 @@ Responsibilities:
 │  Endpoints:                                                  │
 │  ├── GET  /v1/liveness   → Alive()                          │
 │  ├── GET  /v1/readiness  → Ready()                          │
+│  ├── GET  /metrics       → Prometheus exposition            │
 │  ├── POST /v1/sbomCreation           → GenerateSBOM()       │
 │  ├── POST /v1/scanImage              → ScanCVE()            │
 │  ├── POST /v1/scanRegistryImage      → ScanRegistry()       │

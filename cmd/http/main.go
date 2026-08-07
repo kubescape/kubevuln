@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -121,12 +122,22 @@ func main() {
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
+	m, err := metrics.New()
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("metrics initialization error", helpers.Error(err))
+	}
+	controller, err = controller.WithMetrics(m)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("metrics registration error", helpers.Error(err))
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	router.GET("/v1/liveness", controller.Alive)
 	router.GET("/v1/readiness", controller.Ready)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
 
 	group := router.Group(apis.VulnerabilityScanCommandVersion)
 	{
@@ -174,6 +185,10 @@ func main() {
 	// Purging the controller worker queue, bounded by ShutdownTimeout so this
 	// doesn't silently run past the pod's terminationGracePeriodSeconds
 	controller.Shutdown(c.ShutdownTimeout)
+
+	if err := m.Shutdown(srvCtx); err != nil {
+		logger.L().Ctx(srvCtx).Error("metrics provider shutdown error", helpers.Error(err))
+	}
 
 	logger.L().Info("kubevuln exiting")
 }
