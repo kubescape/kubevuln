@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -21,6 +21,7 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -33,6 +34,28 @@ import (
 func isGCPRegistry(imageID string) bool {
 	host, _, _ := strings.Cut(imageID, "/")
 	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
+}
+
+// isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
+//
+// The typed check alone is not enough: stereoscope's registry provider formats the
+// go-containerregistry pull error with %+v, not %w (see
+// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
+// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
+// registry error code emitted when the response carries a JSON error body (e.g. Docker
+// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
+// Error() text when the response body was empty.
+func isRegistryRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	var transportErr *transport.Error
+	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
@@ -97,7 +120,6 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 
 type scannerServer struct {
 	pb.UnimplementedSBOMScannerServer
-	mu      sync.Mutex
 	version string
 }
 
@@ -108,10 +130,22 @@ func NewScannerServer() pb.SBOMScannerServer {
 	}
 }
 
+// CreateSBOM handles one scan per call, with no state shared across concurrent calls: each
+// invocation downloads into its own temp dir (via its own file.NewTempDirGenerator) and builds
+// its own SBOM from its own source. s.version is set once in NewScannerServer and never
+// mutated, so it's safe to read concurrently without a lock. Do not add a mutex/semaphore
+// around this method — a previous version serialized the whole RPC (pull + generation) behind
+// a single process-wide lock, which defeated the caller's scanConcurrency entirely regardless
+// of its configured value (see #473); the number of concurrent in-flight RPCs is bounded by
+// the caller instead, matching scanConcurrency.
+//
+// That bound is on in-flight RPCs, not on actual Syft resource usage: syft.CreateSBOM below
+// runs on context.Background() and Syft's catalogers don't support cancellation, so when
+// dl.Run times out and this RPC returns Incomplete, the abandoned Syft goroutine can keep
+// consuming CPU/memory in the background after the caller already considers that slot free
+// and starts another scan. scanConcurrency therefore bounds concurrent requests, not peak
+// concurrent Syft memory/CPU use, on this path.
 func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMRequest) (*pb.CreateSBOMResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// imageID is already the final, normalized pull reference. The SidecarSBOMAdapter
 	// normalizes it (NormalizeImageID) before sending the request - that is the single
 	// normalization point. Do not normalize again here: re-normalizing an
@@ -183,6 +217,15 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
 		}, nil
+	case err != nil && isRegistryRateLimited(err):
+		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
+		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
+		// ScanService.checkCreateSBOM's errors.As(...) check working the same way it does
+		// for the in-process syft adapter.
+		return &pb.CreateSBOMResponse{
+			ErrorMessage: err.Error(),
+			StatusReason: domain.ReasonTooManyRequests,
+		}, nil
 	case err != nil:
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
@@ -242,7 +285,11 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Strip the SBOM to reduce size
 	v1beta1.StripSBOM(syftSBOM)
 
-	// Check in-memory size
+	// Check in-memory size. This is necessarily a post-hoc check: Syft doesn't expose an
+	// incremental/streaming size hook to check MaxSbomSize during cataloging, only once
+	// syft.CreateSBOM above has already returned a complete result (see #473 and the
+	// maxSBOMSize caveat in docs/CONFIGURATION.md). Memory used while generating is bounded
+	// by the scanner container's memory limit, not by MaxSbomSize.
 	sz := size.Of(syftSBOM)
 	if sz > int(req.MaxSbomSize) {
 		logger.L().Warning("SBOM exceeds size limit",

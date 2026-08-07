@@ -20,6 +20,8 @@ import (
 	"github.com/kubescape/kubevuln/controllers"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -121,12 +123,37 @@ func main() {
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
+	m, err := metrics.New()
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("metrics initialization error", helpers.Error(err))
+	}
+	controller, err = controller.WithMetrics(m)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("metrics registration error", helpers.Error(err))
+	}
+
+	// Best-effort startup sweep: reclaim stereoscope temp dirs orphaned by previous process
+	// invocations killed by SIGKILL (OOM kill, or terminationGracePeriodSeconds exceeded)
+	// before their defer-based cleanup could run. The threshold is ScanTimeout: the main
+	// process and the SBOM-scanner sidecar run in the same Pod on the same machine (same
+	// kernel clock), so no clock-skew margin is needed, and a dir idle longer than
+	// ScanTimeout can only belong to a dead or already-timed-out scan.
+	if removed, err := tools.CleanupStaleTempDirs(os.TempDir(), "stereoscope-", c.ScanTimeout); err != nil {
+		logger.L().Ctx(ctx).Warning("startup temp dir sweep error",
+			helpers.Error(err),
+			helpers.Int("removed", removed))
+	} else if removed > 0 {
+		logger.L().Ctx(ctx).Info("startup temp dir sweep complete",
+			helpers.Int("removed", removed))
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	router.GET("/v1/liveness", controller.Alive)
 	router.GET("/v1/readiness", controller.Ready)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
 
 	group := router.Group(apis.VulnerabilityScanCommandVersion)
 	{
@@ -158,16 +185,26 @@ func main() {
 	stop()
 	logger.L().Info("shutting down gracefully")
 
-	// modify context to inform the server it has 5 seconds to finish
-	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.L().Ctx(ctx).Fatal("server forced to shutdown", helpers.Error(err))
+	// Give the HTTP server up to 5 seconds to finish in-flight requests. This must be
+	// derived from context.Background(), not the signal ctx above: that one is already
+	// Done() by this point (we only got here via <-ctx.Done()), so deriving from it
+	// would hand srv.Shutdown an already-expired context and return immediately.
+	srvCtx, srvCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer srvCancel()
+	if err := srv.Shutdown(srvCtx); err != nil {
+		// Log and continue rather than exit: a failed/timed-out HTTP shutdown must not
+		// skip the worker-pool drain below, since that's where actual queued/running
+		// scan work would otherwise be silently lost (#467).
+		logger.L().Ctx(srvCtx).Error("server shutdown error", helpers.Error(err))
 	}
 
-	// Purging the controller worker queue
-	controller.Shutdown()
+	// Purging the controller worker queue, bounded by ShutdownTimeout so this
+	// doesn't silently run past the pod's terminationGracePeriodSeconds
+	controller.Shutdown(c.ShutdownTimeout)
+
+	if err := m.Shutdown(srvCtx); err != nil {
+		logger.L().Ctx(srvCtx).Error("metrics provider shutdown error", helpers.Error(err))
+	}
 
 	logger.L().Info("kubevuln exiting")
 }

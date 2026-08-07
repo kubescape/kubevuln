@@ -1,10 +1,14 @@
 package tools
 
 import (
+	"os"
+	"path"
 	"testing"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPackageVersion(t *testing.T) {
@@ -227,4 +231,84 @@ func TestReferenceMatchForms(t *testing.T) {
 			assert.Equal(t, tt.want, ReferenceMatchForms(tt.ref))
 		})
 	}
+}
+
+func TestCleanupStaleTempDirs(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, dir string)
+		prefix  string
+		age     time.Duration
+		wantN   int
+		wantErr bool
+	}{
+		{
+			name: "old matching dirs removed, fresh and unrelated kept",
+			setup: func(t *testing.T, dir string) {
+				old := time.Now().Add(-2 * time.Hour)
+				for _, d := range []string{"stereoscope-aaa", "stereoscope-bbb"} {
+					require.NoError(t, os.Mkdir(path.Join(dir, d), 0o755))
+					require.NoError(t, os.Chtimes(path.Join(dir, d), old, old))
+				}
+				require.NoError(t, os.Mkdir(path.Join(dir, "stereoscope-new"), 0o755))
+				require.NoError(t, os.Mkdir(path.Join(dir, "other-xyz"), 0o755))
+				require.NoError(t, os.Chtimes(path.Join(dir, "other-xyz"), old, old))
+			},
+			prefix: "stereoscope-",
+			age:    time.Hour,
+			wantN:  2,
+		},
+		{
+			name: "dir clearly younger than threshold is kept",
+			setup: func(t *testing.T, dir string) {
+				// cutoff = now-1h is computed inside CleanupStaleTempDirs, which runs AFTER
+				// this setup, so an exact -1h mtime would already be older than cutoff and be
+				// removed. A clear 5s margin inside the threshold makes the "kept" assertion
+				// deterministic regardless of clock drift.
+				inside := time.Now().Add(-1*time.Hour + 5*time.Second)
+				require.NoError(t, os.Mkdir(path.Join(dir, "stereoscope-edge"), 0o755))
+				require.NoError(t, os.Chtimes(path.Join(dir, "stereoscope-edge"), inside, inside))
+			},
+			prefix: "stereoscope-",
+			age:    time.Hour,
+			wantN:  0,
+		},
+		{
+			name:    "empty dir returns zero and no error",
+			setup:   func(t *testing.T, dir string) {},
+			prefix:  "stereoscope-",
+			age:     time.Hour,
+			wantN:   0,
+			wantErr: false,
+		},
+		{
+			name: "no matching prefix removes nothing",
+			setup: func(t *testing.T, dir string) {
+				old := time.Now().Add(-2 * time.Hour)
+				require.NoError(t, os.Mkdir(path.Join(dir, "other-dir"), 0o755))
+				require.NoError(t, os.Chtimes(path.Join(dir, "other-dir"), old, old))
+			},
+			prefix: "stereoscope-",
+			age:    time.Hour,
+			wantN:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			n, err := CleanupStaleTempDirs(dir, tt.prefix, tt.age)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantN, n)
+		})
+	}
+}
+
+func TestCleanupStaleTempDirs_NonexistentDir(t *testing.T) {
+	_, err := CleanupStaleTempDirs(path.Join(t.TempDir(), "does-not-exist"), "stereoscope-", time.Hour)
+	require.Error(t, err)
 }

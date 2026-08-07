@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -77,12 +78,36 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 func (s *ScanService) checkCreateSBOM(err error, key string) {
-	if err != nil {
-		var transportError *transport.Error
-		if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
-			s.tooManyRequests.Set(key, true, ttl)
-		}
+	if isRegistryRateLimitedErr(err) {
+		s.tooManyRequests.Set(key, true, ttl)
 	}
+}
+
+// isRegistryRateLimitedErr reports whether err indicates the image pull was rate limited.
+// It recognizes three shapes:
+//   - domain.ErrTooManyRequests: the sentinel SidecarSBOMAdapter.CreateSBOM wraps its
+//     returned error with once the sidecar scanner reports a 429 (see adapters/v1/sidecar.go).
+//   - *transport.Error with StatusCode 429: what the in-process syft adapter would return
+//     if the error reached here unwrapped.
+//   - the rendered error text: stereoscope's registry provider formats the
+//     go-containerregistry pull error with %+v, not %w, which severs the errors.As chain
+//     for *transport.Error before it ever reaches here (mirrors
+//     pkg/sbomscanner/v1.isRegistryRateLimited, which has the same problem on the sidecar
+//     side of the same pull path).
+func isRegistryRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		return true
+	}
+	var transportError *transport.Error
+	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
 }
 
 // GenerateSBOM implements the "Generate SBOM flow"
@@ -219,9 +244,19 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// if SBOM is not available, create it
 			if sbom.Content == nil {
 				if s.sbomGeneration {
+					// a previous container in this loop (or a previous request) may have
+					// already recorded this exact image as rate limited; skip pulling it
+					// again instead of hammering the registry with another attempt
+					if _, ok := s.tooManyRequests.Get(subWorkload.ImageHash); ok {
+						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+							helpers.String("imageSlug", slug))
+						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+							scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+						continue
+					}
 					// create SBOM
 					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, scan.ImageID)
+					s.checkCreateSBOM(err, subWorkload.ImageHash)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
@@ -278,7 +313,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-			filteredCve := s.applyExceptionsToManifest(ctx, cve)
+			filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
 
 			// store filtered CVE
 			if s.storage {
@@ -296,18 +331,41 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				}
 			}
 		} else {
-			filteredCve := s.applyExceptionsToManifest(ctx, cve)
+			// A cached manifest was filtered against the exception set at store time.
+			// Reconstruct the unfiltered manifest so the CURRENT exception set is
+			// re-evaluated (deleted exceptions and ExpiredOnFix transitions
+			// un-suppress findings) and SubmitCVE/StoreVEX receive the same
+			// unfiltered data a cache miss would produce.
+			prevIgnored := v1.IgnoredMatchKeys(cve.Content)
+			cve.Content = v1.RestoreSuppressedMatches(cve.Content)
+			filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
-			if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
-				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-				}
-				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", slug))
+			if s.storage {
+				curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+				if !maps.Equal(prevIgnored, curIgnored) {
+					// Persist additions freely, but never persist removals when the
+					// exception set is incomplete: a transient SecurityException CRD
+					// list failure must not look like a deletion and wipe suppression
+					// from the stored manifest.
+					hasRemovals := false
+					for k := range prevIgnored {
+						if _, ok := curIgnored[k]; !ok {
+							hasRemovals = true
+							break
+						}
+					}
+					if exceptionsComplete || !hasRemovals {
+						err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+						if err != nil {
+							logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+								helpers.String("imageSlug", slug))
+						}
+						err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+						if err != nil {
+							logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+								helpers.String("imageSlug", slug))
+						}
+					}
 				}
 			}
 		}
@@ -343,7 +401,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-			filteredCvep := s.applyExceptionsToManifest(ctx, cvep)
+			filteredCvep, _ := s.applyExceptionsToManifest(ctx, cvep)
 
 			// store filtered CVE'
 			if s.storage {
@@ -487,7 +545,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve := s.applyExceptionsToManifest(ctx, cve)
+		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
 
 		// store filtered CVE
 		if s.storage {
@@ -503,18 +561,41 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			}
 		}
 	} else {
-		filteredCve := s.applyExceptionsToManifest(ctx, cve)
+		// A cached manifest was filtered against the exception set at store time.
+		// Reconstruct the unfiltered manifest so the CURRENT exception set is
+		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
+		// un-suppress findings) and SubmitCVE receives the same unfiltered data a
+		// cache miss would produce.
+		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
+		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
-		if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
+		if s.storage {
+			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+			if !maps.Equal(prevIgnored, curIgnored) {
+				// Persist additions freely, but never persist removals when the
+				// exception set is incomplete: a transient SecurityException CRD
+				// list failure must not look like a deletion and wipe suppression
+				// from the stored manifest.
+				hasRemovals := false
+				for k := range prevIgnored {
+					if _, ok := curIgnored[k]; !ok {
+						hasRemovals = true
+						break
+					}
+				}
+				if exceptionsComplete || !hasRemovals {
+					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+				}
 			}
 		}
 	}
@@ -620,24 +701,30 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
 // SecurityException policies applied. The original manifest is not mutated,
-// so callers can still use it for SubmitCVE (cloud reporting).
-func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.CVEManifest) domain.CVEManifest {
+// so callers can still use it for SubmitCVE (cloud reporting). The returned
+// bool reports whether the current exception set is known complete. A hard
+// fetch failure returns the manifest unfiltered with complete=false; a degraded
+// fetch (ErrExceptionsDegraded) still applies the partial set but reports
+// complete=false, so callers never persist "removals" computed from an
+// incomplete set.
+func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.CVEManifest) (domain.CVEManifest, bool) {
 	if cve.Content == nil {
-		return cve
+		return cve, false
 	}
 	exceptions, err := s.platform.GetCVEExceptions(ctx)
-	if err != nil {
+	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
+	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
-		return cve
+		return cve, false
 	}
 	if len(exceptions) == 0 {
-		return cve
+		return cve, !degraded
 	}
 	filtered := cve
 	docCopy := cve.Content.DeepCopy()
 	v1.ApplySecurityExceptions(docCopy, exceptions)
 	filtered.Content = docCopy
-	return filtered
+	return filtered, !degraded
 }
 
 func addTimestamp(ctx context.Context) context.Context {

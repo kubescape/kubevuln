@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,7 +174,7 @@ func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
 		scanService: services.NewMockScanService(true),
 		workerPool:  workerpool.New(1),
 	}
-	defer c.Shutdown()
+	defer c.Shutdown(5 * time.Second)
 
 	// gin.New() rather than gin.Default() so a regression that panics surfaces
 	// as an unrecovered panic in this test instead of being masked by
@@ -190,6 +191,38 @@ func TestHTTPController_ScanCP_MissingArgsDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		router.ServeHTTP(w, req)
 	})
+}
+
+// TestHTTPController_Shutdown_BoundedByTimeout is a regression test for #467: Shutdown
+// used to delegate straight to workerPool.StopWait(), which blocks until every queued and
+// currently-running task finishes with no deadline of its own. A single stuck task (e.g. a
+// scan blocked on a backend call that ignores ctx cancellation, see #450) could therefore
+// hang shutdown indefinitely, well past Kubernetes' terminationGracePeriodSeconds, ending in
+// a silent SIGKILL instead of a bounded, logged abandonment.
+func TestHTTPController_Shutdown_BoundedByTimeout(t *testing.T) {
+	c := HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+
+	blocked := make(chan struct{})
+	c.workerPool.Submit(func() {
+		<-blocked
+	})
+	// Unblock the stuck task once the test is done so the pool's background dispatcher
+	// goroutine (still draining in the background after Shutdown's timeout fires) can
+	// actually finish instead of leaking for the rest of the test binary's lifetime.
+	defer close(blocked)
+
+	const timeout = 100 * time.Millisecond
+	start := time.Now()
+	c.Shutdown(timeout)
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 2*time.Second,
+		"Shutdown should return once its timeout elapses instead of blocking on a stuck task")
+	assert.GreaterOrEqual(t, elapsed, timeout,
+		"Shutdown should not return before its timeout when the pool hasn't drained yet")
 }
 
 func TestHTTPController_ScanRegistry(t *testing.T) {
@@ -377,7 +410,7 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 		scanService: spy,
 		workerPool:  workerpool.New(4),
 	}
-	defer c.Shutdown()
+	defer c.Shutdown(5 * time.Second)
 
 	router := gin.Default()
 	router.POST("/v1/generateSBOM", c.GenerateSBOM)
@@ -479,4 +512,102 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+}
+
+func TestHTTPController_MetricsEndpoint(t *testing.T) {
+	c := NewHTTPController(services.NewMockScanService(true), 1)
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	c.Shutdown(5 * time.Second)
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, "kubevuln_scans_completed_total"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_worker_pool_queue_depth"), body)
+}
+
+func TestHTTPController_MetricsEndpoint_RecordsRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrTooManyRequests},
+		workerPool:  workerpool.New(1),
+	}
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `reason="too_many_requests"`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="too_many_requests"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
+}
+
+// TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection is a
+// regression test: a malformed-payload validation error (not ErrTooManyRequests)
+// must be recorded under reason="invalid_request", and must NOT be conflated with
+// the too_many_requests series that rate-limit alerts key off of.
+func TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrMissingImageInfo},
+		workerPool:  workerpool.New(1),
+	}
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.NotEqual(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="too_many_requests"`), body)
 }

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
@@ -121,7 +122,7 @@ func TestScan(t *testing.T) {
 			assert.Equal(t, test.expectedCode, w.Code, w.Code)
 			assert.Equal(t, test.expectedBody, w.Body.String(), w.Body.String())
 
-			controller.Shutdown()
+			controller.Shutdown(5 * time.Second)
 		})
 	}
 }

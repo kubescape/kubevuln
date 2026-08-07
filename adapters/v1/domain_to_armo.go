@@ -244,8 +244,36 @@ func linkToVuln(id string) string {
 	switch {
 	case strings.HasPrefix(id, "EUVD-"):
 		return "https://euvd.enisa.europa.eu/enisa/" + id
+
 	case strings.HasPrefix(id, "GHSA-"):
 		return "https://github.com/advisories/" + id
+
+	case strings.HasPrefix(id, "RHSA-"):
+		return "https://access.redhat.com/errata/" + id
+
+	case strings.HasPrefix(id, "USN-"):
+		return "https://ubuntu.com/security/notices/" + id + "/"
+
+	case strings.HasPrefix(id, "DSA-"):
+		return "https://security-tracker.debian.org/tracker/" + id
+
+	case strings.HasPrefix(id, "ELSA-"):
+		return "https://linux.oracle.com/errata/" + id + ".html"
+
+	case strings.HasPrefix(id, "RLSA-"):
+		return "https://errata.rockylinux.org/" + id
+
+	case strings.HasPrefix(id, "ALAS2023-"):
+		return "https://alas.aws.amazon.com/AL2023/ALAS-" +
+			strings.TrimPrefix(id, "ALAS2023-") + ".html"
+
+	case strings.HasPrefix(id, "ALAS2-"):
+		return "https://alas.aws.amazon.com/AL2/ALAS-" +
+			strings.TrimPrefix(id, "ALAS2-") + ".html"
+
+	case strings.HasPrefix(id, "ALAS-"):
+		return "https://alas.aws.amazon.com/" + id + ".html"
+
 	default:
 		return "https://nvd.nist.gov/vuln/detail/" + id
 	}

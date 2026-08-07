@@ -93,10 +93,16 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 	wg.Add(1)
 	go func(report v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
+ refactor/postresults-error-handling
 		// postResults returns errors to the caller. Since this function runs in a
 		// goroutine and nothing is synchronously waiting on the return value, it
 		// forwards any returned error to errorChan.
 		if err := a.postResults(ctx, report, eventReceiverURL, imagetag, wlid); err != nil {
+
+		// failure is reported to the caller via errorChan, not the return value, for chunks
+		// sent from a goroutine
+		if err := a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, nil); err != nil {
+ main
 			sendError(ctx, errorChan, err)
 		}
 	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
@@ -108,12 +114,18 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 		beServer.AccessKeyHeader: a.accessKey,
 	}
 }
-
+ refactor/postresults-error-handling
 // postResults posts a single report and returns any error to the caller.
 // Synchronous callers handle the returned error directly, while
 // postResultsAsGoroutine forwards returned errors to errorChan because
 // nothing is synchronously waiting on the goroutine's return value.
 func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string) error {
+
+// postResults returns any posting error to the caller.
+// Goroutine callers are responsible for forwarding the returned
+// error to errorChan if needed.
+func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) error {
+main
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),

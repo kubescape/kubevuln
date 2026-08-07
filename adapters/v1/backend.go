@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -200,12 +201,15 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	// Merge CRD-based exceptions
+	degraded := false
 	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if crdErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
-		// This is a best-effort degradation that self-heals on the next scan;
-		// caching it would suppress valid CRD exceptions for the full TTL.
+		// Best-effort degradation that self-heals on the next scan. The set is
+		// incomplete: caching it would suppress valid CRD exceptions for the full
+		// TTL, and callers must not persist "removals" computed from it.
 		cacheable = false
+		degraded = true
 	} else if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
@@ -214,14 +218,19 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		// A selector-based exception whose labels failed to resolve fails closed
 		// (see matchExceptionTarget), which is also a self-healing degradation and
 		// must not be cached as if it were the authoritative result.
-		if (usesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
-			(usesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
+		if (UsesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
+			(UsesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
 			cacheable = false
+			degraded = true
 		}
 	}
 
 	if cacheable && a.exceptionsCache != nil {
 		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
+	}
+
+	if degraded {
+		return vulnExceptionList, domain.ErrExceptionsDegraded
 	}
 
 	return vulnExceptionList, nil
@@ -384,7 +393,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 
 	// get exceptions
 	exceptions, err := a.GetCVEExceptions(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrExceptionsDegraded) {
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
 	// convert to vulnerabilities
@@ -407,16 +416,8 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		if err != nil {
 			return fmt.Errorf("failed to convert filtered vulnerabilities to report: %w", err)
 		}
-		// index relevantVulnerabilities
-		cvepIndices := map[string]struct{}{}
-		for _, v := range relevantVulnerabilities {
-			cvepIndices[v.Name] = struct{}{}
-		}
 		// mark common vulnerabilities as relevant
-		for i, v := range vulnerabilities {
-			_, isRelevant := cvepIndices[v.Name]
-			vulnerabilities[i].IsRelevant = &isRelevant
-		}
+		markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities)
 	}
 
 	finalReport := v1.ScanResultReport{
@@ -519,4 +520,20 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
 	logger.L().Debug("httpPostDebug", helpers.String("fullURL", fullURL), helpers.Interface("headers", headers), helpers.String("body", string(body)))
 	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
+}
+
+// markRelevantVulnerabilities annotates each vulnerability with IsRelevant=true iff the same
+// (CVE, package) pair also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would
+// mark a CVE relevant on every package it affects even when only one of those packages was
+// executed; the pair is the record identity (see RelatedPackageName in DomainToArmo and the
+// uniqueness assertion in backend_test.go).
+func markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities []cs.CommonContainerVulnerabilityResult) {
+	cvepIndices := make(map[string]struct{}, len(relevantVulnerabilities))
+	for _, v := range relevantVulnerabilities {
+		cvepIndices[v.Name+"+"+v.RelatedPackageName] = struct{}{}
+	}
+	for i, v := range vulnerabilities {
+		_, isRelevant := cvepIndices[v.Name+"+"+v.RelatedPackageName]
+		vulnerabilities[i].IsRelevant = &isRelevant
+	}
 }

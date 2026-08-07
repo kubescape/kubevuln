@@ -119,6 +119,9 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Aborted) {
 			return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
 		}
+		if ok && st.Code() == codes.DeadlineExceeded {
+			return nil, fmt.Errorf("scan timeout: %w: %v", context.DeadlineExceeded, err)
+		}
 		return nil, err
 	}
 

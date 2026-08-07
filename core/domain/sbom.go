@@ -10,9 +10,10 @@ const (
 	MaxSBOMSizeAnnotationKey        = "kubescape.io/max-sbom-size"
 	ScannerMemoryLimitAnnotationKey = "kubescape.io/scanner-memory-limit"
 
-	ReasonImageTooLarge = "image-too-large"
-	ReasonSBOMTooLarge  = "sbom-too-large"
-	ReasonScannerOOM    = "scanner-oom"
+	ReasonImageTooLarge   = "image-too-large"
+	ReasonSBOMTooLarge    = "sbom-too-large"
+	ReasonScannerOOM      = "scanner-oom"
+	ReasonTooManyRequests = "too-many-requests"
 )
 
 // SBOM contains an syft SBOM in JSON format with some metadata

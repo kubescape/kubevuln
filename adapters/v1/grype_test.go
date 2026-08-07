@@ -25,6 +25,9 @@ import (
 func Test_grypeAdapter_DBVersion(t *testing.T) {
 	ctx := context.TODO()
 	g, terminate, err := NewGrypeAdapterFixedDB()
+	if errors.Is(err, ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
 	require.NoError(t, err)
 	defer terminate()
 	g.Ready(ctx) // need to call ready to load the DB
@@ -65,6 +68,9 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 		},
 	}
 	g, terminate, err := NewGrypeAdapterFixedDB()
+	if errors.Is(err, ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
 	require.NoError(t, err)
 	defer terminate()
 	ctx := context.TODO()

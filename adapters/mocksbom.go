@@ -41,7 +41,12 @@ func (m MockSBOMAdapter) CreateSBOM(_ context.Context, name, imageID, imageTag s
 		return domain.SBOM{}, domain.ErrMockError
 	}
 	if m.toomanyrequests {
-		return domain.SBOM{}, fmt.Errorf("failed to get image descriptor from registry: %w",
+		// %+v, not %w, mirrors stereoscope's real registry_provider.go wrapping: the
+		// typed *transport.Error does not survive as an unwrappable error, only its
+		// rendered text does. checkCreateSBOM/isRegistryRateLimited must be able to
+		// recognize a 429 from that text alone, or this test double would mask exactly
+		// the bug it's meant to catch.
+		return domain.SBOM{}, fmt.Errorf("failed to get image descriptor from registry: %+v",
 			&transport.Error{
 				StatusCode: http.StatusTooManyRequests,
 			},
