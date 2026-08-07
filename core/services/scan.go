@@ -558,38 +558,108 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			helpers.String("imageSlug", workload.ImageSlug))
 	}
 
-	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
-	s.checkCreateSBOM(err, workload.ImageTagNormalized)
-	if err != nil {
-		repErr := s.platform.ReportError(ctx, err)
-		if repErr != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+	// check if CVE manifest is already available
+	cve := domain.CVEManifest{}
+	if s.storage {
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			classifySBOMError(err), err)
-		return err
 	}
 
-	// do not process timed out SBOM
-	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
-		return domain.ErrIncompleteSBOM
-	}
-
-	// scan for CVE
-	cve, err := s.cveScanner.ScanSBOM(ctx, sbom)
-	if err != nil {
-		repErr := s.platform.ReportError(ctx, err)
-		if repErr != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
-				helpers.String("imageSlug", workload.ImageSlug))
+	sbom := domain.SBOM{}
+	if cve.Content == nil {
+		if s.storage {
+			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
 		}
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
-			scanfailure.ReasonCVEMatchingFailed, err)
-		return err
+
+		if sbom.Content == nil {
+			// create SBOM
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+			s.checkCreateSBOM(err, workload.ImageTagNormalized)
+			if err != nil {
+				repErr := s.platform.ReportError(ctx, err)
+				if repErr != nil {
+					logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+					classifySBOMError(err), err)
+				return err
+			}
+
+			if s.storage {
+				err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+		}
+
+		// do not process timed out SBOM
+		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+				classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
+			return domain.ErrIncompleteSBOM
+		}
+
+		// scan for CVE
+		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
+		if err != nil {
+			repErr := s.platform.ReportError(ctx, err)
+			if repErr != nil {
+				logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
+				scanfailure.ReasonCVEMatchingFailed, err)
+			return err
+		}
+
+		// apply security exceptions for storage
+		filteredCve := s.applyExceptionsToManifest(ctx, cve)
+
+		// store filtered CVE
+		if s.storage {
+			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			if s.vexGeneration {
+				err = s.cveRepository.StoreVEX(ctx, cve, domain.CVEManifest{}, false)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+		}
+	} else {
+		filteredCve := s.applyExceptionsToManifest(ctx, cve)
+
+		if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
+			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+		}
 	}
 
 	// report scan success to platform

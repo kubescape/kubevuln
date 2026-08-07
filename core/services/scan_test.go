@@ -714,6 +714,46 @@ func TestScanService_ScanRegistry(t *testing.T) {
 	}
 }
 
+func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
+	t.Run("ScanRegistry applies exceptions and persists to storage", func(t *testing.T) {
+		mockPlatform := adapters.NewMockPlatform(false, &repositories.NoOpSecurityExceptionRepository{})
+		storage := repositories.NewMemoryStorage(false, false)
+		sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+		cveAdapter := adapters.NewMockCVEAdapter()
+
+		s := NewScanService(
+			sbomAdapter,
+			storage,
+			cveAdapter,
+			storage,
+			mockPlatform,
+			adapters.NewMockRelevancyAdapter(),
+			true,  // storage enabled
+			true,  // vexGeneration enabled
+			true,  // sbomGeneration enabled
+			false, // storeFilteredSbom
+			false, // partialRelevancy
+		)
+
+		workload := domain.ScanCommand{
+			ImageSlug:          "test-registry-image",
+			ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+			JobID:              "job-123",
+		}
+
+		ctx, err := s.ValidateScanRegistry(context.Background(), workload)
+		require.NoError(t, err)
+
+		err = s.ScanRegistry(ctx)
+		require.NoError(t, err)
+
+		// Verify CVE is stored in storage
+		storedCVE, err := storage.GetCVE(ctx, workload.ImageSlug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
+		require.NoError(t, err)
+		assert.NotNil(t, storedCVE.Content)
+	})
+}
+
 func TestScanService_ValidateScanRegistry(t *testing.T) {
 	tests := []struct {
 		name     string
