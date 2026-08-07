@@ -77,12 +77,36 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 func (s *ScanService) checkCreateSBOM(err error, key string) {
-	if err != nil {
-		var transportError *transport.Error
-		if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
-			s.tooManyRequests.Set(key, true, ttl)
-		}
+	if isRegistryRateLimitedErr(err) {
+		s.tooManyRequests.Set(key, true, ttl)
 	}
+}
+
+// isRegistryRateLimitedErr reports whether err indicates the image pull was rate limited.
+// It recognizes three shapes:
+//   - domain.ErrTooManyRequests: the sentinel SidecarSBOMAdapter.CreateSBOM wraps its
+//     returned error with once the sidecar scanner reports a 429 (see adapters/v1/sidecar.go).
+//   - *transport.Error with StatusCode 429: what the in-process syft adapter would return
+//     if the error reached here unwrapped.
+//   - the rendered error text: stereoscope's registry provider formats the
+//     go-containerregistry pull error with %+v, not %w, which severs the errors.As chain
+//     for *transport.Error before it ever reaches here (mirrors
+//     pkg/sbomscanner/v1.isRegistryRateLimited, which has the same problem on the sidecar
+//     side of the same pull path).
+func isRegistryRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		return true
+	}
+	var transportError *transport.Error
+	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
 }
 
 // GenerateSBOM implements the "Generate SBOM flow"
@@ -103,7 +127,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	var err error
 	if s.storage {
-		sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+		sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
@@ -113,7 +137,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
 		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 		s.checkCreateSBOM(err, workload.ImageHash)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -151,8 +175,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	if !ok {
 		return domain.ErrCastingWorkload
 	}
-	name := workload.Args[domain.ArgsName].(string)
-	namespace := workload.Args[domain.ArgsNamespace].(string)
+	name, _ := workload.Args[domain.ArgsName].(string)
+	namespace, _ := workload.Args[domain.ArgsNamespace].(string)
 	logger.L().Info("scan started",
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
@@ -208,7 +232,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		if cve.Content == nil || s.storage {
 			// check if SBOM is already available
 			if s.storage {
-				sbom, err = s.sbomRepository.GetSBOM(ctx, slug, s.sbomCreator.Version())
+				sbom, err = s.getSBOM(ctx, slug, s.sbomCreator.Version())
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 						helpers.String("imageSlug", slug))
@@ -219,9 +243,19 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// if SBOM is not available, create it
 			if sbom.Content == nil {
 				if s.sbomGeneration {
+					// a previous container in this loop (or a previous request) may have
+					// already recorded this exact image as rate limited; skip pulling it
+					// again instead of hammering the registry with another attempt
+					if _, ok := s.tooManyRequests.Get(subWorkload.ImageHash); ok {
+						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+							helpers.String("imageSlug", slug))
+						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+							scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+						continue
+					}
 					// create SBOM
-					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(workload))
-					s.checkCreateSBOM(err, scan.ImageID)
+					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
+					s.checkCreateSBOM(err, subWorkload.ImageHash)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
@@ -422,7 +456,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if cve.Content == nil || (s.storage && workload.InstanceID != "") {
 		// check if SBOM is already available
 		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
@@ -433,7 +467,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if sbom.Content == nil {
 			if s.sbomGeneration {
 				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 				s.checkCreateSBOM(err, workload.ImageHash)
 				if err != nil {
 					reason := classifySBOMError(err)
@@ -580,7 +614,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 		if sbom.Content == nil {
 			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(workload))
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 			s.checkCreateSBOM(err, workload.ImageTagNormalized)
 			if err != nil {
 				repErr := s.platform.ReportError(ctx, err)
@@ -743,15 +777,29 @@ func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 	return uuid.New().String()
 }
 
-func optionsFromWorkload(workload domain.ScanCommand) domain.RegistryOptions {
+func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
 	options.Credentials = registryCredentialsFromCredentialsList(workload.CredentialsList)
 
 	if useHTTP, ok := workload.Args[domain.AttributeUseHTTP]; ok {
-		options.InsecureUseHTTP = useHTTP.(bool)
+		if b, isBool := useHTTP.(bool); isBool {
+			options.InsecureUseHTTP = b
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-boolean value for registry option",
+				helpers.String("key", domain.AttributeUseHTTP),
+				helpers.String("type", fmt.Sprintf("%T", useHTTP)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 	}
 	if skipTLSVerify, ok := workload.Args[domain.AttributeSkipTLSVerify]; ok {
-		options.InsecureSkipTLSVerify = skipTLSVerify.(bool)
+		if b, isBool := skipTLSVerify.(bool); isBool {
+			options.InsecureSkipTLSVerify = b
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-boolean value for registry option",
+				helpers.String("key", domain.AttributeSkipTLSVerify),
+				helpers.String("type", fmt.Sprintf("%T", skipTLSVerify)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 	}
 
 	logger.L().Debug("created registryOptions from workload",
@@ -840,11 +888,13 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	addedFileIDs := mapset.NewSet[string]()
 	addedRelationshipIDs := mapset.NewSet[string]()
 
-	// filter relevant files with dynamic paths
-	var dynamicPaths []string
+	// filter relevant files with dynamic paths, indexed by segment count since
+	// CompareDynamic only ever matches paths with the same number of segments
+	dynamicPathsBySegmentCount := make(map[int][]string)
 	relevantFiles.Each(func(file string) bool {
 		if strings.Contains(file, dynamicpathdetector.DynamicIdentifier) {
-			dynamicPaths = append(dynamicPaths, file)
+			segmentCount := strings.Count(file, "/")
+			dynamicPathsBySegmentCount[segmentCount] = append(dynamicPathsBySegmentCount[segmentCount], file)
 		}
 		return false
 	})
@@ -859,8 +909,8 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 				continue
 			}
-			// then try dynamic match (expensive lookup)
-			for _, dynamicPath := range dynamicPaths {
+			// then try dynamic match (expensive lookup), limited to candidates with a matching segment count
+			for _, dynamicPath := range dynamicPathsBySegmentCount[strings.Count(f.Location.RealPath, "/")] {
 				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
 					addedFileIDs.Add(f.ID)
 					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
@@ -931,8 +981,8 @@ func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCo
 	defer span.End()
 	ctx = enrichContext(ctx, workload, s.Version())
 	// validate inputs
-	name := workload.Args[domain.ArgsName].(string)
-	namespace := workload.Args[domain.ArgsNamespace].(string)
+	name, _ := workload.Args[domain.ArgsName].(string)
+	namespace, _ := workload.Args[domain.ArgsNamespace].(string)
 	if name == "" || namespace == "" {
 		return ctx, domain.ErrMissingCpInfo
 	}
@@ -997,4 +1047,83 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 
 func (s *ScanService) Version() string {
 	return s.sbomCreator.Version() + "-" + s.cveScanner.Version()
+}
+
+func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
+	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
+	if err != nil {
+		if errors.Is(err, domain.ErrOutdatedSBOM) {
+			if sbom.Status == helpersv1.TooLarge {
+				logger.L().Ctx(ctx).Info("SBOM is outdated and too large, deleting to trigger a fresh scan",
+					helpers.String("name", name))
+				// Delete both unfiltered and filtered SBOMs
+				if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
+					logger.L().Ctx(ctx).Warning("failed to delete outdated SBOM", helpers.Error(delErr), helpers.String("name", name))
+					return domain.SBOM{}, nil
+				}
+			}
+			return domain.SBOM{}, nil
+		}
+		return sbom, err
+	}
+	if sbom.Content == nil {
+		return sbom, nil
+	}
+
+	if sbom.Status == helpersv1.TooLarge {
+		reason := sbom.Annotations[domain.StatusReasonAnnotationKey]
+		stale := false
+
+		switch reason {
+		case domain.ReasonImageTooLarge:
+			limitStr, ok := sbom.Annotations[domain.MaxImageSizeAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMaxImageSize()
+				if limitStr != fmt.Sprintf("%d", currentLimit) {
+					stale = true
+				}
+			}
+		case domain.ReasonSBOMTooLarge:
+			limitStr, ok := sbom.Annotations[domain.MaxSBOMSizeAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMaxSBOMSize()
+				if limitStr != fmt.Sprintf("%d", currentLimit) {
+					stale = true
+				}
+			}
+		case domain.ReasonScannerOOM:
+			limitStr, ok := sbom.Annotations[domain.ScannerMemoryLimitAnnotationKey]
+			if !ok {
+				stale = true
+			} else {
+				currentLimit := s.sbomCreator.GetMemoryLimit()
+				if limitStr != currentLimit {
+					stale = true
+				}
+			}
+		default:
+			// No status reason annotation or unrecognized reason.
+			// Treat as stale to ensure retroactive cleanup.
+			stale = true
+		}
+
+		if stale {
+			logger.L().Ctx(ctx).Info("SBOM is stale/frozen due to changed limits, deleting to trigger a fresh scan",
+				helpers.String("name", name),
+				helpers.String("reason", reason))
+			// Delete both unfiltered and filtered SBOMs
+			if delErr := s.sbomRepository.DeleteSBOM(ctx, name); delErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to delete stale SBOM", helpers.Error(delErr), helpers.String("name", name))
+				return sbom, nil
+			}
+			// Return empty domain.SBOM to trigger a fresh scan
+			return domain.SBOM{}, nil
+		}
+	}
+
+	return sbom, nil
 }

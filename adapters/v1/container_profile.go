@@ -56,6 +56,12 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate instance ID: %w", err)
 	}
+	// copy labels map so we never mutate the repository-owned profile and nil labels scan cleanly
+	scanLabels := make(map[string]string, len(containerProfile.Labels)+1)
+	for k, v := range containerProfile.Labels {
+		scanLabels[k] = v
+	}
+	scanLabels[helpersv1.ContainerNameMetadataKey] = instanceID.GetContainerName()
 	scan := ports.ContainerRelevancyScan{
 		Completion:       completionStatus,
 		ContainerName:    instanceID.GetContainerName(),
@@ -63,7 +69,7 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 		ImageTag:         containerProfile.Spec.ImageTag,
 		InstanceID:       instanceID,
 		InstanceIDString: instanceIDString,
-		Labels:           containerProfile.Labels,
+		Labels:           scanLabels,
 		RelevantFiles:    mapset.NewSet[string](),
 		Wlid:             wlid,
 	}
@@ -74,8 +80,6 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	for _, f := range containerProfile.Spec.Opens {
 		scan.RelevantFiles.Add(f.Path)
 	}
-	// add container name to labels
-	scan.Labels[helpersv1.ContainerNameMetadataKey] = instanceID.GetContainerName()
 	scans = append(scans, scan)
 	return scans, nil
 }

@@ -5,11 +5,14 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +23,6 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
-	"github.com/stretchr/testify/require"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
@@ -30,8 +32,44 @@ import (
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type testSecurityExceptionRepo struct {
+	getSecurityExceptions func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error)
+	getWorkloadLabels     func(context.Context, string, string, string) (map[string]string, error)
+	getNamespaceLabels    func(context.Context, string) (map[string]string, error)
+}
+
+func (r *testSecurityExceptionRepo) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	if r != nil && r.getSecurityExceptions != nil {
+		return r.getSecurityExceptions(ctx, namespace)
+	}
+	return nil, nil, nil
+}
+
+func (r *testSecurityExceptionRepo) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
+	if r != nil && r.getWorkloadLabels != nil {
+		return r.getWorkloadLabels(ctx, namespace, kind, name)
+	}
+	return nil, nil
+}
+
+func (r *testSecurityExceptionRepo) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
+	if r != nil && r.getNamespaceLabels != nil {
+		return r.getNamespaceLabels(ctx, name)
+	}
+	return nil, nil
+}
+
+func scanContext(wlid, containerName, image string) context.Context {
+	return context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               wlid,
+		ContainerName:      containerName,
+		ImageTagNormalized: image,
+	})
+}
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
@@ -92,6 +130,150 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	}
 }
 
+func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-c/namespace-ns/deployment-d",
+		ContainerName: "container",
+	})
+
+	got1, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, got1, 1)
+	assert.Equal(t, 1, calls, "first call should hit the backend")
+
+	got2, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, got1, got2)
+	assert.Equal(t, 1, calls, "second call for the same workload should be served from cache")
+
+	// a different workload must not be served from the other workload's cache entry
+	otherCtx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-c/namespace-ns2/deployment-d2",
+		ContainerName: "container2",
+	})
+	_, err = a.GetCVEExceptions(otherCtx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
+}
+
+func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheEntries(t *testing.T) {
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, []sev1beta1.ClusterSecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						Images: []string{"docker.io/library/nginx:*"},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					}},
+				},
+			}}, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+
+	nginx, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
+	assert.NoError(t, err)
+	assert.Len(t, nginx, 1)
+
+	redis, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
+	assert.NoError(t, err)
+	assert.Empty(t, redis, "different images for the same workload must not share cached exception results")
+}
+
+func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults(t *testing.T) {
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, []sev1beta1.ClusterSecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						Images: []string{"docker.io/library/nginx:*"},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					}},
+				},
+			}}, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+
+	nginx, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
+	assert.NoError(t, err)
+	assert.Len(t, nginx, 1)
+
+	redis, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
+	assert.NoError(t, err)
+	assert.Empty(t, redis, "registry scans for different images must not share cached exception results")
+}
+
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return nil, nil, errors.New("boom")
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	_, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
+}
+
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t *testing.T) {
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			return []sev1beta1.SecurityException{{
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Match: sev1beta1.ExceptionMatch{
+						ObjectSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "nginx"},
+						},
+					},
+					Vulnerabilities: []sev1beta1.VulnerabilityException{{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2026-1"},
+					}},
+				},
+			}}, nil, nil
+		},
+		getWorkloadLabels: func(context.Context, string, string, string) (map[string]string, error) {
+			return nil, errors.New("lookup failed")
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	_, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
+}
+
 func fileToType[T any](path string) *T {
 	var t *T
 	b, err := os.ReadFile(path)
@@ -145,7 +327,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mu := &sync.Mutex{}
 			seenCVE := map[string]struct{}{}
-			httpPostFunc := func(httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
+			httpPostFunc := func(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
 				var report v1.ScanResultReport
 				err := json.Unmarshal(body, &report)
 				if err != nil {
@@ -287,31 +469,39 @@ func TestNewBackendAdapter(t *testing.T) {
 
 func TestBackendAdapter_SendStatus(t *testing.T) {
 	tests := []struct {
-		name    string
-		step    int
-		report  sysreport.BaseReport
-		wantErr bool
+		name       string
+		step       int
+		wantStatus string
+		wantErr    bool
 	}{
 		{
-			name: "send status",
-			step: 1,
-			report: sysreport.BaseReport{
-				Reporter:   ReporterName,
-				Target:     "vuln scan:: scanning wlid: wlid , container: container imageTag: imageTag imageHash: imageHash",
-				Status:     "Dequeueing",
-				ActionName: ActionName,
-				ActionID:   "1",
-				ActionIDN:  1,
-				Details:    "started",
-			},
+			name:       "send status",
+			step:       1,
+			wantStatus: sysreport.JobStarted,
+		},
+		{
+			name:       "inqueueing step reports started",
+			step:       0,
+			wantStatus: sysreport.JobStarted,
+		},
+		{
+			name:       "second dequeueing step reports success",
+			step:       2,
+			wantStatus: sysreport.JobSuccess,
+		},
+		{
+			name:       "final dequeueing step reports done",
+			step:       3,
+			wantStatus: sysreport.JobDone,
 		},
 	}
-	for _, tt := range tests { //nolint:govet
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var called bool
 			a := &BackendAdapter{
 				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
-					report := sender.GetBaseReport()
-					assert.NotEqual(t, *report, tt.report) //nolint:govet
+					called = true
+					assert.Equal(t, tt.wantStatus, s)
 				},
 			}
 			ctx := context.TODO()
@@ -326,6 +516,7 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			if err := a.SendStatus(ctx, tt.step); (err != nil) != tt.wantErr {
 				t.Errorf("SendStatus() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			assert.True(t, called, "sendStatusFunc was never invoked")
 		})
 	}
 }
@@ -334,7 +525,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 	var capturedURL string
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, fullURL string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, fullURL string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		capturedURL = fullURL
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
@@ -382,7 +573,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
 			StatusCode: 200,
@@ -427,7 +618,7 @@ func TestBackendAdapter_ReportScanFailure_NoWorkloadInContext(t *testing.T) {
 }
 
 func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
 		return nil, assert.AnError
 	}
 
@@ -448,7 +639,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
 }
 
 func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, _ []byte, _ time.Duration) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 500,
 			Body:       io.NopCloser(bytes.NewBufferString("internal server error")),
@@ -475,7 +666,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
 func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 	var capturedReport scanfailure.ScanFailureReport
 
-	mockHTTP := func(_ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+	mockHTTP := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
 		require.NoError(t, json.Unmarshal(body, &capturedReport))
 		return &http.Response{
 			StatusCode: 200,
@@ -537,7 +728,7 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
 				Spec: sev1beta1.SecurityExceptionSpec{
 					Vulnerabilities: []sev1beta1.VulnerabilityException{
-						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CRD-1"}},
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CRD-1"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 					},
 				},
 			},
@@ -572,7 +763,7 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 				Spec: sev1beta1.SecurityExceptionSpec{
 					Match: sev1beta1.ExceptionMatch{Images: []string{"docker.io/library/redis:*"}},
 					Vulnerabilities: []sev1beta1.VulnerabilityException{
-						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-REDIS-ONLY"}},
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-REDIS-ONLY"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 					},
 				},
 			},
@@ -595,4 +786,217 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 	exceptions, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
+}
+
+// recordingHTTPClient counts how many times it served a request, so tests can prove that the
+// exact same client instance was reused across multiple call sites instead of merely asserting
+// that a getter echoes back the field it was handed.
+type recordingHTTPClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *recordingHTTPClient) Do(_ *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+}
+
+func (c *recordingHTTPClient) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
+	stub := &recordingHTTPClient{}
+	a := &BackendAdapter{
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		eventReceiverRestURL: "http://example.invalid",
+		httpClient:           stub,
+		httpPostFunc:         httpPostWithContext,
+		sendStatusFunc: func(sender *beClientV1.BaseReportSender, status string, sendReport bool) {
+			sender.SendStatus(status, sendReport)
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid",
+		ContainerName: "container",
+		ImageTag:      "imageTag",
+		ImageHash:     "imageHash",
+	})
+
+	require.NoError(t, a.ReportError(ctx, fmt.Errorf("boom")))
+	assert.Equal(t, 1, stub.Calls(), "ReportError should use the shared httpClient")
+
+	require.NoError(t, a.SendStatus(ctx, 0))
+	assert.Equal(t, 2, stub.Calls(), "SendStatus should use the shared httpClient")
+
+	errChan := make(chan error, 1)
+	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan))
+	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
+	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
+
+	require.NoError(t, a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, nil))
+	assert.Equal(t, 4, stub.Calls(), "ReportScanFailure should use the shared httpClient")
+
+	assert.Same(t, stub, a.getHTTPClient(), "getHTTPClient should keep returning the exact configured instance")
+}
+
+func TestSendError_DeliversImmediatelyWhenChannelHasRoom(t *testing.T) {
+	// Realistic shape from the reported bug: a buffered channel with free space, hit while ctx
+	// is already cancelled. The send must still win deterministically instead of racing a
+	// random select against ctx.Done().
+	ch := make(chan error, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sendError(ctx, ch, fmt.Errorf("overflow error"))
+
+	require.Len(t, ch, 1)
+	assert.EqualError(t, <-ch, "overflow error")
+}
+
+func TestSendError_BlocksOnFullChannelUntilCtxCancelledThenDrops(t *testing.T) {
+	// This is the scenario the PR description actually claims to guard: a full channel with a
+	// live context. sendError must block until either the channel drains or ctx is cancelled,
+	// only dropping the error once that happens.
+	ch := make(chan error, 1)
+	ch <- fmt.Errorf("first error")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		sendError(ctx, ch, fmt.Errorf("second error"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendError returned before the channel had room or ctx was cancelled")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sendError did not return after context cancellation")
+	}
+
+	require.Len(t, ch, 1, "second error should have been dropped since the channel stayed full")
+	assert.EqualError(t, <-ch, "first error")
+}
+
+// blockingHTTPClient's Do blocks until the request's own context is done, simulating how a real
+// net/http.Transport aborts an in-flight request once its context is cancelled. It lets tests
+// prove that cancelling the caller's ctx actually reaches the request (and the retry loop around
+// it), instead of the call quietly running to completion regardless (#446).
+type blockingHTTPClient struct {
+	calls int32
+}
+
+func (c *blockingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&c.calls, 1)
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func (c *blockingHTTPClient) Calls() int32 {
+	return atomic.LoadInt32(&c.calls)
+}
+
+func TestBackendAdapter_PostResultsAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	client := &blockingHTTPClient{}
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://example.invalid",
+		httpClient:           client,
+		httpPostFunc:         httpPostWithContext,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errChan := make(chan error, 1)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+	}()
+
+	// give postResults time to reach the (blocking) HTTP call before cancelling
+	require.Eventually(t, func() bool { return client.Calls() > 0 }, time.Second, time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err, "postResults should return an error once the request is aborted by ctx cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("postResults did not return promptly after ctx was cancelled; the retry loop is not ctx-aware")
+	}
+}
+
+func TestBackendAdapter_ReportScanFailureAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	client := &blockingHTTPClient{}
+	a := &BackendAdapter{
+		eventReceiverRestURL: "http://example.invalid",
+		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
+		httpClient:           client,
+		httpPostFunc:         httpPostWithContext,
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
+		ImageTagNormalized: "nginx:latest",
+	}))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost, scanfailure.ReasonResultUploadFailed, fmt.Errorf("connection refused"))
+	}()
+
+	require.Eventually(t, func() bool { return client.Calls() > 0 }, time.Second, time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err, "ReportScanFailure should return an error once the request is aborted by ctx cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReportScanFailure did not return promptly after ctx was cancelled; the retry loop is not ctx-aware")
+	}
+}
+
+func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
+	var chunkPosts int32
+	httpPostFunc := func(_ context.Context, _ httputils.IHttpClient, _ string, _ map[string]string, body []byte, _ time.Duration) (*http.Response, error) {
+		var report v1.ScanResultReport
+		require.NoError(t, json.Unmarshal(body, &report))
+		if report.Summary != nil {
+			// this is the summary report (possibly combined with the first chunk) - fail it
+			return nil, fmt.Errorf("simulated summary post failure")
+		}
+		atomic.AddInt32(&chunkPosts, 1)
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
+		httpPostFunc:          httpPostFunc,
+		securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
+	}
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	cve := *fileToType[domain.CVEManifest]("testdata/nginx-cve.json")
+	err := a.SubmitCVE(ctx, cve, domain.CVEManifest{})
+
+	require.Error(t, err, "SubmitCVE should surface the summary post failure")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&chunkPosts), "no vulnerability chunk should be posted once the summary failed")
 }

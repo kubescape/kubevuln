@@ -3,18 +3,23 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/core/ports"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -140,6 +145,7 @@ func TestScanService_ScanCP(t *testing.T) {
 		storeErrorCVE   bool
 		storeErrorSBOM  bool
 		timeout         bool
+		toomanyrequests bool
 		workload        bool
 		wantCvep        bool
 		wantEmptyReport bool
@@ -156,6 +162,11 @@ func TestScanService_ScanCP(t *testing.T) {
 		{
 			name:            "create SBOM error",
 			createSBOMError: true,
+			workload:        true,
+		},
+		{
+			name:            "create SBOM too many requests",
+			toomanyrequests: true,
 			workload:        true,
 		},
 		{
@@ -223,7 +234,7 @@ func TestScanService_ScanCP(t *testing.T) {
 			if tt.emptyWlid {
 				wlid = ""
 			}
-			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, false)
+			sbomAdapter := adapters.NewMockSBOMAdapter(tt.createSBOMError, tt.timeout, tt.toomanyrequests)
 			cveAdapter := adapters.NewMockCVEAdapter()
 			storageCP := repositories.NewMemoryStorage(false, false)
 			storageSBOM := repositories.NewMemoryStorage(tt.getErrorSBOM, tt.storeErrorSBOM)
@@ -239,6 +250,8 @@ func TestScanService_ScanCP(t *testing.T) {
 				},
 				Wlid: wlid,
 			}
+			imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+			imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
 			if tt.workload {
 				var err error
 				ctx, err = s.ValidateScanCP(ctx, workload)
@@ -273,8 +286,8 @@ func TestScanService_ScanCP(t *testing.T) {
 					Opens: []v1beta1.OpenCalls{
 						{Path: "/etc/kubernetes/kube-proxy.conf"},
 					},
-					ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
-					ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+					ImageID:  imageID,
+					ImageTag: imageTag,
 				},
 			}
 			err := storageCP.StoreContainerProfile(ctx, ap)
@@ -283,11 +296,140 @@ func TestScanService_ScanCP(t *testing.T) {
 			if err := s.ScanCP(ctx); (err != nil) != tt.wantErr {
 				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			if tt.toomanyrequests {
+				// the 429 marker must be recorded under the same normalized key every
+				// other flow uses (ImageHash via NormalizeImageID), not the raw
+				// container-profile ImageID, otherwise nothing will ever read it back
+				_, ok := s.tooManyRequests.Get(v1.NormalizeImageID(imageID, imageTag))
+				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized ImageHash")
+			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 				require.NoError(t, err)
 				assert.NotNil(t, cvep.Labels)
 			}
+		})
+	}
+}
+
+// countingSBOMCreator wraps a ports.SBOMCreator and counts CreateSBOM invocations, so tests can
+// assert a pull was (or wasn't) attempted without depending on ScanCP's returned error.
+type countingSBOMCreator struct {
+	ports.SBOMCreator
+	calls int
+}
+
+func (c *countingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error) {
+	c.calls++
+	return c.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
+}
+
+// TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage verifies that once an image has been
+// recorded as rate limited (matching the key ScanCP itself writes under, see the
+// "create SBOM too many requests" case above), a later ScanCP call for that same image does not
+// attempt another pull. This is the read side of the bug: ValidateScanCP has no image identity to
+// check ahead of time, so the gate has to live at the point ScanCP actually knows which image it's
+// about to pull.
+func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	sbomAdapter := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageCP := repositories.NewMemoryStorage(false, false)
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(storageCP), true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err := s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	ap := v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "daemonset-kube-proxy",
+			Namespace: "kube-system",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
+				helpersv1.StatusMetadataKey:     helpersv1.Learning,
+				helpersv1.WlidMetadataKey:       wlid,
+			},
+			Labels: map[string]string{"foo": "bar"},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			ImageID:  imageID,
+			ImageTag: imageTag,
+		},
+	}
+	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
+
+	// simulate a prior pull of this exact image having already come back 429, recorded under
+	// the normalized key ScanCP writes to
+	s.tooManyRequests.Set(v1.NormalizeImageID(imageID, imageTag), true, ttl)
+
+	require.NoError(t, s.ScanCP(ctx))
+	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
+}
+
+// TestIsRegistryRateLimitedErr is a regression test: checkCreateSBOM's rate-limit detection
+// must not rely on errors.As(err, &transport.Error{}) alone, since a real pull error never
+// reaches it in that shape. stereoscope's registry provider formats the go-containerregistry
+// pull error with %+v, not %w, which severs the errors.As chain before CreateSBOM's error
+// ever gets here — so a text fallback is required (mirrors
+// pkg/sbomscanner/v1.isRegistryRateLimited, which has the identical problem on the sidecar
+// side of the same pull path). This also covers the sidecar adapter's own signal:
+// domain.ErrTooManyRequests, which adapters/v1 SidecarSBOMAdapter.CreateSBOM wraps instead of
+// trying to reconstruct a *transport.Error across the gRPC boundary.
+func TestIsRegistryRateLimitedErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "429 transport error",
+			err:  &transport.Error{StatusCode: http.StatusTooManyRequests},
+			want: true,
+		},
+		{
+			name: "401 transport error is not rate limiting",
+			err:  &transport.Error{StatusCode: http.StatusUnauthorized},
+			want: false,
+		},
+		{
+			name: "domain.ErrTooManyRequests sentinel wrapped (sidecar path)",
+			err:  fmt.Errorf("sidecar reported 429: %w", domain.ErrTooManyRequests),
+			want: true,
+		},
+		{
+			name: "wrapped via stereoscope's real %+v formatting (in-process syft path)",
+			err:  fmt.Errorf("failed to get image descriptor from registry: %+v", &transport.Error{StatusCode: http.StatusTooManyRequests}),
+			want: true,
+		},
+		{
+			name: "generic message mentioning 429 alone is not enough",
+			err:  errors.New("received status code: 429"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRegistryRateLimitedErr(tt.err))
 		})
 	}
 }
@@ -450,6 +592,10 @@ func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string
 
 func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
 
+func (schemaUnsupportedSBOMAdapter) GetMaxImageSize() int64 { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMemoryLimit() string { return "" }
+
 func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 	imageHash := "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
 	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
@@ -598,6 +744,89 @@ func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	}
 }
 
+func TestScanService_ValidateScanCP(t *testing.T) {
+	tests := []struct {
+		name     string
+		workload domain.ScanCommand
+		wantErr  error
+	}{
+		{
+			name:     "missing args",
+			workload: domain.ScanCommand{},
+			wantErr:  domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      123,
+					domain.ArgsNamespace: true,
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string name only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      123,
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "non-string namespace only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: true,
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "missing name only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "missing namespace only",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName: "daemonset-kube-proxy",
+				},
+			},
+			wantErr: domain.ErrMissingCpInfo,
+		},
+		{
+			name: "with name and namespace",
+			workload: domain.ScanCommand{
+				Args: map[string]interface{}{
+					domain.ArgsName:      "daemonset-kube-proxy",
+					domain.ArgsNamespace: "kube-system",
+				},
+			},
+			wantErr: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+			_, err := s.ValidateScanCP(context.TODO(), tt.workload)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestScanService_ValidateScanCVE(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -714,12 +943,74 @@ func TestScanService_ScanRegistry(t *testing.T) {
 	}
 }
 
+type mockSecurityExceptionRepo struct {
+	exceptions        []sev1beta1.SecurityException
+	clusterExceptions []sev1beta1.ClusterSecurityException
+}
+
+func (m *mockSecurityExceptionRepo) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	return m.exceptions, m.clusterExceptions, nil
+}
+
+func (m *mockSecurityExceptionRepo) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (m *mockSecurityExceptionRepo) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
+	return nil, nil
+}
+
+type fakeCVEScannerWithVuln struct {
+	ports.CVEScanner
+}
+
+func (f *fakeCVEScannerWithVuln) DBVersion(context.Context) string { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) Ready(context.Context) bool       { return true }
+func (f *fakeCVEScannerWithVuln) Version() string                   { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	return domain.CVEManifest{
+		Name:               sbom.Name,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		CVEScannerVersion:  "v1.0.0",
+		CVEDBVersion:       "v1.0.0",
+		Annotations:        sbom.Annotations,
+		Labels:             sbom.Labels,
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+							ID: "CVE-2023-9999",
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
 	t.Run("ScanRegistry applies exceptions and persists to storage", func(t *testing.T) {
-		mockPlatform := adapters.NewMockPlatform(false, &repositories.NoOpSecurityExceptionRepository{})
+		mockRepo := &mockSecurityExceptionRepo{
+			exceptions: []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Reason: "test exception",
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{
+								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"},
+								Status:        sev1beta1.VulnerabilityStatusNotAffected,
+							},
+						},
+					},
+				},
+			},
+		}
+		mockPlatform := adapters.NewMockPlatform(false, mockRepo)
 		storage := repositories.NewMemoryStorage(false, false)
 		sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
-		cveAdapter := adapters.NewMockCVEAdapter()
+		cveAdapter := &fakeCVEScannerWithVuln{}
 
 		s := NewScanService(
 			sbomAdapter,
@@ -747,10 +1038,13 @@ func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
 		err = s.ScanRegistry(ctx)
 		require.NoError(t, err)
 
-		// Verify CVE is stored in storage
+		// Verify CVE is stored in storage with SecurityExceptions applied
 		storedCVE, err := storage.GetCVE(ctx, workload.ImageSlug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
 		require.NoError(t, err)
 		assert.NotNil(t, storedCVE.Content)
+		assert.Empty(t, storedCVE.Content.Matches, "matched vulnerability should be ignored by SecurityException")
+		assert.Len(t, storedCVE.Content.IgnoredMatches, 1, "ignored match should be populated in stored CVE")
+		assert.Equal(t, "CVE-2023-9999", storedCVE.Content.IgnoredMatches[0].Vulnerability.VulnerabilityMetadata.ID)
 	})
 }
 
@@ -1022,6 +1316,212 @@ func Test_filterSBOM(t *testing.T) {
 				return
 			}
 			tt.want(t, got)
+		})
+	}
+}
+
+func BenchmarkFilterSBOM(b *testing.B) {
+	nginxSBOM := domain.SBOM{
+		Name: "nginx-sbom",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:  "docker.io/library/nginx@sha256:04ba374043ccd2fc5c593885c0eacddebabd5ca375f9323666f28dfd5a9710e3",
+			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
+			helpersv1.StatusMetadataKey:   helpersv1.Learning,
+		},
+		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+	}
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
+	)
+	require.NoError(b, err)
+	labels := map[string]string{
+		helpersv1.ContainerNameMetadataKey: "nginx",
+	}
+	wlid := "wlid://cluster-test/namespace-default/deployment-nginx"
+
+	for _, dynamicPathCount := range []int{10, 100, 1000} {
+		dynamicPathCount := dynamicPathCount
+		b.Run(fmt.Sprintf("dynamicPaths=%d", dynamicPathCount), func(b *testing.B) {
+			relevantFiles := mapset.NewSet[string]()
+			for i := 0; i < dynamicPathCount; i++ {
+				relevantFiles.Add(fmt.Sprintf("/var/lib/%s/segment-%d/data", dynamicpathdetector.DynamicIdentifier, i))
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := filterSBOM(nginxSBOM, instanceID, wlid, relevantFiles, labels, helpersv1.Full)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
+func TestOptionsFromWorkload(t *testing.T) {
+	tests := []struct {
+		name                string
+		args                map[string]interface{}
+		wantInsecureUseHTTP bool
+		wantInsecureSkipTLS bool
+	}{
+		{
+			name: "bool true values are applied",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       true,
+				domain.AttributeSkipTLSVerify: true,
+			},
+			wantInsecureUseHTTP: true,
+			wantInsecureSkipTLS: true,
+		},
+		{
+			name: "bool false values are applied",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       false,
+				domain.AttributeSkipTLSVerify: false,
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "string value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       "true",
+				domain.AttributeSkipTLSVerify: "true",
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "numeric value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       float64(1),
+				domain.AttributeSkipTLSVerify: float64(1),
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "nil value is ignored without panic",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       nil,
+				domain.AttributeSkipTLSVerify: nil,
+			},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name:                "missing keys default to false",
+			args:                map[string]interface{}{},
+			wantInsecureUseHTTP: false,
+			wantInsecureSkipTLS: false,
+		},
+		{
+			name: "extra unrelated keys are ignored",
+			args: map[string]interface{}{
+				domain.AttributeUseHTTP:       true,
+				domain.AttributeSkipTLSVerify: false,
+				"some.other.attribute":        "noise",
+			},
+			wantInsecureUseHTTP: true,
+			wantInsecureSkipTLS: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := domain.ScanCommand{
+				ImageSlug: "test-image-slug",
+				Args:      tt.args,
+			}
+			got := optionsFromWorkload(context.Background(), workload)
+			assert.Equal(t, tt.wantInsecureUseHTTP, got.InsecureUseHTTP,
+				"InsecureUseHTTP mismatch for args: %v", tt.args)
+			assert.Equal(t, tt.wantInsecureSkipTLS, got.InsecureSkipTLSVerify,
+				"InsecureSkipTLSVerify mismatch for args: %v", tt.args)
+		})
+	}
+}
+
+type mockSBOMRepository struct {
+	ports.SBOMRepository
+	getSBOMSBOM domain.SBOM
+	getSBOMErr  error
+	deleteErr   error
+	deleteCalled bool
+}
+
+func (m *mockSBOMRepository) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
+	return m.getSBOMSBOM, m.getSBOMErr
+}
+
+func (m *mockSBOMRepository) DeleteSBOM(ctx context.Context, name string) error {
+	m.deleteCalled = true
+	return m.deleteErr
+}
+
+func TestScanService_getSBOM_Outdated(t *testing.T) {
+	tests := []struct {
+		name          string
+		sbom          domain.SBOM
+		getErr        error
+		deleteErr     error
+		wantDelete    bool
+		wantSBOM      domain.SBOM
+		wantErr       error
+	}{
+		{
+			name: "outdated, too large, delete succeeds",
+			sbom: domain.SBOM{
+				Status:  helpersv1.TooLarge,
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  nil,
+			wantDelete: true,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+		{
+			name: "outdated, too large, delete fails",
+			sbom: domain.SBOM{
+				Status:  helpersv1.TooLarge,
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  fmt.Errorf("delete error"),
+			wantDelete: true,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+		{
+			name: "outdated, not too large, delete not called",
+			sbom: domain.SBOM{
+				Status:  "",
+				Content: &v1beta1.SyftDocument{},
+			},
+			getErr:     domain.ErrOutdatedSBOM,
+			deleteErr:  nil,
+			wantDelete: false,
+			wantSBOM:   domain.SBOM{},
+			wantErr:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockSBOMRepository{
+				getSBOMSBOM: tt.sbom,
+				getSBOMErr:  tt.getErr,
+				deleteErr:   tt.deleteErr,
+			}
+			s := &ScanService{
+				sbomRepository: repo,
+			}
+			gotSBOM, err := s.getSBOM(context.Background(), "test-sbom", "v1.0.0")
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantSBOM, gotSBOM)
+			assert.Equal(t, tt.wantDelete, repo.deleteCalled)
 		})
 	}
 }

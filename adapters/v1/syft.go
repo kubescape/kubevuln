@@ -202,31 +202,38 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		if isGCPRegistry(imageID) {
+		unauthorizedErr := err
+		if isGCPRegistry(pullRef) {
 			if gcpCreds, gcpErr := gcpCredentials(ctx); gcpErr != nil {
 				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
+					helpers.Error(gcpErr),
 					helpers.String("imageID", imageID))
 			} else {
 				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
-				src, err = syft.GetSource(ctxWithSize, imageID, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+				src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
 			}
 		}
 		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
 		// fall back to anonymous access. err/src retain the result of the last attempt.
-		if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-			logger.L().Debug("got 401, retrying without credentials",
+		if err != nil {
+			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))
 			registryOptions.Credentials = nil
-			src, err = syft.GetSource(ctxWithSize, rewriteImageRef(imageID, s.proxyRegistryMap), syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
+				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
+			}
 		}
 	}
 
 	switch {
-	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
+	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
-		domainSBOM.Status = helpersv1.Incomplete
+		domainSBOM.Status = helpersv1.TooLarge
+		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonImageTooLarge
+		domainSBOM.Annotations[domain.MaxImageSizeAnnotationKey] = fmt.Sprintf("%d", s.maxImageSize)
 		return domainSBOM, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		domainSBOM.Status = helpersv1.Unauthorize
@@ -237,7 +244,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	// generate SBOM
 	// use a deadline to prevent the process from hanging for too long
-	// TODO check memory usage and see if we can kill the goroutine
 	var syftSBOM *sbom.SBOM
 	// ensure no parallel pulls
 	s.pullMutex.Lock()
@@ -247,7 +253,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
-				logger.L().Ctx(ctx).Fatal("failed to close source", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("failed to close source", helpers.Error(err),
 					helpers.String("imageID", imageID))
 			}
 		}(src)
@@ -290,7 +296,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	// strip the SBOM to reduce size
 	v1beta1.StripSBOM(syftSBOM)
-	// check the size of the SBOM
+	// check the size of the SBOM. This is necessarily a post-hoc check: Syft doesn't expose
+	// an incremental/streaming size hook to check maxSBOMSize during cataloging, only once
+	// syft.CreateSBOM above has already returned a complete result (see #473 and the
+	// maxSBOMSize caveat in docs/CONFIGURATION.md). Memory used while generating is bounded
+	// by the process's memory limit, not by maxSBOMSize.
 	sz := size.Of(syftSBOM)
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
 	if sz > s.maxSBOMSize {
@@ -299,6 +309,8 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.TooLarge
+		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonSBOMTooLarge
+		domainSBOM.Annotations[domain.MaxSBOMSizeAnnotationKey] = fmt.Sprintf("%d", s.maxSBOMSize)
 		return domainSBOM, nil
 	}
 
@@ -322,4 +334,16 @@ func (s *SyftAdapter) Version() string {
 	v := tools.PackageVersion("github.com/anchore/syft")
 	// no more processing needed
 	return v
+}
+
+func (s *SyftAdapter) GetMaxImageSize() int64 {
+	return s.maxImageSize
+}
+
+func (s *SyftAdapter) GetMaxSBOMSize() int {
+	return s.maxSBOMSize
+}
+
+func (s *SyftAdapter) GetMemoryLimit() string {
+	return ""
 }

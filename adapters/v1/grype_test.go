@@ -3,10 +3,16 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/distro"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
@@ -120,4 +126,184 @@ func Test_grypeAdapter_resolveUseDefaultMatchers(t *testing.T) {
 			assert.Equal(t, tt.want, g.resolveUseDefaultMatchers(tt.dist))
 		})
 	}
+}
+
+type mockProvider struct {
+	vulnerability.Provider
+}
+
+func (m *mockProvider) Close() error { return nil }
+
+// closeTrackingProvider records whether/how-many-times Close was called, so tests can
+// prove the double-buffer swap in finishUpdate closes the *old* store and installs the
+// *new* one, rather than the two being indistinguishable (as they were when both the old
+// and new store in a test were the same *mockProvider instance).
+type closeTrackingProvider struct {
+	vulnerability.Provider
+	closed int32
+}
+
+func (p *closeTrackingProvider) Close() error {
+	atomic.AddInt32(&p.closed, 1)
+	return nil
+}
+
+// waitForNotUpdating polls until a background update finishes (g.updating flips back to
+// false) or fails the test after a short deadline. Background goroutines spawned by
+// updateDBBackground/finishUpdate are not otherwise observable from the outside, and
+// letting them outlive the test is a source of -race flakiness in later tests.
+func waitForNotUpdating(t *testing.T, g *GrypeAdapter) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		g.mu.RLock()
+		updating := g.updating
+		g.mu.RUnlock()
+		if !updating {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("background update did not finish in time")
+}
+
+func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
+	ctx := context.Background()
+	oldStore := &closeTrackingProvider{}
+	newStore := &closeTrackingProvider{}
+	blockLoad := make(chan struct{})
+
+	g := &GrypeAdapter{
+		store:             oldStore,
+		dbStatus:          &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
+		nextUpdateAttempt: time.Now().Add(24 * time.Hour),
+		loadDB: func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			<-blockLoad
+			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew-checksum"}, nil
+		},
+	}
+
+	// Initial check with valid DB returns ready immediately
+	require.True(t, g.Ready(ctx))
+	assert.Equal(t, "test-checksum", g.DBVersion(ctx))
+
+	// Force the next update to be due, to trigger the background update check
+	g.mu.Lock()
+	g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+	g.mu.Unlock()
+
+	// Trigger Ready - should launch background update without blocking
+	readyCh := make(chan bool, 1)
+	go func() {
+		readyCh <- g.Ready(ctx)
+	}()
+
+	select {
+	case isReady := <-readyCh:
+		// With an existing DB, Ready returns immediately true while update runs in background
+		assert.True(t, isReady)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Ready() blocked waiting for DB update, causing lock contention")
+	}
+
+	// Verify DBVersion can acquire read locks concurrently while background update is active
+	version := g.DBVersion(ctx)
+	assert.Equal(t, "test-checksum", version)
+
+	// Verify background update is active under RLock
+	g.mu.RLock()
+	isUpdating := g.updating
+	g.mu.RUnlock()
+	assert.True(t, isUpdating, "background update should be active")
+
+	// Unblock background loadDB and wait for the swap to actually land before asserting on it
+	close(blockLoad)
+	waitForNotUpdating(t, g)
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.Same(t, newStore, g.store, "the new provider from loadDB must be installed as the active store")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store must be closed exactly once after the swap")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&newStore.closed), "the newly installed store must not be closed")
+}
+
+// Reproduces the exact scenario from the mentor review: a cold start (no DB ever loaded)
+// where loadDB keeps failing. Before nextUpdateAttempt existed, needsUpdate short-circuited
+// on dbStatus == nil, so every readiness probe re-launched a full download attempt with no
+// back-off. Ready() blocks synchronously on cold start until the background attempt
+// finishes, so looping it here deterministically exercises that path without a timing race.
+func Test_grypeAdapter_Ready_backsOffAfterFailedColdStart(t *testing.T) {
+	ctx := context.Background()
+	var calls int32
+	g := &GrypeAdapter{
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			atomic.AddInt32(&calls, 1)
+			return nil, nil, errors.New("network down")
+		},
+	}
+
+	for i := 0; i < 5; i++ {
+		require.False(t, g.Ready(ctx))
+	}
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "cold-start failures must back off, not fire once per probe")
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.True(t, g.nextUpdateAttempt.After(time.Now()), "a failed cold start must schedule a future retry instead of leaving Ready always due")
+}
+
+// A load that returns no Go error but a ProviderStatus.Error is not a usable DB. Before this
+// was treated as a failure, it was installed as g.store/g.dbStatus and lastDbUpdate was set
+// to now, wedging the pod NotReady for 24h with nothing to trigger a retry or a restart.
+func Test_grypeAdapter_Ready_treatsStatusErrorAsFailure(t *testing.T) {
+	ctx := context.Background()
+	statusErr := errors.New("corrupt db")
+	badStore := &closeTrackingProvider{}
+	g := &GrypeAdapter{
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			return badStore, &vulnerability.ProviderStatus{Error: statusErr}, nil
+		},
+	}
+
+	require.False(t, g.Ready(ctx))
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.Nil(t, g.store, "a load whose status carries an error must not be installed as the active store")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&badStore.closed), "the unusable store must be closed rather than leaked")
+	assert.True(t, g.nextUpdateAttempt.Before(time.Now().Add(6*time.Minute)), "must schedule a short retry, not the 24h success interval")
+}
+
+// Concurrent readiness probes racing Ready() while an update is in flight must not launch a
+// second background load - the single-flight guard (g.updating) is only meant to be released
+// once the actual load returns, not merely once updateDBBackground's own wait gives up.
+func Test_grypeAdapter_Ready_singleFlightUnderConcurrency(t *testing.T) {
+	ctx := context.Background()
+	var calls int32
+	blockLoad := make(chan struct{})
+	g := &GrypeAdapter{
+		store:             &mockProvider{},
+		dbStatus:          &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
+		nextUpdateAttempt: time.Now().Add(-time.Minute),
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			atomic.AddInt32(&calls, 1)
+			<-blockLoad
+			return &mockProvider{}, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			g.Ready(ctx)
+		}()
+	}
+	wg.Wait()
+
+	close(blockLoad)
+	waitForNotUpdating(t, g)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent Ready() calls must not launch more than one background load")
 }

@@ -7,7 +7,6 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/adrg/xdg"
@@ -51,16 +50,30 @@ const (
 	VendorTrustedMatchMetadataKey = "kubescape.io/vendor-trusted-match"
 )
 
+type loadDBFunc func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error)
+
+func defaultLoadDB(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+	return grype.LoadVulnerabilityDB(distCfg, installCfg, true)
+}
+
 // GrypeAdapter implements CVEScanner from ports using Grype's API
 type GrypeAdapter struct {
-	lastDbUpdate   time.Time
-	dbStatus       *vulnerability.ProviderStatus
-	store          vulnerability.Provider
-	distCfg        distribution.Config
-	installCfg     installation.Config
-	mu             sync.RWMutex
-	matchingMode   config.CVEMatchingMode
-	trustedVendors map[distro.Type]bool
+	// nextUpdateAttempt is when Ready may next launch a background update. It is set on
+	// every terminal outcome of updateDBBackground (success -> +24h, failure -> +5m) and
+	// gates retries independently of dbStatus, so a cold start that keeps failing (and
+	// therefore never sets dbStatus) still backs off between attempts instead of firing
+	// once per readiness probe.
+	nextUpdateAttempt time.Time
+	dbStatus          *vulnerability.ProviderStatus
+	store             vulnerability.Provider
+	distCfg           distribution.Config
+	installCfg        installation.Config
+	mu                sync.RWMutex
+	matchingMode      config.CVEMatchingMode
+	trustedVendors    map[distro.Type]bool
+	updating          bool
+	updateChan        chan struct{}
+	loadDB            loadDBFunc
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -68,15 +81,16 @@ var _ ports.CVEScanner = (*GrypeAdapter)(nil)
 // NewGrypeAdapter initializes the GrypeAdapter structure
 // DB loading is done via readiness probes
 func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, trustedVendors []string) *GrypeAdapter {
+	distCfg := distribution.DefaultConfig()
+	distCfg.LatestURL = listingURL
 	g := &GrypeAdapter{
-		distCfg: distribution.Config{
-			LatestURL: listingURL,
-		},
+		distCfg: distCfg,
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype", "db"),
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
+		loadDB:         defaultLoadDB,
 	}
 	return g
 }
@@ -126,15 +140,16 @@ func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, tru
 	if err != nil {
 		return nil, nil, err
 	}
+	distCfg := distribution.DefaultConfig()
+	distCfg.LatestURL = fmt.Sprintf("http://localhost:%s/databases", port)
 	g := &GrypeAdapter{
-		distCfg: distribution.Config{
-			LatestURL: fmt.Sprintf("http://localhost:%s/databases", port),
-		},
+		distCfg: distCfg,
 		installCfg: installation.Config{
 			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
+		loadDB:         defaultLoadDB,
 	}
 	return g, terminate, nil
 }
@@ -155,112 +170,191 @@ func (g *GrypeAdapter) DBVersion(context.Context) string {
 	return g.dbVersionLocked()
 }
 
-// Ready returns the status of the vulnerabilities DB
+// Ready returns the status of the vulnerabilities DB, triggering non-blocking background updates as needed.
 func (g *GrypeAdapter) Ready(ctx context.Context) bool {
-	// DB update is in progress
-	if !g.mu.TryRLock() {
-		return false
-	}
-	g.mu.RUnlock() // because TryRLock doesn't unlock
-	// DB is not initialized or needs to be updated
-	now := time.Now()
-	if g.dbStatus == nil || now.Sub(g.lastDbUpdate) > 24*time.Hour {
+	g.mu.RLock()
+	hasValidDB := g.store != nil && g.dbStatus != nil && g.dbStatus.Error == nil
+	needsUpdate := time.Now().After(g.nextUpdateAttempt)
+	isUpdating := g.updating
+	g.mu.RUnlock()
+
+	if needsUpdate && !isUpdating {
 		g.mu.Lock()
-		defer g.mu.Unlock()
-		// Use context.WithoutCancel to prevent the update from being cancelled if the request context (e.g. readiness probe) is cancelled
-		ctx, span := otel.Tracer("").Start(context.WithoutCancel(ctx), "GrypeAdapter.UpdateDB")
-		defer span.End()
-		logger.L().Info("updating grype DB",
-			helpers.String("listingURL", g.distCfg.LatestURL))
+		if time.Now().After(g.nextUpdateAttempt) && !g.updating {
+			g.updating = true
+			g.updateChan = make(chan struct{})
+			g.mu.Unlock()
 
-		// Create a context with timeout to prevent stuck updates
-		// 15 minutes allows for slow network connections while still catching truly stuck downloads
-		updateCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-		defer cancel()
-
-		// Track if we have an existing DB to fall back on
-		hasExistingDB := g.dbStatus != nil
-
-		// Run the DB update in a goroutine to respect the timeout
-		type updateResult struct {
-			store    vulnerability.Provider
-			dbStatus *vulnerability.ProviderStatus
-			err      error
+			go g.updateDBBackground(ctx)
+		} else {
+			g.mu.Unlock()
 		}
-		// Buffered channel (size 1) prevents goroutine from blocking if timeout occurs
-		// The goroutine will complete in background but won't leak since it will successfully send
-		resultCh := make(chan updateResult, 1)
+	}
 
-		go func() {
-			// Note: grype.LoadVulnerabilityDB does not accept context, so the goroutine
-			// will continue to completion even if timeout occurs. The buffered channel
-			// ensures the goroutine can complete without blocking.
-			if logger.L().GetLevel() == "debug" {
-				if distClient, err := distribution.NewClient(g.distCfg); err == nil {
-					if archive, err := distClient.IsUpdateAvailable(nil); err == nil && archive != nil {
-						if archiveURL, err := distClient.ResolveArchiveURL(*archive); err == nil {
-							logger.L().Debug("downloading grype DB", helpers.String("archiveURL", archiveURL))
-						}
+	// On cold start (no DB loaded yet), wait for the initial background update to finish or context to cancel
+	if !hasValidDB {
+		g.mu.RLock()
+		ch := g.updateChan
+		g.mu.RUnlock()
+		if ch != nil {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+			}
+		}
+	}
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.store != nil && g.dbStatus != nil && g.dbStatus.Error == nil
+}
+
+// updateDBBackground launches the actual DB load in its own goroutine and waits up to 15
+// minutes for it, purely so a slow/stuck download doesn't hold up this goroutine forever.
+// grype.LoadVulnerabilityDB takes no context and cannot be cancelled, so giving up on the
+// wait does NOT stop the load - it keeps writing to installCfg.DBRootDir in the background.
+// Consequently every mutation of shared state (installing a successful result, scheduling
+// the next attempt, releasing the single-flight guard, and cleaning up DBRootDir on failure)
+// happens exactly once, in finishUpdate, invoked by the goroutine that actually ran the load
+// - never here. That is what keeps a slow load from racing a second one started by the next
+// readiness probe, and keeps DBRootDir from being wiped out from under a download still
+// writing to it.
+func (g *GrypeAdapter) updateDBBackground(ctx context.Context) {
+	// Use context.WithoutCancel to prevent the update from being cancelled if the request context (e.g. readiness probe) is cancelled
+	ctx, span := otel.Tracer("").Start(context.WithoutCancel(ctx), "GrypeAdapter.UpdateDB")
+	defer span.End()
+	logger.L().Info("updating grype DB",
+		helpers.String("listingURL", g.distCfg.LatestURL))
+
+	g.mu.RLock()
+	hasExistingDB := g.store != nil
+	g.mu.RUnlock()
+
+	// loadDB is set once at construction and never reassigned afterwards, so reading it
+	// here without g.mu is safe even though every other field on GrypeAdapter is guarded.
+	loadFn := g.loadDB
+	if loadFn == nil {
+		loadFn = defaultLoadDB
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		if logger.L().GetLevel() == "debug" {
+			if distClient, err := distribution.NewClient(g.distCfg); err == nil {
+				if archive, err := distClient.IsUpdateAvailable(nil); err == nil && archive != nil {
+					if archiveURL, err := distClient.ResolveArchiveURL(*archive); err == nil {
+						logger.L().Debug("downloading grype DB", helpers.String("archiveURL", archiveURL))
 					}
 				}
 			}
-			if err := checkDBDirWritable(g.installCfg.DBRootDir); err != nil {
-				logger.L().Ctx(ctx).Warning("grype DB root dir is not writable",
-					helpers.Error(err),
-					helpers.String("dbRootDir", g.installCfg.DBRootDir))
-			}
-			store, dbStatus, err := grype.LoadVulnerabilityDB(g.distCfg, g.installCfg, true)
-			resultCh <- updateResult{store: store, dbStatus: dbStatus, err: err}
-		}()
-
-		select {
-		case result := <-resultCh:
-			if result.err != nil {
-				logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(result.err))
-				err := tools.DeleteContents(g.installCfg.DBRootDir)
-				logger.L().Debug("cleaned up cache", helpers.Error(err),
-					helpers.String("DBRootDir", g.installCfg.DBRootDir))
-				if !testing.Testing() {
-					logger.L().Info("restarting to release previous grype DB")
-					os.Exit(0)
-				}
-				return false
-			}
-			if g.store != nil {
-				if err := g.store.Close(); err != nil {
-					logger.L().Ctx(ctx).Warning("failed to close previous grype DB", helpers.Error(err))
-				}
-			}
-			g.store = result.store
-			g.dbStatus = result.dbStatus
-			g.lastDbUpdate = now
-			logger.L().Info("grype DB updated")
-			return true
-		case <-updateCtx.Done():
-			if hasExistingDB {
-				// We have an existing DB, keep using it instead of crashing
-				// This prevents crashloop in case of slow but functional network
-				logger.L().Ctx(ctx).Warning("grype DB update timed out after 15 minutes, continuing with existing DB",
-					helpers.String("existingDBVersion", g.dbVersionLocked()))
-				// Update lastDbUpdate to prevent immediate retry, will retry in next 24h cycle
-				g.lastDbUpdate = now
-				return true
-			} else {
-				// No existing DB to fall back on, must restart
-				logger.L().Ctx(ctx).Error("grype DB initial download timed out after 15 minutes")
-				err := tools.DeleteContents(g.installCfg.DBRootDir)
-				logger.L().Debug("cleaned up cache after timeout", helpers.Error(err),
-					helpers.String("DBRootDir", g.installCfg.DBRootDir))
-				if !testing.Testing() {
-					logger.L().Info("restarting pod due to grype DB initial download timeout")
-					os.Exit(0)
-				}
-				return false
-			}
 		}
+		if err := checkDBDirWritable(g.installCfg.DBRootDir); err != nil {
+			logger.L().Ctx(ctx).Warning("grype DB root dir is not writable",
+				helpers.Error(err),
+				helpers.String("dbRootDir", g.installCfg.DBRootDir))
+		}
+		store, dbStatus, err := loadFn(g.distCfg, g.installCfg)
+		g.finishUpdate(ctx, hasExistingDB, store, dbStatus, err)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Minute):
+		// grype.LoadVulnerabilityDB takes no context and cannot be cancelled, and the
+		// pinned grype's HTTP client bounds only dial/TLS handshake, not response-body
+		// reads (its withUserAgent post-processor replaces the *http.Client wholesale,
+		// silently dropping any Timeout we set on distCfg). A connection that stalls
+		// mid-download therefore hangs the load goroutine forever, so finishUpdate would
+		// never run: updating would stay true and DBRootDir would never be retried.
+		//
+		// On a cold start there is nothing to lose, so restart - the one case where this
+		// loses non-blocking behaviour is a download that is genuinely stuck, not merely
+		// slow, which is the same condition that used to trigger os.Exit(0) unconditionally
+		// before this PR. With an existing DB, though, the pod is healthy and serving: keep
+		// it that way instead of dropping in-flight scans, and let finishUpdate install the
+		// stuck load whenever (if ever) it returns.
+		if !hasExistingDB {
+			logger.L().Ctx(ctx).Error("grype DB initial download stuck past 15 minutes with an uncancellable load in flight, restarting to recover")
+			os.Exit(0)
+		}
+		g.mu.RLock()
+		existingVersion := g.dbVersionLocked()
+		g.mu.RUnlock()
+		logger.L().Ctx(ctx).Error("grype DB update stuck past 15 minutes with an uncancellable load in flight, continuing with existing DB",
+			helpers.String("existingDBVersion", existingVersion))
+	}
+}
+
+// finishUpdate is invoked exactly once per updateDBBackground call, by the goroutine that
+// actually ran loadFn, regardless of whether updateDBBackground's own 15-minute wait already
+// gave up on it. It owns every mutation of shared state for this update - installing a
+// successful result, scheduling the next attempt, and releasing the single-flight guard -
+// so nothing else can delete DBRootDir or start a second update while this one is still
+// writing to it. Installing the new state happens under g.mu, but the actual I/O (closing
+// providers, deleting DBRootDir) happens after unlocking, so scans only block for the pointer
+// swap. The single-flight guard is released only after that I/O completes: Ready() unblocks
+// cold-start callers as soon as updateChan closes, so closing it any earlier would let a
+// caller observe g.store before an unusable one has actually been Close()'d.
+func (g *GrypeAdapter) finishUpdate(ctx context.Context, hasExistingDB bool, store vulnerability.Provider, dbStatus *vulnerability.ProviderStatus, err error) {
+	now := time.Now()
+
+	// Released last via defer, after any I/O below, no matter which branch runs or how it
+	// returns: a leaked updating=true would permanently wedge future updates, since nothing
+	// else ever clears it, so this must not depend on every branch remembering to call it.
+	defer func() {
+		g.mu.Lock()
+		g.updating = false
+		if g.updateChan != nil {
+			close(g.updateChan)
+			g.updateChan = nil
+		}
+		g.mu.Unlock()
+	}()
+
+	// A successful load whose reported status still carries an error is not usable: treat
+	// it the same as a load failure so Ready() keeps reporting not-ready and a retry gets
+	// scheduled, instead of wedging the pod NotReady for 24h with nothing to recover it.
+	if err == nil && dbStatus != nil && dbStatus.Error != nil {
+		err = dbStatus.Error
 	}
 
-	return g.dbStatus.Error == nil
+	if err != nil {
+		g.mu.Lock()
+		// Schedule retry in 5 minutes on update failure
+		g.nextUpdateAttempt = now.Add(5 * time.Minute)
+		g.mu.Unlock()
+
+		logger.L().Ctx(ctx).Error("failed to update grype DB", helpers.Error(err))
+		if store != nil {
+			if closeErr := store.Close(); closeErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to close grype DB opened despite reported status error", helpers.Error(closeErr))
+			}
+		}
+		if !hasExistingDB {
+			if delErr := tools.DeleteContents(g.installCfg.DBRootDir); delErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to clean up grype DB cache", helpers.Error(delErr),
+					helpers.String("DBRootDir", g.installCfg.DBRootDir))
+			}
+		}
+		return
+	}
+
+	g.mu.Lock()
+	oldStore := g.store
+	g.store = store
+	g.dbStatus = dbStatus
+	// Schedule the next routine refresh in 24 hours
+	g.nextUpdateAttempt = now.Add(24 * time.Hour)
+	g.mu.Unlock()
+
+	if oldStore != nil && oldStore != store {
+		if closeErr := oldStore.Close(); closeErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to close previous grype DB", helpers.Error(closeErr))
+		}
+	}
+	logger.L().Info("grype DB updated")
 }
 
 const dummyLayer = "generatedlayer"
@@ -273,7 +367,7 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	if g.dbStatus == nil {
+	if g.store == nil || g.dbStatus == nil || g.dbStatus.Error != nil {
 		return domain.CVEManifest{}, domain.ErrInitVulnDB
 	}
 

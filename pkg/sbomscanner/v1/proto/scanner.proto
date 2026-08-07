@@ -37,6 +37,8 @@ message CreateSBOMResponse {
   int64 sbom_size = 3;
   // Error message (for non-terminal errors that should be propagated)
   string error_message = 4;
+  // The status reason if status is TooLarge
+  string status_reason = 5;
 }
 
 message HealthRequest {}

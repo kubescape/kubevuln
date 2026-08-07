@@ -31,6 +31,7 @@ type ScanResult struct {
 	SBOMSize     int64
 	Status       string
 	ErrorMessage string
+	StatusReason string
 }
 
 // SBOMScannerClient is the interface for communicating with the sidecar scanner.

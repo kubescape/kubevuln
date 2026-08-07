@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
@@ -53,8 +54,8 @@ func TestScan(t *testing.T) {
 			"phase 1: missing fields",
 			"../../api/v1/testdata/scan-incomplete.yaml",
 			"/v1/scanImage",
-			500,
-			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=k8s.gcr.io/coredns/coredns:v1.8.6\",\"status\":500,\"title\":\"Internal Server Error\"}",
+			400,
+			"{\"detail\":\"Wlid=wlid://cluster-bez-longrun3/namespace-kube-system/deployment-coredns, ImageHash=k8s.gcr.io/coredns/coredns:v1.8.6\",\"status\":400,\"title\":\"Bad Request\"}",
 			false,
 		},
 		{
@@ -121,7 +122,7 @@ func TestScan(t *testing.T) {
 			assert.Equal(t, test.expectedCode, w.Code, w.Code)
 			assert.Equal(t, test.expectedBody, w.Body.String(), w.Body.String())
 
-			controller.Shutdown()
+			controller.Shutdown(5 * time.Second)
 		})
 	}
 }

@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -158,6 +160,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 		name          string
 		args          args
 		sbom          domain.SBOM
+		wantErr       error
 		wantEmptySBOM bool
 	}{
 		{
@@ -170,6 +173,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				Name:    name,
 				Content: &v1beta1.SyftDocument{},
 			},
+			nil,
 			false,
 		},
 		{
@@ -182,6 +186,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				Name:    name,
 				Content: &v1beta1.SyftDocument{},
 			},
+			nil,
 			false,
 		},
 		{
@@ -196,7 +201,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				SBOMCreatorVersion: "v1.0.0",
 				Content:            &v1beta1.SyftDocument{},
 			},
-			true,
+			domain.ErrOutdatedSBOM,
+			false,
 		},
 		{
 			"empty name",
@@ -210,6 +216,7 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				SBOMCreatorVersion: "v1.0.0",
 				Content:            &v1beta1.SyftDocument{},
 			},
+			nil,
 			true,
 		},
 	}
@@ -220,7 +227,12 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			require.NoError(t, err)
 			err = a.StoreSBOM(tt.args.ctx, tt.sbom, false)
 			require.NoError(t, err)
-			gotSBOM, _ := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			gotSBOM, err := a.GetSBOM(tt.args.ctx, tt.args.name, tt.args.SBOMCreatorVersion)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
 			if (gotSBOM.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSBOM.Content = %v, wantEmptySBOM %v", gotSBOM.Content, tt.wantEmptySBOM)
 				return
@@ -405,8 +417,47 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
 			affectedAfter++
 		}
+		assert.Empty(t, stmt.ActionStatement, "not_affected statement %q must not carry an action_statement", stmt.Vulnerability.Name)
 	}
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
+}
+
+// TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement guards against a regression
+// where markRelevantVulnerabilitiesAsAffectedInVex set an "affected" status without also setting
+// an ActionStatement, which the storage API type comments require for that status.
+func TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NotEmpty(t, cveManifestFiltered.Content.Matches)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.Equal(t, err, nil)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.Equal(t, err, nil)
+
+	foundAffected := false
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Status == v1beta1.Status(vex.StatusAffected) {
+			foundAffected = true
+			assert.NotEmpty(t, stmt.ActionStatement, "affected statement %q must carry an action_statement", stmt.Vulnerability.Name)
+			assert.Empty(t, stmt.ImpactStatement, "affected statement %q must not carry an impact_statement", stmt.Vulnerability.Name)
+		}
+	}
+	require.True(t, foundAffected, "expected at least one affected statement in test fixture")
 }
 
 // TestAPIServerStore_storeVEX_updatePreservesFieldMapping guards against a regression where
@@ -562,6 +613,72 @@ func TestAPIServerStore_updateVEX_doesNotNormalizeCorrectShapeWithNonURLDataSour
 	}
 }
 
+func TestAPIServerStore_updateVEX_mergesMetadataOnUpdate(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFull.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// Create with initial annotations/labels preserving existing metadata
+	if cveManifestFull.Annotations == nil {
+		cveManifestFull.Annotations = make(map[string]string)
+	}
+	cveManifestFull.Annotations["keep-me"] = "init-val"
+	cveManifestFull.Annotations["k1"] = "v1"
+
+	if cveManifestFiltered.Annotations == nil {
+		cveManifestFiltered.Annotations = make(map[string]string)
+	}
+	cveManifestFiltered.Annotations["keep-me"] = "init-val"
+	cveManifestFiltered.Annotations["k1"] = "v1"
+
+	if cveManifestFull.Labels == nil {
+		cveManifestFull.Labels = make(map[string]string)
+	}
+	cveManifestFull.Labels["l1"] = "v2"
+
+	if cveManifestFiltered.Labels == nil {
+		cveManifestFiltered.Labels = make(map[string]string)
+	}
+	cveManifestFiltered.Labels["l1"] = "v2"
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	// Verify they are created correctly
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "v1", vexContainer.Annotations["k1"])
+	assert.Equal(t, "v2", vexContainer.Labels["l1"])
+	assert.Equal(t, "init-val", vexContainer.Annotations["keep-me"])
+
+	// Update with new annotations/labels (omitting keep-me to verify merge retention)
+	cveManifestFull.Annotations = map[string]string{"k1": "new-v1", "k2": "v2"}
+	cveManifestFull.Labels = map[string]string{"l1": "new-v2", "l2": "v3"}
+	cveManifestFiltered.Annotations = map[string]string{"k1": "new-v1", "k2": "v2"}
+	cveManifestFiltered.Labels = map[string]string{"l1": "new-v2", "l2": "v3"}
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+
+	// Verify they are merged on update
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "new-v1", vexContainerAfterUpdate.Annotations["k1"])
+	assert.Equal(t, "v2", vexContainerAfterUpdate.Annotations["k2"])
+	assert.Equal(t, "init-val", vexContainerAfterUpdate.Annotations["keep-me"])
+	assert.Equal(t, "new-v2", vexContainerAfterUpdate.Labels["l1"])
+	assert.Equal(t, "v3", vexContainerAfterUpdate.Labels["l2"])
+}
+
 func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 	workload := domain.ScanCommand{
 		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
@@ -638,6 +755,49 @@ func TestAPIServerStore_StoreCVESummaryStub(t *testing.T) {
 		assert.Equal(t, int64(3), got.Spec.Severities.High.All, "real Spec must be preserved")
 		assert.NotEqual(t, helpersv1.Incomplete, got.Annotations[helpersv1.StatusMetadataKey], "real summary status must not be clobbered by the stub")
 	})
+}
+
+// TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet guards the
+// data-preservation guard in StoreCVESummaryStub: its retry-path Get must fetch
+// the full object, not request ResourceVersion "metadata" (which kubescape/
+// storage returns as an ObjectMeta-only object with a zeroed Spec). The fake
+// clientset ignores GetOptions, so a behavioral test cannot reproduce the
+// resulting data loss; only an assertion on the requested GetOptions can.
+func TestAPIServerStore_StoreCVESummaryStub_DoesNotUseMetadataGet(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
+		ContainerName: "local-path-provisioner",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+	resourceName, err := GetCVESummaryK8sResourceName(ctx)
+	require.NoError(t, err)
+
+	// Seed a real summary so the stub's Create returns AlreadyExists and the
+	// retry-path Get executes.
+	real := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: v1beta1.SeveritySummary{
+				High: v1beta1.VulnerabilityCounters{All: 3, Relevant: 1},
+			},
+		},
+	}
+	_, err = wrapped.VulnerabilityManifestSummaries(ns).Create(context.Background(), real, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreCVESummaryStub(ctx, helpersv1.Incomplete))
+
+	require.NotNil(t, wrapped.vulnSummaries[ns], "summary sub-client must have been exercised")
+	require.Empty(t, wrapped.vulnSummaries[ns].getResourceVersion,
+		"StoreCVESummaryStub must not request the metadata-only Get")
 }
 
 func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
@@ -909,14 +1069,49 @@ func TestMergeMaps(t *testing.T) {
 			new:      map[string]string{},
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil existing map",
+			existing: nil,
+			new:      map[string]string{"key1": "value1"},
+			expected: map[string]string{"key1": "value1"},
+		},
+		{
+			name:     "merge with nil existing and nil new maps",
+			existing: nil,
+			new:      nil,
+			expected: map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mergeMaps(tt.existing, tt.new)
-			assert.Equal(t, tt.expected, tt.existing)
+			got := mergeMaps(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestAPIServerStore_StoreCVE_mergesMetadataOnUpdate(t *testing.T) {
+	seeded := &v1beta1.VulnerabilityManifest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "kubescape",
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"k1": "v1"},
+		Labels:      map[string]string{"l1": "v2"},
+	}
+	require.NoError(t, a.StoreCVE(context.TODO(), cve, false))
+
+	got, err := a.StorageClient.VulnerabilityManifests("kubescape").Get(context.TODO(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "v1", got.Annotations["k1"])
+	assert.Equal(t, "v2", got.Labels["l1"])
 }
 
 func TestAPIServerStore_GetCVE_transientError(t *testing.T) {
@@ -1061,13 +1256,16 @@ func TestAPIServerStore_StoreCVESummary_updateGetFailure_transientError(t *testi
 	require.ErrorIs(t, err, injectedErr)
 }
 
+// NOTE: the missing Annotations/Labels seeds here are load-bearing — they drive the
+// nil-map update path (the mergeMaps crash). See also the SBOM/summary/stub
+// retryExhausted tests. Do NOT re-add empty map seeds; that silently deletes the
+// regression coverage. The "merged and saved" half is covered by
+// TestAPIServerStore_StoreCVE_mergesMetadataOnUpdate.
 func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1085,10 +1283,8 @@ func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
 func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1106,10 +1302,8 @@ func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
 func TestAPIServerStore_StoreSBOMFiltered_retryExhausted_transientError(t *testing.T) {
 	seeded := &v1beta1.SBOMSyftFiltered{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   "kubescape",
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      name,
+			Namespace: "kubescape",
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1143,10 +1337,8 @@ func TestAPIServerStore_StoreCVESummary_retryExhausted_transientError(t *testing
 
 	seeded := &v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        resourceName,
-			Namespace:   ns,
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      resourceName,
+			Namespace: ns,
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1194,10 +1386,8 @@ func TestAPIServerStore_StoreCVESummaryStub_retryExhausted_transientError(t *tes
 
 	seeded := &v1beta1.VulnerabilityManifestSummary{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        resourceName,
-			Namespace:   ns,
-			Annotations: map[string]string{},
-			Labels:      map[string]string{},
+			Name:      resourceName,
+			Namespace: ns,
 		},
 	}
 	clientset := fake.NewSimpleClientset(seeded)
@@ -1210,4 +1400,385 @@ func TestAPIServerStore_StoreCVESummaryStub_retryExhausted_transientError(t *tes
 	err = a.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema)
 	require.True(t, apierrors.IsConflict(err))
 	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+func TestAPIServerStore_StoreVEX_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreVEX_updateGetFailure_transientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name)
+	})
+	var getCalls int
+	clientset.PrependReactor("get", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		getCalls++
+		if getCalls == 1 {
+			// the initial existence check: let it fall through to the tracker, which
+			// reports NotFound since nothing has been created yet
+			return false, nil, nil
+		}
+		// the Get inside the retry-on-conflict loop, after createVEX raced to AlreadyExists
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreVEX_retryExhausted_transientError(t *testing.T) {
+	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+		Spec: v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.True(t, apierrors.IsConflict(err))
+	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+}
+
+// TestAPIServerStore_StoreVEX_concurrentCreateRace guards against a regression where a
+// caller whose Create lost the race (another writer created the container between this
+// caller's own NotFound-returning Get and its Create call) received the raw AlreadyExists
+// error instead of falling back to an update, unlike every other Store* method in this file.
+func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	var createCalls int
+	clientset.PrependReactor("create", "openvulnerabilityexchangecontainers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createCalls++
+		// Simulate a concurrent writer's createVEX beating this caller's Create:
+		// insert the object directly into the tracker (bypassing the Fake's own
+		// action-invocation lock, which is already held while this reactor runs,
+		// to avoid deadlocking on a reentrant call through the client) and report
+		// AlreadyExists back to the caller, exactly as the real apiserver would.
+		created := action.(k8stesting.CreateAction).GetObject().(*v1beta1.OpenVulnerabilityExchangeContainer).DeepCopy()
+		require.NoError(t, clientset.Tracker().Create(action.GetResource(), created, action.GetNamespace()))
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name)
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	err := a.StoreVEX(context.TODO(), cve, cve, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, createCalls)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, vexContainer)
+	// updateVEX bumps Metadata.Version on every successful update, so a version > 0
+	// confirms the fallback actually went through updateVEX rather than a no-op.
+	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+}
+
+// TestAPIServerStore_StoreVEX_recoversFromTransientConflict guards against a regression
+// where the retry loop stops actually retrying (e.g. a future refactor hoists the Get
+// outside the closure and keeps retrying against a stale resourceVersion). It asserts the
+// headline behaviour promised by RetryOnConflict: a single transient conflict is absorbed
+// and the second attempt succeeds.
+func TestAPIServerStore_StoreVEX_recoversFromTransientConflict(t *testing.T) {
+	seeded := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "kubescape",
+			Annotations: map[string]string{},
+			Labels:      map[string]string{},
+		},
+		Spec: v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: time.Now().Format(time.RFC3339)},
+		},
+	}
+	clientset := fake.NewSimpleClientset(seeded)
+	var updateCalls int
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		if updateCalls == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
+		}
+		return false, nil, nil // fall through to the tracker's default update handling
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	require.NoError(t, a.StoreVEX(context.TODO(), cve, cve, false))
+	require.Equal(t, 2, updateCalls)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+}
+
+// The k8s fake clientset's generated typed clients (k8s.io/client-go/gentype) drop the
+// caller's ctx before it ever reaches a PrependReactor, so a reactor cannot observe
+// cancellation and can't be used to prove ctx propagation. These wrappers instead record
+// the exact ctx.Context each call received, so tests can assert the caller's ctx (tagged
+// with a canary value) is the one that actually reaches the storage client, rather than
+// some context.Background()/context.TODO() substitute.
+type ctxCapturingVulnerabilityManifests struct {
+	spdxv1beta1.VulnerabilityManifestInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.getCtx = ctx
+	return w.VulnerabilityManifestInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Create(ctx context.Context, obj *v1beta1.VulnerabilityManifest, opts metav1.CreateOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.createCtx = ctx
+	return w.VulnerabilityManifestInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingVulnerabilityManifests) Update(ctx context.Context, obj *v1beta1.VulnerabilityManifest, opts metav1.UpdateOptions) (*v1beta1.VulnerabilityManifest, error) {
+	w.updateCtx = ctx
+	return w.VulnerabilityManifestInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingSBOMSyfts struct {
+	spdxv1beta1.SBOMSyftInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingSBOMSyfts) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.SBOMSyft, error) {
+	w.getCtx = ctx
+	return w.SBOMSyftInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingSBOMSyfts) Create(ctx context.Context, obj *v1beta1.SBOMSyft, opts metav1.CreateOptions) (*v1beta1.SBOMSyft, error) {
+	w.createCtx = ctx
+	return w.SBOMSyftInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingSBOMSyfts) Update(ctx context.Context, obj *v1beta1.SBOMSyft, opts metav1.UpdateOptions) (*v1beta1.SBOMSyft, error) {
+	w.updateCtx = ctx
+	return w.SBOMSyftInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingOVECs struct {
+	spdxv1beta1.OpenVulnerabilityExchangeContainerInterface
+	getCtx, createCtx, updateCtx context.Context
+}
+
+func (w *ctxCapturingOVECs) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.getCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Get(ctx, name, opts)
+}
+
+func (w *ctxCapturingOVECs) Create(ctx context.Context, obj *v1beta1.OpenVulnerabilityExchangeContainer, opts metav1.CreateOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.createCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Create(ctx, obj, opts)
+}
+
+func (w *ctxCapturingOVECs) Update(ctx context.Context, obj *v1beta1.OpenVulnerabilityExchangeContainer, opts metav1.UpdateOptions) (*v1beta1.OpenVulnerabilityExchangeContainer, error) {
+	w.updateCtx = ctx
+	return w.OpenVulnerabilityExchangeContainerInterface.Update(ctx, obj, opts)
+}
+
+type ctxCapturingVulnerabilityManifestSummaries struct {
+	spdxv1beta1.VulnerabilityManifestSummaryInterface
+	getCtx             context.Context
+	getResourceVersion string
+}
+
+func (w *ctxCapturingVulnerabilityManifestSummaries) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1beta1.VulnerabilityManifestSummary, error) {
+	w.getCtx = ctx
+	w.getResourceVersion = opts.ResourceVersion
+	return w.VulnerabilityManifestSummaryInterface.Get(ctx, name, opts)
+}
+
+// ctxCapturingClient wraps a real (fake) SpdxV1beta1Interface, swapping in ctx-recording
+// wrappers for the sub-clients exercised by the ctxPropagated tests below, while delegating
+// everything else untouched.
+type ctxCapturingClient struct {
+	spdxv1beta1.SpdxV1beta1Interface
+	vulnManifests map[string]*ctxCapturingVulnerabilityManifests
+	sbomSyfts     map[string]*ctxCapturingSBOMSyfts
+	ovecs         map[string]*ctxCapturingOVECs
+	vulnSummaries map[string]*ctxCapturingVulnerabilityManifestSummaries
+}
+
+// The accessor methods below are called once per storage operation (e.g. StoreVEX calls
+// OpenVulnerabilityExchangeContainers(ns) separately for its Get and then again for its
+// Create/Update), so the wrapper must be memoized rather than replaced on every call, or
+// later calls' captured ctx would clobber earlier ones.
+
+func (c *ctxCapturingClient) VulnerabilityManifests(namespace string) spdxv1beta1.VulnerabilityManifestInterface {
+	if c.vulnManifests == nil {
+		c.vulnManifests = map[string]*ctxCapturingVulnerabilityManifests{}
+	}
+	if _, ok := c.vulnManifests[namespace]; !ok {
+		c.vulnManifests[namespace] = &ctxCapturingVulnerabilityManifests{VulnerabilityManifestInterface: c.SpdxV1beta1Interface.VulnerabilityManifests(namespace)}
+	}
+	return c.vulnManifests[namespace]
+}
+
+func (c *ctxCapturingClient) SBOMSyfts(namespace string) spdxv1beta1.SBOMSyftInterface {
+	if c.sbomSyfts == nil {
+		c.sbomSyfts = map[string]*ctxCapturingSBOMSyfts{}
+	}
+	if _, ok := c.sbomSyfts[namespace]; !ok {
+		c.sbomSyfts[namespace] = &ctxCapturingSBOMSyfts{SBOMSyftInterface: c.SpdxV1beta1Interface.SBOMSyfts(namespace)}
+	}
+	return c.sbomSyfts[namespace]
+}
+
+func (c *ctxCapturingClient) OpenVulnerabilityExchangeContainers(namespace string) spdxv1beta1.OpenVulnerabilityExchangeContainerInterface {
+	if c.ovecs == nil {
+		c.ovecs = map[string]*ctxCapturingOVECs{}
+	}
+	if _, ok := c.ovecs[namespace]; !ok {
+		c.ovecs[namespace] = &ctxCapturingOVECs{OpenVulnerabilityExchangeContainerInterface: c.SpdxV1beta1Interface.OpenVulnerabilityExchangeContainers(namespace)}
+	}
+	return c.ovecs[namespace]
+}
+
+func (c *ctxCapturingClient) VulnerabilityManifestSummaries(namespace string) spdxv1beta1.VulnerabilityManifestSummaryInterface {
+	if c.vulnSummaries == nil {
+		c.vulnSummaries = map[string]*ctxCapturingVulnerabilityManifestSummaries{}
+	}
+	if _, ok := c.vulnSummaries[namespace]; !ok {
+		c.vulnSummaries[namespace] = &ctxCapturingVulnerabilityManifestSummaries{VulnerabilityManifestSummaryInterface: c.SpdxV1beta1Interface.VulnerabilityManifestSummaries(namespace)}
+	}
+	return c.vulnSummaries[namespace]
+}
+
+type ctxCanaryKey struct{}
+
+// canaryCtx returns a context carrying a unique, per-call marker value so tests can assert
+// on referential identity (via the canary) rather than just "a context was passed" - a nil
+// or unrelated context.Context would not carry this value.
+func canaryCtx() context.Context {
+	return context.WithValue(context.Background(), ctxCanaryKey{}, "canary")
+}
+
+func requireCanaryCtx(t *testing.T, got context.Context) {
+	t.Helper()
+	require.NotNil(t, got)
+	require.Equal(t, "canary", got.Value(ctxCanaryKey{}))
+}
+
+func TestAPIServerStore_GetCVE_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	_, _ = a.GetCVE(canaryCtx(), name, "", "", "")
+	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].getCtx)
+}
+
+func TestAPIServerStore_GetSBOM_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	_, _ = a.GetSBOM(canaryCtx(), name, "")
+	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].getCtx)
+}
+
+func TestAPIServerStore_GetCVESummary_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	_, _ = a.GetCVESummary(ctx)
+	requireCanaryCtx(t, wrapped.vulnSummaries[a.Namespace].getCtx)
+}
+
+func TestAPIServerStore_GetCVESummary_returnsTransientError(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	clientset.PrependReactor("get", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+	a := &APIServerStore{StorageClient: clientset.SpdxV1beta1(), Namespace: "kubescape"}
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	_, err := a.GetCVESummary(ctx)
+	require.ErrorIs(t, err, injectedErr)
+}
+
+func TestAPIServerStore_StoreCVE_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	require.NoError(t, a.StoreCVE(canaryCtx(), domain.CVEManifest{Name: name}, false))
+	requireCanaryCtx(t, wrapped.vulnManifests[a.Namespace].createCtx)
+}
+
+func TestAPIServerStore_StoreSBOM_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	require.NoError(t, a.StoreSBOM(canaryCtx(), domain.SBOM{Name: name}, false))
+	requireCanaryCtx(t, wrapped.sbomSyfts[a.Namespace].createCtx)
+}
+
+func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := &APIServerStore{StorageClient: wrapped, Namespace: "kubescape"}
+	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	require.NoError(t, a.StoreVEX(canaryCtx(), cve, cve, false))
+	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
+	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].createCtx)
+}
+
+func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+
+	// VulnerabilityManifests: different namespaces must return different wrappers,
+	// repeated access to one namespace must return the same wrapper.
+	vm1 := wrapped.VulnerabilityManifests("ns-a")
+	vm2 := wrapped.VulnerabilityManifests("ns-b")
+	vm1Again := wrapped.VulnerabilityManifests("ns-a")
+	require.NotSame(t, vm1, vm2, "different namespaces must return different wrappers")
+	require.Same(t, vm1, vm1Again, "same namespace must return the memoized wrapper")
+
+	// SBOMSyfts
+	ss1 := wrapped.SBOMSyfts("ns-a")
+	ss2 := wrapped.SBOMSyfts("ns-b")
+	ss1Again := wrapped.SBOMSyfts("ns-a")
+	require.NotSame(t, ss1, ss2)
+	require.Same(t, ss1, ss1Again)
+
+	// OpenVulnerabilityExchangeContainers
+	ov1 := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	ov2 := wrapped.OpenVulnerabilityExchangeContainers("ns-b")
+	ov1Again := wrapped.OpenVulnerabilityExchangeContainers("ns-a")
+	require.NotSame(t, ov1, ov2)
+	require.Same(t, ov1, ov1Again)
 }

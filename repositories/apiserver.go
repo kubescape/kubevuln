@@ -204,7 +204,7 @@ func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace stri
 		logger.L().Debug("empty name provided, skipping container profile retrieval")
 		return v1beta1.ContainerProfile{}, nil
 	}
-	profile, err := a.StorageClient.ContainerProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	profile, err := a.StorageClient.ContainerProfiles(namespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("container profile not found in storage",
@@ -225,7 +225,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		logger.L().Debug("empty name provided, skipping CVE retrieval")
 		return domain.CVEManifest{}, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("CVE manifest not found in storage",
@@ -271,7 +271,7 @@ func (a *APIServerStore) GetCVESummary(ctx context.Context) (*v1beta1.Vulnerabil
 		logger.L().Debug("empty name provided, skipping summary CVE retrieval")
 		return nil, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("summary CVE manifest not found in storage",
@@ -280,7 +280,7 @@ func (a *APIServerStore) GetCVESummary(ctx context.Context) (*v1beta1.Vulnerabil
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get summary CVE manifest from apiserver", helpers.Error(err),
 			helpers.String("name", name))
-		return nil, nil
+		return nil, err
 	}
 
 	logger.L().Debug("got summary CVE manifest from storage",
@@ -327,22 +327,25 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	if cve.Content != nil {
 		manifest.Spec.Payload = *cve.Content
 	}
-	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(context.Background(), cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 			if getErr != nil {
 				return getErr
 			}
 			// update the vulnerability manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -565,22 +568,25 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, workloadNamespace, withRelevancy),
 		},
 	}
-	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 			if getErr != nil {
 				return getErr
 			}
 			// update the vulnerability manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = manifest.Spec
 			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -650,12 +656,15 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 			Labels:      labels,
 		},
 	}
-	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// retrieve the latest version before attempting update
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(context.Background(), manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
@@ -664,9 +673,9 @@ func (a *APIServerStore) StoreCVESummaryStub(ctx context.Context, status string)
 				return nil
 			}
 			// refresh annotations/labels only, keep any existing Spec
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
-			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
+			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -700,30 +709,74 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 		return nil
 	}
 
-	// Check if VEX already exists
-	// If it does, update it
-	// If it doesn't, create it
-	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cvep.Name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create VEX
-			err = a.createVEX(ctx, cve, cvep)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
+	// Check for an existing container first so the common "VEX already exists" path
+	// (every scan after the first one for a given image) goes straight to the cheap
+	// update below, instead of paying for building the full VEX document, hashing it,
+	// and POSTing it via createVEX only to discard the result on AlreadyExists.
+	existing, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cvep.Name, metav1.GetOptions{})
+	// Get returns a non-nil (but empty) object even on error, so success must be
+	// tracked explicitly rather than by checking the returned pointer for nil.
+	haveExisting := err == nil
+	switch {
+	case errors.IsNotFound(err):
+		err = a.createVEX(ctx, cve, cvep)
+		switch {
+		case err == nil:
+			logger.L().Debug("stored VEX in storage", helpers.String("name", cvep.Name))
+			return nil
+		case errors.IsAlreadyExists(err):
+			// A concurrent writer created the container between our Get and our
+			// Create; fall through to the retry-on-conflict update path below
+			// instead of surfacing the raw AlreadyExists error.
+		default:
+			logger.L().Debug("failed to store VEX in storage", helpers.Error(err),
+				helpers.String("name", cvep.Name))
+			return fmt.Errorf("failed to store VEX in storage: %w", err)
 		}
-	} else {
-		// Update VEX
-		err = a.updateVEX(ctx, cve, cvep, vexContainer)
-		if err != nil {
-			return err
-		}
+	case err != nil:
+		logger.L().Debug("failed to get VEX from storage", helpers.Error(err),
+			helpers.String("name", cvep.Name))
+		return fmt.Errorf("failed to get VEX from storage: %w", err)
 	}
 
-	return nil
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Reuse the object already fetched above on the first attempt, so the common
+		// "VEX already exists" path only costs a single Get. Any retry (after a real
+		// conflict) forces a fresh Get for the latest resourceVersion.
+		vexContainer := existing
+		alreadyHadExisting := haveExisting
+		haveExisting = false
+		if !alreadyHadExisting {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			//
+			// NOTE: this must NOT use GetOptions{ResourceVersion: "metadata"} like the
+			// sibling Store* methods do. That option returns an ObjectMeta-only object
+			// with a zero Spec in kubescape/storage's apiserver, which is safe for the
+			// siblings because they overwrite Spec wholesale. updateVEX instead merges
+			// into vexContainer.Spec.Statements, so a metadata-only read would silently
+			// drop every previously stored statement and then fail when it tries to
+			// parse the zeroed Spec.Metadata.Timestamp. The fake clientset used in tests
+			// ignores GetOptions entirely, so no test can catch a regression here.
+			var getErr error
+			vexContainer, getErr = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cvep.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
+		}
+		return a.updateVEX(ctx, cve, cvep, vexContainer)
+	})
+	if retryErr != nil {
+		logger.L().Debug("failed to update VEX in storage", helpers.Error(retryErr),
+			helpers.String("name", cvep.Name))
+		return fmt.Errorf("failed to update VEX in storage: %w", retryErr)
+	}
+	logger.L().Debug("updated VEX in storage", helpers.String("name", cvep.Name))
 
+	return nil
 }
 
 func createProductStructForImageAndPackage(imagePullable string, packagePURL string) (*v1beta1.Product, error) {
@@ -746,6 +799,20 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+// defaultActionStatement is used when a match does not carry enough fix data to build a
+// more specific remediation string.
+const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
+
+// buildActionStatement returns a remediation string for an affected VEX statement. When the
+// match reports a fixed state with known fix versions, it names them; otherwise it falls back
+// to defaultActionStatement.
+func buildActionStatement(v v1beta1.Match) string {
+	if v.Vulnerability.Fix.State == "fixed" && len(v.Vulnerability.Fix.Versions) > 0 {
+		return fmt.Sprintf("Upgrade %s to version %s", v.Artifact.PURL, strings.Join(v.Vulnerability.Fix.Versions, " or "))
+	}
+	return defaultActionStatement
+}
+
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
@@ -757,7 +824,8 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 						if sc.ID == v.Artifact.PURL {
 							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
 							vexDoc.Statements[i].Justification = ""
-							vexDoc.Statements[i].ImpactStatement = "Vulnerable component is loaded into the memory"
+							vexDoc.Statements[i].ImpactStatement = ""
+							vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
 							foundProduct = true
 						}
 						if foundProduct {
@@ -850,7 +918,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 		Spec: vexDoc,
 	}
 
-	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Create(context.Background(), &vexContainer, metav1.CreateOptions{})
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Create(ctx, &vexContainer, metav1.CreateOptions{})
 
 	return err
 }
@@ -927,6 +995,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
 		vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
+		vexDoc.Statements[i].ActionStatement = ""
 	}
 
 	// Now change the status of the filtered vulnerabilities to "Affected"
@@ -947,8 +1016,10 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	vexDoc.Metadata.ID = calculatedId
 
 	// Update the VEX container
+	vexContainer.Annotations = mergeMaps(vexContainer.Annotations, cvep.Annotations)
+	vexContainer.Labels = mergeMaps(vexContainer.Labels, cvep.Labels)
 	vexContainer.Spec = vexDoc
-	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
 
 	return err
 }
@@ -1062,7 +1133,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		logger.L().Debug("empty name provided, skipping SBOM retrieval")
 		return domain.SBOM{}, nil
 	}
-	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("SBOM manifest not found in storage",
@@ -1077,7 +1148,17 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 			helpers.String("name", name),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
 			helpers.String("wanted scanner version", SBOMCreatorVersion))
-		return domain.SBOM{}, nil
+		result := domain.SBOM{
+			Name:               name,
+			Annotations:        manifest.Annotations,
+			Labels:             manifest.Labels,
+			SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+			Content:            &manifest.Spec.Syft,
+		}
+		if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
+			result.Status = status
+		}
+		return result, domain.ErrOutdatedSBOM
 	}
 	result := domain.SBOM{
 		Name:               name,
@@ -1131,22 +1212,25 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
 	if isFiltered {
 		filtered := convertToFilteredSBOM(&manifest)
-		_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(context.Background(), filtered, metav1.CreateOptions{})
+		_, err := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Create(ctx, filtered, metav1.CreateOptions{})
 		switch {
 		case errors.IsAlreadyExists(err):
 			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				// retrieve the latest version before attempting update
 				// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-				result, getErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(context.Background(), sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+				result, getErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Get(ctx, sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 				if getErr != nil {
 					return getErr
 				}
 				// update the filtered sbom
-				mergeMaps(result.Annotations, filtered.Annotations)
-				mergeMaps(result.Labels, filtered.Labels)
+				result.Annotations = mergeMaps(result.Annotations, filtered.Annotations)
+				result.Labels = mergeMaps(result.Labels, filtered.Labels)
 				result.Spec = filtered.Spec
 				// try to send the updated filtered sbom
-				_, updateErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+				_, updateErr := a.StorageClient.SBOMSyftFiltereds(a.Namespace).Update(ctx, result, metav1.UpdateOptions{})
 				return updateErr
 			})
 			if retryErr != nil {
@@ -1165,22 +1249,25 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				helpers.String("name", sbom.Name))
 		}
 	} else {
-		_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+		_, err := a.StorageClient.SBOMSyfts(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 		switch {
 		case errors.IsAlreadyExists(err):
 			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				// retrieve the latest version before attempting update
 				// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-				result, getErr := a.StorageClient.SBOMSyfts(a.Namespace).Get(context.Background(), sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+				result, getErr := a.StorageClient.SBOMSyfts(a.Namespace).Get(ctx, sbom.Name, metav1.GetOptions{ResourceVersion: "metadata"})
 				if getErr != nil {
 					return getErr
 				}
 				// update the sbom
-				mergeMaps(result.Annotations, manifest.Annotations)
-				mergeMaps(result.Labels, manifest.Labels)
+				result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+				result.Labels = mergeMaps(result.Labels, manifest.Labels)
 				result.Spec = manifest.Spec
 				// try to send the updated sbom
-				_, updateErr := a.StorageClient.SBOMSyfts(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+				_, updateErr := a.StorageClient.SBOMSyfts(a.Namespace).Update(ctx, result, metav1.UpdateOptions{})
 				return updateErr
 			})
 			if retryErr != nil {
@@ -1202,6 +1289,31 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	return nil
 }
 
+func (a *APIServerStore) DeleteSBOM(ctx context.Context, name string) error {
+	_, span := otel.Tracer("").Start(ctx, "APIServerStore.DeleteSBOM")
+	defer span.End()
+
+	var deleteErr error
+
+	// Delete unfiltered SBOM
+	err := a.StorageClient.SBOMSyfts(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		logger.L().Ctx(ctx).Warning("failed to delete SBOM", helpers.Error(err), helpers.String("name", name))
+		deleteErr = err
+	}
+
+	// Delete filtered SBOM
+	err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		logger.L().Ctx(ctx).Warning("failed to delete filtered SBOM", helpers.Error(err), helpers.String("name", name))
+		if deleteErr == nil {
+			deleteErr = err
+		}
+	}
+
+	return deleteErr
+}
+
 func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
 	return &v1beta1.SBOMSyftFiltered{
 		TypeMeta:   sbom.TypeMeta,
@@ -1211,9 +1323,15 @@ func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {
 	}
 }
 
-// mergeMaps merges new into existing, overwriting existing keys with new values
-func mergeMaps(existing, new map[string]string) {
-	for k, v := range new {
+// mergeMaps merges incoming into existing, overwriting existing keys with new values,
+// and returns the merged map. Callers MUST use the returned value: when existing is
+// nil a fresh map is allocated, so ignoring the return silently drops the merge.
+func mergeMaps(existing, incoming map[string]string) map[string]string {
+	if existing == nil {
+		existing = make(map[string]string, len(incoming))
+	}
+	for k, v := range incoming {
 		existing[k] = v
 	}
+	return existing
 }

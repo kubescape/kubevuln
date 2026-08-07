@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -21,16 +21,105 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"golang.org/x/oauth2/google"
 )
+
+func isGCPRegistry(imageID string) bool {
+	host, _, _ := strings.Cut(imageID, "/")
+	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
+}
+
+// isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
+//
+// The typed check alone is not enough: stereoscope's registry provider formats the
+// go-containerregistry pull error with %+v, not %w (see
+// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
+// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
+// registry error code emitted when the response carries a JSON error body (e.g. Docker
+// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
+// Error() text when the response body was empty.
+func isRegistryRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	var transportErr *transport.Error
+	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "429 Too Many Requests")
+}
+
+func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, err
+	}
+	token, err := creds.TokenSource.Token()
+	if err != nil {
+		return nil, err
+	}
+	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
+}
+
+// gcpCredsFn is an indirection over gcpCredentials so resolveSource can be
+// unit-tested without a live GCP environment.
+var gcpCredsFn = gcpCredentials
+
+// sourceGetter abstracts the syft.GetSource call so the fallback ordering in
+// resolveSource is testable with a scripted implementation.
+type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error)
+
+// resolveSource downloads an image source, applying the MANIFEST_UNKNOWN and
+// 401/ADC/anonymous fallbacks in order. It mirrors the retry chain in
+// adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
+func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
+	pullRef := imageID
+	src, err := get(ctx, pullRef, &opts)
+	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
+			helpers.String("imageTag", imageTag),
+			helpers.String("imageID", imageID))
+		pullRef = imageTag
+		src, err = get(ctx, pullRef, &opts)
+	}
+	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+		unauthorizedErr := err
+		if isGCPRegistry(imageID) {
+			if gcpCreds, gcpErr := gcpCredsFn(ctx); gcpErr != nil {
+				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
+					helpers.Error(gcpErr),
+					helpers.String("imageID", imageID))
+			} else {
+				opts.Credentials = []image.RegistryCredentials{*gcpCreds}
+				src, err = get(ctx, pullRef, &opts)
+			}
+		}
+		// If GCP ADC was not attempted, succeeded in auth but still got 401, or
+		// the image is not a GCP registry, fall back to anonymous access.
+		if err != nil {
+			logger.L().Debug("retrying without credentials",
+				helpers.String("imageID", imageID))
+			opts.Credentials = nil
+			src, err = get(ctx, pullRef, &opts)
+			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
+				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
+			}
+		}
+	}
+	return src, err
+}
 
 type scannerServer struct {
 	pb.UnimplementedSBOMScannerServer
-	mu      sync.Mutex
 	version string
 }
 
@@ -41,10 +130,22 @@ func NewScannerServer() pb.SBOMScannerServer {
 	}
 }
 
+// CreateSBOM handles one scan per call, with no state shared across concurrent calls: each
+// invocation downloads into its own temp dir (via its own file.NewTempDirGenerator) and builds
+// its own SBOM from its own source. s.version is set once in NewScannerServer and never
+// mutated, so it's safe to read concurrently without a lock. Do not add a mutex/semaphore
+// around this method — a previous version serialized the whole RPC (pull + generation) behind
+// a single process-wide lock, which defeated the caller's scanConcurrency entirely regardless
+// of its configured value (see #473); the number of concurrent in-flight RPCs is bounded by
+// the caller instead, matching scanConcurrency.
+//
+// That bound is on in-flight RPCs, not on actual Syft resource usage: syft.CreateSBOM below
+// runs on context.Background() and Syft's catalogers don't support cancellation, so when
+// dl.Run times out and this RPC returns Incomplete, the abandoned Syft goroutine can keep
+// consuming CPU/memory in the background after the caller already considers that slot free
+// and starts another scan. scanConcurrency therefore bounds concurrent requests, not peak
+// concurrent Syft memory/CPU use, on this path.
 func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMRequest) (*pb.CreateSBOMResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// imageID is already the final, normalized pull reference. The SidecarSBOMAdapter
 	// normalizes it (NormalizeImageID) before sending the request - that is the single
 	// normalization point. Do not normalize again here: re-normalizing an
@@ -95,38 +196,35 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 
 	// Download image from registry
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
-	src, err := syft.GetSource(ctxWithSize, imageID,
-		syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
-		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
-			helpers.String("imageID", imageID))
-		src, err = syft.GetSource(ctxWithSize, imageTag,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-	}
-
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		logger.L().Debug("got 401, retrying without credentials",
-			helpers.String("imageID", imageID))
-		registryOptions.Credentials = nil
-		src, err = syft.GetSource(ctxWithSize, imageID,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
-	}
+	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for gcpCredentials inside resolveSource.
+		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+		return syft.GetSource(ctxWithSize, ref,
+			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+	}, imageID, imageTag, registryOptions)
 
 	switch {
-	case err != nil && strings.Contains(err.Error(), image.ErrImageTooLarge.Error()):
+	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		logger.L().Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.Incomplete,
+			Status:       helpersv1.TooLarge,
+			StatusReason: domain.ReasonImageTooLarge,
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
+		}, nil
+	case err != nil && isRegistryRateLimited(err):
+		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
+		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
+		// ScanService.checkCreateSBOM's errors.As(...) check working the same way it does
+		// for the in-process syft adapter.
+		return &pb.CreateSBOMResponse{
+			ErrorMessage: err.Error(),
+			StatusReason: domain.ReasonTooManyRequests,
 		}, nil
 	case err != nil:
 		return &pb.CreateSBOMResponse{
@@ -187,7 +285,11 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Strip the SBOM to reduce size
 	v1beta1.StripSBOM(syftSBOM)
 
-	// Check in-memory size
+	// Check in-memory size. This is necessarily a post-hoc check: Syft doesn't expose an
+	// incremental/streaming size hook to check MaxSbomSize during cataloging, only once
+	// syft.CreateSBOM above has already returned a complete result (see #473 and the
+	// maxSBOMSize caveat in docs/CONFIGURATION.md). Memory used while generating is bounded
+	// by the scanner container's memory limit, not by MaxSbomSize.
 	sz := size.Of(syftSBOM)
 	if sz > int(req.MaxSbomSize) {
 		logger.L().Warning("SBOM exceeds size limit",
@@ -195,8 +297,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status:   helpersv1.TooLarge,
-			SbomSize: int64(sz),
+			Status:       helpersv1.TooLarge,
+			SbomSize:     int64(sz),
+			StatusReason: domain.ReasonSBOMTooLarge,
 		}, nil
 	}
 

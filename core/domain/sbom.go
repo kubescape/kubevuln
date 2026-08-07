@@ -4,6 +4,18 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+const (
+	StatusReasonAnnotationKey       = "kubescape.io/status-reason"
+	MaxImageSizeAnnotationKey       = "kubescape.io/max-image-size"
+	MaxSBOMSizeAnnotationKey        = "kubescape.io/max-sbom-size"
+	ScannerMemoryLimitAnnotationKey = "kubescape.io/scanner-memory-limit"
+
+	ReasonImageTooLarge   = "image-too-large"
+	ReasonSBOMTooLarge    = "sbom-too-large"
+	ReasonScannerOOM      = "scanner-oom"
+	ReasonTooManyRequests = "too-many-requests"
+)
+
 // SBOM contains an syft SBOM in JSON format with some metadata
 type SBOM struct {
 	Content            *v1beta1.SyftDocument

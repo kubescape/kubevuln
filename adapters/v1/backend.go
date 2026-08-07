@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/akyoto/cache"
 	"github.com/armosec/armoapi-go/armotypes"
 	cs "github.com/armosec/armoapi-go/containerscan"
 	v1 "github.com/armosec/armoapi-go/containerscan/v1"
@@ -20,6 +22,7 @@ import (
 	"github.com/armosec/utils-go/httputils"
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
@@ -32,33 +35,102 @@ import (
 )
 
 type BackendAdapter struct {
-	eventReceiverRestURL      string
-	apiServerRestURL          string
-	clusterConfig             pkgcautils.ClusterConfig
-	getCVEExceptionsFunc      func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc              func(httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
-	sendStatusFunc            func(*backendClientV1.BaseReportSender, string, bool)
-	accessKey                 string
-	securityExceptionRepo     ports.SecurityExceptionRepository
+	eventReceiverRestURL  string
+	apiServerRestURL      string
+	clusterConfig         pkgcautils.ClusterConfig
+	getCVEExceptionsFunc  func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	httpPostFunc          func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
+	sendStatusFunc        func(*backendClientV1.BaseReportSender, string, bool)
+	accessKey             string
+	securityExceptionRepo ports.SecurityExceptionRepository
+	exceptionsCache       *cache.Cache
+	httpClient            httputils.IHttpClient
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
+
+// exceptionsCacheCleaningInterval controls how often expired entries are swept from exceptionsCache.
+// exceptionsCacheTTL bounds how stale a cached exceptions/CRD merge can be before the next scan
+// re-fetches from the backend and cluster; exceptions rarely change within a scan burst, so this
+// avoids a network + CRD round trip on every single container scan.
+const (
+	exceptionsCacheCleaningInterval = 1 * time.Minute
+	exceptionsCacheTTL              = 5 * time.Minute
+)
 
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID: accountID,
 		},
-		eventReceiverRestURL:  eventReceiverRestURL,
-		apiServerRestURL:      apiServerRestURL,
-		getCVEExceptionsFunc:  backendClientV1.GetCVEExceptionByDesignator,
-		httpPostFunc:          httputils.HttpPostWithRetry,
+		eventReceiverRestURL: eventReceiverRestURL,
+		apiServerRestURL:     apiServerRestURL,
+		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
+		httpPostFunc:         httpPostWithContext,
 		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
 			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
 		},
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
+		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 32,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
+}
+
+func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
+	if a.httpClient != nil {
+		return a.httpClient
+	}
+	return http.DefaultClient
+}
+
+// httpPostWithContext is the default httpPostFunc. Unlike httputils.HttpPostWithRetry (which
+// binds context.Background() to the request and retries on a plain, non-cancellable
+// backoff.Retry loop), it threads the caller's ctx through the request AND the retry loop, so
+// cancelling ctx aborts both an in-flight attempt and any further retries promptly instead of
+// running the full retry budget to completion regardless of cancellation (#446).
+func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, maxElapsedTime time.Duration) (*http.Response, error) {
+	bo := backoff.NewExponentialBackOff()
+	return backoff.Retry(ctx, func() (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, backoff.Permanent(err)
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			defer resp.Body.Close()
+			retryErr := fmt.Errorf("received status code: %d", resp.StatusCode)
+			if !shouldRetryReport(resp) {
+				return nil, backoff.Permanent(retryErr)
+			}
+			return nil, retryErr
+		}
+		return resp, nil
+	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
+}
+
+// shouldRetryReport mirrors the unexported defaultShouldRetry in armosec/utils-go: retry on any
+// response except the ones that are never going to succeed on a retry.
+func shouldRetryReport(resp *http.Response) bool {
+	return resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusForbidden &&
+		resp.StatusCode != http.StatusNotFound &&
+		resp.StatusCode != http.StatusInternalServerError
 }
 
 const ActionName = "vuln scan"
@@ -88,12 +160,34 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		return nil, domain.ErrCastingWorkload
 	}
 
+	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	// Registry scans carry no Wlid (registryScanCommandToScanCommand never sets
+	// it), which would otherwise collapse every scanned image onto the same
+	// cache key ("<accountID>/////"). Skip caching entirely for them rather than
+	// let unrelated images share exceptions.
+	cacheable := workload.Wlid != ""
+	cacheKey := strings.Join([]string{
+		a.clusterConfig.AccountID,
+		wlidpkg.GetClusterFromWlid(workload.Wlid),
+		namespace,
+		strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
+		wlidpkg.GetNameFromWlid(workload.Wlid),
+		workload.ContainerName,
+		workload.ImageTagNormalized,
+	}, "/")
+
+	if cacheable && a.exceptionsCache != nil {
+		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
+			return cached.(domain.CVEExceptions), nil
+		}
+	}
+
 	designator := identifiers.PortalDesignator{
 		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
-			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
+			"scope.namespace":     namespace,
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
 			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
 			"scope.containerName": workload.ContainerName,
@@ -106,14 +200,28 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	// Merge CRD-based exceptions
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
-	seList, cseList, err := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
-	if err != nil {
-		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
+	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
+	if crdErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
+		// This is a best-effort degradation that self-heals on the next scan;
+		// caching it would suppress valid CRD exceptions for the full TTL.
+		cacheable = false
 	} else if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+
+		// A selector-based exception whose labels failed to resolve fails closed
+		// (see matchExceptionTarget), which is also a self-healing degradation and
+		// must not be cached as if it were the authoritative result.
+		if (usesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
+			(usesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
+			cacheable = false
+		}
+	}
+
+	if cacheable && a.exceptionsCache != nil {
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
 	}
 
 	return vulnExceptionList, nil
@@ -132,7 +240,13 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	report.Errors = append(report.Errors, err.Error())
 	report.Status = sysreport.JobFailed
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
+	// NOTE: unlike postResults/ReportScanFailure, this call is not ctx-cancellation-aware.
+	// backendClientV1.NewBaseReportSender builds its own *http.Request bound to
+	// context.Background() inside armosec/utils-go, before it ever reaches our IHttpClient, so
+	// there's no seam here to inject ctx without either bypassing the sender or a ctx-accepting
+	// constructor upstream in kubescape/backend. Tracked separately (#450) rather than silently
+	// left unaddressed.
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
 	a.sendStatusFunc(sender, sysreport.JobFailed, true)
 	return nil
 }
@@ -185,7 +299,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
-	resp, err := a.httpPostFunc(http.DefaultClient, url, a.getRequestHeaders(), payload, 30*time.Second)
+	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
@@ -213,8 +327,10 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	report.Details = details[step]
 	report.Status = statuses[step]
 
-	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, &http.Client{}, a.getRequestHeaders(), report)
-	a.sendStatusFunc(sender, sysreport.JobSuccess, true)
+	// NOTE: see the same comment on ReportError above — this call has the same ctx-cancellation
+	// gap for the same reason.
+	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
+	a.sendStatusFunc(sender, statuses[step], true)
 	return nil
 }
 
@@ -365,7 +481,19 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	firstVulnerabilitiesChunk := <-chunksChan
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	// send the summary and the first chunk in one or two reports according to the size
-	nextPartNum := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.eventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	nextPartNum, summaryErr := a.sendSummaryAndVulnerabilities(ctx, &finalReport, a.eventReceiverRestURL, totalVulnerabilities, scanID, firstVulnerabilitiesChunk, errChan, sendWG)
+	if summaryErr != nil {
+		// Nothing was sent, so no chunk goroutine was dispatched and nothing will ever drain
+		// chunksChan or close errChan on its own. Drain chunksChan ourselves so the producer
+		// goroutine started by SplitSlice2Chunks doesn't block forever trying to hand off the
+		// remaining chunks (#446), and return directly instead of ranging over an errChan
+		// nothing will close.
+		go func() {
+			for range chunksChan {
+			}
+		}()
+		return summaryErr
+	}
 	// if not all vulnerabilities got into the first chunk
 	if totalVulnerabilities != firstChunkVulnerabilitiesCount {
 		//send the rest of the vulnerabilities - error channel will be closed when all vulnerabilities are sent

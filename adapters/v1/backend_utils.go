@@ -24,7 +24,38 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
-func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int) {
+// sendError delivers err to errorChan. It always wins the send when the channel has room,
+// even if ctx is already cancelled, so a cancelled context never causes a real error to be
+// dropped in favor of a stale one already sitting in the channel. Only once the channel is
+// actually saturated do we fall back to waiting for room or for ctx cancellation, logging a
+// warning if we ultimately have to give up.
+func sendError(ctx context.Context, errorChan chan<- error, err error) {
+	if errorChan == nil || err == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case errorChan <- err:
+		return
+	default:
+	}
+	// only now consider giving up
+	select {
+	case errorChan <- err:
+	case <-ctx.Done():
+		logger.L().Ctx(ctx).Warning("dropping error, context cancelled", helpers.Error(err))
+	}
+}
+
+// sendSummaryAndVulnerabilities posts the summary report synchronously so it always reaches the
+// backend before any chunk report (preventing the "missing summary for containerScanID"
+// rejection, #437). If the summary post fails, no chunk is dispatched here: the backend would
+// reject every one of them anyway without a summary on file, so there is nothing to gain by
+// sending them (#446). Callers must treat a non-nil error as "nothing was sent" and must not
+// dispatch the remaining chunks either.
+func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL string, totalVulnerabilities int, scanID string, firstVulnerabilitiesChunk []containerscan.CommonContainerVulnerabilityResult, errChan chan<- error, sendWG *sync.WaitGroup) (nextPartNum int, err error) {
 	//get the first chunk
 	firstChunkVulnerabilitiesCount := len(firstVulnerabilitiesChunk)
 	//if size of summary + first chunk does not exceed max size
@@ -39,9 +70,10 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 		//first chunk is not included in the summary, so if there are vulnerabilities to send set the last part to false
 		report.PaginationInfo.IsLastReport = firstChunkVulnerabilitiesCount == 0
 	}
-	//send the summary report
-	a.postResultsAsGoroutine(ctx, report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
-	nextPartNum++
+	if err := a.postResults(ctx, *report, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan); err != nil {
+		return 0, fmt.Errorf("failed to send summary report: %w", err)
+	}
+	nextPartNum = 1
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
 		a.postResultsAsGoroutine(ctx,
@@ -54,14 +86,16 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 			}, eventReceiverURL, report.Summary.ImageTag, report.Summary.WLID, errChan, sendWG)
 		nextPartNum++
 	}
-	return nextPartNum
+	return nextPartNum, nil
 }
 
 func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func(report v1.ScanResultReport, eventReceiverURL, imagetag string, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
-		a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
+		// failure is reported to the caller via errorChan, not the return value, for chunks
+		// sent from a goroutine
+		_ = a.postResults(ctx, report, eventReceiverURL, imagetag, wlid, errorChan)
 	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
 }
 
@@ -72,30 +106,34 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	}
 }
 
-func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) {
+// postResults posts a single report and returns the failure, if any, so a synchronous caller
+// (sendSummaryAndVulnerabilities, for the summary report) can react to it. Goroutine-wrapped
+// callers (postResultsAsGoroutine, for chunk reports) additionally get the same failure via
+// errorChan, since nothing is synchronously waiting on their return value.
+func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error) error {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to convert to json", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
-		return
+		sendError(ctx, errorChan, err)
+		return err
 	}
 
 	urlBase, err := beClient.GetVulnerabilitiesReportURL(eventReceiverURL, report.Designators.Attributes[identifiers.AttributeCustomerGUID])
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get vulnerabilities report url", helpers.Error(err),
 			helpers.String("wlid", wlid))
-		errorChan <- err
-		return
+		sendError(ctx, errorChan, err)
+		return err
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
+	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
 			helpers.String("image", imagetag),
 			helpers.String("wlid", wlid))
-		errorChan <- err
-		return
+		sendError(ctx, errorChan, err)
+		return err
 	}
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
@@ -105,10 +143,11 @@ func (a *BackendAdapter) postResults(ctx context.Context, report v1.ScanResultRe
 		} else {
 			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
 		}
-		errorChan <- err
-		return
+		sendError(ctx, errorChan, err)
+		return err
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
+	return nil
 }
 
 func (a *BackendAdapter) sendVulnerabilitiesRoutine(ctx context.Context, chunksChan <-chan []containerscan.CommonContainerVulnerabilityResult, eventReceiverURL string, scanID string, finalReport v1.ScanResultReport, errChan chan error, sendWG *sync.WaitGroup, totalVulnerabilities int, firstChunkVulnerabilitiesCount int, nextPartNum int) {
@@ -139,8 +178,8 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 
 	//verify that all vulnerabilities received and sent
 	if chunksVulnerabilitiesCount != expectedVulnerabilitiesSum {
-		errorChan <- fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
-			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount)
+		sendError(ctx, errorChan, fmt.Errorf("error while splitting vulnerabilities chunks, expected %s vulnerabilities but received %d",
+			strconv.Itoa(expectedVulnerabilitiesSum), chunksVulnerabilitiesCount))
 	}
 }
 
