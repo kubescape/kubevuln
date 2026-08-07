@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -385,6 +386,173 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			if err := a.SubmitCVE(ctx, tt.cve, tt.cvep); (err != nil) != tt.wantErr {
 				t.Errorf("SubmitCVE() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBackendAdapter_SubmitCVE_RelevancySubset(t *testing.T) {
+	// minimal valid image source so ParseImageManifest succeeds; the config is stored
+	// base64-encoded (the []byte JSON field forces base64), matching real syft output
+	config := base64.StdEncoding.EncodeToString([]byte(`{"architecture":"amd64","os":"linux","history":[],"rootfs":{"type":"layers","diff_ids":[]}}`))
+	imageTarget := fmt.Sprintf(`{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"dummyLayer","size":0}],"manifest":null,"config":%q,"repoDigests":null,"architecture":"","os":""}`, config)
+
+	match := func(id, pkg string) v1beta1.Match {
+		return v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: id},
+			},
+			Artifact: v1beta1.GrypePackage{Name: pkg},
+		}
+	}
+	full := domain.CVEManifest{
+		Content: &v1beta1.GrypeDocument{
+			Source: &v1beta1.Source{Target: json.RawMessage(imageTarget)},
+			Matches: []v1beta1.Match{
+				match("CVE-2024-0001", "libssl1.1"),
+				match("CVE-2024-0001", "openssl"),
+				match("CVE-2024-0002", "zlib1g"),
+			},
+		},
+	}
+	cvep := domain.CVEManifest{
+		Content: &v1beta1.GrypeDocument{
+			Source: &v1beta1.Source{Target: json.RawMessage(imageTarget)},
+			Matches: []v1beta1.Match{
+				match("CVE-2024-0001", "libssl1.1"),
+			},
+		},
+	}
+
+	var gotReport v1.ScanResultReport
+	httpPostFunc := func(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte, timeOut time.Duration) (*http.Response, error) {
+		var report v1.ScanResultReport
+		if err := json.Unmarshal(body, &report); err != nil {
+			t.Errorf("failed to unmarshal report: %v", err)
+		}
+		gotReport = report
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewBuffer([]byte{})),
+		}, nil
+	}
+
+	a := &BackendAdapter{
+		getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
+		httpPostFunc:          httpPostFunc,
+		securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
+	}
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	require.NoError(t, a.SubmitCVE(ctx, full, cvep))
+
+	require.Len(t, gotReport.Vulnerabilities, 3)
+	wantRelevant := map[string]bool{
+		"CVE-2024-0001+libssl1.1": true,
+		"CVE-2024-0001+openssl":   false,
+		"CVE-2024-0002+zlib1g":    false,
+	}
+	for _, v := range gotReport.Vulnerabilities {
+		id := v.Name + "+" + v.RelatedPackageName
+		want, ok := wantRelevant[id]
+		require.True(t, ok, "unexpected vulnerability %s", id)
+		require.NotNil(t, v.IsRelevant, "IsRelevant should be set for %s", id)
+		assert.Equal(t, want, *v.IsRelevant, "IsRelevant mismatch for %s", id)
+	}
+	require.NotNil(t, gotReport.Summary)
+	assert.Equal(t, int64(1), gotReport.Summary.RelevantCount)
+}
+
+func TestMarkRelevantVulnerabilities(t *testing.T) {
+	vuln := func(name, pkg string) containerscan.CommonContainerVulnerabilityResult {
+		return containerscan.CommonContainerVulnerabilityResult{
+			Vulnerability: containerscan.Vulnerability{Name: name, RelatedPackageName: pkg},
+		}
+	}
+	tests := []struct {
+		name                string
+		vulnerabilities     []containerscan.CommonContainerVulnerabilityResult
+		relevantVulns       []containerscan.CommonContainerVulnerabilityResult
+		wantRelevantVulnIDs map[string]bool // key: name+"+"+relatedPackageName
+	}{
+		{
+			name: "same cve on multiple packages, only one executed",
+			vulnerabilities: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+				vuln("CVE-2024-0001", "openssl"),
+			},
+			relevantVulns: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+			},
+			wantRelevantVulnIDs: map[string]bool{
+				"CVE-2024-0001+libssl1.1": true,
+				"CVE-2024-0001+openssl":   false,
+			},
+		},
+		{
+			name: "single cve single package present in both scans",
+			vulnerabilities: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+			},
+			relevantVulns: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+			},
+			wantRelevantVulnIDs: map[string]bool{
+				"CVE-2024-0001+libssl1.1": true,
+			},
+		},
+		{
+			name: "disjoint cves",
+			vulnerabilities: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+			},
+			relevantVulns: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0002", "openssl"),
+			},
+			wantRelevantVulnIDs: map[string]bool{
+				"CVE-2024-0001+libssl1.1": false,
+			},
+		},
+		{
+			name: "empty relevancy scan marks nothing relevant",
+			vulnerabilities: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "libssl1.1"),
+			},
+			wantRelevantVulnIDs: map[string]bool{
+				"CVE-2024-0001+libssl1.1": false,
+			},
+		},
+		{
+			name: "mixed cves on multiple packages",
+			vulnerabilities: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "p1"),
+				vuln("CVE-2024-0001", "p2"),
+				vuln("CVE-2024-0002", "p3"),
+			},
+			relevantVulns: []containerscan.CommonContainerVulnerabilityResult{
+				vuln("CVE-2024-0001", "p1"),
+			},
+			wantRelevantVulnIDs: map[string]bool{
+				"CVE-2024-0001+p1": true,
+				"CVE-2024-0001+p2": false,
+				"CVE-2024-0002+p3": false,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markRelevantVulnerabilities(tt.vulnerabilities, tt.relevantVulns)
+			for _, v := range tt.vulnerabilities {
+				id := v.Name + "+" + v.RelatedPackageName
+				want, ok := tt.wantRelevantVulnIDs[id]
+				require.True(t, ok, "unexpected vulnerability %s", id)
+				require.NotNil(t, v.IsRelevant, "IsRelevant should be set for %s", id)
+				assert.Equal(t, want, *v.IsRelevant, "IsRelevant mismatch for %s", id)
 			}
 		})
 	}
