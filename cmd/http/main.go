@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -129,6 +130,21 @@ func main() {
 	controller, err = controller.WithMetrics(m)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("metrics registration error", helpers.Error(err))
+	}
+
+	// Best-effort startup sweep: reclaim stereoscope temp dirs orphaned by previous process
+	// invocations killed by SIGKILL (OOM kill, or terminationGracePeriodSeconds exceeded)
+	// before their defer-based cleanup could run. The threshold is ScanTimeout: the main
+	// process and the SBOM-scanner sidecar run in the same Pod on the same machine (same
+	// kernel clock), so no clock-skew margin is needed, and a dir idle longer than
+	// ScanTimeout can only belong to a dead or already-timed-out scan.
+	if removed, err := tools.CleanupStaleTempDirs(os.TempDir(), "stereoscope-", c.ScanTimeout); err != nil {
+		logger.L().Ctx(ctx).Warning("startup temp dir sweep error",
+			helpers.Error(err),
+			helpers.Int("removed", removed))
+	} else if removed > 0 {
+		logger.L().Ctx(ctx).Info("startup temp dir sweep complete",
+			helpers.Int("removed", removed))
 	}
 
 	gin.SetMode(gin.ReleaseMode)

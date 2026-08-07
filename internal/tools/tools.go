@@ -2,11 +2,13 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path"
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
@@ -103,6 +105,42 @@ func DeleteContents(dir string) error {
 		}
 	}
 	return nil
+}
+
+// CleanupStaleTempDirs removes directories under dir whose names start with prefix and whose
+// mtime is older than olderThan. It is a best-effort startup sweep to reclaim disk space left
+// by processes killed before their defer-based cleanup could run (e.g. SIGKILL from OOM or
+// Kubernetes terminationGracePeriodSeconds expiry).
+//
+// It returns the number of directories removed and a joined error of all failures encountered.
+// A non-nil error never blocks startup — callers should log and continue.
+func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	cutoff := time.Now().Add(-olderThan)
+	removed := 0
+	var allErrs error
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			allErrs = errors.Join(allErrs, err)
+			continue
+		}
+		if !info.ModTime().Before(cutoff) {
+			continue // young enough — may belong to a live sidecar scan
+		}
+		if err := os.RemoveAll(path.Join(dir, e.Name())); err != nil {
+			allErrs = errors.Join(allErrs, err)
+			continue
+		}
+		removed++
+	}
+	return removed, allErrs
 }
 
 func NormalizeReference(ref string) string {
