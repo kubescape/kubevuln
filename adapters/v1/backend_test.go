@@ -1220,3 +1220,23 @@ func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
 	require.Error(t, err, "SubmitCVE should surface the summary post failure")
 	assert.Equal(t, int32(0), atomic.LoadInt32(&chunkPosts), "no vulnerability chunk should be posted once the summary failed")
 }
+
+func TestShouldRetryReport(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   bool
+	}{
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+		{http.StatusInternalServerError, true}, // #486
+		{http.StatusTooManyRequests, true},
+		{http.StatusBadGateway, true},
+		{http.StatusServiceUnavailable, true},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			got := shouldRetryReport(&http.Response{StatusCode: tc.status})
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

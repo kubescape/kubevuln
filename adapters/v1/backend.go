@@ -125,13 +125,15 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
 }
 
-// shouldRetryReport mirrors the unexported defaultShouldRetry in armosec/utils-go: retry on any
-// response except the ones that are never going to succeed on a retry.
+// shouldRetryReport is derived from the unexported defaultShouldRetry in armosec/utils-go, but
+// intentionally diverges from it: upstream treats 500 as fatal, we retry it. A 500 from the event
+// receiver is usually transient (gateway blip, backend pod restart), so dropping the scan result
+// on the first one loses data that a retry would have delivered (#486). The retry budget is
+// bounded by maxElapsedTime, so a genuinely broken backend still fails fast enough.
 func shouldRetryReport(resp *http.Response) bool {
 	return resp.StatusCode != http.StatusUnauthorized &&
 		resp.StatusCode != http.StatusForbidden &&
-		resp.StatusCode != http.StatusNotFound &&
-		resp.StatusCode != http.StatusInternalServerError
+		resp.StatusCode != http.StatusNotFound
 }
 
 const ActionName = "vuln scan"
