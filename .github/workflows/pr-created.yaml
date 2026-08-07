@@ -40,9 +40,22 @@ jobs:
         with:
           platforms: arm64
 
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build-arm64
+            ~/go/pkg/mod-arm64
+          key: ${{ runner.os }}-arm64-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-go-
+
       - name: Run go test ./... on linux/arm64
         run: |
+          mkdir -p ~/.cache/go-build-arm64 ~/go/pkg/mod-arm64
           docker run --rm --platform linux/arm64 \
             -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -v ~/.cache/go-build-arm64:/root/.cache/go-build \
+            -v ~/go/pkg/mod-arm64:/root/go/pkg/mod \
             -e CGO_ENABLED=0 \
             golang:1.25 go test ./...
