@@ -673,11 +673,11 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		return err
 	}
 
-	// apply security exceptions
-	filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
-
 	// store filtered CVE
 	if s.storage {
+		// apply security exceptions
+		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+
 		err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -745,6 +745,12 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		return cve, !degraded
 	}
 	filtered := cve
+	if cve.Labels != nil {
+		filtered.Labels = maps.Clone(cve.Labels)
+	}
+	if cve.Annotations != nil {
+		filtered.Annotations = maps.Clone(cve.Annotations)
+	}
 	docCopy := cve.Content.DeepCopy()
 	v1.ApplySecurityExceptions(docCopy, exceptions)
 	filtered.Content = docCopy
