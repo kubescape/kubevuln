@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/retry"
 )
@@ -1832,6 +1834,53 @@ func TestAPIServerStore_StoreVEX_ctxPropagated(t *testing.T) {
 	require.Contains(t, wrapped.ovecs, a.Namespace)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].createCtx)
+}
+
+// TestAPIServerStore_GetSecurityExceptions_PropagatesListErrors is a regression test for
+// #477: GetSecurityExceptions used to only log a List() failure and always return a nil
+// error, which silently defeated the cacheable=false guard in
+// BackendAdapter.GetCVEExceptions (that guard only fires when this method's error is
+// non-nil). A List() failure on either the namespaced or cluster-scoped resource must now
+// surface as a non-nil returned error.
+func TestAPIServerStore_GetSecurityExceptions_PropagatesListErrors(t *testing.T) {
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+
+	tests := []struct {
+		name         string
+		namespace    string
+		failResource string
+	}{
+		{name: "namespaced list fails", namespace: "kubescape", failResource: "securityexceptions"},
+		{name: "cluster-scoped list fails", namespace: "kubescape", failResource: "clustersecurityexceptions"},
+		{name: "cluster-scoped list fails, no namespace given", namespace: "", failResource: "clustersecurityexceptions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+				securityExceptionGVR:        "SecurityExceptionList",
+				clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+			})
+			dynClient.PrependReactor("list", tt.failResource, func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, injectedErr
+			})
+			a := &APIServerStore{DynamicClient: dynClient, Namespace: "kubescape"}
+
+			_, _, err := a.GetSecurityExceptions(context.TODO(), tt.namespace)
+			require.Error(t, err, "a List() failure must surface as a non-nil error, not just a log line")
+			assert.True(t, stderrors.Is(err, injectedErr))
+		})
+	}
+}
+
+// TestAPIServerStore_GetSecurityExceptions_NoErrorOnSuccess guards against a regression in
+// the other direction: joining a nil error slice must still return nil, not a non-nil
+// "empty" error, so a successful call keeps behaving exactly as before.
+func TestAPIServerStore_GetSecurityExceptions_NoErrorOnSuccess(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	se, cse, err := a.GetSecurityExceptions(context.TODO(), "kubescape")
+	require.NoError(t, err)
+	assert.Empty(t, se)
+	assert.Empty(t, cse)
 }
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {

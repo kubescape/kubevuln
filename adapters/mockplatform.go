@@ -45,25 +45,32 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	}
 
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	degraded := false
 	seList, cseList, err := m.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
-		return domain.CVEExceptions{}, domain.ErrExceptionsDegraded
+		degraded = true
 	}
 
+	var vulnExceptionList domain.CVEExceptions
 	if len(seList) > 0 || len(cseList) > 0 {
 		target := v1.BuildExceptionTarget(ctx, workload, seList, cseList, m.securityExceptionRepo)
-		policies := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		crdPolicies := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+
 		// A selector-based exception whose labels failed to resolve fails closed,
 		// making the merged set incomplete (see matchExceptionTarget).
 		if (v1.UsesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
 			(v1.UsesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
-			return policies, domain.ErrExceptionsDegraded
+			degraded = true
 		}
-		return policies, nil
 	}
 
-	return domain.CVEExceptions{}, nil
+	if degraded {
+		return vulnExceptionList, domain.ErrExceptionsDegraded
+	}
+
+	return vulnExceptionList, nil
 }
 
 func (m MockPlatform) ReportError(ctx context.Context, _ error) error {

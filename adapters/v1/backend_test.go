@@ -35,6 +35,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
+)
+
+// securityExceptionGVR and clusterSecurityExceptionGVR mirror the unexported GVRs of the same
+// names in package repositories (repositories/apiserver.go) — duplicated here because they're
+// not exported across the package boundary, only used to register the fake dynamic client's
+// list kinds for this test.
+var (
+	securityExceptionGVR = schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1beta1",
+		Resource: "securityexceptions",
+	}
+	clusterSecurityExceptionGVR = schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1beta1",
+		Resource: "clustersecurityexceptions",
+	}
 )
 
 type testSecurityExceptionRepo struct {
@@ -239,6 +260,37 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 	_, err = a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
+}
+
+// TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails is an end-to-end
+// regression test for #477. TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails
+// above only proves GetCVEExceptions handles a non-nil error correctly — it injects that
+// error directly via a fake securityExceptionRepo, so it never exercises the real
+// repositories.APIServerStore.GetSecurityExceptions, which is the concrete implementation
+// that actually talks to the Kubernetes API and is where the bug lived: it used to swallow
+// List() failures and always return a nil error, so this exact "don't cache" guard could
+// never fire against the real implementation despite passing against the fake. This test
+// wires a real APIServerStore backed by a dynamic client that fails the CRD list, closing
+// that gap.
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *testing.T) {
+	store := repositories.NewFakeAPIServerStorage("kubescape")
+	store.DynamicClient.(*fakedynamic.FakeDynamicClient).PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("etcd timeout")
+	})
+
+	calls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", store)
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, err := a.GetCVEExceptions(ctx)
+	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
+	_, err = a.GetCVEExceptions(ctx)
+	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
+	assert.Equal(t, 2, calls, "a real CRD list failure must disable caching, not just a faked one")
 }
 
 func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t *testing.T) {

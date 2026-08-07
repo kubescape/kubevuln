@@ -210,7 +210,8 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		// TTL, and callers must not persist "removals" computed from it.
 		cacheable = false
 		degraded = true
-	} else if len(seList) > 0 || len(cseList) > 0 {
+	}
+	if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
