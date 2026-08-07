@@ -149,6 +149,7 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string, src suppressionSource) map[string]interface{} {
 	attrs := map[string]interface{}{
 		"sourceKind": src.kind,
+		"ruleId":     suppressionRuleID(src),
 	}
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
@@ -163,6 +164,16 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		attrs["normalizedTarget"] = t
 	}
 	return attrs
+}
+
+// suppressionRuleID renders a stable, structured identifier for the CRD object that produced a
+// suppression, distinct from both its bare name and the human-authored reason: kind/namespace/name
+// for a namespaced SecurityException, kind/name for a cluster-scoped one.
+func suppressionRuleID(src suppressionSource) string {
+	if src.namespace != "" {
+		return src.kind + "/" + src.namespace + "/" + src.name
+	}
+	return src.kind + "/" + src.name
 }
 
 // normalizedTarget renders a human-readable identifier for what an exception's match criteria
@@ -226,12 +237,26 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	doc.Matches = remaining
 }
 
+// suppressingPolicies filters matched down to the policies that actually cause suppression,
+// mirroring the hasIgnoreAction(matched) condition ApplySecurityExceptions uses to decide
+// whether to suppress at all. Without this, a non-Ignore policy passed alongside an Ignore one
+// would be misreported by logSuppression as a suppression source.
+func suppressingPolicies(matched []armotypes.VulnerabilityExceptionPolicy) []armotypes.VulnerabilityExceptionPolicy {
+	var out []armotypes.VulnerabilityExceptionPolicy
+	for _, p := range matched {
+		if hasIgnoreAction([]armotypes.VulnerabilityExceptionPolicy{p}) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // logSuppression records why a CVE disappeared from scan results: which exception object
 // matched, its scope, and the stated reason/justification. This is logged rather than stored on
 // the manifest because the filtered manifest's IgnoreRule (github.com/kubescape/storage) has no
 // fields for this provenance; see buildSuppressionAttributes for where it is captured.
 func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) {
-	for _, p := range matched {
+	for _, p := range suppressingPolicies(matched) {
 		fields := []helpers.IDetails{
 			helpers.String("cve", m.Vulnerability.ID),
 			helpers.String("package", m.Artifact.Name),
@@ -245,11 +270,17 @@ func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionP
 		if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
 			fields = append(fields, helpers.String("sourceKind", kind))
 		}
+		if ruleID, ok := p.Attributes["ruleId"].(string); ok && ruleID != "" {
+			fields = append(fields, helpers.String("ruleId", ruleID))
+		}
 		if ns, ok := p.Attributes["sourceNamespace"].(string); ok && ns != "" {
 			fields = append(fields, helpers.String("sourceNamespace", ns))
 		}
 		if just, ok := p.Attributes["justification"].(string); ok && just != "" {
 			fields = append(fields, helpers.String("justification", just))
+		}
+		if impact, ok := p.Attributes["impactStatement"].(string); ok && impact != "" {
+			fields = append(fields, helpers.String("impactStatement", impact))
 		}
 		if target, ok := p.Attributes["normalizedTarget"].(string); ok && target != "" {
 			fields = append(fields, helpers.String("normalizedTarget", target))

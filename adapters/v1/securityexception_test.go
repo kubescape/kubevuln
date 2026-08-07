@@ -104,6 +104,7 @@ func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
 	nsPolicy := policies[0]
 	assert.Equal(t, "allow-log4shell", nsPolicy.Name)
 	assert.Equal(t, "SecurityException", nsPolicy.Attributes["sourceKind"])
+	assert.Equal(t, "SecurityException/prod/allow-log4shell", nsPolicy.Attributes["ruleId"])
 	assert.Equal(t, "prod", nsPolicy.Attributes["sourceNamespace"])
 	assert.Equal(t, "vulnerable code path is unreachable", nsPolicy.Attributes["justification"])
 	assert.Equal(t, "no network exposure", nsPolicy.Attributes["impactStatement"])
@@ -112,6 +113,7 @@ func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
 	clusterPolicy := policies[1]
 	assert.Equal(t, "allow-cluster-wide", clusterPolicy.Name)
 	assert.Equal(t, "ClusterSecurityException", clusterPolicy.Attributes["sourceKind"])
+	assert.Equal(t, "ClusterSecurityException/allow-cluster-wide", clusterPolicy.Attributes["ruleId"])
 	_, hasNamespace := clusterPolicy.Attributes["sourceNamespace"]
 	assert.False(t, hasNamespace, "cluster-scoped exceptions have no source namespace")
 	assert.Equal(t, "cluster-wide", clusterPolicy.Attributes["normalizedTarget"])
@@ -671,4 +673,20 @@ func TestIgnoredMatchKeys_DistinctKeysPerPackage(t *testing.T) {
 		"CVE-2021-44228\x00log4j-core\x002.17.0": {},
 		"CVE-2021-44228\x00log4j-api\x002.15.0":  {},
 	}, IgnoredMatchKeys(doc))
+}
+
+func TestSuppressingPolicies_FiltersNonIgnoreActions(t *testing.T) {
+	ignorePolicy := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "allow-log4shell"},
+		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+	}
+	alertOnlyPolicy := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "alert-only"},
+		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{"alertOnly"},
+	}
+
+	out := suppressingPolicies([]armotypes.VulnerabilityExceptionPolicy{alertOnlyPolicy, ignorePolicy})
+
+	require.Len(t, out, 1)
+	assert.Equal(t, "allow-log4shell", out[0].Name)
 }
