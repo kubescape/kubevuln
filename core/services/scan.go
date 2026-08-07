@@ -673,6 +673,30 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		return err
 	}
 
+	// store filtered CVE
+	if s.storage {
+		// apply security exceptions
+		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+
+		err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
+		err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
+		if s.vexGeneration {
+			err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCve, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+		}
+	}
+
 	// report scan success to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
@@ -721,6 +745,12 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		return cve, !degraded
 	}
 	filtered := cve
+	if cve.Labels != nil {
+		filtered.Labels = maps.Clone(cve.Labels)
+	}
+	if cve.Annotations != nil {
+		filtered.Annotations = maps.Clone(cve.Annotations)
+	}
 	docCopy := cve.Content.DeepCopy()
 	v1.ApplySecurityExceptions(docCopy, exceptions)
 	filtered.Content = docCopy

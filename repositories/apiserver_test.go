@@ -2204,3 +2204,90 @@ func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
 	require.NotSame(t, cp1, cp2)
 	require.Same(t, cp1, cp1Again)
 }
+
+func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	testMatch := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:         "CVE-TRANSITION-TEST",
+				DataSource: "GHSA-TRANSITION-TEST",
+			},
+			Fix: v1beta1.Fix{
+				State:    "fixed",
+				Versions: []string{"2.0"},
+			},
+		},
+		Artifact: v1beta1.GrypePackage{
+			Name:    "transition-package",
+			Version: "1.0",
+			PURL:    "pkg:deb/debian/transition-package@1.0",
+		},
+	}
+
+	// Initially, testMatch is in Matches for both cveManifest and cveManifestFiltered (so it starts as affected)
+	cveManifest.Content.Matches = append(cveManifest.Content.Matches, testMatch)
+	cveManifestFiltered.Content.Matches = append(cveManifestFiltered.Content.Matches, testMatch)
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First StoreVEX call: testMatch should be created with StatusAffected
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, vexContainer)
+
+	var foundInitial bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-TRANSITION-TEST" {
+			foundInitial = true
+			assert.Equal(t, v1beta1.Status(vex.StatusAffected), stmt.Status)
+			assert.NotEmpty(t, stmt.ActionStatement)
+		}
+	}
+	assert.True(t, foundInitial, "Initial match should be recorded as affected in VEX document")
+
+	// Now move testMatch from Matches to IgnoredMatches (simulating a SecurityException rule applied)
+	var filteredMatches []v1beta1.Match
+	for _, m := range cveManifestFiltered.Content.Matches {
+		if m.Vulnerability.ID != "CVE-TRANSITION-TEST" {
+			filteredMatches = append(filteredMatches, m)
+		}
+	}
+	cveManifestFiltered.Content.Matches = filteredMatches
+	cveManifestFiltered.Content.IgnoredMatches = append(cveManifestFiltered.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+
+	// Second StoreVEX call: testMatch should transition from affected to not_affected
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var foundTransitioned bool
+	for _, stmt := range vexContainerUpdated.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-TRANSITION-TEST" {
+			foundTransitioned = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Empty(t, stmt.ActionStatement, "ActionStatement should be cleared on transition to not_affected")
+		}
+	}
+	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
+}
