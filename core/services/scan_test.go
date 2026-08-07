@@ -22,6 +22,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -947,6 +948,111 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockSecurityExceptionRepo struct {
+	exceptions        []sev1beta1.SecurityException
+	clusterExceptions []sev1beta1.ClusterSecurityException
+}
+
+func (m *mockSecurityExceptionRepo) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	return m.exceptions, m.clusterExceptions, nil
+}
+
+func (m *mockSecurityExceptionRepo) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (m *mockSecurityExceptionRepo) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
+	return nil, nil
+}
+
+type fakeCVEScannerWithVuln struct {
+	ports.CVEScanner
+}
+
+func (f *fakeCVEScannerWithVuln) DBVersion(context.Context) string { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) Ready(context.Context) bool       { return true }
+func (f *fakeCVEScannerWithVuln) Version() string                   { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	return domain.CVEManifest{
+		Name:               sbom.Name,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		CVEScannerVersion:  "v1.0.0",
+		CVEDBVersion:       "v1.0.0",
+		Annotations:        sbom.Annotations,
+		Labels:             sbom.Labels,
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+							ID: "CVE-2023-9999",
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
+	t.Run("ScanRegistry applies exceptions and persists to storage", func(t *testing.T) {
+		mockRepo := &mockSecurityExceptionRepo{
+			exceptions: []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Reason: "test exception",
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{
+								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"},
+								Status:        sev1beta1.VulnerabilityStatusNotAffected,
+							},
+						},
+					},
+				},
+			},
+		}
+		mockPlatform := adapters.NewMockPlatform(false, mockRepo)
+		storage := repositories.NewMemoryStorage(false, false)
+		sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+		cveAdapter := &fakeCVEScannerWithVuln{}
+
+		s := NewScanService(
+			sbomAdapter,
+			storage,
+			cveAdapter,
+			storage,
+			mockPlatform,
+			adapters.NewMockRelevancyAdapter(),
+			true,  // storage enabled
+			true,  // vexGeneration enabled
+			true,  // sbomGeneration enabled
+			false, // storeFilteredSbom
+			false, // partialRelevancy
+		)
+
+		workload := domain.ScanCommand{
+			ImageSlug:          "test-registry-image",
+			ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+			JobID:              "job-123",
+		}
+
+		ctx, err := s.ValidateScanRegistry(context.Background(), workload)
+		require.NoError(t, err)
+
+		err = s.ScanRegistry(ctx)
+		require.NoError(t, err)
+
+		// Verify CVE is stored in storage with SecurityExceptions applied
+		storedCVE, err := storage.GetCVE(ctx, workload.ImageSlug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
+		require.NoError(t, err)
+		assert.NotNil(t, storedCVE.Content)
+		assert.Empty(t, storedCVE.Content.Matches, "matched vulnerability should be ignored by SecurityException")
+		assert.Len(t, storedCVE.Content.IgnoredMatches, 1, "ignored match should be populated in stored CVE")
+		assert.Equal(t, "CVE-2023-9999", storedCVE.Content.IgnoredMatches[0].Vulnerability.VulnerabilityMetadata.ID)
+	})
 }
 
 func TestScanService_ValidateScanRegistry(t *testing.T) {

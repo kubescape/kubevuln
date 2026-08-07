@@ -639,38 +639,131 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			helpers.String("imageSlug", workload.ImageSlug))
 	}
 
-	// create SBOM
-	sbom, err := s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-	s.checkCreateSBOM(err, workload.ImageTagNormalized)
-	if err != nil {
-		repErr := s.platform.ReportError(ctx, err)
-		if repErr != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+	// check if CVE manifest is already available
+	cve := domain.CVEManifest{}
+	if s.storage {
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			classifySBOMError(err), err)
-		return err
 	}
 
-	// do not process timed out SBOM
-	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-			classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
-		return domain.ErrIncompleteSBOM
-	}
-
-	// scan for CVE
-	cve, err := s.cveScanner.ScanSBOM(ctx, sbom)
-	if err != nil {
-		repErr := s.platform.ReportError(ctx, err)
-		if repErr != nil {
-			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
-				helpers.String("imageSlug", workload.ImageSlug))
+	sbom := domain.SBOM{}
+	if cve.Content == nil {
+		if s.storage {
+			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
 		}
-		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
-			scanfailure.ReasonCVEMatchingFailed, err)
-		return err
+
+		if sbom.Content == nil {
+			// create SBOM
+			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
+			s.checkCreateSBOM(err, workload.ImageTagNormalized)
+			if err != nil {
+				repErr := s.platform.ReportError(ctx, err)
+				if repErr != nil {
+					logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+					classifySBOMError(err), err)
+				return err
+			}
+
+			if s.storage {
+				err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+		}
+
+		// do not process timed out SBOM
+		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+				classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
+			return domain.ErrIncompleteSBOM
+		}
+
+		// scan for CVE
+		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
+		if err != nil {
+			repErr := s.platform.ReportError(ctx, err)
+			if repErr != nil {
+				logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
+				scanfailure.ReasonCVEMatchingFailed, err)
+			return err
+		}
+
+		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
+		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+
+		// store filtered CVE
+		if s.storage {
+			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+			if s.vexGeneration {
+				err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCve, false)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+		}
+	} else {
+		// A cached manifest was filtered against the exception set at store time.
+		// Reconstruct the unfiltered manifest so the CURRENT exception set is
+		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
+		// un-suppress findings) and SubmitCVE/StoreVEX receive the same
+		// unfiltered data a cache miss would produce.
+		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
+		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
+
+		if s.storage {
+			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+			if !maps.Equal(prevIgnored, curIgnored) {
+				// Persist additions freely, but never persist removals when the
+				// exception set is incomplete: a transient SecurityException CRD
+				// list failure must not look like a deletion and wipe suppression
+				// from the stored manifest.
+				hasRemovals := false
+				for k := range prevIgnored {
+					if _, ok := curIgnored[k]; !ok {
+						hasRemovals = true
+						break
+					}
+				}
+				if exceptionsComplete || !hasRemovals {
+					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+					if err != nil {
+						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+							helpers.String("imageSlug", workload.ImageSlug))
+					}
+				}
+			}
+		}
 	}
 
 	// store filtered CVE
