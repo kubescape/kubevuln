@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -511,4 +512,102 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+}
+
+func TestHTTPController_MetricsEndpoint(t *testing.T) {
+	c := NewHTTPController(services.NewMockScanService(true), 1)
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	c.Shutdown(5 * time.Second)
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, "kubevuln_scans_completed_total"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_worker_pool_queue_depth"), body)
+}
+
+func TestHTTPController_MetricsEndpoint_RecordsRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrTooManyRequests},
+		workerPool:  workerpool.New(1),
+	}
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `reason="too_many_requests"`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="too_many_requests"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
+}
+
+// TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection is a
+// regression test: a malformed-payload validation error (not ErrTooManyRequests)
+// must be recorded under reason="invalid_request", and must NOT be conflated with
+// the too_many_requests series that rate-limit alerts key off of.
+func TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: validateErrScanService{MockScanService: services.NewMockScanService(true), err: domain.ErrMissingImageInfo},
+		workerPool:  workerpool.New(1),
+	}
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.NotEqual(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="too_many_requests"`), body)
 }
