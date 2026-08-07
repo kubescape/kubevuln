@@ -2160,21 +2160,27 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
 
-	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
-		Match: v1beta1.Match{
-			Vulnerability: v1beta1.Vulnerability{
-				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
-					ID:         "CVE-IGNORE-TEST",
-					DataSource: "GHSA-IGNORE-TEST",
-				},
+	testMatch := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:         "CVE-TRANSITION-TEST",
+				DataSource: "GHSA-TRANSITION-TEST",
 			},
-			Artifact: v1beta1.GrypePackage{
-				Name:    "ignored-package",
-				Version: "1.0",
-				PURL:    "pkg:deb/debian/ignored-package@1.0",
+			Fix: v1beta1.Fix{
+				State:    "fixed",
+				Versions: []string{"2.0"},
 			},
 		},
-	})
+		Artifact: v1beta1.GrypePackage{
+			Name:    "transition-package",
+			Version: "1.0",
+			PURL:    "pkg:deb/debian/transition-package@1.0",
+		},
+	}
+
+	// Initially, testMatch is in Matches for both cveManifest and cveManifestFiltered (so it starts as affected)
+	cveManifest.Content.Matches = append(cveManifest.Content.Matches, testMatch)
+	cveManifestFiltered.Content.Matches = append(cveManifestFiltered.Content.Matches, testMatch)
 
 	a := NewFakeAPIServerStorage("kubescape")
 
@@ -2188,6 +2194,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 	}
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
 
+	// First StoreVEX call: testMatch should be created with StatusAffected
 	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
 	require.NoError(t, err)
 
@@ -2195,32 +2202,43 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, vexContainer)
 
-	var foundIgnored bool
+	var foundInitial bool
 	for _, stmt := range vexContainer.Spec.Statements {
-		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
-			foundIgnored = true
-			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
-			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		if stmt.Vulnerability.Name == "CVE-TRANSITION-TEST" {
+			foundInitial = true
+			assert.Equal(t, v1beta1.Status(vex.StatusAffected), stmt.Status)
+			assert.NotEmpty(t, stmt.ActionStatement)
 		}
 	}
-	assert.True(t, foundIgnored, "IgnoredMatch should be included in the VEX document")
+	assert.True(t, foundInitial, "Initial match should be recorded as affected in VEX document")
 
-	// Now test updating VEX container when a match moves into IgnoredMatches
-	cveManifestFiltered.Content.IgnoredMatches = cveManifest.Content.IgnoredMatches
+	// Now move testMatch from Matches to IgnoredMatches (simulating a SecurityException rule applied)
+	var filteredMatches []v1beta1.Match
+	for _, m := range cveManifestFiltered.Content.Matches {
+		if m.Vulnerability.ID != "CVE-TRANSITION-TEST" {
+			filteredMatches = append(filteredMatches, m)
+		}
+	}
+	cveManifestFiltered.Content.Matches = filteredMatches
+	cveManifestFiltered.Content.IgnoredMatches = append(cveManifestFiltered.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+
+	// Second StoreVEX call: testMatch should transition from affected to not_affected
 	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
 	require.NoError(t, err)
 
 	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
-	foundIgnored = false
+	var foundTransitioned bool
 	for _, stmt := range vexContainerUpdated.Spec.Statements {
-		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
-			foundIgnored = true
+		if stmt.Vulnerability.Name == "CVE-TRANSITION-TEST" {
+			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
 			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Empty(t, stmt.ActionStatement, "ActionStatement should be cleared on transition to not_affected")
 		}
 	}
-	assert.True(t, foundIgnored, "IgnoredMatch should remain not_affected on VEX update")
+	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
 }
