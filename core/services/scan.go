@@ -719,7 +719,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 			if s.vexGeneration {
-				err = s.cveRepository.StoreVEX(ctx, filteredCve, domain.CVEManifest{}, false)
+				err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCve, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
 						helpers.String("imageSlug", workload.ImageSlug))
