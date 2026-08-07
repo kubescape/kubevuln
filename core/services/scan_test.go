@@ -9,16 +9,20 @@ import (
 	"os"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -592,7 +596,7 @@ func (schemaUnsupportedSBOMAdapter) CreateSBOM(_ context.Context, _, _, _ string
 func (schemaUnsupportedSBOMAdapter) Version() string { return "schema-unsupported-mock" }
 
 func (schemaUnsupportedSBOMAdapter) GetMaxImageSize() int64 { return 0 }
-func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int { return 0 }
+func (schemaUnsupportedSBOMAdapter) GetMaxSBOMSize() int    { return 0 }
 func (schemaUnsupportedSBOMAdapter) GetMemoryLimit() string { return "" }
 
 func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
@@ -666,6 +670,9 @@ func TestScanService_NginxTest(t *testing.T) {
 	ctx := context.TODO()
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	cveAdapter, terminate, err := v1.NewGrypeAdapterFixedDB()
+	if errors.Is(err, v1.ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
 	require.NoError(t, err)
 	defer terminate()
 	storageCP := repositories.NewMemoryStorage(false, false)
@@ -1335,9 +1342,9 @@ func TestOptionsFromWorkload(t *testing.T) {
 
 type mockSBOMRepository struct {
 	ports.SBOMRepository
-	getSBOMSBOM domain.SBOM
-	getSBOMErr  error
-	deleteErr   error
+	getSBOMSBOM  domain.SBOM
+	getSBOMErr   error
+	deleteErr    error
 	deleteCalled bool
 }
 
@@ -1352,13 +1359,13 @@ func (m *mockSBOMRepository) DeleteSBOM(ctx context.Context, name string) error 
 
 func TestScanService_getSBOM_Outdated(t *testing.T) {
 	tests := []struct {
-		name          string
-		sbom          domain.SBOM
-		getErr        error
-		deleteErr     error
-		wantDelete    bool
-		wantSBOM      domain.SBOM
-		wantErr       error
+		name       string
+		sbom       domain.SBOM
+		getErr     error
+		deleteErr  error
+		wantDelete bool
+		wantSBOM   domain.SBOM
+		wantErr    error
 	}{
 		{
 			name: "outdated, too large, delete succeeds",
@@ -1418,4 +1425,404 @@ func TestScanService_getSBOM_Outdated(t *testing.T) {
 			assert.Equal(t, tt.wantDelete, repo.deleteCalled)
 		})
 	}
+}
+
+// recordingPlatform implements ports.Platform for tests: it returns a configurable exception
+// set (or error) and captures every manifest passed to SubmitCVE so cache-hit vs cache-miss
+// telemetry can be asserted.
+type recordingPlatform struct {
+	exceptions       domain.CVEExceptions
+	getExceptionsErr error
+	submitted        []domain.CVEManifest
+}
+
+var _ ports.Platform = (*recordingPlatform)(nil)
+
+func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, error) {
+	return p.exceptions, p.getExceptionsErr
+}
+
+func (p *recordingPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
+	p.submitted = append(p.submitted, cve)
+	return nil
+}
+
+func (p *recordingPlatform) ReportError(context.Context, error) error { return nil }
+func (p *recordingPlatform) ReportScanFailure(context.Context, scanfailure.ScanFailureCase, string, error) error {
+	return nil
+}
+func (p *recordingPlatform) SendStatus(context.Context, int) error { return nil }
+
+// countingCVERepository wraps a CVERepository and counts StoreCVE calls, so tests can assert a
+// cached manifest was (or wasn't) rewritten without depending on the stored content alone.
+type countingCVERepository struct {
+	ports.CVERepository
+	storeCVECalls int
+}
+
+func (c *countingCVERepository) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	c.storeCVECalls++
+	return c.CVERepository.StoreCVE(ctx, cve, withRelevancy)
+}
+
+// fakeCVEScanner is a CVEScanner whose ScanSBOM output is fully controlled, used to exercise the
+// cache-miss path with a real vulnerability ID (the shared MockCVEAdapter emits an empty-ID match
+// that no SecurityException can target).
+type fakeCVEScanner struct{}
+
+func (fakeCVEScanner) ScanSBOM(_ context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	return domain.CVEManifest{
+		Name:               sbom.Name,
+		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
+		CVEScannerVersion:  "fake-cve",
+		CVEDBVersion:       "fake-db",
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+		},
+	}, nil
+}
+
+func (fakeCVEScanner) Version() string                  { return "fake-cve" }
+func (fakeCVEScanner) DBVersion(context.Context) string { return "fake-db" }
+func (fakeCVEScanner) Ready(context.Context) bool       { return true }
+
+func matchForTest(id string) v1beta1.Match {
+	return v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: id}}}
+}
+
+func ignoredMatchForTest(id string) v1beta1.IgnoredMatch {
+	return v1beta1.IgnoredMatch{
+		Match:              matchForTest(id),
+		AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: id}},
+	}
+}
+
+func exceptionPolicyForTest(id string) domain.CVEExceptions {
+	return domain.CVEExceptions{{
+		PolicyType:            "vulnerabilityExceptionPolicy",
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: id}},
+	}}
+}
+
+// newScanCVETestService builds a ScanService over in-memory storage with a configurable platform
+// and CVE repository/scanner, returning the service, the version strings needed to seed/read a
+// CVE manifest, and a validated context.
+func newScanCVETestService(t *testing.T, platform ports.Platform, cveRepo ports.CVERepository, cveScanner ports.CVEScanner) (*ScanService, string, string, string, context.Context) {
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	if cveScanner == nil {
+		cveScanner = adapters.NewMockCVEAdapter()
+	}
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveScanner, cveRepo, platform, adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+	workload := domain.ScanCommand{
+		ImageSlug:     "imageSlug",
+		ContainerName: "kube-proxy",
+		ImageHash:     "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+		Wlid:          "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+	}
+	var err error
+	ctx, err = s.ValidateScanCVE(ctx, workload)
+	require.NoError(t, err)
+	return s, sbomAdapter.Version(), cveScanner.Version(), cveScanner.DBVersion(ctx), ctx
+}
+
+func seedCachedCVEManifest(t *testing.T, repo ports.CVERepository, name, sbomCreatorVersion, cveScannerVersion, cveDBVersion string, ctx context.Context, content *v1beta1.GrypeDocument) {
+	require.NoError(t, repo.StoreCVE(ctx, domain.CVEManifest{
+		Name:               name,
+		SBOMCreatorVersion: sbomCreatorVersion,
+		CVEScannerVersion:  cveScannerVersion,
+		CVEDBVersion:       cveDBVersion,
+		Content:            content,
+	}, false))
+}
+
+func matchIDs(matches []v1beta1.Match) []string {
+	var ids []string
+	for _, m := range matches {
+		ids = append(ids, m.Vulnerability.ID)
+	}
+	return ids
+}
+
+// TestScanService_ScanCVE_CacheHit_DeletedExceptionRestoresSuppressedMatch is a regression test
+// for the cached-manifest poisoning bug: deleting a SecurityException must un-suppress the
+// finding on the next cache hit, and the backend must receive the unfiltered manifest.
+func TestScanService_ScanCVE_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *testing.T) {
+	platform := &recordingPlatform{}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.NotNil(t, stored.Content)
+	assert.Contains(t, matchIDs(stored.Content.Matches), "CVE-A", "deleted exception must restore the suppressed match")
+	assert.Len(t, stored.Content.IgnoredMatches, 0)
+
+	require.Len(t, platform.submitted, 1, "cache hit must still submit the manifest to the backend")
+	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a cache hit")
+}
+
+func TestScanService_ScanCVE_CacheHit_AddedExceptionSuppresses(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1)
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsRewrite(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	inner := repositories.NewMemoryStorage(false, false)
+	counting := &countingCVERepository{CVERepository: inner}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, counting, nil)
+	seedCachedCVEManifest(t, inner, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Zero(t, counting.storeCVECalls, "an unchanged exception set must not rewrite the cached manifest")
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1)
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+func TestScanService_ScanCVE_CacheHit_ExceptionFetchFailureDoesNotWipe(t *testing.T) {
+	platform := &recordingPlatform{getExceptionsErr: errors.New("backend unreachable")}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "a failed exception fetch must not wipe filtering from the stored manifest")
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+// TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch is the reproduction matthyx
+// provided during review: an ExpiredOnFix policy suppresses only the matches of a CVE whose
+// Fix.State != "fixed". When one CVE hits two packages with different fix states, the ignored-ID
+// set stays identical while the ignored-match set changes, so change detection must be keyed by
+// match identity, not CVE ID.
+func TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch(t *testing.T) {
+	fixedMatch := matchForTest("CVE-X")
+	fixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgA", Version: "1.0.0"}
+	fixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "fixed", Versions: []string{"1.0.1"}}
+
+	unfixedMatch := matchForTest("CVE-X")
+	unfixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgB", Version: "2.0.0"}
+	unfixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "not-fixed"}
+
+	expiredOnFix := true
+	platform := &recordingPlatform{exceptions: domain.CVEExceptions{{
+		PolicyType:            "vulnerabilityExceptionPolicy",
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-X"}},
+		ExpiredOnFix:          &expiredOnFix,
+	}}}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	// cached: both matches suppressed by the earlier, wider policy (no ExpiredOnFix)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		IgnoredMatches: []v1beta1.IgnoredMatch{
+			{Match: fixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+		},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.Matches, 1, "pkgA (fixed) must be restored into Matches")
+	assert.Equal(t, "pkgA", stored.Content.Matches[0].Artifact.Name)
+	require.Len(t, stored.Content.IgnoredMatches, 1)
+	assert.Equal(t, "pkgB", stored.Content.IgnoredMatches[0].Match.Artifact.Name)
+}
+
+// TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression is the mirror case:
+// widening the exception (dropping ExpiredOnFix) must suppress the previously-visible fixed match.
+func TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression(t *testing.T) {
+	fixedMatch := matchForTest("CVE-X")
+	fixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgA", Version: "1.0.0"}
+	fixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "fixed", Versions: []string{"1.0.1"}}
+
+	unfixedMatch := matchForTest("CVE-X")
+	unfixedMatch.Artifact = v1beta1.GrypePackage{Name: "pkgB", Version: "2.0.0"}
+	unfixedMatch.Vulnerability.Fix = v1beta1.Fix{State: "not-fixed"}
+
+	// new, wider policy: no ExpiredOnFix → both pkgA and pkgB suppressed
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-X")}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	// cached: only pkgB was suppressed under the earlier ExpiredOnFix policy
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{fixedMatch},
+		IgnoredMatches: []v1beta1.IgnoredMatch{
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+		},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	assert.Empty(t, stored.Content.Matches, "widening the exception must suppress pkgA too")
+	require.Len(t, stored.Content.IgnoredMatches, 2)
+}
+
+// TestScanService_ScanCVE_CacheHit_DegradedFetchDoesNotPersistRemoval verifies Blocker 1: a
+// transient SecurityException CRD list failure (ErrExceptionsDegraded, partial set) must not be
+// mistaken for an exception deletion and wipe suppression from the stored manifest.
+func TestScanService_ScanCVE_CacheHit_DegradedFetchDoesNotPersistRemoval(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       domain.CVEExceptions{}, // partial set: CVE-A exception missing (CRD list failed)
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "a degraded fetch must not persist an apparent removal")
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+// TestScanService_ScanCVE_CacheHit_DegradedFetchPersistsAddition verifies that a purely additive
+// change is persisted even when the exception set is incomplete.
+func TestScanService_ScanCVE_CacheHit_DegradedFetchPersistsAddition(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"), // partial set still includes CVE-A
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestService(t, platform, repo, nil)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "a purely additive change must be persisted even when degraded")
+	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+// TestScanService_ScanCVE_CacheMiss_UnfilteredToBackend guards the primary path: a fresh scan
+// stores the exception-filtered manifest but submits the unfiltered original to the backend.
+func TestScanService_ScanCVE_CacheMiss_UnfilteredToBackend(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := repositories.NewMemoryStorage(false, false)
+	s, _, _, _, ctx := newScanCVETestService(t, platform, repo, fakeCVEScanner{})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1)
+
+	require.Len(t, platform.submitted, 1)
+	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a cache miss")
+}
+
+// TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch is the ScanCP mirror of
+// the ScanCVE regression test, run with vexGeneration enabled so the StoreVEX path is exercised.
+// The manifest handed to StoreVEX is the same object passed to SubmitCVE (scan.go), so the
+// unfiltered submission assertion covers the VEX consequence transitively; that VEX statements
+// are built from cve.Content.Matches (i.e. the restored manifest) is asserted directly by
+// TestAPIServerStore_storeVEX (repositories/apiserver_test.go).
+func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *testing.T) {
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	// the full CVE manifest is keyed by the image slug ScanCP computes itself
+	slug, err := names.ImageInfoToSlug(tools.NormalizeReference(imageTag), imageID)
+	require.NoError(t, err)
+
+	platform := &recordingPlatform{}
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageCP := repositories.NewMemoryStorage(false, false)
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, v1.NewContainerProfileAdapter(storageCP), true, true, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	ap := v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "daemonset-kube-proxy",
+			Namespace: "kube-system",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
+				helpersv1.StatusMetadataKey:     helpersv1.Learning,
+				helpersv1.WlidMetadataKey:       wlid,
+			},
+			Labels: map[string]string{"foo": "bar"},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			ImageID:  imageID,
+			ImageTag: imageTag,
+		},
+	}
+	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
+
+	seedCachedCVEManifest(t, storageCVE, slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx), ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCP(ctx))
+
+	stored, err := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
+	require.NoError(t, err)
+	require.NotNil(t, stored.Content)
+	assert.Contains(t, matchIDs(stored.Content.Matches), "CVE-A", "deleted exception must restore the suppressed match on a ScanCP cache hit")
+	assert.Len(t, stored.Content.IgnoredMatches, 0)
+
+	require.Len(t, platform.submitted, 1, "ScanCP cache hit must still submit the manifest to the backend")
+	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a ScanCP cache hit")
 }

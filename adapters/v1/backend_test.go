@@ -255,9 +255,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
 	_, err := a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	_, err = a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
 }
 
@@ -272,14 +272,10 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 // wires a real APIServerStore backed by a dynamic client that fails the CRD list, closing
 // that gap.
 func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *testing.T) {
-	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
-		securityExceptionGVR:        "SecurityExceptionList",
-		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
-	})
-	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+	store := repositories.NewFakeAPIServerStorage("kubescape")
+	store.DynamicClient.(*fakedynamic.FakeDynamicClient).PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("etcd timeout")
 	})
-	store := &repositories.APIServerStore{DynamicClient: dynClient, Namespace: "kubescape"}
 
 	calls := 0
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", store)
@@ -290,9 +286,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *tes
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
 	_, err := a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
 	_, err = a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
 	assert.Equal(t, 2, calls, "a real CRD list failure must disable caching, not just a faked one")
 }
 
@@ -324,9 +320,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
 	_, err := a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	_, err = a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
 

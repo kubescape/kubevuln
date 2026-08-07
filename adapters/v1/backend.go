@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -200,13 +201,17 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	// Merge CRD-based exceptions
+	degraded := false
 	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if crdErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
-		// This is a best-effort degradation that self-heals on the next scan;
-		// caching it would suppress valid CRD exceptions for the full TTL.
+		// Best-effort degradation that self-heals on the next scan. The set is
+		// incomplete: caching it would suppress valid CRD exceptions for the full
+		// TTL, and callers must not persist "removals" computed from it.
 		cacheable = false
-	} else if len(seList) > 0 || len(cseList) > 0 {
+		degraded = true
+	}
+	if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
@@ -214,14 +219,19 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		// A selector-based exception whose labels failed to resolve fails closed
 		// (see matchExceptionTarget), which is also a self-healing degradation and
 		// must not be cached as if it were the authoritative result.
-		if (usesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
-			(usesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
+		if (UsesObjectSelector(seList, cseList) && !target.WorkloadLabelsResolved) ||
+			(UsesNamespaceSelector(cseList) && !target.NamespaceLabelsResolved) {
 			cacheable = false
+			degraded = true
 		}
 	}
 
 	if cacheable && a.exceptionsCache != nil {
 		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
+	}
+
+	if degraded {
+		return vulnExceptionList, domain.ErrExceptionsDegraded
 	}
 
 	return vulnExceptionList, nil
@@ -384,7 +394,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 
 	// get exceptions
 	exceptions, err := a.GetCVEExceptions(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, domain.ErrExceptionsDegraded) {
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
 	// convert to vulnerabilities

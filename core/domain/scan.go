@@ -30,6 +30,10 @@ var (
 	ErrCastingWorkload          = errors.New("casting workload")
 	ErrMockError                = errors.New("mock error")
 	ErrTooManyRequests          = errors.New("too many requests")
+	// ErrExceptionsDegraded indicates the SecurityException set is incomplete
+	// (e.g. the CRD list failed). Callers must not treat missing exceptions as
+	// deletions.
+	ErrExceptionsDegraded = errors.New("exception set is incomplete")
 )
 
 type ScanIDKey struct{}
