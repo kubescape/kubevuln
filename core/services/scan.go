@@ -656,17 +656,17 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return err
 		}
 
-		// apply security exceptions for storage
-		filteredCve := s.applyExceptionsToManifest(ctx, cve)
+		// apply security exceptions
+		cve = s.applyExceptionsToManifest(ctx, cve)
 
 		// store filtered CVE
 		if s.storage {
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
@@ -683,12 +683,13 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		filteredCve := s.applyExceptionsToManifest(ctx, cve)
 
 		if s.storage && len(filteredCve.Content.IgnoredMatches) > len(cve.Content.IgnoredMatches) {
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
+			cve = filteredCve
+			err = s.cveRepository.StoreCVE(ctx, cve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
+			err = s.cveRepository.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
