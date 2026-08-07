@@ -899,11 +899,47 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 		})
 	}
 
+	// Add ignored vulnerabilities as not_affected with SecurityException impact statement
+	if cve.Content != nil {
+		for _, v := range cve.Content.IgnoredMatches {
+			var aliases []string
+			for _, alias := range v.RelatedVulnerabilities {
+				aliases = append(aliases, alias.ID)
+			}
+
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+
+			if err != nil {
+				return err
+			}
+
+			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:          v.Vulnerability.DataSource,
+					Name:        v.Vulnerability.ID,
+					Description: v.Vulnerability.Description,
+					Aliases:     aliases,
+				},
+
+				Products: []v1beta1.Product{
+					*product,
+				},
+
+				Status:          v1beta1.Status(vex.StatusNotAffected),
+				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+				ImpactStatement: "Vulnerability was ignored by a SecurityException",
+			})
+		}
+	}
+
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
 	if err != nil {
 		return err
 	}
+
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
 
 	calculatedId, err := calculateVexCanonicalHash(vexDoc)
 	if err != nil {
@@ -927,6 +963,37 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	return err
 }
 
+func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifest) error {
+	if cve == nil || cve.Content == nil {
+		return nil
+	}
+	for _, v := range cve.Content.IgnoredMatches {
+		for i, s := range vexDoc.Statements {
+			if s.Vulnerability.Name == v.Vulnerability.ID {
+				foundProduct := false
+				for _, p := range s.Products {
+					for _, sc := range p.Subcomponents {
+						if sc.ID == v.Artifact.PURL {
+							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
+							vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
+							vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
+							vexDoc.Statements[i].ActionStatement = ""
+							foundProduct = true
+						}
+						if foundProduct {
+							break
+						}
+					}
+					if foundProduct {
+						break
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, vexContainer *v1beta1.OpenVulnerabilityExchangeContainer) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.updateVEX")
 	defer span.End()
@@ -946,55 +1013,99 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
-	for _, v := range cve.Content.Matches {
-		found := false
-		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.Name != v.Vulnerability.ID {
-				continue
+	if cve.Content != nil {
+		for _, v := range cve.Content.Matches {
+			found := false
+			for _, s := range vexDoc.Statements {
+				if s.Vulnerability.Name != v.Vulnerability.ID {
+					continue
+				}
+				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
+					continue
+				}
+				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+					found = true
+					break
+				}
 			}
-			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-				continue
-			}
-			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				found = true
-				break
+			if !found {
+				// Add the vulnerability to the VEX document
+				var aliases []string
+				for _, alias := range v.RelatedVulnerabilities {
+					aliases = append(aliases, alias.ID)
+				}
+
+				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				if err != nil {
+					return err
+				}
+
+				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+					Vulnerability: v1beta1.VexVulnerability{
+						ID:          v.Vulnerability.DataSource,
+						Name:        v.Vulnerability.ID,
+						Description: v.Vulnerability.Description,
+						Aliases:     aliases,
+					},
+
+					Products: []v1beta1.Product{
+						*product,
+					},
+
+					Status:          v1beta1.Status(vex.StatusNotAffected),
+					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+					ImpactStatement: "Vulnerable component is not loaded into the memory",
+				})
 			}
 		}
-		if !found {
-			// Add the vulnerability to the VEX document
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
+
+		for _, v := range cve.Content.IgnoredMatches {
+			found := false
+			for _, s := range vexDoc.Statements {
+				if s.Vulnerability.Name != v.Vulnerability.ID {
+					continue
+				}
+				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
+					continue
+				}
+				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+					found = true
+					break
+				}
 			}
+			if !found {
+				var aliases []string
+				for _, alias := range v.RelatedVulnerabilities {
+					aliases = append(aliases, alias.ID)
+				}
 
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-			if err != nil {
-				return err
+				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				if err != nil {
+					return err
+				}
+
+				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+					Vulnerability: v1beta1.VexVulnerability{
+						ID:          v.Vulnerability.DataSource,
+						Name:        v.Vulnerability.ID,
+						Description: v.Vulnerability.Description,
+						Aliases:     aliases,
+					},
+
+					Products: []v1beta1.Product{
+						*product,
+					},
+
+					Status:          v1beta1.Status(vex.StatusNotAffected),
+					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+					ImpactStatement: "Vulnerability was ignored by a SecurityException",
+				})
 			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerable component is not loaded into the memory",
-			})
 		}
 	}
 
 	// Reset every statement back to the baseline "not affected" status before
-	// reapplying the current filtered manifest. Without this, a statement that
-	// was marked "affected" during an earlier update stays "affected" forever,
-	// even after the corresponding CVE/package pair is no longer relevant.
+	// reapplying the current filtered manifest.
 	for i := range vexDoc.Statements {
 		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
@@ -1007,6 +1118,9 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	if err != nil {
 		return err
 	}
+
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
 
 	// Update the VEX document metadata
 	vexDoc.Metadata.LastUpdated = time.Now().Format(time.RFC3339)

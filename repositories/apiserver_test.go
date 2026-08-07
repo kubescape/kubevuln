@@ -2155,3 +2155,72 @@ func TestCtxCapturingClient_wrappersKeyedByNamespace(t *testing.T) {
 	require.NotSame(t, cp1, cp2)
 	require.Same(t, cp1, cp1Again)
 }
+
+func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         "CVE-IGNORE-TEST",
+					DataSource: "GHSA-IGNORE-TEST",
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    "ignored-package",
+				Version: "1.0",
+				PURL:    "pkg:deb/debian/ignored-package@1.0",
+			},
+		},
+	})
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, vexContainer)
+
+	var foundIgnored bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
+			foundIgnored = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundIgnored, "IgnoredMatch should be included in the VEX document")
+
+	// Now test updating VEX container when a match moves into IgnoredMatches
+	cveManifestFiltered.Content.IgnoredMatches = cveManifest.Content.IgnoredMatches
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	foundIgnored = false
+	for _, stmt := range vexContainerUpdated.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
+			foundIgnored = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundIgnored, "IgnoredMatch should remain not_affected on VEX update")
+}
