@@ -25,3 +25,24 @@ jobs:
       CGO_ENABLED: 0
       GO_VERSION: "1.25"
     secrets: inherit
+
+  # Runs the unit test suite under QEMU arm64 emulation so platform-specific
+  # regressions (e.g. in adapters/v1, pkg/sbomscanner/v1) are caught before
+  # merge, matching the linux/arm64 image published by pr-merged.yaml.
+  arm64-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Run go test ./... on linux/arm64
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e CGO_ENABLED=0 \
+            golang:1.25 go test ./...
