@@ -300,6 +300,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 		}
 
+		filteredCve := domain.CVEManifest{}
+		var cveExceptionsComplete bool
 		// if CVE manifest is not available, create it
 		if cve.Content == nil {
 			// scan for CVE
@@ -313,7 +315,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-			filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
 
 			// store filtered CVE
 			if s.storage {
@@ -338,7 +340,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// unfiltered data a cache miss would produce.
 			prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 			cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-			filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
+			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
 
 			if s.storage {
 				curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
@@ -354,7 +356,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 							break
 						}
 					}
-					if exceptionsComplete || !hasRemovals {
+					if cveExceptionsComplete || !hasRemovals {
 						err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 						if err != nil {
 							logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
@@ -401,7 +403,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-			filteredCvep, _ := s.applyExceptionsToManifest(ctx, cvep)
+			filteredCvep, cvepExceptionsComplete := s.applyExceptionsToManifest(ctx, cvep)
 
 			// store filtered CVE'
 			if s.storage {
@@ -420,8 +422,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE summary is not critical
 				}
-				if s.vexGeneration {
-					err = s.cveRepository.StoreVEX(ctx, cve, cvep, true)
+				if s.vexGeneration && cveExceptionsComplete && cvepExceptionsComplete {
+					err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCvep, true)
 					if err != nil {
 						logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
 							helpers.String("imageSlug", slug))
