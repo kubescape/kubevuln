@@ -234,9 +234,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
 	_, err := a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	_, err = a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
 }
 
@@ -268,9 +268,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
 	_, err := a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	_, err = a.GetCVEExceptions(ctx)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
 

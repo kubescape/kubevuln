@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"crypto/sha256"
+	stderrors "errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -117,12 +118,14 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	defer cancel()
 
 	var exceptions []sev1beta1.SecurityException
+	var listErr error
 
 	// Only list namespaced exceptions when namespace is provided
 	if namespace != "" {
 		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
+			listErr = stderrors.Join(listErr, err)
 		} else {
 			for i := range seList.Items {
 				var se sev1beta1.SecurityException
@@ -140,6 +143,7 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
+		listErr = stderrors.Join(listErr, err)
 	} else {
 		for i := range cseList.Items {
 			var cse sev1beta1.ClusterSecurityException
@@ -151,7 +155,7 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 		}
 	}
 
-	return exceptions, clusterExceptions, nil
+	return exceptions, clusterExceptions, listErr
 }
 
 // GetWorkloadLabels resolves the labels of a workload so that a
