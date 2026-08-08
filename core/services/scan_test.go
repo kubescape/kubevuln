@@ -1983,3 +1983,53 @@ func TestFilterSBOM_TransitiveClosure(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"pkg-A->file-F", "pkg-B->pkg-A", "pkg-C->pkg-B"}, gotRelationshipPairs)
 }
+
+// TestFilterSBOM_PreservesSourceRelationshipOrder is a regression test for CodeRabbit's
+// review on #515: the BFS fix for #514 emitted relationships as it discovered them, but
+// mapset's ToSlice() has no stable order, so with multiple relevant files the output order
+// could vary between calls on the same input. filterSBOM must emit ArtifactRelationships in
+// the same order they appear in sbom.Content.ArtifactRelationships, filtered down to the
+// relevant ones - not in discovery order.
+func TestFilterSBOM_PreservesSourceRelationshipOrder(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	// Two independent relevant files, each with its own 2-level chain, interleaved in the
+	// source relationship list rather than grouped by file.
+	sourceRelationships := []v1beta1.SyftRelationship{
+		{Parent: "pkg-B1", Child: "pkg-A1", Type: "contains"},
+		{Parent: "pkg-A2", Child: "file-F2", Type: "contains"},
+		{Parent: "pkg-A1", Child: "file-F1", Type: "contains"},
+		{Parent: "pkg-B2", Child: "pkg-A2", Type: "contains"},
+	}
+
+	sbom := domain.SBOM{
+		Content: &v1beta1.SyftDocument{
+			Files: []v1beta1.SyftFile{
+				{ID: "file-F1", Location: v1beta1.Coordinates{RealPath: "/app/f1.class"}},
+				{ID: "file-F2", Location: v1beta1.Coordinates{RealPath: "/app/f2.class"}},
+			},
+			Artifacts: []v1beta1.SyftPackage{
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A1", Name: "A1"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B1", Name: "B1"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A2", Name: "A2"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B2", Name: "B2"}},
+			},
+			ArtifactRelationships: sourceRelationships,
+		},
+	}
+
+	relevantFiles := mapset.NewSet[string]()
+	relevantFiles.Add("/app/f1.class")
+	relevantFiles.Add("/app/f2.class")
+
+	filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+	require.NoError(t, err)
+
+	// Every source relationship is relevant here, so the filtered order must equal the
+	// source order exactly - not just contain the same elements.
+	require.Equal(t, sourceRelationships, filtered.Content.ArtifactRelationships,
+		"filterSBOM must emit ArtifactRelationships in source order, not discovery order")
+}

@@ -1052,6 +1052,12 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 		childToRelationships[relationship.Child] = append(childToRelationships[relationship.Child], relationship)
 	}
 
+	// Compute the closure first (which relationships/artifacts are relevant) without emitting
+	// anything: addedFileIDs.ToSlice() has no stable order, so a traversal that appends
+	// relationships as it discovers them would make the output order vary between calls on
+	// the same input whenever there's more than one relevant file. Emitting afterward, in a
+	// single pass over sbom.Content.ArtifactRelationships, keeps the output in the same
+	// deterministic source order the pre-fix code always had.
 	relationshipsArtifacts := mapset.NewSet[string]()
 	frontier := addedFileIDs.ToSlice()
 	for len(frontier) > 0 {
@@ -1063,13 +1069,18 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 					continue
 				}
 				addedRelationshipIDs.Add(relationshipID)
-				filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
 				if relationshipsArtifacts.Add(relationship.Parent) {
 					next = append(next, relationship.Parent)
 				}
 			}
 		}
 		frontier = next
+	}
+
+	for _, relationship := range sbom.Content.ArtifactRelationships {
+		if addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
+			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
+		}
 	}
 
 	// filter relevant artifacts. An artifact is relevant if it is in the relevant relationships
