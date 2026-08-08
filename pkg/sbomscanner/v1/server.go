@@ -119,10 +119,10 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		unauthorizedErr := err
 		for _, provider := range registryAuthProviders {
-			if !provider.Matches(imageID) {
+			if !provider.Matches(pullRef) {
 				continue
 			}
-			if creds, credErr := provider.Credentials(ctx); credErr != nil {
+			if creds, credErr := provider.Credentials(ctx); credErr != nil || creds == nil {
 				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
 					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
