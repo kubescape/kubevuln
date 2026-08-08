@@ -2001,4 +2001,12 @@ func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
 
 	_, errValReg := s.ValidateScanRegistry(context.TODO(), workload)
 	assert.ErrorIs(t, errValReg, domain.ErrTooManyRequests)
+
+	ctx := enrichContext(context.TODO(), workload, s.Version())
+
+	// Execution paths must also abort and return ErrTooManyRequests without calling CreateSBOM
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanCVE(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanRegistry(ctx), domain.ErrTooManyRequests)
+	assert.Equal(t, 0, countingSBOM.calls, "No execution path should attempt CreateSBOM when rate limited")
 }

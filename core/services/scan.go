@@ -149,6 +149,13 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
+		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+			logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+				helpers.String("imageSlug", workload.ImageSlug))
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+			return domain.ErrTooManyRequests
+		}
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
@@ -502,6 +509,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
 			if s.sbomGeneration {
+				if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+					logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+						helpers.String("imageSlug", workload.ImageSlug))
+					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+						scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+					return domain.ErrTooManyRequests
+				}
 				// create SBOM
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 				s.checkCreateSBOM(err, rateLimitCacheKey(workload))
