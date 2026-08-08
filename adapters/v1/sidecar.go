@@ -234,24 +234,36 @@ func (s *SidecarSBOMAdapter) Version() string {
 	s.versionMu.Unlock()
 
 	v, err, _ := s.versionGroup.Do("version", func() (any, error) {
+		// Another goroutine may have populated versionStr after the
+		// singleflight key was released but before this closure executes.
+		// Recheck the cache to avoid issuing a redundant Health() request.
+		s.versionMu.Lock()
+		if s.versionStr != "" {
+			s.versionMu.Unlock()
+			return s.versionStr, nil
+		}
+		s.versionMu.Unlock()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		version, _, err := s.client.Health(ctx)
 		if err != nil {
 			return "", err
 		}
+
+		s.versionMu.Lock()
+		defer s.versionMu.Unlock()
+		s.versionStr = version
+
 		return version, nil
 	})
+
 	if err != nil {
 		logger.L().Warning("failed to get scanner version", helpers.Error(err))
 		return "unknown"
 	}
 
-	version := v.(string)
-	s.versionMu.Lock()
-	s.versionStr = version
-	s.versionMu.Unlock()
-	return version
+	return v.(string)
 }
 
 func (s *SidecarSBOMAdapter) GetMaxImageSize() int64 {
