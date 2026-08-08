@@ -1118,13 +1118,75 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
+	for _, v := range cve.Content.IgnoredMatches {
+		found := false
+		for _, s := range vexDoc.Statements {
+			if s.Vulnerability.Name != v.Vulnerability.ID {
+				continue
+			}
+			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
+				continue
+			}
+			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Add the vulnerability to the VEX document
+			var aliases []string
+			for _, alias := range v.RelatedVulnerabilities {
+				aliases = append(aliases, alias.ID)
+			}
+
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+			if err != nil {
+				return err
+			}
+
+			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:          v.Vulnerability.DataSource,
+					Name:        v.Vulnerability.ID,
+					Description: v.Vulnerability.Description,
+					Aliases:     aliases,
+				},
+
+				Products: []v1beta1.Product{
+					*product,
+				},
+
+				Status:          v1beta1.Status(vex.StatusNotAffected),
+				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+				ImpactStatement: "Vulnerability was ignored by a SecurityException",
+			})
+		}
+	}
+
+	ignoredMap := make(map[string]bool)
+	for _, v := range cve.Content.IgnoredMatches {
+		ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+	}
+
 	// Reset every statement back to the baseline "not affected" status before
 	// reapplying the current filtered manifest.
 	for i := range vexDoc.Statements {
 		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
-		vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
 		vexDoc.Statements[i].ActionStatement = ""
+		
+		isIgnored := false
+		if len(vexDoc.Statements[i].Products) > 0 && len(vexDoc.Statements[i].Products[0].Subcomponents) > 0 {
+			if ignoredMap[vexDoc.Statements[i].Vulnerability.Name+vexDoc.Statements[i].Products[0].Subcomponents[0].ID] {
+				isIgnored = true
+			}
+		}
+
+		if isIgnored {
+			vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
+		} else {
+			vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
+		}
 	}
 
 	// Now change the status of the filtered vulnerabilities to "Affected"

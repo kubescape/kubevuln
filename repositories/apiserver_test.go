@@ -368,6 +368,85 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 	assert.Equal(t, relevant+1, relevant2)
 }
 
+func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	// Inject an IgnoredMatch into the original cveManifest
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         "CVE-IGNORE-TEST",
+					DataSource: "GHSA-IGNORE-TEST",
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    "ignored-package",
+				Version: "1.0",
+			},
+		},
+	})
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.NoError(t, err)
+
+	// Inject a second IgnoredMatch to trigger updateVEX and verify it correctly handles new ignored matches
+	// and preserves existing ones
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         "CVE-IGNORE-TEST-2",
+					DataSource: "GHSA-IGNORE-TEST-2",
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    "ignored-package-2",
+				Version: "2.0",
+			},
+		},
+	})
+
+	// Second call triggers the updateVEX path
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotNil(t, vexContainer)
+
+	var foundIgnored1, foundIgnored2 bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
+			foundIgnored1 = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST-2" {
+			foundIgnored2 = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundIgnored1, "First IgnoredMatch should be preserved in the VEX document during update")
+	assert.True(t, foundIgnored2, "Second IgnoredMatch should be included in the VEX document during update")
+}
+
 // TestAPIServerStore_storeVEX_updateRestoresNotAffected guards against a regression where
 // updateVEX only ever promoted statements to "affected" and never reset them back to
 // "not_affected" once the corresponding CVE/package pair stopped being relevant.
