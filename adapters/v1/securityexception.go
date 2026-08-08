@@ -6,11 +6,22 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// suppressionSource identifies the CRD object a suppression provenance record originated
+// from, so a suppressed CVE can be traced back to the exception (and its scope) that
+// caused it to be filtered out of scan results.
+type suppressionSource struct {
+	kind      string // "SecurityException" or "ClusterSecurityException"
+	name      string
+	namespace string
+}
 
 // ConvertToVulnerabilityExceptionPolicies converts SecurityException and
 // ClusterSecurityException CRDs into armotypes.VulnerabilityExceptionPolicy
@@ -37,7 +48,11 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			if !shouldSuppress(vuln) {
 				continue
 			}
-			p := buildPolicy(se.Spec, vuln, namespace)
+			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
+				kind:      "SecurityException",
+				name:      se.Name,
+				namespace: se.Namespace,
+			})
 			policies = append(policies, p)
 		}
 	}
@@ -54,7 +69,10 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			if !shouldSuppress(vuln) {
 				continue
 			}
-			p := buildPolicy(cse.Spec, vuln, "")
+			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
+				kind: "ClusterSecurityException",
+				name: cse.Name,
+			})
 			policies = append(policies, p)
 		}
 	}
@@ -86,7 +104,7 @@ func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
 	}
 }
 
-func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string) armotypes.VulnerabilityExceptionPolicy {
+func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string, src suppressionSource) armotypes.VulnerabilityExceptionPolicy {
 	vulnerabilityPolicies := []armotypes.VulnerabilityPolicy{
 		{Name: strings.TrimSpace(vuln.Vulnerability.ID)},
 	}
@@ -97,6 +115,10 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 	}
 
 	p := armotypes.VulnerabilityExceptionPolicy{
+		// PortalBase.Name identifies the CRD object (the "rule") that produced this policy,
+		// since SecurityException/ClusterSecurityException have no separate rule/statement
+		// ID — the object's own name is the closest thing to one.
+		PortalBase:            armotypes.PortalBase{Name: src.name},
 		PolicyType:            "vulnerabilityExceptionPolicy",
 		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
 		VulnerabilityPolicies: vulnerabilityPolicies,
@@ -114,8 +136,67 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 	}
 
 	p.Designatores = buildDesignators(spec.Match.Resources, namespace)
+	p.Attributes = buildSuppressionAttributes(spec, vuln, namespace, src)
 
 	return p
+}
+
+// buildSuppressionAttributes records suppression provenance that has no dedicated field on
+// armotypes.VulnerabilityExceptionPolicy: which kind of exception CRD matched, its scope, and
+// the VEX justification/impact statement behind the suppression. This is surfaced here (rather
+// than on the filtered manifest's IgnoreRule) because the manifest's IgnoreRule schema is owned
+// by github.com/kubescape/storage and has no such fields.
+func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException, namespace string, src suppressionSource) map[string]interface{} {
+	attrs := map[string]interface{}{
+		"sourceKind": src.kind,
+		"ruleId":     suppressionRuleID(src),
+	}
+	if src.namespace != "" {
+		attrs["sourceNamespace"] = src.namespace
+	}
+	if j := strings.TrimSpace(vuln.Justification); j != "" {
+		attrs["justification"] = j
+	}
+	if s := strings.TrimSpace(vuln.ImpactStatement); s != "" {
+		attrs["impactStatement"] = s
+	}
+	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
+		attrs["normalizedTarget"] = t
+	}
+	return attrs
+}
+
+// suppressionRuleID renders a stable, structured identifier for the CRD object that produced a
+// suppression, distinct from both its bare name and the human-authored reason: kind/namespace/name
+// for a namespaced SecurityException, kind/name for a cluster-scoped one.
+func suppressionRuleID(src suppressionSource) string {
+	if src.namespace != "" {
+		return src.kind + "/" + src.namespace + "/" + src.name
+	}
+	return src.kind + "/" + src.name
+}
+
+// normalizedTarget renders a human-readable identifier for what an exception's match criteria
+// targeted, for suppression-provenance reporting.
+func normalizedTarget(resources []sev1beta1.ResourceMatch, namespace string) string {
+	if len(resources) == 0 {
+		if namespace != "" {
+			return "namespace/" + namespace
+		}
+		return "cluster-wide"
+	}
+	parts := make([]string, 0, len(resources))
+	for _, r := range resources {
+		target := r.Kind
+		if r.Name != "" {
+			target += "/" + r.Name
+		}
+		if namespace != "" {
+			target = namespace + "/" + target
+		}
+		parts = append(parts, target)
+	}
+	return strings.Join(parts, ",")
 }
 
 // hasIgnoreAction returns true if any of the matched policies contain the Ignore action.
@@ -148,11 +229,64 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 					{Vulnerability: m.Vulnerability.ID},
 				},
 			})
+			logSuppression(m, matched)
 		} else {
 			remaining = append(remaining, m)
 		}
 	}
 	doc.Matches = remaining
+}
+
+// suppressingPolicies filters matched down to the policies that actually cause suppression,
+// mirroring the hasIgnoreAction(matched) condition ApplySecurityExceptions uses to decide
+// whether to suppress at all. Without this, a non-Ignore policy passed alongside an Ignore one
+// would be misreported by logSuppression as a suppression source.
+func suppressingPolicies(matched []armotypes.VulnerabilityExceptionPolicy) []armotypes.VulnerabilityExceptionPolicy {
+	var out []armotypes.VulnerabilityExceptionPolicy
+	for _, p := range matched {
+		if hasIgnoreAction([]armotypes.VulnerabilityExceptionPolicy{p}) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// logSuppression records why a CVE disappeared from scan results: which exception object
+// matched, its scope, and the stated reason/justification. This is logged rather than stored on
+// the manifest because the filtered manifest's IgnoreRule (github.com/kubescape/storage) has no
+// fields for this provenance; see buildSuppressionAttributes for where it is captured.
+func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) {
+	for _, p := range suppressingPolicies(matched) {
+		fields := []helpers.IDetails{
+			helpers.String("cve", m.Vulnerability.ID),
+			helpers.String("package", m.Artifact.Name),
+		}
+		if p.Name != "" {
+			fields = append(fields, helpers.String("sourceName", p.Name))
+		}
+		if p.Reason != "" {
+			fields = append(fields, helpers.String("reason", p.Reason))
+		}
+		if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
+			fields = append(fields, helpers.String("sourceKind", kind))
+		}
+		if ruleID, ok := p.Attributes["ruleId"].(string); ok && ruleID != "" {
+			fields = append(fields, helpers.String("ruleId", ruleID))
+		}
+		if ns, ok := p.Attributes["sourceNamespace"].(string); ok && ns != "" {
+			fields = append(fields, helpers.String("sourceNamespace", ns))
+		}
+		if just, ok := p.Attributes["justification"].(string); ok && just != "" {
+			fields = append(fields, helpers.String("justification", just))
+		}
+		if impact, ok := p.Attributes["impactStatement"].(string); ok && impact != "" {
+			fields = append(fields, helpers.String("impactStatement", impact))
+		}
+		if target, ok := p.Attributes["normalizedTarget"].(string); ok && target != "" {
+			fields = append(fields, helpers.String("normalizedTarget", target))
+		}
+		logger.L().Info("CVE suppressed by security exception", fields...)
+	}
 }
 
 // RestoreSuppressedMatches is the inverse of ApplySecurityExceptions: it returns a copy of doc
