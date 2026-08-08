@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -158,16 +157,19 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
 
 	// translate business models into Syft models
-	if options.Platform == "" {
-		options.Platform = runtime.GOARCH
-	}
-	platformStr := options.Platform
-	if !strings.Contains(platformStr, "/") {
-		platformStr = "linux/" + platformStr
-	}
-	imgPlatform, err := image.NewPlatform(platformStr)
-	if err != nil {
-		return domain.SBOM{}, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+	// only request a specific platform when the caller explicitly asked for one;
+	// otherwise let Syft resolve whatever platform the image manifest provides.
+	var imgPlatform *image.Platform
+	if options.Platform != "" {
+		platformStr := options.Platform
+		if !strings.Contains(platformStr, "/") {
+			platformStr = "linux/" + platformStr
+		}
+		p, err := image.NewPlatform(platformStr)
+		if err != nil {
+			return domain.SBOM{}, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+		}
+		imgPlatform = p
 	}
 	credentials := make([]image.RegistryCredentials, len(options.Credentials))
 	for i, v := range options.Credentials {
