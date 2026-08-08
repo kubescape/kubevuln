@@ -27,6 +27,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -55,6 +56,14 @@ type ScanService struct {
 	storage           bool
 	vexGeneration     bool
 	tooManyRequests   *cache.Cache
+	metrics           *metrics.Metrics
+}
+
+// SetMetrics attaches an optional Metrics instance to the service. It is not
+// a constructor parameter so existing callers (including the many test call
+// sites) are unaffected; metric recording is a no-op until this is called.
+func (s *ScanService) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
@@ -832,6 +841,9 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	}
 	exceptions, err := s.platform.GetCVEExceptions(ctx)
 	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
+	if degraded && s.metrics != nil {
+		s.metrics.ExceptionsDegradedCounter.Add(ctx, 1)
+	}
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
