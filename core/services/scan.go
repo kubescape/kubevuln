@@ -185,6 +185,7 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 	return s.cveScanner.Ready(ctx)
 }
 
+// ScanCP implements the "Scanning for CVEs" flow triggered by ContainerProfiles relevancy data.
 func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	mainCtx, span := otel.Tracer("").Start(mainCtx, "ScanService.ScanCP")
 	defer span.End()
@@ -644,6 +645,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	return nil
 }
 
+// ScanRegistry implements the "Scanning for CVEs" flow triggered by a manual/registry scan request.
 func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanRegistry")
 	defer span.End()
@@ -1078,6 +1080,7 @@ func getRelationshipID(relationship v1beta1.SyftRelationship) string {
 	return fmt.Sprintf("%s/%s/%s", relationship.Parent, relationship.Child, relationship.Type)
 }
 
+// ValidateGenerateSBOM validates the workload for the GenerateSBOM flow and enriches the context.
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
 	defer span.End()
@@ -1100,6 +1103,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 	return ctx, nil
 }
 
+// ValidateScanCP validates the workload for the ScanCP flow and enriches the context.
 func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCP")
 	defer span.End()
@@ -1121,6 +1125,7 @@ func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCo
 	return ctx, nil
 }
 
+// ValidateScanCVE validates the workload for the ScanCVE flow and enriches the context.
 func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
 	defer span.End()
@@ -1147,6 +1152,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 	return ctx, nil
 }
 
+// ValidateScanRegistry validates the workload for the ScanRegistry flow and enriches the context.
 func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanRegistry")
 	defer span.End()
@@ -1170,10 +1176,12 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	return ctx, nil
 }
 
+// Version returns the combined SBOM creator and CVE scanner version string.
 func (s *ScanService) Version() string {
 	return s.sbomCreator.Version() + "-" + s.cveScanner.Version()
 }
 
+// getSBOM retrieves a stored SBOM, deleting and returning empty if it is outdated or stale due to changed size/memory limits.
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
 	if err != nil {
