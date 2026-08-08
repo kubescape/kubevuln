@@ -110,6 +110,8 @@ func (a *BackendAdapter) getRequestHeaders() map[string]string {
 	}
 }
 
+// postResults posts a single report and returns the failure, if any.
+// Callers that run it in a goroutine are responsible for forwarding the error to errorChan.
 func (a *BackendAdapter) postResults(
 	ctx context.Context,
 	report v1.ScanResultReport,
@@ -144,7 +146,7 @@ func (a *BackendAdapter) postResults(
 		} else {
 			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
 		}
-		// return the error to the caller
+
 		return err
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
@@ -185,15 +187,7 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 }
 
 func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
-	if counter == nil {
-		return
-	}
-
 	if isGlobal && isIgnored {
-		return
-	}
-
-	if isIgnored {
 		return
 	}
 
