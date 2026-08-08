@@ -19,6 +19,7 @@ func TestNewAndHandler(t *testing.T) {
 	m.ScanCounter.Add(context.Background(), 1, metric.WithAttributes())
 	m.ScanDuration.Record(context.Background(), 0.5, metric.WithAttributes())
 	m.RejectCounter.Add(context.Background(), 1, metric.WithAttributes())
+	m.ExceptionsDegradedCounter.Add(context.Background(), 1, metric.WithAttributes())
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -29,6 +30,7 @@ func TestNewAndHandler(t *testing.T) {
 	assert.True(t, strings.Contains(body, "kubevuln_scans_completed_total"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_scan_rejections_total"), body)
+	assert.True(t, strings.Contains(body, "kubevuln_exceptions_degraded_total"), body)
 }
 
 func TestMeterRegistersObservableGauge(t *testing.T) {

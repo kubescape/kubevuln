@@ -26,9 +26,10 @@ type Metrics struct {
 	provider *sdkmetric.MeterProvider
 	handler  http.Handler
 
-	ScanDuration  metric.Float64Histogram
-	ScanCounter   metric.Int64Counter
-	RejectCounter metric.Int64Counter
+	ScanDuration              metric.Float64Histogram
+	ScanCounter               metric.Int64Counter
+	RejectCounter             metric.Int64Counter
+	ExceptionsDegradedCounter metric.Int64Counter
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -82,12 +83,21 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	exceptionsDegradedCounter, err := meter.Int64Counter(
+		"kubevuln_exceptions_degraded_total",
+		metric.WithDescription("Total number of times CVE exception fetching degraded (partially failed) during a scan"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Metrics{
 		provider:      provider,
 		handler:       promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
-		ScanDuration:  scanDuration,
-		ScanCounter:   scanCounter,
-		RejectCounter: rejectCounter,
+		ScanDuration:              scanDuration,
+		ScanCounter:               scanCounter,
+		RejectCounter:             rejectCounter,
+		ExceptionsDegradedCounter: exceptionsDegradedCounter,
 	}, nil
 }
 
