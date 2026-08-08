@@ -1932,3 +1932,81 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 	require.Len(t, platform.submitted, 1, "ScanCP cache hit must still submit the manifest to the backend")
 	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a ScanCP cache hit")
 }
+
+func TestScanService_ScanRegistry_RateLimitBackoff(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "docker.io/library/nginx:1.25"
+	slug, err := names.ImageInfoToSlug(tools.NormalizeReference(imageTag), imageID)
+	require.NoError(t, err)
+
+	platform := &recordingPlatform{}
+	countingSBOM := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageHash:          v1.NormalizeImageID(imageID, imageTag),
+		ImageTag:           imageTag,
+		ImageTagNormalized: tools.NormalizeReference(imageTag),
+		ImageSlug:          slug,
+		JobID:              "job-registry",
+	}
+	ctx := enrichContext(context.TODO(), workload, s.Version())
+
+	// Simulate a prior 429 rate limit recorded for this image
+	key := rateLimitCacheKey(workload)
+	s.tooManyRequests.Set(key, true, ttl)
+
+	// ValidateScanRegistry must return ErrTooManyRequests
+	_, valErr := s.ValidateScanRegistry(ctx, workload)
+	assert.ErrorIs(t, valErr, domain.ErrTooManyRequests)
+
+	// ScanRegistry execution path must also abort and return ErrTooManyRequests
+	scanErr := s.ScanRegistry(ctx)
+	assert.ErrorIs(t, scanErr, domain.ErrTooManyRequests)
+	assert.Equal(t, 0, countingSBOM.calls, "ScanRegistry must not attempt CreateSBOM when rate limited")
+}
+
+func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	normalizedTag := tools.NormalizeReference(imageTag)
+	normalizedImageID := v1.NormalizeImageID(imageID, imageTag)
+	slug, err := names.ImageInfoToSlug(normalizedTag, imageID)
+	require.NoError(t, err)
+
+	workload := domain.ScanCommand{
+		ImageHash:          normalizedImageID,
+		ImageTag:           imageTag,
+		ImageTagNormalized: normalizedTag,
+		ImageSlug:          slug,
+	}
+
+	key := rateLimitCacheKey(workload)
+
+	platform := &recordingPlatform{}
+	countingSBOM := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
+
+	// Record rate limit under canonical key
+	s.tooManyRequests.Set(key, true, ttl)
+
+	// All validation entry points must recognize the rate limit
+	_, errValGen := s.ValidateGenerateSBOM(context.TODO(), workload)
+	assert.ErrorIs(t, errValGen, domain.ErrTooManyRequests)
+
+	_, errValCVE := s.ValidateScanCVE(context.TODO(), workload)
+	assert.ErrorIs(t, errValCVE, domain.ErrTooManyRequests)
+
+	_, errValReg := s.ValidateScanRegistry(context.TODO(), workload)
+	assert.ErrorIs(t, errValReg, domain.ErrTooManyRequests)
+
+	ctx := enrichContext(context.TODO(), workload, s.Version())
+
+	// Execution paths must also abort and return ErrTooManyRequests without calling CreateSBOM
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanCVE(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanRegistry(ctx), domain.ErrTooManyRequests)
+	assert.Equal(t, 0, countingSBOM.calls, "No execution path should attempt CreateSBOM when rate limited")
+}
