@@ -77,6 +77,18 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 	}
 }
 
+// rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
+// It prefers workload.ImageHash if set; otherwise falls back to workload.ImageSlug or workload.ImageTagNormalized.
+func rateLimitCacheKey(workload domain.ScanCommand) string {
+	if workload.ImageHash != "" {
+		return workload.ImageHash
+	}
+	if workload.ImageSlug != "" {
+		return workload.ImageSlug
+	}
+	return workload.ImageTagNormalized
+}
+
 func (s *ScanService) checkCreateSBOM(err error, key string) {
 	if isRegistryRateLimitedErr(err) {
 		s.tooManyRequests.Set(key, true, ttl)
@@ -139,7 +151,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if sbom.Content == nil {
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-		s.checkCreateSBOM(err, workload.ImageHash)
+		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 				classifySBOMError(err), err)
@@ -247,7 +259,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					// a previous container in this loop (or a previous request) may have
 					// already recorded this exact image as rate limited; skip pulling it
 					// again instead of hammering the registry with another attempt
-					if _, ok := s.tooManyRequests.Get(subWorkload.ImageHash); ok {
+					if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(subWorkload)); ok {
 						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
 							helpers.String("imageSlug", slug))
 						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -256,7 +268,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					}
 					// create SBOM
 					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, subWorkload.ImageHash)
+					s.checkCreateSBOM(err, rateLimitCacheKey(subWorkload))
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
@@ -492,7 +504,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			if s.sbomGeneration {
 				// create SBOM
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-				s.checkCreateSBOM(err, workload.ImageHash)
+				s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 				if err != nil {
 					reason := classifySBOMError(err)
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -660,9 +672,16 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		if sbom.Content == nil {
+			if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+				logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+					helpers.String("imageSlug", workload.ImageSlug))
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+					scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+				return domain.ErrTooManyRequests
+			}
 			// create SBOM
 			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-			s.checkCreateSBOM(err, workload.ImageTagNormalized)
+			s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 			if err != nil {
 				repErr := s.platform.ReportError(ctx, err)
 				if repErr != nil {
@@ -1076,7 +1095,7 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
@@ -1123,7 +1142,7 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
@@ -1142,10 +1161,11 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		parentSpan.SetAttributes(attribute.String("imageSlug", workload.ImageSlug))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
+		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageTagNormalized); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
