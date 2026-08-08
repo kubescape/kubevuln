@@ -89,6 +89,7 @@ func rateLimitCacheKey(workload domain.ScanCommand) string {
 	return workload.ImageTagNormalized
 }
 
+// checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
 func (s *ScanService) checkCreateSBOM(err error, key string) {
 	if isRegistryRateLimitedErr(err) {
 		s.tooManyRequests.Set(key, true, ttl)
@@ -883,10 +884,12 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	return filtered, !degraded
 }
 
+// addTimestamp attaches the current timestamp to the context.
 func addTimestamp(ctx context.Context) context.Context {
 	return context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 }
 
+// enrichContext populates the context with scan command metadata and tracing attributes.
 func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVersion string) context.Context {
 	// generate unique scanID and add to context
 
@@ -897,6 +900,7 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVers
 	return ctx
 }
 
+// generateScanID computes a unique hash ID for a scan execution.
 func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 
 	scannerVersion = strings.ReplaceAll(scannerVersion, ".", "-")
@@ -916,6 +920,7 @@ func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 	return uuid.New().String()
 }
 
+// optionsFromWorkload converts scan command credentials into domain.RegistryOptions.
 func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
 	options.Credentials = registryCredentialsFromCredentialsList(workload.CredentialsList)
@@ -957,6 +962,7 @@ func credentialsLog(credentials []domain.RegistryCredentials) string {
 	return sb.String()
 }
 
+// registryCredentialsFromCredentialsList converts auth configurations into domain registry credentials.
 func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) []domain.RegistryCredentials {
 	registryCredentials := make([]domain.RegistryCredentials, len(credentials))
 	for i, cred := range credentials {
@@ -977,6 +983,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 	return registryCredentials
 }
 
+// parseAuthorityFromServerAddress extracts the authority host:port from a server address.
 func parseAuthorityFromServerAddress(serverAddress string) string {
 	if serverAddress == "" {
 		return ""
@@ -995,6 +1002,7 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 	return parsedURL.Host
 }
 
+// filterSBOM filters the SBOM package tree based on container profile relevancy information.
 func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string, completion string) (domain.SBOM, error) {
 	name, err := instanceID.GetSlug(false)
 	if err != nil {
@@ -1089,6 +1097,7 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	return filteredSBOM, nil
 }
 
+// getRelationshipID returns a unique string identifier for a Syft relationship.
 func getRelationshipID(relationship v1beta1.SyftRelationship) string {
 	return fmt.Sprintf("%s/%s/%s", relationship.Parent, relationship.Child, relationship.Type)
 }
