@@ -22,8 +22,8 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -973,7 +973,7 @@ type fakeCVEScannerWithVuln struct {
 
 func (f *fakeCVEScannerWithVuln) DBVersion(context.Context) string { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) Ready(context.Context) bool       { return true }
-func (f *fakeCVEScannerWithVuln) Version() string                   { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) Version() string                  { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	return domain.CVEManifest{
 		Name:               sbom.Name,
@@ -1931,4 +1931,55 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 
 	require.Len(t, platform.submitted, 1, "ScanCP cache hit must still submit the manifest to the backend")
 	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a ScanCP cache hit")
+}
+
+// TestFilterSBOM_TransitiveClosure is a regression test for #514: filterSBOM used to walk
+// ArtifactRelationships in exactly two fixed passes, which only ever caught relevant artifacts
+// up to one hop past the direct file owner, and even that one hop depended on the order
+// ArtifactRelationships happened to be in (Syft does not document or guarantee any particular
+// order). This constructs a 3-level containment chain - file F is owned by pkg-A, pkg-A is
+// contained in pkg-B, pkg-B is contained in pkg-C - with the relationships listed
+// outermost-first (C->B, B->A, A->F), the ordering that reproduced the bug.
+func TestFilterSBOM_TransitiveClosure(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	sbom := domain.SBOM{
+		Content: &v1beta1.SyftDocument{
+			Files: []v1beta1.SyftFile{
+				{ID: "file-F", Location: v1beta1.Coordinates{RealPath: "/app/relevant.class"}},
+			},
+			Artifacts: []v1beta1.SyftPackage{
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A", Name: "A"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B", Name: "B"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-C", Name: "C"}},
+			},
+			ArtifactRelationships: []v1beta1.SyftRelationship{
+				{Parent: "pkg-C", Child: "pkg-B", Type: "contains"},
+				{Parent: "pkg-B", Child: "pkg-A", Type: "contains"},
+				{Parent: "pkg-A", Child: "file-F", Type: "contains"},
+			},
+		},
+	}
+
+	relevantFiles := mapset.NewSet[string]()
+	relevantFiles.Add("/app/relevant.class")
+
+	filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+	require.NoError(t, err)
+
+	var gotIDs []string
+	for _, a := range filtered.Content.Artifacts {
+		gotIDs = append(gotIDs, a.ID)
+	}
+	assert.ElementsMatch(t, []string{"pkg-A", "pkg-B", "pkg-C"}, gotIDs,
+		"every artifact that transitively contains a relevant file must be kept, regardless of relationship order")
+
+	var gotRelationshipPairs []string
+	for _, r := range filtered.Content.ArtifactRelationships {
+		gotRelationshipPairs = append(gotRelationshipPairs, r.Parent+"->"+r.Child)
+	}
+	assert.ElementsMatch(t, []string{"pkg-A->file-F", "pkg-B->pkg-A", "pkg-C->pkg-B"}, gotRelationshipPairs)
 }
