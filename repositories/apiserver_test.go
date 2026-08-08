@@ -4,9 +4,11 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/akyoto/cache"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -1960,6 +1962,84 @@ func TestAPIServerStore_GetSecurityExceptions_NoErrorOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, se)
 	assert.Empty(t, cse)
+}
+
+// TestAPIServerStore_GetSecurityExceptions_CachesAcrossWorkloads is a regression test for
+// #510: GetSecurityExceptions used to issue a fresh List() call for both CRD types on every
+// invocation, even though the raw list is identical for every workload sharing the same
+// namespace (SecurityException) or the same cluster (ClusterSecurityException). List() call
+// counters prove the cache collapses repeated calls within the TTL into a single List(), and
+// that a genuinely new namespace still gets its own namespaced list while reusing the
+// already-cached cluster-scoped one.
+func TestAPIServerStore_GetSecurityExceptions_CachesAcrossWorkloads(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	var seListCalls, cseListCalls int32
+	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&seListCalls, 1)
+		return false, nil, nil
+	})
+	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&cseListCalls, 1)
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	// Two calls for the same namespace, simulating two distinct workloads/images scanned in it.
+	_, _, err := a.GetSecurityExceptions(context.TODO(), "ns-a")
+	require.NoError(t, err)
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "ns-a")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&seListCalls), "second call for the same namespace should be served from cache")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cseListCalls), "second call should also reuse the cached cluster-scoped list")
+
+	// A different namespace needs its own namespaced list, but the cluster-scoped list is
+	// shared across every namespace and must still come from cache.
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "ns-b")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&seListCalls), "a new namespace is a cache miss for the namespaced list")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cseListCalls), "ClusterSecurityExceptions are cluster-wide and must not be re-listed per namespace")
+}
+
+// TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures guards the self-healing
+// property #477 relies on: a List() failure must never populate the cache, or a transient
+// apiserver hiccup would be pinned as "no exceptions" for the full cache TTL instead of being
+// retried on the next call.
+func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	var calls int32
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return true, nil, injectedErr
+		}
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	_, _, err := a.GetSecurityExceptions(context.TODO(), "")
+	require.Error(t, err)
+
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "")
+	require.NoError(t, err, "a failed List() must not be cached, so the next call retries instead of replaying the failure")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {

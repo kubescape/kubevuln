@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akyoto/cache"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -40,11 +41,29 @@ const (
 	vulnSummaryContNameFormat              string = "%s-%s-%s" // "<kind>-<name>-<container-name>"
 )
 
+// securityExceptionListCacheCleaningInterval/TTL bound how stale the raw SecurityException/
+// ClusterSecurityException List() results served by GetSecurityExceptions can be. Unlike
+// BackendAdapter's exceptionsCacheTTL (5m, keyed per workload), this cache sits below the
+// per-workload match/filter step and is keyed per namespace (SecurityException) or cluster-wide
+// (ClusterSecurityException), so every workload sharing that scope reuses the same List() —
+// see #510. 30s keeps the data close to live while still collapsing a burst of many
+// workloads/images scanned back-to-back into a single List() call.
+const (
+	securityExceptionListCacheCleaningInterval = 30 * time.Second
+	securityExceptionListCacheTTL              = 30 * time.Second
+	clusterSecurityExceptionListCacheKey       = "cse"
+)
+
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
 	DynamicClient dynamic.Interface
 	Namespace     string
+
+	// securityExceptionListCache caches the raw List() results GetSecurityExceptions reads;
+	// nil is safe (falls back to always listing, e.g. in tests that construct APIServerStore
+	// literals directly instead of through the constructors below).
+	securityExceptionListCache *cache.Cache
 }
 
 var (
@@ -97,9 +116,10 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 		return nil, err
 	}
 	return &APIServerStore{
-		StorageClient: clientset.SpdxV1beta1(),
-		DynamicClient: dynClient,
-		Namespace:     namespace,
+		StorageClient:              clientset.SpdxV1beta1(),
+		DynamicClient:              dynClient,
+		Namespace:                  namespace,
+		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
 	}, nil
 }
 
@@ -114,7 +134,8 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 			securityExceptionGVR:        "SecurityExceptionList",
 			clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
 		}),
-		Namespace: namespace,
+		Namespace:                  namespace,
+		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
 	}
 }
 
@@ -125,51 +146,101 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 // conversion failure on an individual item is still only logged and skipped, since that's a
 // malformed single object rather than a listing-wide failure, and skipping it doesn't risk
 // masking a systemic API problem the way swallowing a List() error would.
+//
+// Both lists are served from securityExceptionListCache when available and fresh: the raw
+// List() results are the same for every workload in a given namespace (SecurityException) or
+// in the whole cluster (ClusterSecurityException), but without this cache each distinct
+// workload/image scanned re-triggers its own List() call — see #510. A List() failure is
+// never cached, so a transient apiserver hiccup self-heals on the next call instead of being
+// pinned for the TTL.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
 	// Use a detached context with timeout — the scan context may be canceled
 	// before the CRD listing completes due to rate limiting.
 	listCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 
-	var exceptions []sev1beta1.SecurityException
 	var listErrs []error
 
 	// Only list namespaced exceptions when namespace is provided
+	var exceptions []sev1beta1.SecurityException
 	if namespace != "" {
-		seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
+		var err error
+		exceptions, err = a.listSecurityExceptions(ctx, listCtx, namespace)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
-			listErrs = append(listErrs, fmt.Errorf("failed to list SecurityExceptions: %w", err))
-		} else {
-			for i := range seList.Items {
-				var se sev1beta1.SecurityException
-				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(seList.Items[i].Object, &se); err != nil {
-					logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err))
-					continue
-				}
-				exceptions = append(exceptions, se)
-			}
+			listErrs = append(listErrs, err)
 		}
 	}
 
-	// List cluster-scoped exceptions
-	var clusterExceptions []sev1beta1.ClusterSecurityException
-	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
+	clusterExceptions, err := a.listClusterSecurityExceptions(ctx, listCtx)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
-		listErrs = append(listErrs, fmt.Errorf("failed to list ClusterSecurityExceptions: %w", err))
-	} else {
-		for i := range cseList.Items {
-			var cse sev1beta1.ClusterSecurityException
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(cseList.Items[i].Object, &cse); err != nil {
-				logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err))
-				continue
-			}
-			clusterExceptions = append(clusterExceptions, cse)
-		}
+		listErrs = append(listErrs, err)
 	}
 
 	return exceptions, clusterExceptions, stderrors.Join(listErrs...)
+}
+
+// listSecurityExceptions returns the namespaced SecurityExceptions for namespace, from
+// securityExceptionListCache when a fresh entry exists.
+func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, namespace string) ([]sev1beta1.SecurityException, error) {
+	cacheKey := "se/" + namespace
+	if a.securityExceptionListCache != nil {
+		if cached, ok := a.securityExceptionListCache.Get(cacheKey); ok {
+			return cached.([]sev1beta1.SecurityException), nil
+		}
+	}
+
+	seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to list SecurityExceptions", helpers.Error(err), helpers.String("namespace", namespace))
+		return nil, fmt.Errorf("failed to list SecurityExceptions: %w", err)
+	}
+
+	var exceptions []sev1beta1.SecurityException
+	for i := range seList.Items {
+		var se sev1beta1.SecurityException
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(seList.Items[i].Object, &se); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err))
+			continue
+		}
+		exceptions = append(exceptions, se)
+	}
+
+	if a.securityExceptionListCache != nil {
+		a.securityExceptionListCache.Set(cacheKey, exceptions, securityExceptionListCacheTTL)
+	}
+	return exceptions, nil
+}
+
+// listClusterSecurityExceptions returns every ClusterSecurityException in the cluster, from
+// securityExceptionListCache when a fresh entry exists. The result is the same regardless of
+// which workload/namespace triggered the call, so it is cached under a single cluster-wide key.
+func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
+	if a.securityExceptionListCache != nil {
+		if cached, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey); ok {
+			return cached.([]sev1beta1.ClusterSecurityException), nil
+		}
+	}
+
+	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to list ClusterSecurityExceptions", helpers.Error(err))
+		return nil, fmt.Errorf("failed to list ClusterSecurityExceptions: %w", err)
+	}
+
+	var clusterExceptions []sev1beta1.ClusterSecurityException
+	for i := range cseList.Items {
+		var cse sev1beta1.ClusterSecurityException
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(cseList.Items[i].Object, &cse); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err))
+			continue
+		}
+		clusterExceptions = append(clusterExceptions, cse)
+	}
+
+	if a.securityExceptionListCache != nil {
+		a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, clusterExceptions, securityExceptionListCacheTTL)
+	}
+	return clusterExceptions, nil
 }
 
 // GetWorkloadLabels resolves the labels of a workload so that a
@@ -1174,7 +1245,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
 		vexDoc.Statements[i].ActionStatement = ""
-		
+
 		isIgnored := false
 		if len(vexDoc.Statements[i].Products) > 0 && len(vexDoc.Statements[i].Products[0].Subcomponents) > 0 {
 			if ignoredMap[vexDoc.Statements[i].Vulnerability.Name+vexDoc.Statements[i].Products[0].Subcomponents[0].ID] {
