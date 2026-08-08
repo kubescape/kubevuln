@@ -161,6 +161,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	if options.Platform == "" {
 		options.Platform = runtime.GOARCH
 	}
+	platformStr := options.Platform
+	if !strings.Contains(platformStr, "/") {
+		platformStr = "linux/" + platformStr
+	}
+	imgPlatform, err := image.NewPlatform(platformStr)
+	if err != nil {
+		return domain.SBOM{}, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+	}
 	credentials := make([]image.RegistryCredentials, len(options.Credentials))
 	for i, v := range options.Credentials {
 		credentials[i] = image.RegistryCredentials{
@@ -191,14 +199,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
 	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
-	src, err := syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+	src, err := syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 
 	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
 			helpers.String("imageTag", imageTag),
 			helpers.String("imageID", imageID))
 		pullRef = rewriteImageRef(imageTag, s.proxyRegistryMap)
-		src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+		src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
@@ -210,7 +218,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 					helpers.String("imageID", imageID))
 			} else {
 				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
-				src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+				src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 			}
 		}
 		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
@@ -219,7 +227,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))
 			registryOptions.Credentials = nil
-			src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithSources("registry"))
+			src, err = syft.GetSource(ctxWithSize, pullRef, syft.DefaultGetSourceConfig().WithRegistryOptions(&registryOptions).WithPlatform(imgPlatform).WithSources("registry"))
 			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
 				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
 			}
