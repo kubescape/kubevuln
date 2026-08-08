@@ -78,14 +78,12 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 // rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
-// It prefers workload.ImageHash if set; otherwise falls back to workload.ImageSlug or workload.ImageTagNormalized.
+// It always uses workload.ImageTagNormalized: ScanCVE/GenerateSBOM/ScanCP payloads populate
+// ImageHash while ScanRegistry payloads never do (registryScanCommandToScanCommand leaves it
+// empty), so a fallback chain that preferred ImageHash resolved to a different key per flow and
+// let a 429 recorded on one flow go unnoticed on the other for the same image. ImageTagNormalized
+// is the one field every flow populates, so it's the only reference guaranteed to line up.
 func rateLimitCacheKey(workload domain.ScanCommand) string {
-	if workload.ImageHash != "" {
-		return workload.ImageHash
-	}
-	if workload.ImageSlug != "" {
-		return workload.ImageSlug
-	}
 	return workload.ImageTagNormalized
 }
 

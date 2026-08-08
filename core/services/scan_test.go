@@ -301,11 +301,11 @@ func TestScanService_ScanCP(t *testing.T) {
 				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				// the 429 marker must be recorded under the same normalized key every
-				// other flow uses (ImageHash via NormalizeImageID), not the raw
+				// the 429 marker must be recorded under the same canonical key every
+				// other flow uses (ImageTagNormalized, see rateLimitCacheKey), not the raw
 				// container-profile ImageID, otherwise nothing will ever read it back
-				_, ok := s.tooManyRequests.Get(v1.NormalizeImageID(imageID, imageTag))
-				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized ImageHash")
+				_, ok := s.tooManyRequests.Get(tools.NormalizeReference(imageTag))
+				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized image reference")
 			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
@@ -378,8 +378,8 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
 
 	// simulate a prior pull of this exact image having already come back 429, recorded under
-	// the normalized key ScanCP writes to
-	s.tooManyRequests.Set(v1.NormalizeImageID(imageID, imageTag), true, ttl)
+	// the canonical key ScanCP writes to (ImageTagNormalized, see rateLimitCacheKey)
+	s.tooManyRequests.Set(tools.NormalizeReference(imageTag), true, ttl)
 
 	require.NoError(t, s.ScanCP(ctx))
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
@@ -1944,8 +1944,9 @@ func TestScanService_ScanRegistry_RateLimitBackoff(t *testing.T) {
 	cveAdapter := adapters.NewMockCVEAdapter()
 	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
 
+	// registryScanCommandToScanCommand never populates ImageHash, so this reflects what
+	// ScanRegistry actually receives - not a workload-scan payload.
 	workload := domain.ScanCommand{
-		ImageHash:          v1.NormalizeImageID(imageID, imageTag),
 		ImageTag:           imageTag,
 		ImageTagNormalized: tools.NormalizeReference(imageTag),
 		ImageSlug:          slug,
@@ -1975,12 +1976,26 @@ func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
 	slug, err := names.ImageInfoToSlug(normalizedTag, imageID)
 	require.NoError(t, err)
 
+	// Workload scans (ScanCVE/GenerateSBOM/ScanCP) receive a payload with ImageHash populated.
 	workload := domain.ScanCommand{
 		ImageHash:          normalizedImageID,
 		ImageTag:           imageTag,
 		ImageTagNormalized: normalizedTag,
 		ImageSlug:          slug,
 	}
+
+	// Registry scans never populate ImageHash - registryScanCommandToScanCommand doesn't set
+	// it, so this is what ScanRegistry actually receives for the same image. Using the same
+	// workload struct for every flow (as this test used to) hid the bug: it never exercised
+	// the ImageHash=="" case a real registry scan sends.
+	registryWorkload := domain.ScanCommand{
+		ImageTag:           imageTag,
+		ImageTagNormalized: normalizedTag,
+		ImageSlug:          slug,
+	}
+
+	require.Equal(t, rateLimitCacheKey(workload), rateLimitCacheKey(registryWorkload),
+		"a workload scan and a registry scan for the same image must resolve to the same rate-limit cache key")
 
 	key := rateLimitCacheKey(workload)
 
@@ -1999,14 +2014,15 @@ func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
 	_, errValCVE := s.ValidateScanCVE(context.TODO(), workload)
 	assert.ErrorIs(t, errValCVE, domain.ErrTooManyRequests)
 
-	_, errValReg := s.ValidateScanRegistry(context.TODO(), workload)
+	_, errValReg := s.ValidateScanRegistry(context.TODO(), registryWorkload)
 	assert.ErrorIs(t, errValReg, domain.ErrTooManyRequests)
 
 	ctx := enrichContext(context.TODO(), workload, s.Version())
+	registryCtx := enrichContext(context.TODO(), registryWorkload, s.Version())
 
 	// Execution paths must also abort and return ErrTooManyRequests without calling CreateSBOM
 	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrTooManyRequests)
 	assert.ErrorIs(t, s.ScanCVE(ctx), domain.ErrTooManyRequests)
-	assert.ErrorIs(t, s.ScanRegistry(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanRegistry(registryCtx), domain.ErrTooManyRequests)
 	assert.Equal(t, 0, countingSBOM.calls, "No execution path should attempt CreateSBOM when rate limited")
 }
