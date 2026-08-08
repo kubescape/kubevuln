@@ -250,14 +250,14 @@ func (s *SidecarSBOMAdapter) Version() string {
 		if err != nil {
 			return "", err
 		}
-		
+
 		s.versionMu.Lock()
 		defer s.versionMu.Unlock()
 		s.versionStr = version
-		
+
 		return version, nil
 	})
-	
+
 	if err != nil {
 		logger.L().Warning("failed to get scanner version", helpers.Error(err))
 		return "unknown"

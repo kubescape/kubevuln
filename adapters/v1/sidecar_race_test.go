@@ -21,7 +21,7 @@ func (m *mockScannerClientRace) Health(ctx context.Context) (string, bool, error
 
 func TestSidecarVersion_CachingUnderConcurrency(t *testing.T) {
 	mockClient := &mockScannerClientRace{}
-	
+
 	adapter := &SidecarSBOMAdapter{
 		client: mockClient,
 	}
@@ -30,7 +30,7 @@ func TestSidecarVersion_CachingUnderConcurrency(t *testing.T) {
 	var readyWg sync.WaitGroup
 	startCh := make(chan struct{})
 	workers := 100
-	
+
 	// Launch many goroutines that constantly call Version() to hit the tiny race window
 	// between singleflight.Do returning and versionMu being locked.
 	for i := 0; i < workers; i++ {
@@ -40,7 +40,7 @@ func TestSidecarVersion_CachingUnderConcurrency(t *testing.T) {
 			defer wg.Done()
 			readyWg.Done()
 			<-startCh
-			
+
 			for j := 0; j < 1000; j++ {
 				version := adapter.Version()
 				if version != "test-version" {
