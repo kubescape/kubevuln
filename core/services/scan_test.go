@@ -22,8 +22,8 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -973,7 +973,7 @@ type fakeCVEScannerWithVuln struct {
 
 func (f *fakeCVEScannerWithVuln) DBVersion(context.Context) string { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) Ready(context.Context) bool       { return true }
-func (f *fakeCVEScannerWithVuln) Version() string                   { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) Version() string                  { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	return domain.CVEManifest{
 		Name:               sbom.Name,
@@ -2025,4 +2025,59 @@ func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
 	assert.ErrorIs(t, s.ScanCVE(ctx), domain.ErrTooManyRequests)
 	assert.ErrorIs(t, s.ScanRegistry(registryCtx), domain.ErrTooManyRequests)
 	assert.Equal(t, 0, countingSBOM.calls, "No execution path should attempt CreateSBOM when rate limited")
+}
+
+func TestScanCVE_NoSBOMRegeneration_OnCacheHit(t *testing.T) {
+	// Setup
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	platform := &recordingPlatform{}
+	relevancy := adapters.NewMockRelevancyAdapter()
+	service := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancy, true, true, true, false, false)
+
+	slug := "wasteful-sbom-test"
+
+	// Create a cached CVE
+	cveAdapterDBVersion := cveAdapter.DBVersion(context.TODO())
+	cacheCVE := domain.CVEManifest{
+		Name:               slug,
+		SBOMCreatorVersion: sbomAdapter.Version(),
+		CVEScannerVersion:  cveAdapter.Version(),
+		CVEDBVersion:       cveAdapterDBVersion,
+		Content:            &v1beta1.GrypeDocument{},
+		Labels: map[string]string{
+			"kubevuln.kubescape.io/image-slug":         slug,
+			"kubevuln.kubescape.io/sbom-creator":       sbomAdapter.Version(),
+			"kubevuln.kubescape.io/cve-scanner":        cveAdapter.Version(),
+			"kubevuln.kubescape.io/cve-scanner-db":     cveAdapterDBVersion,
+			"kubevuln.kubescape.io/workload-name":      "my-workload",
+			"kubevuln.kubescape.io/workload-namespace": "default",
+			"kubevuln.kubescape.io/workload-kind":      "Deployment",
+		},
+	}
+	require.NoError(t, storageCVE.StoreCVE(context.TODO(), cacheCVE, false))
+
+	// No SBOM in storage! (cache miss for SBOM)
+
+	// Context with Workload containing an InstanceID
+	workload := domain.ScanCommand{
+		ImageSlug:  slug,
+		InstanceID: "some-instance-id", // triggers `workload.InstanceID != ""`
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+	// Run ScanCVE
+	err := service.ScanCVE(ctx)
+	require.NoError(t, err)
+
+	// Verify that CreateSBOM was NOT called.
+	// We check if the storage now has the SBOM (which indicates it was generated).
+	generatedSBOM, err := storageSBOM.GetSBOM(context.TODO(), slug, sbomAdapter.Version())
+
+	// Since we no longer generate the SBOM wastefully, the storage should return an empty content
+	require.NoError(t, err, "MemoryStorage returns a nil error on a cache miss")
+	require.Nil(t, generatedSBOM.Content, "The generated SBOM should be nil since we avoided regenerating it wastefully")
+
 }
