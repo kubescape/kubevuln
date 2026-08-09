@@ -138,6 +138,26 @@ spec:
       action: "alert_only"
 ```
 
+#### Namespaced: risk-accepted finding (`affected`)
+
+```yaml
+apiVersion: kubescape.io/v1
+kind: SecurityException
+metadata:
+  name: risk-accepted-log4j
+  namespace: production
+spec:
+  reason: "Accepted risks for Q3 2026 release"
+
+  vulnerabilities:
+    - vulnerability:
+        id: "CVE-2021-44228"
+      status: "affected"
+      actionStatement: "Risk accepted: WAF blocks the exploit vector. Reviewed 2026-07-30 by security lead. Ticket SEC-1234."
+      response:
+        - will_not_fix
+```
+
 #### Namespaced — apply to all workloads in namespace (no match selector)
 
 ```yaml
@@ -344,11 +364,15 @@ Organizations should create dedicated `ClusterRole`/`Role` resources for Securit
 
 The CRD schema should include CEL validation rules to enforce invariants at admission time, without requiring a separate webhook:
 
-- `justification` is required when `status` is `not_affected`
+- `justification` or `impactStatement` is required when `status` is `not_affected`, mirroring the OpenVEX rule that a `not_affected` statement MUST carry one or the other
+- `actionStatement` is required when `status` is `affected`, mirroring the OpenVEX rule that an `affected` statement MUST describe the action taken
 - `expiresAt`, if set, must be a valid RFC3339 timestamp in the future (at creation time)
 - At least one entry must exist in either `vulnerabilities` or `posture`
 - `posture[].action` must be one of `ignore`, `alert_only`
-- `vulnerabilities[].status` must be one of `not_affected`, `fixed`, `under_investigation`
+- `vulnerabilities[].status` must be one of `not_affected`, `affected`, `fixed`, `under_investigation`
+- `vulnerabilities[].response[]` values must be one of `can_not_fix`, `will_not_fix`, `update`, `rollback`, `workaround_available`
+
+The two cross-field rules are enforced at admission, where an invalid document is rejected outright. The scanner additionally treats an `affected` entry with no `actionStatement` as non-suppressing, so a document that predates the rule cannot hide a finding it was never valid to hide.
 
 ## Conflict Resolution & Precedence
 
@@ -400,8 +424,20 @@ The primary audit trail for SecurityException changes is **Git history** when us
 The vulnerability exception entries align with OpenVEX statements:
 
 - `vulnerability.id` → VEX vulnerability ID
-- `status` → VEX status
+- `status` → VEX status (all four values: `not_affected`, `affected`, `fixed`, `under_investigation`)
 - `justification` → VEX justification
 - `impactStatement` → VEX impact statement
+- `actionStatement` → VEX action statement
+
+`response[]` is the one field with no OpenVEX equivalent. It is a typed extension aligned with CycloneDX VEX `analysis.response[]`, and carries what is being done about a vulnerability, which is a separate question from the status of where it stands. When degrading to OpenVEX, its values can be serialized into the `action_statement` free text or dropped; nothing else is lost, since every other field maps one to one.
+
+### Suppression and `affected`
+
+`affected` is the only status whose suppression depends on more than the status. It asserts that the vulnerability is real and applies, so the finding stays visible unless the entry also carries an `actionStatement` and a `response[]` saying no remediation is coming:
+
+- `can_not_fix`, `will_not_fix`: no fix is coming and the risk has been accepted, so the finding may be filtered from default reports.
+- `update`, `rollback`, `workaround_available`: a remediation is planned or in place, so the finding stays visible until it is confirmed.
+
+Every value in `response[]` must be a non-remediating one for the finding to be suppressed. An entry pairing `will_not_fix` with `update` is still tracking work, so the finding stays visible.
 
 Note: OpenVEX `products` (purl-based product/subcomponent matching) is deferred to a future version. See "Identifier Bridging" above.

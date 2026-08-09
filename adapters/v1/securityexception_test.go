@@ -878,3 +878,161 @@ func TestConvertPerEntryExpiresAtSetsExpirationDate(t *testing.T) {
 	require.NotNil(t, policies[1].ExpirationDate)
 	assert.Equal(t, entryLevel.Time, *policies[1].ExpirationDate)
 }
+
+// affected is the one status whose suppression depends on more than the status itself, so
+// the matrix below is the contract: an actionStatement plus a response that says no
+// remediation is coming, and nothing less.
+func TestConvertAffectedSuppression(t *testing.T) {
+	tests := []struct {
+		name            string
+		actionStatement string
+		response        []sev1beta1.VulnerabilityResponse
+		wantSuppressed  bool
+	}{
+		{
+			name:            "will_not_fix with an action statement is an accepted risk",
+			actionStatement: "WAF blocks the exploit vector, reviewed by security lead",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWillNotFix},
+			wantSuppressed:  true,
+		},
+		{
+			name:            "can_not_fix with an action statement is an accepted risk",
+			actionStatement: "no upstream fix available",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseCanNotFix},
+			wantSuppressed:  true,
+		},
+		{
+			name:            "both non-remediating responses together",
+			actionStatement: "no upstream fix and none planned",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseCanNotFix, sev1beta1.VulnerabilityResponseWillNotFix},
+			wantSuppressed:  true,
+		},
+		{
+			name:            "update keeps the finding visible until the fix lands",
+			actionStatement: "upgrade scheduled for the Q4 release",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseUpdate},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "rollback keeps the finding visible",
+			actionStatement: "rolling back to 1.2.3",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseRollback},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "workaround_available keeps the finding visible",
+			actionStatement: "config workaround applied",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWorkaroundAvailable},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "a remediating response alongside will_not_fix still tracks work",
+			actionStatement: "not fixing now, upgrade planned later",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWillNotFix, sev1beta1.VulnerabilityResponseUpdate},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "no response is no suppression signal",
+			actionStatement: "under discussion with the vendor",
+			response:        nil,
+			wantSuppressed:  false,
+		},
+		{
+			name:            "will_not_fix without an action statement is not a valid affected statement",
+			actionStatement: "",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWillNotFix},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "a blank action statement does not count",
+			actionStatement: "   ",
+			response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWillNotFix},
+			wantSuppressed:  false,
+		},
+		{
+			name:            "an unrecognised response value suppresses nothing",
+			actionStatement: "accepted",
+			response:        []sev1beta1.VulnerabilityResponse{"risk_accepted"},
+			wantSuppressed:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exceptions := []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{
+								Vulnerability:   sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+								Status:          sev1beta1.VulnerabilityStatusAffected,
+								ActionStatement: tt.actionStatement,
+								Response:        tt.response,
+							},
+						},
+					},
+				},
+			}
+
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+			if tt.wantSuppressed {
+				require.Len(t, policies, 1)
+				assert.Equal(t, "CVE-2021-44228", policies[0].VulnerabilityPolicies[0].Name)
+			} else {
+				assert.Empty(t, policies)
+			}
+		})
+	}
+}
+
+// The statuses that resolve a CVE keep suppressing on the status alone, so documents written
+// before affected existed are unaffected by the new rules.
+func TestConvertResolvingStatusesUnchangedByAffected(t *testing.T) {
+	for _, status := range []sev1beta1.VulnerabilityStatus{
+		sev1beta1.VulnerabilityStatusNotAffected,
+		sev1beta1.VulnerabilityStatusFixed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			exceptions := []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"}, Status: status},
+						},
+					},
+				},
+			}
+
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+			require.Len(t, policies, 1, "no actionStatement or response should be needed")
+		})
+	}
+}
+
+func TestConvertAffectedRecordsProvenance(t *testing.T) {
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "risk-accepted-log4j", Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability:   sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:          sev1beta1.VulnerabilityStatusAffected,
+						ActionStatement: "WAF mitigation in place, ticket SEC-1234",
+						Response:        []sev1beta1.VulnerabilityResponse{sev1beta1.VulnerabilityResponseWillNotFix},
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	require.Len(t, policies, 1)
+	assert.Equal(t, "WAF mitigation in place, ticket SEC-1234", policies[0].Attributes["actionStatement"])
+	assert.Equal(t, []string{"will_not_fix"}, policies[0].Attributes["response"])
+}
