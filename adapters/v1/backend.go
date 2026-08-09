@@ -438,26 +438,26 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	finalReport.Designators.Attributes[identifiers.AttributeSBOMToolVersion] = cve.SBOMCreatorVersion
 	finalReport.Designators.Attributes[identifiers.AttributeSBOMToolName] = cve.SBOMCreatorName
 
-	if val, ok := workload.Args[identifiers.AttributeRegistryName]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeRegistryName] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRegistryName].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryName] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeRepository]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeRepository] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRepository].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRepository] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeTag]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeTag] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeTag].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeTag] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeSensor]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeSensor].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeSensor] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeRegistryID]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeRegistryID] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRegistryID].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryID] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeRegistryScanID]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeRegistryScanID] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRegistryScanID].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryScanID] = val
 	}
-	if val, ok := workload.Args[identifiers.AttributeRegistryScanImagesCount]; ok {
-		finalReport.Designators.Attributes[identifiers.AttributeRegistryScanImagesCount] = val.(string)
+	if val, ok := workload.Args[identifiers.AttributeRegistryScanImagesCount].(string); ok {
+		finalReport.Designators.Attributes[identifiers.AttributeRegistryScanImagesCount] = val
 	}
 	if val, ok := finalReport.Designators.Attributes[identifiers.AttributeKind]; ok {
 		if s, err := k8sinterface.GetGroupVersionResource(val); err == nil {
