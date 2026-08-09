@@ -242,6 +242,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		}
 		attrs["response"] = responses
 	}
+	if subs := normalizedSubcomponents(vuln.Subcomponents); len(subs) > 0 {
+		attrs[attrSubcomponents] = subs
+	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
 	}
@@ -316,6 +319,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	for _, m := range doc.Matches {
 		isFixed, _ := hasKnownFix(m)
 		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
 				Match: m,

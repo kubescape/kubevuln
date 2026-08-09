@@ -131,6 +131,8 @@ spec:
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
       expiresAt: "2026-09-15T00:00:00Z"  # expires earlier than spec.expiresAt
+      subcomponents:                      # scope the acceptance to specific packages
+        - "pkg:npm/elliptic"
 
   posture:
     - controlID: "C-0034"
@@ -335,9 +337,11 @@ The key insight is that by converting CRD data into existing `armotypes.Vulnerab
 
 ## Identifier Bridging
 
-Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`) and optionally scoped to specific images via `match.images` glob patterns. This covers the common use cases of excepting a known CVE globally or within specific images.
+Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`), optionally scoped to specific images via `match.images` glob patterns, and optionally narrowed to individual packages via `vulnerabilities[].subcomponents`. This covers excepting a known CVE globally, within specific images, or only where it appears in a named package.
 
-**Future extension — `products` (purl-based package matching)**: A future version may add OpenVEX-style `products` fields using Package URLs (purls) for fine-grained matching at the package level inside an SBOM (e.g., `pkg:deb/debian/openssl@1.1.1`). This is deferred from v1 as CVE ID + image pattern matching is sufficient for most use cases, and purl matching adds significant complexity (purl parsing, SBOM correlation, version range matching).
+**`subcomponents` (purl-based package matching)**: Entries may carry a list of Package URLs, mirroring OpenVEX `statements[].products[].subcomponents[]`. The acceptance then applies only to findings whose package matches one of the listed purls; an unversioned purl (`pkg:npm/elliptic`) matches any version, and a version-qualified purl (`pkg:deb/debian/openssl@1.1.1n`) matches only that version. An entry with no `subcomponents` applies at product scope. Matching fails closed: a finding whose package has no purl, or an entry whose purl cannot be parsed, is left visible rather than suppressed.
+
+**Future extension — version ranges**: `subcomponents` matches a purl exactly or at any version, with no range expressions (CycloneDX's `affects[].versions[].range`). Ranges can be added later without changing the `subcomponents` shape.
 
 ## Authorization & Validation
 
