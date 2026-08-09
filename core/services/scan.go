@@ -86,6 +86,17 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 	}
 }
 
+// rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
+// It always uses workload.ImageTagNormalized: ScanCVE/GenerateSBOM/ScanCP payloads populate
+// ImageHash while ScanRegistry payloads never do (registryScanCommandToScanCommand leaves it
+// empty), so a fallback chain that preferred ImageHash resolved to a different key per flow and
+// let a 429 recorded on one flow go unnoticed on the other for the same image. ImageTagNormalized
+// is the one field every flow populates, so it's the only reference guaranteed to line up.
+func rateLimitCacheKey(workload domain.ScanCommand) string {
+	return workload.ImageTagNormalized
+}
+
+// checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
 func (s *ScanService) checkCreateSBOM(err error, key string) {
 	if isRegistryRateLimitedErr(err) {
 		s.tooManyRequests.Set(key, true, ttl)
@@ -146,9 +157,16 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 
 	// if SBOM is not available, create it
 	if sbom.Content == nil {
+		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+			logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+				helpers.String("imageSlug", workload.ImageSlug))
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+			return domain.ErrTooManyRequests
+		}
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-		s.checkCreateSBOM(err, workload.ImageHash)
+		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 				classifySBOMError(err), err)
@@ -174,6 +192,7 @@ func (s *ScanService) Ready(ctx context.Context) bool {
 	return s.cveScanner.Ready(ctx)
 }
 
+// ScanCP implements the "Scanning for CVEs" flow triggered by ContainerProfiles relevancy data.
 func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	mainCtx, span := otel.Tracer("").Start(mainCtx, "ScanService.ScanCP")
 	defer span.End()
@@ -256,7 +275,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					// a previous container in this loop (or a previous request) may have
 					// already recorded this exact image as rate limited; skip pulling it
 					// again instead of hammering the registry with another attempt
-					if _, ok := s.tooManyRequests.Get(subWorkload.ImageHash); ok {
+					if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(subWorkload)); ok {
 						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
 							helpers.String("imageSlug", slug))
 						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -265,7 +284,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					}
 					// create SBOM
 					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, subWorkload.ImageHash)
+					s.checkCreateSBOM(err, rateLimitCacheKey(subWorkload))
 					if err != nil {
 						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
 							helpers.String("imageSlug", slug))
@@ -501,9 +520,16 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		// if SBOM is not available, create it
 		if sbom.Content == nil {
 			if s.sbomGeneration {
+				if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+					logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+						helpers.String("imageSlug", workload.ImageSlug))
+					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+						scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+					return domain.ErrTooManyRequests
+				}
 				// create SBOM
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-				s.checkCreateSBOM(err, workload.ImageHash)
+				s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 				if err != nil {
 					reason := classifySBOMError(err)
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
@@ -628,6 +654,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	return nil
 }
 
+// ScanRegistry implements the "Scanning for CVEs" flow triggered by a manual/registry scan request.
 func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.ScanRegistry")
 	defer span.End()
@@ -671,9 +698,16 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		if sbom.Content == nil {
+			if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+				logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
+					helpers.String("imageSlug", workload.ImageSlug))
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
+					scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+				return domain.ErrTooManyRequests
+			}
 			// create SBOM
 			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-			s.checkCreateSBOM(err, workload.ImageTagNormalized)
+			s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 			if err != nil {
 				repErr := s.platform.ReportError(ctx, err)
 				if repErr != nil {
@@ -777,30 +811,6 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 	}
 
-	// store filtered CVE
-	if s.storage {
-		// apply security exceptions
-		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
-
-		err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
-				helpers.String("imageSlug", workload.ImageSlug))
-		}
-		err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-				helpers.String("imageSlug", workload.ImageSlug))
-		}
-		if s.vexGeneration {
-			err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCve, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-		}
-	}
-
 	// report scan success to platform
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
@@ -864,10 +874,12 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	return filtered, !degraded
 }
 
+// addTimestamp attaches the current timestamp to the context.
 func addTimestamp(ctx context.Context) context.Context {
 	return context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
 }
 
+// enrichContext populates the context with scan command metadata and tracing attributes.
 func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVersion string) context.Context {
 	// generate unique scanID and add to context
 
@@ -878,6 +890,7 @@ func enrichContext(ctx context.Context, workload domain.ScanCommand, scannerVers
 	return ctx
 }
 
+// generateScanID computes a unique hash ID for a scan execution.
 func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 
 	scannerVersion = strings.ReplaceAll(scannerVersion, ".", "-")
@@ -897,6 +910,7 @@ func generateScanID(workload domain.ScanCommand, scannerVersion string) string {
 	return uuid.New().String()
 }
 
+// optionsFromWorkload converts scan command credentials into domain.RegistryOptions.
 func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domain.RegistryOptions {
 	options := domain.RegistryOptions{}
 	options.Credentials = registryCredentialsFromCredentialsList(workload.CredentialsList)
@@ -938,6 +952,7 @@ func credentialsLog(credentials []domain.RegistryCredentials) string {
 	return sb.String()
 }
 
+// registryCredentialsFromCredentialsList converts auth configurations into domain registry credentials.
 func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) []domain.RegistryCredentials {
 	registryCredentials := make([]domain.RegistryCredentials, len(credentials))
 	for i, cred := range credentials {
@@ -958,6 +973,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 	return registryCredentials
 }
 
+// parseAuthorityFromServerAddress extracts the authority host:port from a server address.
 func parseAuthorityFromServerAddress(serverAddress string) string {
 	if serverAddress == "" {
 		return ""
@@ -976,6 +992,7 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 	return parsedURL.Host
 }
 
+// filterSBOM filters the SBOM package tree based on container profile relevancy information.
 func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid string, relevantFiles mapset.Set[string], labels map[string]string, completion string) (domain.SBOM, error) {
 	name, err := instanceID.GetSlug(false)
 	if err != nil {
@@ -1094,10 +1111,12 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	return filteredSBOM, nil
 }
 
+// getRelationshipID returns a unique string identifier for a Syft relationship.
 func getRelationshipID(relationship v1beta1.SyftRelationship) string {
 	return fmt.Sprintf("%s/%s/%s", relationship.Parent, relationship.Child, relationship.Type)
 }
 
+// ValidateGenerateSBOM validates the workload for the GenerateSBOM flow and enriches the context.
 func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateGenerateSBOM")
 	defer span.End()
@@ -1114,12 +1133,13 @@ func (s *ScanService) ValidateGenerateSBOM(ctx context.Context, workload domain.
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
 }
 
+// ValidateScanCP validates the workload for the ScanCP flow and enriches the context.
 func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCP")
 	defer span.End()
@@ -1141,6 +1161,7 @@ func (s *ScanService) ValidateScanCP(ctx context.Context, workload domain.ScanCo
 	return ctx, nil
 }
 
+// ValidateScanCVE validates the workload for the ScanCVE flow and enriches the context.
 func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanCVE")
 	defer span.End()
@@ -1161,12 +1182,13 @@ func (s *ScanService) ValidateScanCVE(ctx context.Context, workload domain.ScanC
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageHash); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
 }
 
+// ValidateScanRegistry validates the workload for the ScanRegistry flow and enriches the context.
 func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.ScanCommand) (context.Context, error) {
 	_, span := otel.Tracer("").Start(ctx, "ScanService.ValidateScanRegistry")
 	defer span.End()
@@ -1180,19 +1202,22 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {
 		parentSpan.SetAttributes(attribute.String("imageSlug", workload.ImageSlug))
 		parentSpan.SetAttributes(attribute.String("version", os.Getenv("RELEASE")))
+		parentSpan.SetAttributes(attribute.String("wlid", workload.Wlid))
 		ctx = trace.ContextWithSpan(ctx, parentSpan)
 	}
 	// check if previous image pull resulted in TOOMANYREQUESTS error
-	if _, ok := s.tooManyRequests.Get(workload.ImageTagNormalized); ok {
+	if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
 		return ctx, domain.ErrTooManyRequests
 	}
 	return ctx, nil
 }
 
+// Version returns the combined SBOM creator and CVE scanner version string.
 func (s *ScanService) Version() string {
 	return s.sbomCreator.Version() + "-" + s.cveScanner.Version()
 }
 
+// getSBOM retrieves a stored SBOM, deleting and returning empty if it is outdated or stale due to changed size/memory limits.
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
 	if err != nil {
