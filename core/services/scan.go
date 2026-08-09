@@ -1057,21 +1057,45 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 		}
 	}
 
-	// filter relevant relationships. A relationship is relevant if the child is a relevant file
-	relationshipsArtifacts := mapset.NewSet[string]()
+	// filter relevant relationships and their transitively-relevant ancestor artifacts. A
+	// relationship is relevant if its child is a relevant file, or transitively, if its child
+	// is an artifact already known to be relevant (e.g. a package nested inside another
+	// package's archive). This walks the relationship graph to a fixed point instead of a
+	// fixed number of passes: Syft does not document or guarantee any particular relationship
+	// ordering, and a fixed number of passes can silently drop artifacts nested more than one
+	// level below the direct file owner depending on that order (see #514).
+	childToRelationships := make(map[string][]v1beta1.SyftRelationship, len(sbom.Content.ArtifactRelationships))
 	for _, relationship := range sbom.Content.ArtifactRelationships {
-		if addedFileIDs.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) { // if the child is a relevant file
-			relationshipsArtifacts.Add(relationship.Parent)
-			addedRelationshipIDs.Add(getRelationshipID(relationship))
-			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
-		}
+		childToRelationships[relationship.Child] = append(childToRelationships[relationship.Child], relationship)
 	}
 
-	// Add children of relevant relationships (that the parent is not relevant)
+	// Compute the closure first (which relationships/artifacts are relevant) without emitting
+	// anything: addedFileIDs.ToSlice() has no stable order, so a traversal that appends
+	// relationships as it discovers them would make the output order vary between calls on
+	// the same input whenever there's more than one relevant file. Emitting afterward, in a
+	// single pass over sbom.Content.ArtifactRelationships, keeps the output in the same
+	// deterministic source order the pre-fix code always had.
+	relationshipsArtifacts := mapset.NewSet[string]()
+	frontier := addedFileIDs.ToSlice()
+	for len(frontier) > 0 {
+		var next []string
+		for _, childID := range frontier {
+			for _, relationship := range childToRelationships[childID] {
+				relationshipID := getRelationshipID(relationship)
+				if addedRelationshipIDs.Contains(relationshipID) {
+					continue
+				}
+				addedRelationshipIDs.Add(relationshipID)
+				if relationshipsArtifacts.Add(relationship.Parent) {
+					next = append(next, relationship.Parent)
+				}
+			}
+		}
+		frontier = next
+	}
+
 	for _, relationship := range sbom.Content.ArtifactRelationships {
-		if relationshipsArtifacts.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
-			relationshipsArtifacts.Add(relationship.Parent)
-			addedRelationshipIDs.Add(getRelationshipID(relationship))
+		if addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
 			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
 		}
 	}
