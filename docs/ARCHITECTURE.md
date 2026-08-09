@@ -513,6 +513,27 @@ The central business logic component implementing the `ScanService` port.
 
 ---
 
+## In-Process Caching
+
+Kubevuln keeps three TTL caches in memory, all backed by `github.com/akyoto/cache`:
+
+| Cache | Location | TTL | Purpose |
+|-------|----------|-----|---------|
+| `tooManyRequests` | `core/services/scan.go` | 10m | Registry rate-limit (429) backoff, keyed by image reference |
+| `exceptionsCache` | `adapters/v1/backend.go` | 1m | Merged CVE-exceptions/VEX policy, keyed per workload |
+| `securityExceptionListCache` | `repositories/apiserver.go` | 30s | Raw `SecurityException`/`ClusterSecurityException` `List()` results, keyed per namespace/cluster |
+
+**These caches are process-local by design, not shared across replicas.** In a multi-replica Kubevuln deployment (see #438 for the equivalent discussion about the Grype vulnerability DB), each pod keeps an independent copy of each cache with no cross-pod coordination:
+
+- A 429 recorded by one pod's `tooManyRequests` cache is invisible to the others - they can each independently discover and cache the same backoff, so the mitigation this cache exists to provide only fully applies within a single pod.
+- A `SecurityException` change (create/update/delete) observed by one pod is not reflected on the others until their own cache entries naturally expire - the same workload can show a CVE as suppressed or not depending on which pod happens to handle a given scan request, for up to the relevant cache's TTL.
+
+This is an accepted tradeoff, not an oversight: introducing a shared backing store (e.g. an external KV store) is a real architectural change with its own operational cost, and the deployment-side wiring for anything like that lives outside this repo (see kubescape-operator/helm-charts), matching how #438 scoped the equivalent Grype-DB-cache decision. Given that, the TTLs above are chosen deliberately per cache's actual stakes: `securityExceptionListCache` and `exceptionsCache` are kept short (30s / 1m) because a stale read there is a suppression-correctness question, not just a performance one, while `tooManyRequests` can tolerate a longer window (10m) since its only cost is a redundant registry pull attempt.
+
+If this tradeoff ever needs to change (e.g. Kubevuln starts running at a replica count where the redundant-429 or suppression-disagreement window becomes a real operational problem), the right first step is `exceptionsCache`, since it's the one with actual correctness/security stakes rather than a pure performance cost.
+
+---
+
 ## Integration Points
 
 ### External System Integration
