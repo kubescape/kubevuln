@@ -2479,4 +2479,8 @@ func TestAPIServerStore_StoreVEX_NilContentDoesNotPanic(t *testing.T) {
 		err := a.StoreVEX(ctx, empty, empty, false)
 		assert.NoError(t, err, "updateVEX must handle a nil CVEManifest.Content without erroring")
 	})
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, vexContainerUpdated.Spec.Statements, "updateVEX must not fabricate statements out of a nil CVEManifest.Content")
 }
