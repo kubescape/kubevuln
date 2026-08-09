@@ -2450,3 +2450,37 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 	}
 	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
 }
+
+// TestAPIServerStore_StoreVEX_NilContentDoesNotPanic is a regression test for #518:
+// createVEX, updateVEX, and markRelevantVulnerabilitiesAsAffectedInVex used to guard
+// CVEManifest.Content inconsistently - some reads were nil-checked, others weren't, within
+// the very same function. None of the current callers ever pass a nil Content, but the
+// functions themselves had no defense of their own. This exercises both the create path
+// (first call, container doesn't exist yet) and the update path (second call, container
+// already exists) with a completely empty CVEManifest{} - Content is nil - for both cve and
+// cvep, and asserts neither call panics or errors.
+func TestAPIServerStore_StoreVEX_NilContentDoesNotPanic(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+
+	empty := domain.CVEManifest{Name: name}
+
+	require.NotPanics(t, func() {
+		err := a.StoreVEX(ctx, empty, empty, false)
+		assert.NoError(t, err, "createVEX must handle a nil CVEManifest.Content without erroring")
+	})
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, vexContainer.Spec.Statements, "no matches were ever provided, so no statements should be generated")
+
+	// Second call with the same (still nil-Content) manifests exercises updateVEX.
+	require.NotPanics(t, func() {
+		err := a.StoreVEX(ctx, empty, empty, false)
+		assert.NoError(t, err, "updateVEX must handle a nil CVEManifest.Content without erroring")
+	})
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, vexContainerUpdated.Spec.Statements, "updateVEX must not fabricate statements out of a nil CVEManifest.Content")
+}

@@ -903,6 +903,9 @@ func buildActionStatement(v v1beta1.Match) string {
 }
 
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+	if cvep == nil || cvep.Content == nil {
+		return nil
+	}
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
@@ -953,39 +956,40 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 		},
 	}
 
-	// Loop over the Vulnerability struct and add each vulnerability to the VEX document
-	for _, v := range cve.Content.Matches {
-		var aliases []string
-		for _, alias := range v.RelatedVulnerabilities {
-			aliases = append(aliases, alias.ID)
-		}
-
-		product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
-		if err != nil {
-			return err
-		}
-
-		vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-			Vulnerability: v1beta1.VexVulnerability{
-				ID:          v.Vulnerability.DataSource,
-				Name:        v.Vulnerability.ID,
-				Description: v.Vulnerability.Description,
-				Aliases:     aliases,
-			},
-
-			Products: []v1beta1.Product{
-				*product,
-			},
-
-			Status:          v1beta1.Status(vex.StatusNotAffected),
-			Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-			ImpactStatement: "Vulnerable component is not loaded into the memory",
-		})
-	}
-
-	// Add ignored vulnerabilities as not_affected with SecurityException impact statement
+	// Loop over the Vulnerability struct and add each vulnerability to the VEX document, and
+	// add ignored vulnerabilities as not_affected with SecurityException impact statement.
+	// Both loops read cve.Content, so both are guarded by the same nil check.
 	if cve.Content != nil {
+		for _, v := range cve.Content.Matches {
+			var aliases []string
+			for _, alias := range v.RelatedVulnerabilities {
+				aliases = append(aliases, alias.ID)
+			}
+
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+
+			if err != nil {
+				return err
+			}
+
+			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:          v.Vulnerability.DataSource,
+					Name:        v.Vulnerability.ID,
+					Description: v.Vulnerability.Description,
+					Aliases:     aliases,
+				},
+
+				Products: []v1beta1.Product{
+					*product,
+				},
+
+				Status:          v1beta1.Status(vex.StatusNotAffected),
+				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+				ImpactStatement: "Vulnerable component is not loaded into the memory",
+			})
+		}
+
 		for _, v := range cve.Content.IgnoredMatches {
 			var aliases []string
 			for _, alias := range v.RelatedVulnerabilities {
@@ -1189,54 +1193,13 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
-	for _, v := range cve.Content.IgnoredMatches {
-		found := false
-		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.Name != v.Vulnerability.ID {
-				continue
-			}
-			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-				continue
-			}
-			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Add the vulnerability to the VEX document
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-			if err != nil {
-				return err
-			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerability was ignored by a SecurityException",
-			})
-		}
-	}
-
+	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
+	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
 	ignoredMap := make(map[string]bool)
-	for _, v := range cve.Content.IgnoredMatches {
-		ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+	if cve.Content != nil {
+		for _, v := range cve.Content.IgnoredMatches {
+			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+		}
 	}
 
 	// Reset every statement back to the baseline "not affected" status before
