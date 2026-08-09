@@ -65,7 +65,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			name:     "phase 1, timeout",
 			timeout:  true,
 			workload: true,
-			wantErr:  false, // we no longer check for timeout
+			wantErr:  true,
 		},
 		{
 			name:            "phase 1, too many requests",
@@ -124,12 +124,21 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			if tt.workload {
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)
 			}
-			if err := s.GenerateSBOM(ctx); (err != nil) != tt.wantErr {
+			err := s.GenerateSBOM(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
 				_, err := s.ValidateGenerateSBOM(ctx, workload)
 				assert.Equal(t, domain.ErrTooManyRequests, err)
+			}
+			if tt.timeout {
+				// a timed-out/too-large SBOM must be surfaced as a failure (see #540), not
+				// silently stored and reported as success like every other scan flow already does
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
+				var scanErr *domain.ScanError
+				require.ErrorAs(t, err, &scanErr)
+				assert.Equal(t, scanfailure.ReasonSBOMIncomplete, scanErr.Reason)
 			}
 		})
 	}
