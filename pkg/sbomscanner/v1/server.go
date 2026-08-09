@@ -74,12 +74,37 @@ func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
 // unit-tested without a live GCP environment.
 var gcpCredsFn = gcpCredentials
 
+// registryAuthProvider supplies registry credentials for hosts it recognizes, so
+// resolveSource can consult cloud-specific auth fallbacks without hard-coding each
+// one into its retry logic.
+type registryAuthProvider interface {
+	// Matches reports whether this provider handles the given pull reference.
+	Matches(imageID string) bool
+	// Credentials fetches credentials for a host this provider matches.
+	Credentials(ctx context.Context) (*image.RegistryCredentials, error)
+}
+
+// gcpAuthProvider resolves credentials for GCR/Artifact Registry hosts via
+// Application Default Credentials.
+type gcpAuthProvider struct{}
+
+func (gcpAuthProvider) Matches(imageID string) bool { return isGCPRegistry(imageID) }
+
+func (gcpAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
+	return gcpCredsFn(ctx)
+}
+
+// registryAuthProviders is the ordered list of cloud registry auth fallbacks resolveSource
+// consults on a 401 Unauthorized, before falling back to anonymous access. Add ECR/ACR
+// providers here as they're implemented.
+var registryAuthProviders = []registryAuthProvider{gcpAuthProvider{}}
+
 // sourceGetter abstracts the syft.GetSource call so the fallback ordering in
 // resolveSource is testable with a scripted implementation.
 type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error)
 
 // resolveSource downloads an image source, applying the MANIFEST_UNKNOWN and
-// 401/ADC/anonymous fallbacks in order. It mirrors the retry chain in
+// 401/provider/anonymous fallbacks in order. It mirrors the retry chain in
 // adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
 func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
 	pullRef := imageID
@@ -93,18 +118,22 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 	}
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		unauthorizedErr := err
-		if isGCPRegistry(imageID) {
-			if gcpCreds, gcpErr := gcpCredsFn(ctx); gcpErr != nil {
-				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
-					helpers.Error(gcpErr),
+		for _, provider := range registryAuthProviders {
+			if !provider.Matches(pullRef) {
+				continue
+			}
+			if creds, credErr := provider.Credentials(ctx); credErr != nil || creds == nil {
+				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
+					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
 			} else {
-				opts.Credentials = []image.RegistryCredentials{*gcpCreds}
+				opts.Credentials = []image.RegistryCredentials{*creds}
 				src, err = get(ctx, pullRef, &opts)
 			}
+			break
 		}
-		// If GCP ADC was not attempted, succeeded in auth but still got 401, or
-		// the image is not a GCP registry, fall back to anonymous access.
+		// If no provider matched, its credentials were unavailable, or it succeeded
+		// in auth but still got 401, fall back to anonymous access.
 		if err != nil {
 			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))

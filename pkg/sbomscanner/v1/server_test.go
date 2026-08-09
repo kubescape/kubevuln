@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -252,6 +253,108 @@ func TestResolveSource(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeAuthProvider is a scripted registryAuthProvider used to prove
+// resolveSource consults registryAuthProviders generically, not just GCP.
+type fakeAuthProvider struct {
+	matchHost string
+	creds     *image.RegistryCredentials
+	err       error
+}
+
+func (p fakeAuthProvider) Matches(imageID string) bool {
+	host, _, _ := strings.Cut(imageID, "/")
+	return host == p.matchHost
+}
+
+func (p fakeAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
+	return p.creds, p.err
+}
+
+func TestResolveSource_CustomProvider(t *testing.T) {
+	orig := registryAuthProviders
+	defer func() { registryAuthProviders = orig }()
+	registryAuthProviders = []registryAuthProvider{
+		fakeAuthProvider{
+			matchHost: "my-registry.example.com",
+			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},
+		},
+	}
+
+	err401 := errors.New("401 Unauthorized")
+	var calls [][]image.RegistryCredentials
+	callCount := 0
+	results := []error{err401, nil}
+	get := func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		creds := append([]image.RegistryCredentials(nil), opts.Credentials...)
+		calls = append(calls, creds)
+		res := results[callCount]
+		callCount++
+		return nil, res
+	}
+
+	_, err := resolveSource(context.Background(), get, "my-registry.example.com/foo/bar", "", image.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+	assert.Equal(t, []image.RegistryCredentials{{Username: "custom", Password: "token"}}, calls[len(calls)-1])
+}
+
+func TestResolveSource_ProviderNilCredentialsFallsBackAnonymous(t *testing.T) {
+	orig := registryAuthProviders
+	defer func() { registryAuthProviders = orig }()
+	registryAuthProviders = []registryAuthProvider{
+		fakeAuthProvider{matchHost: "my-registry.example.com"},
+	}
+
+	err401 := errors.New("401 Unauthorized")
+	err403 := errors.New("403 Forbidden")
+	var calls [][]image.RegistryCredentials
+	callCount := 0
+	results := []error{err401, err403}
+	get := func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		creds := append([]image.RegistryCredentials(nil), opts.Credentials...)
+		calls = append(calls, creds)
+		res := results[callCount]
+		callCount++
+		return nil, res
+	}
+
+	assert.NotPanics(t, func() {
+		_, err := resolveSource(context.Background(), get, "my-registry.example.com/foo/bar", "", image.RegistryOptions{})
+		require.Error(t, err)
+	})
+	assert.Equal(t, 2, callCount)
+	assert.Nil(t, calls[len(calls)-1])
+}
+
+func TestResolveSource_ProviderMatchesUsesPullRef(t *testing.T) {
+	orig := registryAuthProviders
+	defer func() { registryAuthProviders = orig }()
+	registryAuthProviders = []registryAuthProvider{
+		fakeAuthProvider{
+			matchHost: "gcr.io",
+			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},
+		},
+	}
+
+	manifestUnknownErr := errors.New("MANIFEST_UNKNOWN")
+	err401 := errors.New("401 Unauthorized")
+	var calls [][]image.RegistryCredentials
+	callCount := 0
+	results := []error{manifestUnknownErr, err401, nil}
+	get := func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		creds := append([]image.RegistryCredentials(nil), opts.Credentials...)
+		calls = append(calls, creds)
+		res := results[callCount]
+		callCount++
+		return nil, res
+	}
+
+	_, err := resolveSource(context.Background(), get, "digest-only.example.com/foo@sha256:abc", "gcr.io/foo:latest", image.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 3, callCount)
+	assert.Equal(t, []image.RegistryCredentials{{Username: "custom", Password: "token"}}, calls[len(calls)-1])
 }
 
 func makeDummyTarGz(fileSize int) ([]byte, string, string, error) {
