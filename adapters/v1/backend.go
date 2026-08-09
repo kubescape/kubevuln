@@ -244,6 +244,14 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportError")
 	defer span.End()
 
+	if err == nil {
+		return nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	report, err2 := a.reportFromContext(ctx)
 	if err2 != nil {
 		return err2
@@ -331,6 +339,10 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
 	defer span.End()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	report, err := a.reportFromContext(ctx)
 	if err != nil {
