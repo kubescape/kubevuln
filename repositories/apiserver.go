@@ -488,23 +488,25 @@ func parseSeverities(cve domain.CVEManifest, cvep domain.CVEManifest, withReleva
 	var unknown int64
 	var unknownRelevant int64
 
-	for i := range cve.Content.Matches {
-		switch cve.Content.Matches[i].Vulnerability.Severity {
-		case domain.CriticalSeverity:
-			critical += 1
-		case domain.HighSeverity:
-			high += 1
-		case domain.MediumSeverity:
-			medium += 1
-		case domain.LowSeverity:
-			low += 1
-		case domain.NegligibleSeverity:
-			negligible += 1
-		case domain.UnknownSeverity:
-			unknown += 1
+	if cve.Content != nil {
+		for i := range cve.Content.Matches {
+			switch cve.Content.Matches[i].Vulnerability.Severity {
+			case domain.CriticalSeverity:
+				critical += 1
+			case domain.HighSeverity:
+				high += 1
+			case domain.MediumSeverity:
+				medium += 1
+			case domain.LowSeverity:
+				low += 1
+			case domain.NegligibleSeverity:
+				negligible += 1
+			case domain.UnknownSeverity:
+				unknown += 1
+			}
 		}
 	}
-	if withRelevancy {
+	if withRelevancy && cvep.Content != nil {
 		for i := range cvep.Content.Matches {
 			switch cvep.Content.Matches[i].Vulnerability.Severity {
 			case domain.CriticalSeverity:

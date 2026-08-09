@@ -2484,3 +2484,39 @@ func TestAPIServerStore_StoreVEX_NilContentDoesNotPanic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, vexContainerUpdated.Spec.Statements, "updateVEX must not fabricate statements out of a nil CVEManifest.Content")
 }
+
+// TestAPIServerStore_StoreCVESummary_NilContentDoesNotPanic is a regression test for #524:
+// parseSeverities dereferenced cve.Content.Matches unguarded, and cvep.Content.Matches guarded
+// only by the caller-supplied withRelevancy bool rather than an actual nil check on
+// cvep.Content. StoreCVESummary is part of the public ports.CVERepository interface, so
+// nothing enforced that precondition on it. This calls StoreCVESummary directly (not just
+// indirectly through scan.go) with a CVEManifest{} - Content is nil - for both cve and cvep,
+// in both withRelevancy states, and asserts none of the four combinations panic or error.
+func TestAPIServerStore_StoreCVESummary_NilContentDoesNotPanic(t *testing.T) {
+	for _, withRelevancy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("withRelevancy=%v", withRelevancy), func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			ctx := context.TODO()
+			workload := domain.ScanCommand{
+				Wlid:          "wlid://cluster-x/namespace-y/deployment-z",
+				ContainerName: "container",
+			}
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(123456))
+
+			empty := domain.CVEManifest{Name: name}
+
+			require.NotPanics(t, func() {
+				err := a.StoreCVESummary(ctx, empty, empty, withRelevancy)
+				assert.NoError(t, err, "StoreCVESummary must handle a nil CVEManifest.Content without erroring")
+			})
+
+			// Second call with the same (still nil-Content) manifests exercises the
+			// RetryOnConflict update path, not just the initial Create.
+			require.NotPanics(t, func() {
+				err := a.StoreCVESummary(ctx, empty, empty, withRelevancy)
+				assert.NoError(t, err, "the update path must also handle a nil CVEManifest.Content without erroring")
+			})
+		})
+	}
+}
