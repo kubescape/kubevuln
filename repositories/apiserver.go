@@ -22,8 +22,8 @@ import (
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
-	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	fakespdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1/fake"
 	"github.com/openvex/go-vex/pkg/vex"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
@@ -31,8 +31,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -123,9 +127,57 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	}, nil
 }
 
-func NewFakeAPIServerStorage(namespace string) *APIServerStore {
+type fakeStorageClientset struct {
+	k8stesting.Fake
+	tracker k8stesting.ObjectTracker
+}
+
+func (c *fakeStorageClientset) SpdxV1beta1() spdxv1beta1.SpdxV1beta1Interface {
+	return &fakespdxv1beta1.FakeSpdxV1beta1{Fake: &c.Fake}
+}
+
+func (c *fakeStorageClientset) Tracker() k8stesting.ObjectTracker {
+	return c.tracker
+}
+
+func newFakeStorageClientset(objects ...runtime.Object) *fakeStorageClientset {
+	scheme := runtime.NewScheme()
+	metav1.AddToGroupVersion(scheme, schema.GroupVersion{Version: "v1"})
+	if err := v1beta1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
+	codecs := serializer.NewCodecFactory(scheme)
+	tracker := k8stesting.NewFieldManagedObjectTracker(
+		scheme,
+		codecs.UniversalDecoder(),
+		managedfields.NewDeducedTypeConverter(),
+	)
+	for _, obj := range objects {
+		if err := tracker.Add(obj); err != nil {
+			panic(err)
+		}
+	}
+
+	clientset := &fakeStorageClientset{tracker: tracker}
+	clientset.AddReactor("*", "*", k8stesting.ObjectReaction(tracker))
+	clientset.AddWatchReactor("*", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		var opts metav1.ListOptions
+		if watchAction, ok := action.(k8stesting.WatchActionImpl); ok {
+			opts = watchAction.ListOptions
+		}
+		w, err := tracker.Watch(action.GetResource(), action.GetNamespace(), opts)
+		if err != nil {
+			return false, nil, err
+		}
+		return true, w, nil
+	})
+
+	return clientset
+}
+
+func newFakeAPIServerStore(namespace string, storageClient spdxv1beta1.SpdxV1beta1Interface) *APIServerStore {
 	return &APIServerStore{
-		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		StorageClient: storageClient,
 		// The fake dynamic client requires every GVR it will List() to have a registered
 		// list kind up front (fakedynamic.NewSimpleDynamicClient's default of an empty
 		// scheme panics on List() otherwise) - register the two GVRs GetSecurityExceptions
@@ -137,6 +189,10 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 		Namespace:                  namespace,
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
 	}
+}
+
+func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APIServerStore {
+	return newFakeAPIServerStore(namespace, newFakeStorageClientset(objects...).SpdxV1beta1())
 }
 
 // GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
