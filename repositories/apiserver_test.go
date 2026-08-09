@@ -2484,3 +2484,88 @@ func TestAPIServerStore_StoreVEX_NilContentDoesNotPanic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, vexContainerUpdated.Spec.Statements, "updateVEX must not fabricate statements out of a nil CVEManifest.Content")
 }
+
+// TestAPIServerStore_StoreCVESummary_NilContentDoesNotPanic is a regression test for #524:
+// parseSeverities dereferenced cve.Content.Matches unguarded, and cvep.Content.Matches guarded
+// only by the caller-supplied withRelevancy bool rather than an actual nil check on
+// cvep.Content. StoreCVESummary is part of the public ports.CVERepository interface, so
+// nothing enforced that precondition on it. This calls StoreCVESummary directly (not just
+// indirectly through scan.go) with a CVEManifest{} - Content is nil - for both cve and cvep,
+// in both withRelevancy states, and asserts none of the four combinations panic or error.
+func TestAPIServerStore_StoreCVESummary_NilContentDoesNotPanic(t *testing.T) {
+	for _, withRelevancy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("withRelevancy=%v", withRelevancy), func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			ctx := context.TODO()
+			workload := domain.ScanCommand{
+				Wlid:          "wlid://cluster-x/namespace-y/deployment-z",
+				ContainerName: "container",
+			}
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(123456))
+
+			empty := domain.CVEManifest{Name: name}
+
+			require.NotPanics(t, func() {
+				err := a.StoreCVESummary(ctx, empty, empty, withRelevancy)
+				assert.NoError(t, err, "StoreCVESummary must handle a nil CVEManifest.Content without erroring")
+			})
+
+			// Second call with the same (still nil-Content) manifests exercises the
+			// RetryOnConflict update path, not just the initial Create.
+			require.NotPanics(t, func() {
+				err := a.StoreCVESummary(ctx, empty, empty, withRelevancy)
+				assert.NoError(t, err, "the update path must also handle a nil CVEManifest.Content without erroring")
+			})
+		})
+	}
+}
+
+// TestAPIServerStore_StoreCVESummary_MixedNilContentDoesNotPanic is a regression test for
+// CodeRabbit's review on #525: the "both nil" cases above never actually reach the second
+// (cvep) loop in parseSeverities when withRelevancy is true and cve.Content is non-nil, which
+// is the exact combination that used to panic. This gives cve real match data and leaves
+// cvep.Content nil with withRelevancy=true, then reads the stored summary back and asserts
+// the real manifest's counts are recorded while the relevant counts stay zero.
+func TestAPIServerStore_StoreCVESummary_MixedNilContentDoesNotPanic(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-x/namespace-y/deployment-z",
+		ContainerName: "container",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(123456))
+
+	cve := domain.CVEManifest{
+		Name: name,
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{
+				{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+							ID:       "CVE-MIXED-TEST",
+							Severity: domain.CriticalSeverity,
+						},
+					},
+				},
+			},
+		},
+	}
+	cvep := domain.CVEManifest{Name: name} // Content is nil
+
+	require.NotPanics(t, func() {
+		err := a.StoreCVESummary(ctx, cve, cvep, true)
+		assert.NoError(t, err, "StoreCVESummary must handle a non-nil cve.Content with a nil cvep.Content under withRelevancy=true")
+	})
+
+	resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, cve.Name)
+	require.NoError(t, err)
+	namespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	summary, err := a.StorageClient.VulnerabilityManifestSummaries(namespace).Get(ctx, resourceName, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), summary.Spec.Severities.Critical.All, "the real cve manifest's match must still be counted")
+	assert.Equal(t, int64(0), summary.Spec.Severities.Critical.Relevant, "cvep.Content is nil, so no relevant count should be recorded")
+}
