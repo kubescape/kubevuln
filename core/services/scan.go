@@ -507,7 +507,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	sbom := domain.SBOM{}
 	// check if we need SBOM
-	if cve.Content == nil || (s.storage && workload.InstanceID != "") {
+	if cve.Content == nil {
 		// check if SBOM is already available
 		if s.storage {
 			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
