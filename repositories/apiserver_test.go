@@ -2450,3 +2450,66 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 	}
 	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
 }
+
+// A nil Content used to reach an unguarded range and panic. StoreVEX should
+// treat it as nothing to do.
+func TestAPIServerStore_storeVEX_nilContent(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		Wlid:          "wlid://cluster-aaa/namespace-any/job-any",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "any",
+	})
+
+	filtered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	assert.NotPanics(t, func() {
+		err := a.StoreVEX(ctx, domain.CVEManifest{Name: "nil-content"}, filtered, false)
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		full := tools.FileToCVEManifest("testdata/nginx-cve.json")
+		err := a.StoreVEX(ctx, full, domain.CVEManifest{Name: full.Name}, false)
+		assert.NoError(t, err)
+	})
+}
+
+// The IgnoredMatches loop that ran outside the cve.Content guard rebuilt
+// statements the guarded loop above had already appended, and its own dedupe
+// meant it could never add anything. Removing it must leave the document
+// identical, including on the update path.
+func TestAPIServerStore_storeVEX_ignoredMatchesNotDuplicated(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		Wlid:          "wlid://cluster-aaa/namespace-any/job-any",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "any",
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+	// second store takes the update path, which is where the duplicate loop lived
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).
+		Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	seen := map[string]int{}
+	for _, s := range vexContainer.Spec.Statements {
+		key := s.Vulnerability.Name
+		if len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+			key += "|" + string(s.Products[0].Subcomponents[0].ID)
+		}
+		seen[key]++
+	}
+	for key, n := range seen {
+		assert.Equal(t, 1, n, "statement %q appears %d times", key, n)
+	}
+}

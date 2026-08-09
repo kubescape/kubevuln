@@ -903,6 +903,9 @@ func buildActionStatement(v v1beta1.Match) string {
 }
 
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+	if cvep == nil || cvep.Content == nil {
+		return nil
+	}
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
@@ -934,6 +937,11 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest) error {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.createVEX")
 	defer span.End()
+
+	if cve.Content == nil {
+		logger.L().Debug("no CVE content, skipping VEX creation")
+		return nil
+	}
 
 	imagePullable := cve.Annotations[helpersv1.ImageIDMetadataKey]
 
@@ -1186,51 +1194,6 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 					ImpactStatement: "Vulnerability was ignored by a SecurityException",
 				})
 			}
-		}
-	}
-
-	for _, v := range cve.Content.IgnoredMatches {
-		found := false
-		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.Name != v.Vulnerability.ID {
-				continue
-			}
-			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-				continue
-			}
-			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Add the vulnerability to the VEX document
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-			if err != nil {
-				return err
-			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerability was ignored by a SecurityException",
-			})
 		}
 	}
 
