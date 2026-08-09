@@ -1047,17 +1047,14 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 		ImageTag:      "imageTag",
 		ImageHash:     "imageHash",
 	})
-
 	require.NoError(t, a.ReportError(ctx, fmt.Errorf("boom")))
 	assert.Equal(t, 1, stub.Calls(), "ReportError should use the shared httpClient")
 
 	require.NoError(t, a.SendStatus(ctx, 0))
 	assert.Equal(t, 2, stub.Calls(), "SendStatus should use the shared httpClient")
 
-	errChan := make(chan error, 1)
-	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan))
+	require.NoError(t, a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid"))
 	assert.Equal(t, 3, stub.Calls(), "postResults should use the shared httpClient")
-	assert.Empty(t, errChan, "postResults should not report an error when the shared client succeeds")
 
 	require.NoError(t, a.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, scanfailure.ReasonSBOMGenerationFailed, nil))
 	assert.Equal(t, 4, stub.Calls(), "ReportScanFailure should use the shared httpClient")
@@ -1137,11 +1134,10 @@ func TestBackendAdapter_PostResultsAbortsPromptlyOnCtxCancellation(t *testing.T)
 		httpPostFunc:         httpPostWithContext,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	errChan := make(chan error, 1)
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid", errChan)
+		done <- a.postResults(ctx, v1.ScanResultReport{}, a.eventReceiverRestURL, "imageTag", "wlid")
 	}()
 
 	// give postResults time to reach the (blocking) HTTP call before cancelling
@@ -1239,4 +1235,39 @@ func TestShouldRetryReport(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
+	backend := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{},
+		securityExceptionRepo: &testSecurityExceptionRepo{},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
+		sendStatusFunc: func(*beClientV1.BaseReportSender, string, bool) {},
+		httpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+		},
+	}
+	ctx := context.WithValue(context.Background(), domain.TimestampKey{}, int64(123456))
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, "56275825-4c07-4e3f-9a4c-53f05b0d0c2e")
+	
+	// Create a scan command with non-string args
+	workload := domain.ScanCommand{
+		Wlid: "wlid://cluster-x/namespace-y/deployment-z",
+		Args: map[string]interface{}{
+			identifiers.AttributeRegistryName: 12345, // Not a string!
+		},
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+	
+	cve := domain.CVEManifest{
+		Content: &v1beta1.GrypeDocument{},
+	}
+	cvep := domain.CVEManifest{}
+	
+	// Ensure it does NOT panic
+	assert.NotPanics(t, func() {
+		_ = backend.SubmitCVE(ctx, cve, cvep)
+	})
 }

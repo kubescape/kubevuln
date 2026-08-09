@@ -4,9 +4,11 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/akyoto/cache"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -366,6 +368,85 @@ func TestAPIServerStore_storeVEX(t *testing.T) {
 
 	// Second should have one more relevant CVE than the first one
 	assert.Equal(t, relevant+1, relevant2)
+}
+
+func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	// Inject an IgnoredMatch into the original cveManifest
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         "CVE-IGNORE-TEST",
+					DataSource: "GHSA-IGNORE-TEST",
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    "ignored-package",
+				Version: "1.0",
+			},
+		},
+	})
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.NoError(t, err)
+
+	// Inject a second IgnoredMatch to trigger updateVEX and verify it correctly handles new ignored matches
+	// and preserves existing ones
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         "CVE-IGNORE-TEST-2",
+					DataSource: "GHSA-IGNORE-TEST-2",
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    "ignored-package-2",
+				Version: "2.0",
+			},
+		},
+	})
+
+	// Second call triggers the updateVEX path
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	assert.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotNil(t, vexContainer)
+
+	var foundIgnored1, foundIgnored2 bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST" {
+			foundIgnored1 = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST-2" {
+			foundIgnored2 = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundIgnored1, "First IgnoredMatch should be preserved in the VEX document during update")
+	assert.True(t, foundIgnored2, "Second IgnoredMatch should be included in the VEX document during update")
 }
 
 // TestAPIServerStore_storeVEX_updateRestoresNotAffected guards against a regression where
@@ -1883,6 +1964,84 @@ func TestAPIServerStore_GetSecurityExceptions_NoErrorOnSuccess(t *testing.T) {
 	assert.Empty(t, cse)
 }
 
+// TestAPIServerStore_GetSecurityExceptions_CachesAcrossWorkloads is a regression test for
+// #510: GetSecurityExceptions used to issue a fresh List() call for both CRD types on every
+// invocation, even though the raw list is identical for every workload sharing the same
+// namespace (SecurityException) or the same cluster (ClusterSecurityException). List() call
+// counters prove the cache collapses repeated calls within the TTL into a single List(), and
+// that a genuinely new namespace still gets its own namespaced list while reusing the
+// already-cached cluster-scoped one.
+func TestAPIServerStore_GetSecurityExceptions_CachesAcrossWorkloads(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	var seListCalls, cseListCalls int32
+	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&seListCalls, 1)
+		return false, nil, nil
+	})
+	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&cseListCalls, 1)
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	// Two calls for the same namespace, simulating two distinct workloads/images scanned in it.
+	_, _, err := a.GetSecurityExceptions(context.TODO(), "ns-a")
+	require.NoError(t, err)
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "ns-a")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&seListCalls), "second call for the same namespace should be served from cache")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cseListCalls), "second call should also reuse the cached cluster-scoped list")
+
+	// A different namespace needs its own namespaced list, but the cluster-scoped list is
+	// shared across every namespace and must still come from cache.
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "ns-b")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&seListCalls), "a new namespace is a cache miss for the namespaced list")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cseListCalls), "ClusterSecurityExceptions are cluster-wide and must not be re-listed per namespace")
+}
+
+// TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures guards the self-healing
+// property #477 relies on: a List() failure must never populate the cache, or a transient
+// apiserver hiccup would be pinned as "no exceptions" for the full cache TTL instead of being
+// retried on the next call.
+func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	var calls int32
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return true, nil, injectedErr
+		}
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	_, _, err := a.GetSecurityExceptions(context.TODO(), "")
+	require.Error(t, err)
+
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "")
+	require.NoError(t, err, "a failed List() must not be cached, so the next call retries instead of replaying the failure")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
@@ -2290,4 +2449,38 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 		}
 	}
 	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
+}
+
+// TestAPIServerStore_StoreVEX_NilContentDoesNotPanic is a regression test for #518:
+// createVEX, updateVEX, and markRelevantVulnerabilitiesAsAffectedInVex used to guard
+// CVEManifest.Content inconsistently - some reads were nil-checked, others weren't, within
+// the very same function. None of the current callers ever pass a nil Content, but the
+// functions themselves had no defense of their own. This exercises both the create path
+// (first call, container doesn't exist yet) and the update path (second call, container
+// already exists) with a completely empty CVEManifest{} - Content is nil - for both cve and
+// cvep, and asserts neither call panics or errors.
+func TestAPIServerStore_StoreVEX_NilContentDoesNotPanic(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+
+	empty := domain.CVEManifest{Name: name}
+
+	require.NotPanics(t, func() {
+		err := a.StoreVEX(ctx, empty, empty, false)
+		assert.NoError(t, err, "createVEX must handle a nil CVEManifest.Content without erroring")
+	})
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, vexContainer.Spec.Statements, "no matches were ever provided, so no statements should be generated")
+
+	// Second call with the same (still nil-Content) manifests exercises updateVEX.
+	require.NotPanics(t, func() {
+		err := a.StoreVEX(ctx, empty, empty, false)
+		assert.NoError(t, err, "updateVEX must handle a nil CVEManifest.Content without erroring")
+	})
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, vexContainerUpdated.Spec.Statements, "updateVEX must not fabricate statements out of a nil CVEManifest.Content")
 }

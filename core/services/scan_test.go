@@ -22,8 +22,8 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
-	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -301,11 +301,11 @@ func TestScanService_ScanCP(t *testing.T) {
 				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				// the 429 marker must be recorded under the same normalized key every
-				// other flow uses (ImageHash via NormalizeImageID), not the raw
+				// the 429 marker must be recorded under the same canonical key every
+				// other flow uses (ImageTagNormalized, see rateLimitCacheKey), not the raw
 				// container-profile ImageID, otherwise nothing will ever read it back
-				_, ok := s.tooManyRequests.Get(v1.NormalizeImageID(imageID, imageTag))
-				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized ImageHash")
+				_, ok := s.tooManyRequests.Get(tools.NormalizeReference(imageTag))
+				assert.True(t, ok, "expected image to be recorded as rate limited under its normalized image reference")
 			}
 			if tt.wantCvep {
 				cvep, err := storageCVE.GetCVE(ctx, tt.slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
@@ -378,8 +378,8 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
 
 	// simulate a prior pull of this exact image having already come back 429, recorded under
-	// the normalized key ScanCP writes to
-	s.tooManyRequests.Set(v1.NormalizeImageID(imageID, imageTag), true, ttl)
+	// the canonical key ScanCP writes to (ImageTagNormalized, see rateLimitCacheKey)
+	s.tooManyRequests.Set(tools.NormalizeReference(imageTag), true, ttl)
 
 	require.NoError(t, s.ScanCP(ctx))
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
@@ -973,7 +973,7 @@ type fakeCVEScannerWithVuln struct {
 
 func (f *fakeCVEScannerWithVuln) DBVersion(context.Context) string { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) Ready(context.Context) bool       { return true }
-func (f *fakeCVEScannerWithVuln) Version() string                   { return "v1.0.0" }
+func (f *fakeCVEScannerWithVuln) Version() string                  { return "v1.0.0" }
 func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	return domain.CVEManifest{
 		Name:               sbom.Name,
@@ -1931,4 +1931,153 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 
 	require.Len(t, platform.submitted, 1, "ScanCP cache hit must still submit the manifest to the backend")
 	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a ScanCP cache hit")
+}
+
+func TestScanService_ScanRegistry_RateLimitBackoff(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "docker.io/library/nginx:1.25"
+	slug, err := names.ImageInfoToSlug(tools.NormalizeReference(imageTag), imageID)
+	require.NoError(t, err)
+
+	platform := &recordingPlatform{}
+	countingSBOM := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
+
+	// registryScanCommandToScanCommand never populates ImageHash, so this reflects what
+	// ScanRegistry actually receives - not a workload-scan payload.
+	workload := domain.ScanCommand{
+		ImageTag:           imageTag,
+		ImageTagNormalized: tools.NormalizeReference(imageTag),
+		ImageSlug:          slug,
+		JobID:              "job-registry",
+	}
+	ctx := enrichContext(context.TODO(), workload, s.Version())
+
+	// Simulate a prior 429 rate limit recorded for this image
+	key := rateLimitCacheKey(workload)
+	s.tooManyRequests.Set(key, true, ttl)
+
+	// ValidateScanRegistry must return ErrTooManyRequests
+	_, valErr := s.ValidateScanRegistry(ctx, workload)
+	assert.ErrorIs(t, valErr, domain.ErrTooManyRequests)
+
+	// ScanRegistry execution path must also abort and return ErrTooManyRequests
+	scanErr := s.ScanRegistry(ctx)
+	assert.ErrorIs(t, scanErr, domain.ErrTooManyRequests)
+	assert.Equal(t, 0, countingSBOM.calls, "ScanRegistry must not attempt CreateSBOM when rate limited")
+}
+
+func TestScanService_CrossFlowRateLimitBackoff(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	normalizedTag := tools.NormalizeReference(imageTag)
+	normalizedImageID := v1.NormalizeImageID(imageID, imageTag)
+	slug, err := names.ImageInfoToSlug(normalizedTag, imageID)
+	require.NoError(t, err)
+
+	// Workload scans (ScanCVE/GenerateSBOM/ScanCP) receive a payload with ImageHash populated.
+	workload := domain.ScanCommand{
+		ImageHash:          normalizedImageID,
+		ImageTag:           imageTag,
+		ImageTagNormalized: normalizedTag,
+		ImageSlug:          slug,
+	}
+
+	// Registry scans never populate ImageHash - registryScanCommandToScanCommand doesn't set
+	// it, so this is what ScanRegistry actually receives for the same image. Using the same
+	// workload struct for every flow (as this test used to) hid the bug: it never exercised
+	// the ImageHash=="" case a real registry scan sends.
+	registryWorkload := domain.ScanCommand{
+		ImageTag:           imageTag,
+		ImageTagNormalized: normalizedTag,
+		ImageSlug:          slug,
+	}
+
+	require.Equal(t, rateLimitCacheKey(workload), rateLimitCacheKey(registryWorkload),
+		"a workload scan and a registry scan for the same image must resolve to the same rate-limit cache key")
+
+	key := rateLimitCacheKey(workload)
+
+	platform := &recordingPlatform{}
+	countingSBOM := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
+
+	// Record rate limit under canonical key
+	s.tooManyRequests.Set(key, true, ttl)
+
+	// All validation entry points must recognize the rate limit
+	_, errValGen := s.ValidateGenerateSBOM(context.TODO(), workload)
+	assert.ErrorIs(t, errValGen, domain.ErrTooManyRequests)
+
+	_, errValCVE := s.ValidateScanCVE(context.TODO(), workload)
+	assert.ErrorIs(t, errValCVE, domain.ErrTooManyRequests)
+
+	_, errValReg := s.ValidateScanRegistry(context.TODO(), registryWorkload)
+	assert.ErrorIs(t, errValReg, domain.ErrTooManyRequests)
+
+	ctx := enrichContext(context.TODO(), workload, s.Version())
+	registryCtx := enrichContext(context.TODO(), registryWorkload, s.Version())
+
+	// Execution paths must also abort and return ErrTooManyRequests without calling CreateSBOM
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanCVE(ctx), domain.ErrTooManyRequests)
+	assert.ErrorIs(t, s.ScanRegistry(registryCtx), domain.ErrTooManyRequests)
+	assert.Equal(t, 0, countingSBOM.calls, "No execution path should attempt CreateSBOM when rate limited")
+}
+
+func TestScanCVE_NoSBOMRegeneration_OnCacheHit(t *testing.T) {
+	// Setup
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageCVE := repositories.NewMemoryStorage(false, false)
+	platform := &recordingPlatform{}
+	relevancy := adapters.NewMockRelevancyAdapter()
+	service := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, relevancy, true, true, true, false, false)
+
+	slug := "wasteful-sbom-test"
+
+	// Create a cached CVE
+	cveAdapterDBVersion := cveAdapter.DBVersion(context.TODO())
+	cacheCVE := domain.CVEManifest{
+		Name:               slug,
+		SBOMCreatorVersion: sbomAdapter.Version(),
+		CVEScannerVersion:  cveAdapter.Version(),
+		CVEDBVersion:       cveAdapterDBVersion,
+		Content:            &v1beta1.GrypeDocument{},
+		Labels: map[string]string{
+			"kubevuln.kubescape.io/image-slug":         slug,
+			"kubevuln.kubescape.io/sbom-creator":       sbomAdapter.Version(),
+			"kubevuln.kubescape.io/cve-scanner":        cveAdapter.Version(),
+			"kubevuln.kubescape.io/cve-scanner-db":     cveAdapterDBVersion,
+			"kubevuln.kubescape.io/workload-name":      "my-workload",
+			"kubevuln.kubescape.io/workload-namespace": "default",
+			"kubevuln.kubescape.io/workload-kind":      "Deployment",
+		},
+	}
+	require.NoError(t, storageCVE.StoreCVE(context.TODO(), cacheCVE, false))
+
+	// No SBOM in storage! (cache miss for SBOM)
+
+	// Context with Workload containing an InstanceID
+	workload := domain.ScanCommand{
+		ImageSlug:  slug,
+		InstanceID: "some-instance-id", // triggers `workload.InstanceID != ""`
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+	// Run ScanCVE
+	err := service.ScanCVE(ctx)
+	require.NoError(t, err)
+
+	// Verify that CreateSBOM was NOT called.
+	// We check if the storage now has the SBOM (which indicates it was generated).
+	generatedSBOM, err := storageSBOM.GetSBOM(context.TODO(), slug, sbomAdapter.Version())
+
+	// Since we no longer generate the SBOM wastefully, the storage should return an empty content
+	require.NoError(t, err, "MemoryStorage returns a nil error on a cache miss")
+	require.Nil(t, generatedSBOM.Content, "The generated SBOM should be nil since we avoided regenerating it wastefully")
+
 }

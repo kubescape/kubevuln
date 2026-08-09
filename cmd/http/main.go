@@ -127,6 +127,7 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("metrics initialization error", helpers.Error(err))
 	}
+	service.SetMetrics(m)
 	controller, err = controller.WithMetrics(m)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("metrics registration error", helpers.Error(err))
