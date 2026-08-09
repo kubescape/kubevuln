@@ -97,12 +97,13 @@ func rateLimitCacheKey(workload domain.ScanCommand) string {
 	}
 	h := sha256.New()
 	for _, cred := range workload.CredentialsList {
-		h.Write([]byte(cred.Username))
-		h.Write([]byte(cred.Password))
-		h.Write([]byte(cred.Auth))
-		h.Write([]byte(cred.IdentityToken))
-		h.Write([]byte(cred.RegistryToken))
-		h.Write([]byte(cred.ServerAddress))
+		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
+			len(cred.Username), cred.Username,
+			len(cred.Password), cred.Password,
+			len(cred.Auth), cred.Auth,
+			len(cred.IdentityToken), cred.IdentityToken,
+			len(cred.RegistryToken), cred.RegistryToken,
+			len(cred.ServerAddress), cred.ServerAddress)
 	}
 	return fmt.Sprintf("%s|%x", workload.ImageTagNormalized, h.Sum(nil))
 }

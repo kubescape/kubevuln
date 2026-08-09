@@ -46,9 +46,6 @@ func TestScanService_RateLimitIsCredentialBlind(t *testing.T) {
 	cveAdapter := adapters.NewMockCVEAdapter()
 	s := NewScanService(countingSBOM, repositories.NewMemoryStorage(false, false), cveAdapter, repositories.NewMemoryStorage(false, false), platform, nil, false, false, true, false, false)
 
-	ctx := context.TODO()
-	ctx = enrichContext(ctx, unauthenticatedWorkload, s.Version())
-
 	// Simulate unauthenticated workload hitting 429
 	s.tooManyRequests.Set(rateLimitCacheKey(unauthenticatedWorkload), true, 10*time.Minute)
 
@@ -58,4 +55,28 @@ func TestScanService_RateLimitIsCredentialBlind(t *testing.T) {
 
 	scanErr := s.ScanRegistry(authCtx)
 	assert.NoError(t, scanErr, "Authenticated workload should not be blocked by unauthenticated workload's 429")
+}
+
+func TestScanService_RateLimitCacheKey_BoundaryCollision(t *testing.T) {
+	// A poorly encoded credential hash (like direct concatenation) would yield
+	// the same key for (Username="a", Password="bc") and (Username="ab", Password="c").
+	// This test ensures boundaries are respected.
+	imageTag := "docker.io/library/nginx:latest"
+
+	workload1 := domain.ScanCommand{
+		ImageTagNormalized: imageTag,
+		CredentialsList: []registry.AuthConfig{
+			{Username: "a", Password: "bc"},
+		},
+	}
+
+	workload2 := domain.ScanCommand{
+		ImageTagNormalized: imageTag,
+		CredentialsList: []registry.AuthConfig{
+			{Username: "ab", Password: "c"},
+		},
+	}
+
+	require.NotEqual(t, rateLimitCacheKey(workload1), rateLimitCacheKey(workload2),
+		"Cache keys must differ for split-field collisions")
 }
