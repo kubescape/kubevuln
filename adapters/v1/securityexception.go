@@ -242,8 +242,10 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		}
 		attrs["response"] = responses
 	}
-	if subs := normalizedSubcomponents(vuln.Subcomponents); len(subs) > 0 {
-		attrs[attrSubcomponents] = subs
+	// Recorded whenever the entry states a scope at all, even if nothing in it survives
+	// normalization: an entry that asked to be scoped must not fall back to product scope.
+	if len(vuln.Subcomponents) > 0 {
+		attrs[attrSubcomponents] = normalizedSubcomponents(vuln.Subcomponents)
 	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
