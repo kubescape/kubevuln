@@ -59,21 +59,21 @@ func TestScanService_RateLimitIsCredentialBlind(t *testing.T) {
 
 func TestScanService_RateLimitCacheKey_BoundaryCollision(t *testing.T) {
 	// A poorly encoded credential hash (like direct concatenation) would yield
-	// the same key for (Username="a", Password="bc") and (Username="ab", Password="c").
+	// the same key for (Username="a", ServerAddress="bc") and (Username="ab", ServerAddress="c").
 	// This test ensures boundaries are respected.
 	imageTag := "docker.io/library/nginx:latest"
 
 	workload1 := domain.ScanCommand{
 		ImageTagNormalized: imageTag,
 		CredentialsList: []registry.AuthConfig{
-			{Username: "a", Password: "bc"},
+			{Username: "a", ServerAddress: "bc"},
 		},
 	}
 
 	workload2 := domain.ScanCommand{
 		ImageTagNormalized: imageTag,
 		CredentialsList: []registry.AuthConfig{
-			{Username: "ab", Password: "c"},
+			{Username: "ab", ServerAddress: "c"},
 		},
 	}
 
