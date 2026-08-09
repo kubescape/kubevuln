@@ -37,8 +37,14 @@ func hasKnownFix(m v1beta1.Match) (bool, string) {
 	if m.Vulnerability.Fix.State == fixStateFixed {
 		return true, unknownFixVersion
 	}
-	// no concrete version: fall back to CPE matches
+	// no concrete version: fall back to CPE matches. Only cpe-match details are read,
+	// since match.CPEResult is the shape Grype emits for those alone; a distro detail
+	// would also unmarshal into it (unknown fields are dropped) and its constraint would
+	// then be read as if it came from a CPE.
 	for _, detail := range m.MatchDetails {
+		if detail.Type != string(match.CPEMatch) {
+			continue
+		}
 		var found match.CPEResult
 		if err := json.Unmarshal(detail.Found, &found); err != nil {
 			continue

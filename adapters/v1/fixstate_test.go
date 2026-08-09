@@ -12,14 +12,18 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // cpeMatchDetail builds a cpe-match detail carrying the given version constraint, the
 // shape Grype emits when a CVE is matched through a CPE rather than a distro advisory.
 func cpeMatchDetail(constraint string) v1beta1.MatchDetails {
+	return matchDetail("cpe-match", constraint)
+}
+
+func matchDetail(detailType, constraint string) v1beta1.MatchDetails {
 	return v1beta1.MatchDetails{
-		Type:  "cpe-match",
+		Type:  detailType,
 		Found: json.RawMessage(`{"vulnerabilityID":"CVE-2024-13176","versionConstraint":"` + constraint + `","cpes":["cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*"]}`),
 	}
 }
@@ -134,7 +138,7 @@ func expiredOnFixException(cve string) domain.CVEExceptions {
 			PolicyType:            "vulnerabilityExceptionPolicy",
 			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
 			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: cve}},
-			ExpiredOnFix:          pointer.Bool(true),
+			ExpiredOnFix:          ptr.To(true),
 		},
 	}
 }
@@ -193,4 +197,25 @@ func TestExpiredOnFixAgreesAcrossPathsWhenUnfixed(t *testing.T) {
 	assert.Len(t, doc.IgnoredMatches, 1, "CVE without a fix should be ignored in the manifest")
 	assert.NotEmpty(t, results[0].ExceptionApplied, "CVE without a fix should carry an applied exception")
 	assert.Equal(t, 0, results[0].IsFixed)
+}
+
+// A distro detail unmarshals into match.CPEResult just as cleanly as a CPE one, so the
+// constraint is only read when the detail actually came from a CPE match.
+func TestHasKnownFixOnlyReadsCPEDetails(t *testing.T) {
+	for _, detailType := range []string{"exact-direct-match", "exact-indirect-match"} {
+		t.Run(detailType, func(t *testing.T) {
+			m := v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2024-13176"},
+					Fix:                   v1beta1.Fix{State: "unknown"},
+				},
+				MatchDetails: []v1beta1.MatchDetails{matchDetail(detailType, ">= 1.0.2, < 1.0.2zl")},
+			}
+
+			fixed, version := hasKnownFix(m)
+
+			assert.False(t, fixed, "an upper-bounded constraint outside a cpe-match is not a fix signal")
+			assert.Empty(t, version)
+		})
+	}
 }
