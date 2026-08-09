@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -56,6 +55,30 @@ func isRegistryRateLimited(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
 		strings.Contains(errStr, "429 Too Many Requests")
+}
+
+// isPlatformMismatch reports whether err is (or wraps) stereoscope's
+// *image.ErrPlatformMismatch, returned once a provider has positively resolved the image but
+// its OS/architecture doesn't match the platform that was requested.
+func isPlatformMismatch(err error) bool {
+	var platformErr *image.ErrPlatformMismatch
+	return errors.As(err, &platformErr)
+}
+
+// formatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
+// fields Syft/stereoscope actually resolved an image against. Returns "" unless both os and
+// architecture are known. Duplicated from adapters/v1/syft.go's helper of the same name since
+// the two packages don't share a dependency either could live in without introducing one
+// (same rationale as syftToDomain's duplication, documented there).
+func formatResolvedPlatform(os, arch, variant string) string {
+	if os == "" || arch == "" {
+		return ""
+	}
+	parts := []string{os, arch}
+	if variant != "" {
+		parts = append(parts, variant)
+	}
+	return strings.Join(parts, "/")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
@@ -186,16 +209,24 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Parse platform for multi-arch image resolution.
 	// The platform specifier uses OCI format: "os/arch[/variant]" (e.g. "linux/amd64").
 	// If only an architecture is provided (e.g. "amd64"), we prepend "linux/".
-	platformStr := req.Platform
-	if platformStr == "" {
-		platformStr = runtime.GOARCH
-	}
-	if !strings.Contains(platformStr, "/") {
-		platformStr = "linux/" + platformStr
-	}
-	imgPlatform, err := image.NewPlatform(platformStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+	//
+	// Only request a specific platform when the caller explicitly asked for one; otherwise
+	// leave imgPlatform nil so Syft resolves whatever platform the image manifest provides.
+	// This mirrors the in-process adapter (adapters/v1/syft.go) and matters for pod-less scan
+	// paths (registry rescans, periodic CRD-based rescans) that have no node context to derive
+	// a platform from: defaulting to runtime.GOARCH here used to force a platform mismatch for
+	// single-arch images that don't happen to match the sidecar container's own arch (see #512).
+	var imgPlatform *image.Platform
+	if req.Platform != "" {
+		platformStr := req.Platform
+		if !strings.Contains(platformStr, "/") {
+			platformStr = "linux/" + platformStr
+		}
+		p, err := image.NewPlatform(platformStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+		}
+		imgPlatform = p
 	}
 
 	// Build registry credentials
@@ -246,6 +277,20 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
 		}, nil
+	case err != nil && isPlatformMismatch(err):
+		// The requested platform doesn't exist in the image's manifest. StatusReason travels
+		// over gRPC as a plain string; the caller's classifySBOMError also recognizes the
+		// "mismatched platform" text in ErrorMessage directly, so this is reported as a
+		// distinct reason rather than falling into the generic SBOM-generation-failed path
+		// (see #512).
+		logger.L().Warning("requested platform not found in image manifest",
+			helpers.String("platform", req.Platform),
+			helpers.String("imageID", imageID),
+			helpers.Error(err))
+		return &pb.CreateSBOMResponse{
+			ErrorMessage: err.Error(),
+			StatusReason: domain.ReasonPlatformNotFound,
+		}, nil
 	case err != nil && isRegistryRateLimited(err):
 		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
 		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
@@ -259,6 +304,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
 		}, nil
+	}
+
+	// Record the platform actually resolved, whether it was explicitly requested or left for
+	// Syft to pick, so a silently-wrong-arch SBOM is inspectable after the fact (see #512).
+	var resolvedPlatform string
+	if meta, ok := src.Describe().Metadata.(source.ImageMetadata); ok {
+		resolvedPlatform = formatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant)
 	}
 
 	// Generate SBOM with timeout
@@ -300,14 +352,16 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	case errors.Is(err, deadline.ErrTimedOut):
 		logger.L().Warning("Syft timed out", helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.Incomplete,
+			Status:           helpersv1.Incomplete,
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	case err == nil:
 		// continue
 	default:
 		return &pb.CreateSBOMResponse{
-			Status:       helpersv1.Incomplete,
-			ErrorMessage: err.Error(),
+			Status:           helpersv1.Incomplete,
+			ErrorMessage:     err.Error(),
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	}
 
@@ -326,9 +380,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status:       helpersv1.TooLarge,
-			SbomSize:     int64(sz),
-			StatusReason: domain.ReasonSBOMTooLarge,
+			Status:           helpersv1.TooLarge,
+			SbomSize:         int64(sz),
+			StatusReason:     domain.ReasonSBOMTooLarge,
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	}
 
@@ -345,9 +400,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		helpers.Int("packages", len(doc.Artifacts)))
 
 	return &pb.CreateSBOMResponse{
-		Status:       helpersv1.Learning,
-		SbomDocument: docBytes,
-		SbomSize:     int64(sz),
+		Status:           helpersv1.Learning,
+		SbomDocument:     docBytes,
+		SbomSize:         int64(sz),
+		ResolvedPlatform: resolvedPlatform,
 	}, nil
 }
 

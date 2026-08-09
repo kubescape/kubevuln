@@ -27,11 +27,12 @@ type ScanRequest struct {
 
 // ScanResult contains the SBOM document and metadata from a successful scan.
 type ScanResult struct {
-	SyftDocument *v1beta1.SyftDocument
-	SBOMSize     int64
-	Status       string
-	ErrorMessage string
-	StatusReason string
+	SyftDocument     *v1beta1.SyftDocument
+	SBOMSize         int64
+	Status           string
+	ErrorMessage     string
+	StatusReason     string
+	ResolvedPlatform string
 }
 
 // SBOMScannerClient is the interface for communicating with the sidecar scanner.

@@ -935,6 +935,16 @@ func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domai
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
+	if platform, ok := workload.Args[domain.ArgsPlatform]; ok {
+		if p, isString := platform.(string); isString {
+			options.Platform = p
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-string value for registry option",
+				helpers.String("key", domain.ArgsPlatform),
+				helpers.String("type", fmt.Sprintf("%T", platform)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
+	}
 
 	logger.L().Debug("created registryOptions from workload",
 		helpers.String("imageTagNormalized", workload.ImageTagNormalized),

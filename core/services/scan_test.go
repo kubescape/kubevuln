@@ -1368,7 +1368,34 @@ func TestOptionsFromWorkload(t *testing.T) {
 		args                map[string]interface{}
 		wantInsecureUseHTTP bool
 		wantInsecureSkipTLS bool
+		wantPlatform        string
 	}{
+		{
+			name: "platform string is applied",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: "linux/arm64",
+			},
+			wantPlatform: "linux/arm64",
+		},
+		{
+			name: "bare arch platform string is passed through as-is",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: "arm64",
+			},
+			wantPlatform: "arm64",
+		},
+		{
+			name: "non-string platform value is ignored without panic",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: float64(1),
+			},
+			wantPlatform: "",
+		},
+		{
+			name:         "missing platform key defaults to empty (pod-less scans resolve whatever the manifest provides)",
+			args:         map[string]interface{}{},
+			wantPlatform: "",
+		},
 		{
 			name: "bool true values are applied",
 			args: map[string]interface{}{
@@ -1442,6 +1469,8 @@ func TestOptionsFromWorkload(t *testing.T) {
 				"InsecureUseHTTP mismatch for args: %v", tt.args)
 			assert.Equal(t, tt.wantInsecureSkipTLS, got.InsecureSkipTLSVerify,
 				"InsecureSkipTLSVerify mismatch for args: %v", tt.args)
+			assert.Equal(t, tt.wantPlatform, got.Platform,
+				"Platform mismatch for args: %v", tt.args)
 		})
 	}
 }

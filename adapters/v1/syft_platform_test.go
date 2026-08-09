@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"runtime"
 	"testing"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -13,15 +12,15 @@ func TestParseSyftPlatform(t *testing.T) {
 	tests := []struct {
 		name     string
 		platform string
+		wantNil  bool
 		wantOS   string
 		wantArch string
 		wantErr  bool
 	}{
 		{
-			name:     "empty defaults to GOARCH with linux prefix",
+			name:     "empty leaves platform unset",
 			platform: "",
-			wantOS:   "linux",
-			wantArch: runtime.GOARCH,
+			wantNil:  true,
 		},
 		{
 			name:     "architecture only gets linux prefix",
@@ -55,6 +54,10 @@ func TestParseSyftPlatform(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+			if tt.wantNil {
+				assert.Nil(t, got)
+				return
+			}
 			require.NotNil(t, got)
 			assert.Equal(t, tt.wantOS, got.OS)
 			assert.Equal(t, tt.wantArch, got.Architecture)
