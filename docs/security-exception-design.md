@@ -130,6 +130,7 @@ spec:
       status: "not_affected"
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
+      expiresAt: "2026-09-15T00:00:00Z"  # overrides spec.expiresAt for this entry
 
   posture:
     - controlID: "C-0034"
@@ -382,7 +383,7 @@ Users can inspect exception activity via `kubectl describe securityexception <na
 
 ### Expiry
 
-Expiry (`expiresAt`) is evaluated at scan time by the scanners — no controller or status update is needed. When a scanner reads a SecurityException and `expiresAt` is in the past, the exception is simply skipped. This means:
+Expiry (`expiresAt`) is evaluated at scan time by the scanners — no controller or status update is needed. It may be set at the document level (`spec.expiresAt`) and overridden per entry (`vulnerabilities[].expiresAt`); an entry without its own value inherits the document-level one. When a scanner reads a SecurityException and an entry's effective `expiresAt` is in the past, that entry is simply skipped. This means:
 
 - No component writes to the SecurityException status subresource
 - Expired exceptions remain in the cluster until explicitly deleted by the user

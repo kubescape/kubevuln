@@ -690,3 +690,128 @@ func TestSuppressingPolicies_FiltersNonIgnoreActions(t *testing.T) {
 	require.Len(t, out, 1)
 	assert.Equal(t, "allow-log4shell", out[0].Name)
 }
+
+func TestConvertPerEntryExpiresAt(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	tests := []struct {
+		name       string
+		docLevel   *metav1.Time
+		entry      *metav1.Time
+		suppressed bool
+	}{
+		{name: "entry overrides an expired document", docLevel: &past, entry: &future, suppressed: true},
+		{name: "entry overrides a live document", docLevel: &future, entry: &past, suppressed: false},
+		{name: "entry inherits an expired document", docLevel: &past, entry: nil, suppressed: false},
+		{name: "entry inherits a live document", docLevel: &future, entry: nil, suppressed: true},
+		{name: "no expiry anywhere never expires", docLevel: nil, entry: nil, suppressed: true},
+		{name: "entry expiry without a document default", docLevel: nil, entry: &past, suppressed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exceptions := []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						ExpiresAt: tt.docLevel,
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{
+								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2026-31808"},
+								Status:        sev1beta1.VulnerabilityStatusNotAffected,
+								ExpiresAt:     tt.entry,
+							},
+						},
+					},
+				},
+			}
+
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+			if tt.suppressed {
+				require.Len(t, policies, 1)
+				assert.Equal(t, "CVE-2026-31808", policies[0].VulnerabilityPolicies[0].Name)
+			} else {
+				assert.Empty(t, policies)
+			}
+		})
+	}
+}
+
+// A single document mixing per-entry expiries is the case that previously forced authors to
+// split one review into several CRDs: the document-level check expired every entry at once.
+func TestConvertPerEntryExpiresAtWithinOneDocument(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &future,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-INHERITS"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED-EARLY"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &past},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXTENDED"}, Status: sev1beta1.VulnerabilityStatusFixed, ExpiresAt: &future},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	require.Len(t, policies, 2)
+	assert.Equal(t, "CVE-INHERITS", policies[0].VulnerabilityPolicies[0].Name)
+	assert.Equal(t, "CVE-EXTENDED", policies[1].VulnerabilityPolicies[0].Name)
+}
+
+func TestConvertPerEntryExpiresAtClusterScoped(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	clusterExceptions := []sev1beta1.ClusterSecurityException{
+		{
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &past,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXTENDED"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &future},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(nil, clusterExceptions, ExceptionTarget{})
+
+	require.Len(t, policies, 1)
+	assert.Equal(t, "CVE-CLUSTER-EXTENDED", policies[0].VulnerabilityPolicies[0].Name)
+}
+
+// The policy handed downstream must carry the same expiry the suppression decision used,
+// otherwise a per-entry override would be dropped on the way to the backend.
+func TestConvertPerEntryExpiresAtSetsExpirationDate(t *testing.T) {
+	docLevel := metav1.NewTime(time.Now().Add(1 * time.Hour))
+	entryLevel := metav1.NewTime(time.Now().Add(48 * time.Hour))
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &docLevel,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-INHERITS"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-OVERRIDES"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &entryLevel},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	require.Len(t, policies, 2)
+	require.NotNil(t, policies[0].ExpirationDate)
+	assert.Equal(t, docLevel.Time, *policies[0].ExpirationDate)
+	require.NotNil(t, policies[1].ExpirationDate)
+	assert.Equal(t, entryLevel.Time, *policies[1].ExpirationDate)
+}
