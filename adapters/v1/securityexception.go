@@ -220,7 +220,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 
 	var remaining []v1beta1.Match
 	for _, m := range doc.Matches {
-		isFixed := m.Vulnerability.Fix.State == "fixed"
+		isFixed, _ := hasKnownFix(m)
 		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
@@ -335,8 +335,8 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
 // Keyed by vulnerability ID + artifact name + version (via \x00 separators) rather than CVE ID
-// alone, because an ExpiredOnFix policy suppresses only the matches of a CVE whose
-// Fix.State != "fixed" (getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
+// alone, because an ExpiredOnFix policy suppresses only the matches of a CVE that have no known
+// fix (hasKnownFix, via getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
 // have different suppression states. The manifest content is fixed across a cache hit, so these
 // keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
 func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
