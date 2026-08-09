@@ -106,7 +106,7 @@ metadata:
 spec:
   author: "team-platform@example.com"
   reason: "Accepted risks for Q2 2026 release"
-  expiresAt: "2026-07-01T00:00:00Z"
+  expiresAt: "2026-12-31T00:00:00Z"
 
   match:
     objectSelector:
@@ -130,7 +130,7 @@ spec:
       status: "not_affected"
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
-      expiresAt: "2026-09-15T00:00:00Z"  # overrides spec.expiresAt for this entry
+      expiresAt: "2026-09-15T00:00:00Z"  # expires earlier than spec.expiresAt
 
   posture:
     - controlID: "C-0034"
