@@ -87,13 +87,24 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 // rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
-// It always uses workload.ImageTagNormalized: ScanCVE/GenerateSBOM/ScanCP payloads populate
-// ImageHash while ScanRegistry payloads never do (registryScanCommandToScanCommand leaves it
-// empty), so a fallback chain that preferred ImageHash resolved to a different key per flow and
-// let a 429 recorded on one flow go unnoticed on the other for the same image. ImageTagNormalized
-// is the one field every flow populates, so it's the only reference guaranteed to line up.
+// It uses workload.ImageTagNormalized along with a hash of any provided credentials.
+// Including the credentials ensures that a 429 encountered by an unauthenticated pull
+// does not cause a cross-tenant denial-of-service for workloads that use valid imagePullSecrets
+// to bypass the rate limit. ImageHash is avoided because ScanRegistry payloads never populate it.
 func rateLimitCacheKey(workload domain.ScanCommand) string {
-	return workload.ImageTagNormalized
+	if len(workload.CredentialsList) == 0 {
+		return workload.ImageTagNormalized
+	}
+	h := sha256.New()
+	for _, cred := range workload.CredentialsList {
+		h.Write([]byte(cred.Username))
+		h.Write([]byte(cred.Password))
+		h.Write([]byte(cred.Auth))
+		h.Write([]byte(cred.IdentityToken))
+		h.Write([]byte(cred.RegistryToken))
+		h.Write([]byte(cred.ServerAddress))
+	}
+	return fmt.Sprintf("%s|%x", workload.ImageTagNormalized, h.Sum(nil))
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
