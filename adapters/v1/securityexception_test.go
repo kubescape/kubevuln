@@ -1012,7 +1012,7 @@ func TestConvertAffectedSuppression(t *testing.T) {
 				},
 			}
 
-			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 			if tt.wantSuppressed {
 				require.Len(t, policies, 1)
@@ -1043,7 +1043,7 @@ func TestConvertResolvingStatusesUnchangedByAffected(t *testing.T) {
 				},
 			}
 
-			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 			require.Len(t, policies, 1, "no actionStatement or response should be needed")
 		})
@@ -1067,7 +1067,7 @@ func TestConvertAffectedRecordsProvenance(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	require.Len(t, policies, 1)
 	assert.Equal(t, "WAF mitigation in place, ticket SEC-1234", policies[0].Attributes["actionStatement"])
