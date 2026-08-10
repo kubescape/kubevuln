@@ -34,13 +34,21 @@ func PackageVersion(name string) string {
 var offendingChars = regexp.MustCompile("[@:/ ._]")
 
 // SanitizeLabel sanitizes a string to be a valid DNS1123 label.
+//
+// Lowercasing and trimming both ends matter because LabelsFromImageID drops any label that
+// fails validation, so anything this leaves invalid disappears silently rather than being
+// stored in a degraded form:
+//
+//   - A DNS1123 label must be lowercase, while an image tag may legally contain uppercase
+//     (the reference grammar allows [a-zA-Z0-9_][a-zA-Z0-9._-]*), so a tag such as v1.0-RC1
+//     produced an invalid label.
+//   - A DNS1123 label must start and end alphanumeric, and adjacent offending characters
+//     collapse into several dashes (v1_. becomes v1--), so stripping a single trailing dash
+//     was not enough. Truncation at 63 can also land on a dash, and a leading offending
+//     character produces a leading one.
 func SanitizeLabel(s string) string {
-	s2 := truncate.Truncate(offendingChars.ReplaceAllString(s, "-"), 63, "", truncate.PositionEnd)
-	// remove trailing dash
-	if len(s2) > 0 && s2[len(s2)-1] == '-' {
-		return s2[:len(s2)-1]
-	}
-	return s2
+	s2 := truncate.Truncate(offendingChars.ReplaceAllString(strings.ToLower(s), "-"), 63, "", truncate.PositionEnd)
+	return strings.Trim(s2, "-")
 }
 
 // LabelsFromImageID returns a map of labels from an image ID.
