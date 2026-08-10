@@ -1239,7 +1239,7 @@ func TestShouldRetryReport(t *testing.T) {
 
 func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	backend := &BackendAdapter{
-		clusterConfig: armometadata.ClusterConfig{},
+		clusterConfig:         armometadata.ClusterConfig{},
 		securityExceptionRepo: &testSecurityExceptionRepo{},
 		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
@@ -1251,7 +1251,7 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), domain.TimestampKey{}, int64(123456))
 	ctx = context.WithValue(ctx, domain.ScanIDKey{}, "56275825-4c07-4e3f-9a4c-53f05b0d0c2e")
-	
+
 	// Create a scan command with non-string args
 	workload := domain.ScanCommand{
 		Wlid: "wlid://cluster-x/namespace-y/deployment-z",
@@ -1260,14 +1260,36 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 		},
 	}
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
-	
+
 	cve := domain.CVEManifest{
 		Content: &v1beta1.GrypeDocument{},
 	}
 	cvep := domain.CVEManifest{}
-	
+
 	// Ensure it does NOT panic
 	assert.NotPanics(t, func() {
 		_ = backend.SubmitCVE(ctx, cve, cvep)
 	})
+}
+
+func TestBackendAdapter_ReportError_NilError(t *testing.T) {
+	backend := &BackendAdapter{}
+	err := backend.ReportError(context.Background(), nil)
+	assert.NoError(t, err)
+}
+
+func TestBackendAdapter_ReportErrorAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	backend := &BackendAdapter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := backend.ReportError(ctx, errors.New("boom"))
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBackendAdapter_SendStatusAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	backend := &BackendAdapter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := backend.SendStatus(ctx, 0)
+	assert.ErrorIs(t, err, context.Canceled)
 }
