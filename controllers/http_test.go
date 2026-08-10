@@ -581,6 +581,9 @@ func TestHTTPController_MetricsEndpoint_RecordsRejection(t *testing.T) {
 
 func TestHTTPController_MetricsEndpoint_ExportsScanFallbackMetrics(t *testing.T) {
 	c := NewHTTPController(services.NewMockScanService(true), 1)
+	t.Cleanup(func() {
+		c.Shutdown(5 * time.Second)
+	})
 	m, err := metrics.New()
 	require.NoError(t, err)
 	_, err = c.WithMetrics(m)

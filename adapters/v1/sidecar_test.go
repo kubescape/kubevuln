@@ -174,6 +174,32 @@ func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, helpersv1.TooLarge, sbom.Status)
 	assert.Equal(t, 3, callCount)
+	assert.Equal(t, domain.ReasonScannerOOM, sbom.Annotations[domain.StatusReasonAnnotationKey])
+}
+
+func TestSidecarSBOMAdapter_CreateSBOM_TransportUnavailableDoesNotBecomeTooLarge(t *testing.T) {
+	callCount := 0
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			callCount++
+			return nil, sbomscanner.ErrScannerUnavailable
+		},
+	}
+
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+
+	for i := 0; i < maxCrashRetries+1; i++ {
+		sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "unavailable-image:latest", domain.RegistryOptions{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sbomscanner.ErrScannerUnavailable)
+		assert.Empty(t, sbom.Status)
+		assert.NotContains(t, sbom.Annotations, domain.StatusReasonAnnotationKey)
+	}
+
+	assert.Equal(t, maxCrashRetries+1, callCount)
+	assert.Empty(t, adapter.retryCount, "transport errors must not be tracked as crash retries")
 }
 
 // TestSidecarSBOMAdapter_CreateSBOM_EmptyDigestSendsTag is the regression guard for

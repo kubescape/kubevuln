@@ -36,6 +36,16 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonScannerOOMKilled,
 		},
 		{
+			name:     "sidecar unavailable returns generic sbom failure",
+			err:      fmt.Errorf("scan failed: %w", sbomscanner.ErrScannerUnavailable),
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name:     "direct sidecar unavailable",
+			err:      sbomscanner.ErrScannerUnavailable,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
 			name:     "context deadline exceeded returns timeout",
 			err:      fmt.Errorf("scan: %w", context.DeadlineExceeded),
 			expected: scanfailure.ReasonScanTimeout,

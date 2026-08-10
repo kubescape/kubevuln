@@ -26,6 +26,9 @@ func classifySBOMError(err error) string {
 	if errors.Is(err, sbomscanner.ErrScannerCrashed) {
 		return scanfailure.ReasonScannerOOMKilled
 	}
+	if errors.Is(err, sbomscanner.ErrScannerUnavailable) {
+		return scanfailure.ReasonSBOMGenerationFailed
+	}
 
 	// Context deadline exceeded → scan timeout
 	if errors.Is(err, context.DeadlineExceeded) {

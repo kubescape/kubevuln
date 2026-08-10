@@ -281,6 +281,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		if errors.As(err, &platformErr) {
 			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		}
+		// Requested-but-unavailable platforms surface here as *image.ErrPlatformMismatch
+		// (from stereoscope, once it has positively resolved the image but its OS/arch don't
+		// match options.Platform). Propagated as-is: classifySBOMError in core/services
+		// recognizes it via errors.As and reports a distinct "platform not found" reason
+		// instead of the generic SBOM-generation-failed fallback (see #512).
 		return domainSBOM, err
 	}
 

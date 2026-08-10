@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrScannerCrashed  = errors.New("SBOM scanner sidecar crashed during scan")
-	ErrScannerNotReady = errors.New("SBOM scanner sidecar not ready")
+	ErrScannerCrashed     = errors.New("SBOM scanner sidecar crashed during scan")
+	ErrScannerUnavailable = errors.New("SBOM scanner sidecar unavailable during scan")
+	ErrScannerNotReady    = errors.New("SBOM scanner sidecar not ready")
 )
 
 // ScanRequest contains all parameters needed for a registry-based SBOM scan.
