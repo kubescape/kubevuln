@@ -31,6 +31,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
+	
+	vexcontroller "github.com/kubescape/kubevuln/pkg/vex/controller"
+	"github.com/kubescape/kubevuln/pkg/vexsource/v1beta1"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func main() {
@@ -208,6 +212,34 @@ func main() {
 		logger.L().Info("starting server")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.L().Ctx(ctx).Fatal("router error", helpers.Error(err))
+		}
+	}()
+
+	// Initialize controller-runtime Manager for VEXSource reconciliation
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme: runtime.NewScheme(),
+	})
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("unable to start manager", helpers.Error(err))
+	}
+
+	if err := v1beta1.AddToScheme(mgr.GetScheme()); err != nil {
+		logger.L().Ctx(ctx).Fatal("unable to register scheme", helpers.Error(err))
+	}
+
+	reconciler := &vexcontroller.VEXSourceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err = reconciler.SetupWithManager(mgr); err != nil {
+		logger.L().Ctx(ctx).Fatal("unable to create controller", helpers.Error(err))
+	}
+
+	// Start the controller manager in a goroutine
+	go func() {
+		logger.L().Info("starting VEXSource controller manager")
+		if err := mgr.Start(ctx); err != nil {
+			logger.L().Ctx(ctx).Fatal("manager error", helpers.Error(err))
 		}
 	}()
 
