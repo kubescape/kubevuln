@@ -1272,3 +1272,25 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 		_ = backend.SubmitCVE(ctx, cve, cvep)
 	})
 }
+
+func TestBackendAdapter_ReportError_NilError(t *testing.T) {
+	backend := &BackendAdapter{}
+	err := backend.ReportError(context.Background(), nil)
+	assert.NoError(t, err)
+}
+
+func TestBackendAdapter_ReportErrorAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	backend := &BackendAdapter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := backend.ReportError(ctx, errors.New("boom"))
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBackendAdapter_SendStatusAbortsPromptlyOnCtxCancellation(t *testing.T) {
+	backend := &BackendAdapter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := backend.SendStatus(ctx, 0)
+	assert.ErrorIs(t, err, context.Canceled)
+}

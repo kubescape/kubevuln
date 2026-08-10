@@ -11,8 +11,15 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 )
+
+// securityExceptionAPIVersion is the apiVersion recorded on the ObjectReference used
+// when emitting suppression Events, matching pkg/securityexception/v1beta1's group/version.
+const securityExceptionAPIVersion = "kubescape.io/v1beta1"
 
 // suppressionSource identifies the CRD object a suppression provenance record originated
 // from, so a suppressed CVE can be traced back to the exception (and its scope) that
@@ -21,6 +28,7 @@ type suppressionSource struct {
 	kind      string // "SecurityException" or "ClusterSecurityException"
 	name      string
 	namespace string
+	uid       types.UID
 }
 
 // ConvertToVulnerabilityExceptionPolicies converts SecurityException and
@@ -29,8 +37,9 @@ type suppressionSource struct {
 //
 // Only exceptions whose spec.match applies to target are converted, so an
 // exception scoped by resources/images/objectSelector/namespaceSelector is not
-// applied to workloads it does not target. Expired exceptions are skipped, and
-// counted in the returned domain.ExceptionStats.ExpiredBySource.
+// applied to workloads it does not target. Expired vulnerability entries (see
+// effectiveExpiresAt) are skipped, and counted in the returned
+// domain.ExceptionStats.ExpiredBySource.
 func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) ([]armotypes.VulnerabilityExceptionPolicy, domain.ExceptionStats) {
 	var policies []armotypes.VulnerabilityExceptionPolicy
 	stats := domain.ExceptionStats{ExpiredBySource: map[string]int{}}
@@ -39,10 +48,6 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range exceptions {
 		se := &exceptions[i]
-		if isExpired(se.Spec.ExpiresAt, now) {
-			stats.ExpiredBySource["SecurityException"]++
-			continue
-		}
 		if !matchExceptionTarget(se.Spec.Match, target, false) {
 			continue
 		}
@@ -51,10 +56,15 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			if !shouldSuppress(vuln) {
 				continue
 			}
+			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
+				stats.ExpiredBySource["SecurityException"]++
+				continue
+			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
 				kind:      "SecurityException",
 				name:      se.Name,
 				namespace: se.Namespace,
+				uid:       se.UID,
 			})
 			policies = append(policies, p)
 		}
@@ -62,10 +72,6 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range clusterExceptions {
 		cse := &clusterExceptions[i]
-		if isExpired(cse.Spec.ExpiresAt, now) {
-			stats.ExpiredBySource["ClusterSecurityException"]++
-			continue
-		}
 		if !matchExceptionTarget(cse.Spec.Match, target, true) {
 			continue
 		}
@@ -73,9 +79,14 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			if !shouldSuppress(vuln) {
 				continue
 			}
+			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
+				stats.ExpiredBySource["ClusterSecurityException"]++
+				continue
+			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
 				kind: "ClusterSecurityException",
 				name: cse.Name,
+				uid:  cse.UID,
 			})
 			policies = append(policies, p)
 		}
@@ -86,6 +97,19 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
 	return expiresAt != nil && expiresAt.Time.Before(now)
+}
+
+// effectiveExpiresAt resolves the expiry governing a single vulnerability entry: the
+// per-entry expiresAt when set, otherwise the document-level default.
+//
+// Expiry is therefore decided per entry rather than per document. A document-level
+// expiresAt still expires every entry that does not override it, so documents written
+// before per-entry expiry existed behave exactly as they did before.
+func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException) *metav1.Time {
+	if vuln.ExpiresAt != nil {
+		return vuln.ExpiresAt
+	}
+	return spec.ExpiresAt
 }
 
 // shouldSuppress reports whether a VulnerabilityException entry may be
@@ -129,8 +153,8 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 		Reason:                spec.Reason,
 	}
 
-	if spec.ExpiresAt != nil {
-		t := spec.ExpiresAt.Time
+	if exp := effectiveExpiresAt(spec, vuln); exp != nil {
+		t := exp.Time
 		p.ExpirationDate = &t
 	}
 
@@ -157,6 +181,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 	}
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
+	}
+	if src.uid != "" {
+		attrs["sourceUID"] = string(src.uid)
 	}
 	if j := strings.TrimSpace(vuln.Justification); j != "" {
 		attrs["justification"] = j
@@ -216,12 +243,18 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 }
 
 // ApplySecurityExceptions moves CVEs covered by exception policies from
-// doc.Matches to doc.IgnoredMatches with applied ignore rules. The returned map counts each
-// suppression by the exception's sourceKind ("SecurityException"/"ClusterSecurityException"),
-// at the same per-policy granularity logSuppression already logs at; a policy with no
-// sourceKind attribute (e.g. a cloud-sourced exception, not a CRD) is not counted, since this
-// return value only feeds the CRD-suppression metric.
-func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions) map[string]int {
+// doc.Matches to doc.IgnoredMatches with applied ignore rules.
+//
+// recorder is optional: when nil, suppression is still logged via logSuppression but no
+// K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
+// deployments without SecurityException CRD integration enabled) are unaffected.
+//
+// The returned map counts each suppression by the exception's sourceKind
+// ("SecurityException"/"ClusterSecurityException"), at the same per-policy granularity
+// logSuppression already logs at; a policy with no sourceKind attribute (e.g. a
+// cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
+// the CRD-suppression metric.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
 	matchedBySource := map[string]int{}
 	if doc == nil || len(exceptions) == 0 {
 		return matchedBySource
@@ -229,7 +262,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 
 	var remaining []v1beta1.Match
 	for _, m := range doc.Matches {
-		isFixed := m.Vulnerability.Fix.State == "fixed"
+		isFixed, _ := hasKnownFix(m)
 		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
@@ -238,7 +271,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 					{Vulnerability: m.Vulnerability.ID},
 				},
 			})
-			logSuppression(m, matched)
+			logSuppression(m, matched, recorder)
 			for _, p := range suppressingPolicies(matched) {
 				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
 					matchedBySource[kind]++
@@ -270,7 +303,11 @@ func suppressingPolicies(matched []armotypes.VulnerabilityExceptionPolicy) []arm
 // matched, its scope, and the stated reason/justification. This is logged rather than stored on
 // the manifest because the filtered manifest's IgnoreRule (github.com/kubescape/storage) has no
 // fields for this provenance; see buildSuppressionAttributes for where it is captured.
-func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) {
+//
+// When recorder is non-nil, the same suppression is also recorded as a K8s Event on the
+// SecurityException/ClusterSecurityException object that caused it, so it shows up in
+// `kubectl describe`. The log line is always written regardless of recorder.
+func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy, recorder record.EventRecorder) {
 	for _, p := range suppressingPolicies(matched) {
 		fields := []helpers.IDetails{
 			helpers.String("cve", m.Vulnerability.ID),
@@ -301,7 +338,36 @@ func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionP
 			fields = append(fields, helpers.String("normalizedTarget", target))
 		}
 		logger.L().Info("CVE suppressed by security exception", fields...)
+
+		emitSuppressionEvent(recorder, p, m)
 	}
+}
+
+// emitSuppressionEvent records a K8s Event on the CRD object that produced p, if recorder is
+// configured and p carries enough provenance (kind, name, UID) to build an ObjectReference.
+// A manually-built *corev1.ObjectReference bypasses live Get and scheme registration entirely
+// (client-go/tools/reference.GetReference short-circuits on it), so no K8s client access beyond
+// the recorder itself is needed here.
+func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.VulnerabilityExceptionPolicy, m v1beta1.Match) {
+	if recorder == nil {
+		return
+	}
+	kind, _ := p.Attributes["sourceKind"].(string)
+	uid, _ := p.Attributes["sourceUID"].(string)
+	if kind == "" || p.Name == "" || uid == "" {
+		return
+	}
+	namespace, _ := p.Attributes["sourceNamespace"].(string)
+
+	ref := &corev1.ObjectReference{
+		Kind:       kind,
+		APIVersion: securityExceptionAPIVersion,
+		Name:       p.Name,
+		Namespace:  namespace,
+		UID:        types.UID(uid),
+	}
+	recorder.Eventf(ref, corev1.EventTypeNormal, "VulnerabilitySuppressed",
+		"Suppressed %s in package %s", m.Vulnerability.ID, m.Artifact.Name)
 }
 
 // RestoreSuppressedMatches is the inverse of ApplySecurityExceptions: it returns a copy of doc
@@ -350,8 +416,8 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
 // Keyed by vulnerability ID + artifact name + version (via \x00 separators) rather than CVE ID
-// alone, because an ExpiredOnFix policy suppresses only the matches of a CVE whose
-// Fix.State != "fixed" (getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
+// alone, because an ExpiredOnFix policy suppresses only the matches of a CVE that have no known
+// fix (hasKnownFix, via getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
 // have different suppression states. The manifest content is fixed across a cache hit, so these
 // keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
 func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
