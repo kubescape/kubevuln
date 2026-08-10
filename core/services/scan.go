@@ -97,8 +97,9 @@ func rateLimitCacheKey(workload domain.ScanCommand) string {
 	}
 	h := sha256.New()
 	for _, cred := range workload.CredentialsList {
-		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
+		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
 			len(cred.Username), cred.Username,
+			len(cred.Password), cred.Password, // codeql[go/weak-password-hashing]
 			len(cred.Auth), cred.Auth,
 			len(cred.IdentityToken), cred.IdentityToken,
 			len(cred.RegistryToken), cred.RegistryToken,

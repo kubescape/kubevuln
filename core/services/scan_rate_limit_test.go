@@ -80,3 +80,24 @@ func TestScanService_RateLimitCacheKey_BoundaryCollision(t *testing.T) {
 	require.NotEqual(t, rateLimitCacheKey(workload1), rateLimitCacheKey(workload2),
 		"Cache keys must differ for split-field collisions")
 }
+
+func TestScanService_RateLimitCacheKey_SameUsernameDifferentPassword(t *testing.T) {
+	imageTag := "docker.io/library/nginx:latest"
+
+	workload1 := domain.ScanCommand{
+		ImageTagNormalized: imageTag,
+		CredentialsList: []registry.AuthConfig{
+			{Username: "shared-user", Password: "password-A"},
+		},
+	}
+
+	workload2 := domain.ScanCommand{
+		ImageTagNormalized: imageTag,
+		CredentialsList: []registry.AuthConfig{
+			{Username: "shared-user", Password: "password-B"},
+		},
+	}
+
+	require.NotEqual(t, rateLimitCacheKey(workload1), rateLimitCacheKey(workload2),
+		"Cache keys must differ for workloads with same Username but different Passwords")
+}
