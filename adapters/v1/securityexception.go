@@ -45,15 +45,15 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range exceptions {
 		se := &exceptions[i]
-		if isExpired(se.Spec.ExpiresAt, now) {
-			continue
-		}
 		if !matchExceptionTarget(se.Spec.Match, target, false) {
 			continue
 		}
 		namespace := se.Namespace
 		for _, vuln := range se.Spec.Vulnerabilities {
 			if !shouldSuppress(vuln) {
+				continue
+			}
+			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -68,14 +68,14 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range clusterExceptions {
 		cse := &clusterExceptions[i]
-		if isExpired(cse.Spec.ExpiresAt, now) {
-			continue
-		}
 		if !matchExceptionTarget(cse.Spec.Match, target, true) {
 			continue
 		}
 		for _, vuln := range cse.Spec.Vulnerabilities {
 			if !shouldSuppress(vuln) {
+				continue
+			}
+			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
@@ -92,6 +92,19 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
 	return expiresAt != nil && expiresAt.Time.Before(now)
+}
+
+// effectiveExpiresAt resolves the expiry governing a single vulnerability entry: the
+// per-entry expiresAt when set, otherwise the document-level default.
+//
+// Expiry is therefore decided per entry rather than per document. A document-level
+// expiresAt still expires every entry that does not override it, so documents written
+// before per-entry expiry existed behave exactly as they did before.
+func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException) *metav1.Time {
+	if vuln.ExpiresAt != nil {
+		return vuln.ExpiresAt
+	}
+	return spec.ExpiresAt
 }
 
 // shouldSuppress reports whether a VulnerabilityException entry may be
@@ -135,8 +148,8 @@ func buildPolicy(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vulnerabil
 		Reason:                spec.Reason,
 	}
 
-	if spec.ExpiresAt != nil {
-		t := spec.ExpiresAt.Time
+	if exp := effectiveExpiresAt(spec, vuln); exp != nil {
+		t := exp.Time
 		p.ExpirationDate = &t
 	}
 
