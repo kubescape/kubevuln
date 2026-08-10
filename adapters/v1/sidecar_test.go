@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -358,4 +359,37 @@ func TestSidecarSBOMAdapter_CreateSBOM_CrashRetry_EvictsStaleEntries(t *testing.
 	defer adapter.mu.Unlock()
 	assert.NotContains(t, adapter.retryCount, "one-shot-image:latest", "stale entry must be evicted")
 	assert.Contains(t, adapter.retryCount, "another-image:latest")
+}
+
+// The scanner protocol carries the SBOM size limit as an int32, so a configured maxSBOMSize
+// above math.MaxInt32 wraps on a plain conversion. 2 GiB and 6 GiB become negative and 4 GiB
+// becomes zero, each of which makes the scanner classify every SBOM as TooLarge and stop
+// scanning entirely, while 5 GiB silently becomes a 1 GiB limit. Clamping keeps the limit at
+// the largest value the protocol can express instead.
+func TestSBOMSizeLimitForWire(t *testing.T) {
+	const giB = 1024 * 1024 * 1024
+
+	tests := []struct {
+		name        string
+		maxSBOMSize int
+		want        int32
+	}{
+		{name: "default 20MiB is unchanged", maxSBOMSize: 20 * 1024 * 1024, want: 20 * 1024 * 1024},
+		{name: "zero is unchanged", maxSBOMSize: 0, want: 0},
+		{name: "exactly MaxInt32 is unchanged", maxSBOMSize: math.MaxInt32, want: math.MaxInt32},
+		{name: "one over MaxInt32 clamps", maxSBOMSize: math.MaxInt32 + 1, want: math.MaxInt32},
+		{name: "2 GiB clamps instead of going negative", maxSBOMSize: 2 * giB, want: math.MaxInt32},
+		{name: "4 GiB clamps instead of becoming zero", maxSBOMSize: 4 * giB, want: math.MaxInt32},
+		{name: "5 GiB clamps instead of silently becoming 1 GiB", maxSBOMSize: 5 * giB, want: math.MaxInt32},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sbomSizeLimitForWire(tt.maxSBOMSize)
+			assert.Equal(t, tt.want, got)
+			if tt.maxSBOMSize > 0 {
+				assert.Positive(t, got, "a positive configured limit must stay positive on the wire")
+			}
+		})
+	}
 }
