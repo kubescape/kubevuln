@@ -721,6 +721,8 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			body := w.Body.String()
 			wantSeries := `kubevuln_scans_completed_total{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
 			assert.True(t, strings.Contains(body, wantSeries), body)
+			wantDurationSeries := `kubevuln_scan_duration_seconds_count{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
+			assert.True(t, strings.Contains(body, wantDurationSeries), body)
 		})
 	}
 }

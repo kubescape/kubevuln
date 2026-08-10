@@ -31,10 +31,11 @@ field for backend debugging; the reason code drives the user-facing text (mapped
 
 Failure cases: CVE scan failure, SBOM generation failure, OOM kill, backend post failure.
 
-The same reason code also lands on the HTTP controller's Prometheus metrics: `recordScan`
-(`controllers/http.go`) wraps a scan flow's error in `*domain.ScanError` at the point of
-failure — the same call site that already computes the reason for `ReportScanFailure` above —
-and attaches it as a `reason` attribute on `kubevuln_scans_completed_total` and
+The same reason code also lands on the HTTP controller's Prometheus metrics: the scan services
+create the `*domain.ScanError` at the point of failure — the same call site that already
+computes the reason for `ReportScanFailure` above — and `recordScan` (`controllers/http.go`)
+reads it back off the error the controller receives, attaching it as a `reason` attribute on
+`kubevuln_scans_completed_total` and
 `kubevuln_scan_duration_seconds` (see [API.md](API.md#metrics)). This gives an operator with
 only `/metrics` access (no backend `ReportScanFailure` stream, no pod logs) the same
 distinction between failure causes that this document describes, instead of a single opaque

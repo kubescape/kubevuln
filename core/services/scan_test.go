@@ -139,13 +139,15 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 				_, err := s.ValidateGenerateSBOM(ctx, workload)
 				assert.Equal(t, domain.ErrTooManyRequests, err)
 			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
 			if tt.timeout {
 				// a timed-out/too-large SBOM must be surfaced as a failure (see #540), not
 				// silently stored and reported as success like every other scan flow already does
 				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
-				var scanErr *domain.ScanError
-				require.ErrorAs(t, err, &scanErr)
-				assert.Equal(t, scanfailure.ReasonSBOMIncomplete, scanErr.Reason)
 			}
 		})
 	}
@@ -610,6 +612,9 @@ func TestScanService_ScanCVE(t *testing.T) {
 				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
 				assert.Equal(t, tt.wantReason, scanErr.Reason)
 			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
+			}
 		})
 	}
 }
@@ -985,6 +990,9 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				var scanErr *domain.ScanError
 				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
 				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
