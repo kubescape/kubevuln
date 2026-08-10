@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -73,6 +77,34 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 		assert.Equal(t, "https://report.armo.cloud", services.GetReportReceiverHttpUrl())
 	})
 
+	t.Run("does not mutate http.DefaultClient when API_URL discovery runs", func(t *testing.T) {
+		dir := t.TempDir()
+		clusterData := `{
+			"backendOpenAPI":"https://api.armosec.io/api",
+			"eventReceiverRestURL":"https://report.armo.cloud"
+		}`
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(clusterData), 0o600)
+		require.NoError(t, err)
+
+		originalDefaultClient := http.DefaultClient
+		http.DefaultClient = &http.Client{}
+		t.Cleanup(func() {
+			http.DefaultClient = originalDefaultClient
+		})
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		defaultClient := http.DefaultClient
+		services, err := LoadBackendServicesConfig(dir, server.URL)
+		require.NoError(t, err)
+		assert.Same(t, defaultClient, http.DefaultClient)
+		assert.Zero(t, http.DefaultClient.Timeout)
+		assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
+	})
+
 	t.Run("returns joined error when discovery and fallback fail", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
@@ -84,6 +116,24 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 		assert.Contains(t, err.Error(), "404")
 		assert.Contains(t, err.Error(), "clusterData.json")
 	})
+}
+
+func TestLoadBackendServicesFromAPI_UsesProvidedTimeoutBoundClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"version":"v3","response":{"api-server":"https://api.armosec.io","event-receiver-http":"https://report.armo.cloud"}}`))
+	}))
+	defer server.Close()
+
+	client, err := v3.NewServiceDiscoveryClientV3(server.URL)
+	require.NoError(t, err)
+
+	start := time.Now()
+	_, err = loadBackendServicesFromAPI(client, &http.Client{Timeout: 20 * time.Millisecond})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestNormalizeServiceURL(t *testing.T) {
