@@ -33,6 +33,8 @@ func TestCheckIPAllowed(t *testing.T) {
 		{"multicast", "224.0.0.1", true},
 		{"real public IPv4 (Google DNS)", "8.8.8.8", false},
 		{"real public IPv4 (Cloudflare DNS)", "1.1.1.1", false},
+		{"carrier-grade NAT / cloud internal (100.64.0.0/10)", "100.64.0.1", true},
+		{"0.0.0.0/8 (routes to localhost on Linux)", "0.0.0.1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,21 +101,24 @@ func TestFetch_BlocksRealLoopbackServer(t *testing.T) {
 }
 
 func TestFetch_RejectsOversizedBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, strings.Repeat("x", 100))
 	}))
 	defer server.Close()
 
-	// Use the Fetcher's http.Client directly against the plain-http test
-	// server to isolate the size-limiting logic from the SSRF dial guard,
-	// which would otherwise also (correctly) reject this loopback target.
+	// Use the TLS test server's own client (which trusts its self-signed
+	// cert) instead of New()'s SSRF-guarded client, since the server
+	// necessarily listens on loopback, which SafeFetch correctly refuses
+	// to dial (covered separately by TestFetch_BlocksRealLoopbackServer).
+	// This still exercises Fetch's real logic end-to-end: scheme
+	// validation, request execution, and MaxBytes/ErrTooLarge
+	// enforcement, via an actual https:// call to Fetch itself.
 	f := &Fetcher{Client: server.Client(), MaxBytes: 10}
-	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
-	require.NoError(t, err)
-	resp, err := f.Client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := f.Fetch(context.Background(), server.URL)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTooLarge)
+	assert.Nil(t, body)
 }
 
 func TestErrorsAreDistinguishable(t *testing.T) {

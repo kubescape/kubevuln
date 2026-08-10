@@ -17,6 +17,28 @@ import (
 	"time"
 )
 
+// carrierGradeNAT is RFC 6598's shared address space (100.64.0.0/10),
+// used inside cloud provider and Kubernetes internal networks (AWS CNI,
+// GCP, Tailscale, pod CIDRs). net.IP.IsPrivate() does not cover this
+// range, so it must be checked explicitly.
+var carrierGradeNAT = mustParseCIDR("100.64.0.0/10")
+
+// thisHostOnThisNetwork is RFC 1122's 0.0.0.0/8. Every address in this
+// range other than 0.0.0.0 itself is non-zero, so it passes
+// IsUnspecified(), and none of it is covered by IsLoopback() or
+// IsPrivate() - but on Linux, dialing any address in this range
+// (e.g. 0.0.0.1) actually connects to 127.0.0.1 (localhost), making it a
+// working bypass of the loopback check if left unhandled.
+var thisHostOnThisNetwork = mustParseCIDR("0.0.0.0/8")
+
+func mustParseCIDR(s string) *net.IPNet {
+	_, ipnet, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(err)
+	}
+	return ipnet
+}
+
 var (
 	// ErrScheme is returned when a URL is not https.
 	ErrScheme = errors.New("only https URLs are allowed")
@@ -117,7 +139,9 @@ func checkIPAllowed(ip net.IP) error {
 		ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
-		ip.IsMulticast() {
+		ip.IsMulticast() ||
+		carrierGradeNAT.Contains(ip) ||
+		thisHostOnThisNetwork.Contains(ip) {
 		return fmt.Errorf("%w: %s", ErrBlockedIP, ip)
 	}
 	return nil
