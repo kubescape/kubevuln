@@ -788,7 +788,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
 		// store filtered CVE
 		if s.storage {
@@ -802,7 +802,12 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+			// Only publish VEX built from a known-complete exception set, matching how
+			// ScanCVE and ScanCP gate their own calls: a degraded fetch would otherwise
+			// emit a document asserting fewer suppressions than the user configured.
+			if exceptionsComplete {
+				s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+			}
 		}
 	} else {
 		// A cached manifest was filtered against the exception set at store time.

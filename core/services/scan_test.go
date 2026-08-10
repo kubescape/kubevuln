@@ -2380,3 +2380,30 @@ func TestScanService_ScanRegistry_CacheHit_ExceptionChangeUpdatesVEX(t *testing.
 	require.NotNil(t, repo.vexCalls[0].Content)
 	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
 }
+
+// A degraded exception fetch must not publish a VEX document from a partial set on the
+// registry cache-miss path either, matching how ScanCVE and ScanCP gate their own calls.
+func TestScanService_ScanRegistry_CacheMiss_DegradedFetchSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveAdapter, repo,
+		platform, adapters.NewMockRelevancyAdapter(), true, true, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	ctx, err := s.ValidateScanRegistry(ctx, domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+		JobID:              "job-123",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	assert.Empty(t, repo.vexCalls, "an incomplete exception set must not produce a VEX document")
+}
