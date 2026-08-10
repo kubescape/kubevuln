@@ -460,6 +460,7 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
 		ImageId:         u.Host + "/test-image",
 		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/amd64",
 		MaxImageSize:    1, // Exceeded by layer size
 		InsecureUseHttp: true,
 	})
