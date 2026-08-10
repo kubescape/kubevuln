@@ -16,17 +16,16 @@ vet:
 	go vet ./...
 
 lint:
-	@base=$$(git merge-base HEAD upstream/main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true); \
+	@base_ref=$${GITHUB_BASE_REF:-main}; \
+	base=$$(git merge-base HEAD upstream/$$base_ref 2>/dev/null || git merge-base HEAD origin/$$base_ref 2>/dev/null || true); \
 	if [ -n "$$base" ]; then \
-		golangci-lint run --out-format=line-number --issues-exit-code=0 | \
-		go run github.com/golangci/revgrep/cmd/revgrep@latest "$$base"; \
+		golangci-lint run --timeout=5m --new-from-rev="$$base"; \
 	else \
-		golangci-lint run --out-format=line-number --issues-exit-code=0 | \
-		go run github.com/golangci/revgrep/cmd/revgrep@latest; \
+		golangci-lint run --timeout=5m; \
 	fi
 
 lint-all:
-	golangci-lint run
+	golangci-lint run --timeout=5m
 
 verify: build test vet lint
 
