@@ -705,3 +705,83 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 		})
 	}
 }
+
+// buildPolicy expands one vulnerability entry into a VulnerabilityPolicy per id and alias,
+// so an exception listing an alias equal to its id, or repeating an alias, used to make the
+// same policy match several times. Every consumer then counted it that many times: duplicate
+// ExceptionApplied entries sent to the backend, and one suppression log line and Kubernetes
+// Event per duplicate.
+func TestGetCVEExceptionMatch_PolicyMatchesAtMostOnce(t *testing.T) {
+	policy := func(names ...string) armotypes.VulnerabilityExceptionPolicy {
+		vp := make([]armotypes.VulnerabilityPolicy, 0, len(names))
+		for _, n := range names {
+			vp = append(vp, armotypes.VulnerabilityPolicy{Name: n})
+		}
+		return armotypes.VulnerabilityExceptionPolicy{
+			PortalBase:            armotypes.PortalBase{Name: "exception"},
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: vp,
+		}
+	}
+
+	tests := []struct {
+		name    string
+		list    []armotypes.VulnerabilityExceptionPolicy
+		cve     string
+		wantLen int
+	}{
+		{
+			name:    "id repeated as its own alias",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228", "CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 1,
+		},
+		{
+			name:    "the same alias listed twice",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228", "GHSA-jfh8", "GHSA-jfh8")},
+			cve:     "GHSA-jfh8",
+			wantLen: 1,
+		},
+		{
+			name:    "case-insensitive duplicates still collapse",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("cve-2021-44228", "CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 1,
+		},
+		{
+			name:    "distinct policies both still match",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228"), policy("CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 2,
+		},
+		{
+			name:    "no match",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228")},
+			cve:     "CVE-2023-44487",
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getCVEExceptionMatchCVENameFromList(tt.list, tt.cve, false)
+			assert.Len(t, got, tt.wantLen)
+		})
+	}
+}
+
+// An ExpiredOnFix policy is skipped as a whole when filterFixed is set, regardless of which
+// of its id/alias entries names the CVE.
+func TestGetCVEExceptionMatch_ExpiredOnFixSkipsWholePolicy(t *testing.T) {
+	expiredOnFix := true
+	p := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase:            armotypes.PortalBase{Name: "exception"},
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}, {Name: "GHSA-jfh8"}},
+		ExpiredOnFix:          &expiredOnFix,
+	}
+
+	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", true))
+	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "GHSA-jfh8", true))
+	assert.Len(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", false), 1)
+}

@@ -319,12 +319,18 @@ func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExc
 	var l []armotypes.VulnerabilityExceptionPolicy
 
 	for i := range srcCVEList {
+		if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
+			continue
+		}
 		for j := range srcCVEList[i].VulnerabilityPolicies {
 			if strings.EqualFold(srcCVEList[i].VulnerabilityPolicies[j].Name, CVEName) {
-				if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
-					continue
-				}
+				// A policy contributes at most once. buildPolicy expands a vulnerability
+				// entry into one VulnerabilityPolicy per id and alias, so an exception
+				// listing an alias equal to its id, or the same alias twice, would
+				// otherwise return the same policy several times, and every consumer
+				// counts it that many times.
 				l = append(l, srcCVEList[i])
+				break
 			}
 		}
 	}
