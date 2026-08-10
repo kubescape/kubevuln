@@ -9,7 +9,10 @@ the failure being silent). Reporting is best-effort and never changes the scan's
 A report is sent from each scan entry point after the operation's existing retries are exhausted:
 
 - `GenerateSBOM()` — SBOM could not be created (unsupported image, image too large, auth/pull
-  failure, timeout).
+  failure, timeout), including a created SBOM whose status comes back `Incomplete`/`TooLarge`.
+  This last case used to be missed: `GenerateSBOM` stored the degraded SBOM and returned success
+  regardless of status, the one entry point that didn't check for it. It now checks and reports
+  the failure the same way the other three do.
 - `ScanCVE()` — an SBOM exists but CVE matching failed.
 - `ScanCP()` — continuous-protection scan failures (may cover several images per scan).
 - `ScanRegistry()` — registry image scan failures (reported at image level, no workload context).
@@ -32,6 +35,16 @@ fallback it used to fall into. The raw error is preserved in a separate `Error` 
 backend debugging; the reason code drives the user-facing text (mapped downstream).
 
 Failure cases: CVE scan failure, SBOM generation failure, OOM kill, backend post failure.
+
+The same reason code also lands on the HTTP controller's Prometheus metrics: the scan services
+create the `*domain.ScanError` at the point of failure — the same call site that already
+computes the reason for `ReportScanFailure` above — and `recordScan` (`controllers/http.go`)
+reads it back off the error the controller receives, attaching it as a `reason` attribute on
+`kubevuln_scans_completed_total` and
+`kubevuln_scan_duration_seconds` (see [API.md](API.md#metrics)). This gives an operator with
+only `/metrics` access (no backend `ReportScanFailure` stream, no pod logs) the same
+distinction between failure causes that this document describes, instead of a single opaque
+`outcome="error"` bucket.
 
 ## Report shape
 

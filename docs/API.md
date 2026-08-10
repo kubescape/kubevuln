@@ -135,10 +135,18 @@ GET /metrics
 
 | Name | Type | Labels | Description |
 |------|------|--------|-------------|
-| `kubevuln_scans_completed_total` | counter | `endpoint`, `outcome` (`success`/`partial`/`error`) | Scans completed by the HTTP controller's worker pool |
-| `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
+| `kubevuln_scans_completed_total` | counter | `endpoint`, `outcome` (`success`/`partial`/`error`), `reason` | Scans completed by the HTTP controller's worker pool |
+| `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome`, `reason` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
 | `kubevuln_scan_rejections_total` | counter | `endpoint`, `reason` (`too_many_requests`/`invalid_request`) | Requests rejected at validation time, before being queued |
 | `kubevuln_worker_pool_queue_depth` | gauge | - | Number of scan jobs currently waiting in the worker pool |
+
+`reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
+`scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
+-- the same classification already sent to the backend via `ReportScanFailure` (see
+[scan-failure-reporting.md](scan-failure-reporting.md)) -- falling back to `"unexpected_error"`
+for an `error` outcome that carries no specific classification. This lets an operator watching
+only `/metrics` distinguish, for example, a registry auth failure from an oversized image
+without needing access to the backend's failure-report stream or pod logs.
 
 #### Example
 

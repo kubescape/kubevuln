@@ -44,6 +44,9 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		toomanyrequests bool
 		workload        bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error GenerateSBOM returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "phase 1, no workload",
@@ -60,18 +63,21 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
-			name:     "phase 1, timeout",
-			timeout:  true,
-			workload: true,
-			wantErr:  false, // we no longer check for timeout
+			name:       "phase 1, timeout",
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
 			name:            "phase 1, too many requests",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "phase 2, get SBOM failed",
@@ -86,6 +92,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			storeError: true,
 			workload:   true,
 			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMStorageFailed,
 		},
 		{
 			name:     "phase 2, create and store SBOM",
@@ -124,12 +131,23 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			if tt.workload {
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)
 			}
-			if err := s.GenerateSBOM(ctx); (err != nil) != tt.wantErr {
+			err := s.GenerateSBOM(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
 				_, err := s.ValidateGenerateSBOM(ctx, workload)
 				assert.Equal(t, domain.ErrTooManyRequests, err)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				// a timed-out/too-large SBOM must be surfaced as a failure (see #540), not
+				// silently stored and reported as success like every other scan flow already does
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
@@ -456,6 +474,9 @@ func TestScanService_ScanCVE(t *testing.T) {
 		workload        bool
 		wantEmptyReport bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error ScanCVE returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "no workload",
@@ -472,12 +493,14 @@ func TestScanService_ScanCVE(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:            "create SBOM too many requests",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:      "empty wlid",
@@ -530,12 +553,13 @@ func TestScanService_ScanCVE(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:     "timeout SBOM",
-			sbom:     true,
-			storage:  true,
-			timeout:  true,
-			workload: true,
-			wantErr:  true,
+			name:       "timeout SBOM",
+			sbom:       true,
+			storage:    true,
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 	}
 	for _, tt := range tests {
@@ -575,12 +599,21 @@ func TestScanService_ScanCVE(t *testing.T) {
 					_ = storageCVE.StoreCVE(ctx, cve, false)
 				}
 			}
-			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
+			err := s.ScanCVE(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				_, err := s.ValidateScanCVE(ctx, workload)
-				assert.Equal(t, domain.ErrTooManyRequests, err)
+				_, verr := s.ValidateScanCVE(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, verr)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
@@ -882,6 +915,9 @@ func TestScanService_ScanRegistry(t *testing.T) {
 		toomanyrequests bool
 		workload        bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error ScanRegistry returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "no workload",
@@ -893,18 +929,21 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
-			name:     "timeout SBOM",
-			timeout:  true,
-			workload: true,
-			wantErr:  true,
+			name:       "timeout SBOM",
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
 			name:            "toomanyrequests SBOM",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "scan",
@@ -939,12 +978,21 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				ctx, _ = s.ValidateScanRegistry(ctx, workload)
 				require.NoError(t, err)
 			}
-			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
+			err := s.ScanRegistry(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				_, err := s.ValidateScanRegistry(ctx, workload)
-				assert.Equal(t, domain.ErrTooManyRequests, err)
+				_, verr := s.ValidateScanRegistry(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, verr)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
