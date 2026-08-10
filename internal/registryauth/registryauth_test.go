@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
@@ -65,12 +66,13 @@ func TestECRMatchesAndRegion(t *testing.T) {
 // registry in another, so ambient AWS config is not a safe source for it.
 func TestECRCredentialsUsesRegionFromReference(t *testing.T) {
 	orig := ECRCredsFn
-	defer func() { ECRCredsFn = orig }()
+	defer func() { ECRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
 
 	var gotRegion string
-	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, error) {
+	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, time.Time, error) {
 		gotRegion = region
-		return &image.RegistryCredentials{Username: "AWS", Password: "secret"}, nil
+		return &image.RegistryCredentials{Username: "AWS", Password: "secret"}, time.Now().Add(time.Hour), nil
 	}
 
 	creds, err := ECR{}.Credentials(context.Background(), "123456789012.dkr.ecr.ap-south-1.amazonaws.com/app:v1")
@@ -90,7 +92,7 @@ func TestCredentialsFromAuthorizationToken(t *testing.T) {
 	}
 
 	t.Run("decodes user and password", func(t *testing.T) {
-		creds, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
+		creds, _, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
 		require.NoError(t, err)
 		assert.Equal(t, "AWS", creds.Username)
 		assert.Equal(t, "pa55word", creds.Password)
@@ -99,34 +101,52 @@ func TestCredentialsFromAuthorizationToken(t *testing.T) {
 	// ECR passwords are opaque blobs that routinely contain colons, so only the first one
 	// separates the user from the password.
 	t.Run("password may contain colons", func(t *testing.T) {
-		creds, err := credentialsFromAuthorizationToken(tokenFor("AWS:aa:bb:cc"))
+		creds, _, err := credentialsFromAuthorizationToken(tokenFor("AWS:aa:bb:cc"))
 		require.NoError(t, err)
 		assert.Equal(t, "AWS", creds.Username)
 		assert.Equal(t, "aa:bb:cc", creds.Password)
 	})
 
 	t.Run("nil output", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(nil)
+		_, _, err := credentialsFromAuthorizationToken(nil)
 		assert.ErrorIs(t, err, errNoAuthorizationData)
 	})
 
 	t.Run("no authorization data", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{})
+		_, _, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{})
 		assert.ErrorIs(t, err, errNoAuthorizationData)
 	})
 
 	t.Run("token without a colon", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(tokenFor("no-separator"))
+		_, _, err := credentialsFromAuthorizationToken(tokenFor("no-separator"))
 		assert.ErrorIs(t, err, errMalformedAuthorizationToken)
 	})
 
 	t.Run("token is not base64", func(t *testing.T) {
 		bad := "!!!not-base64!!!"
-		_, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
+		_, _, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
 			AuthorizationData: []ecrtypes.AuthorizationData{{AuthorizationToken: &bad}},
 		})
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, errNoAuthorizationData)
+	})
+
+	// The cache relies on this expiry to know when to refetch (see cache.go), so it must
+	// come from ECR's own response, not be assumed from the package doc's "12 hours".
+	t.Run("reports ECR's own expiry", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:pa55word"))
+		want := time.Now().Add(6 * time.Hour).Truncate(time.Second)
+		_, expiry, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
+			AuthorizationData: []ecrtypes.AuthorizationData{{AuthorizationToken: &encoded, ExpiresAt: &want}},
+		})
+		require.NoError(t, err)
+		assert.True(t, want.Equal(expiry))
+	})
+
+	t.Run("no ExpiresAt yields a zero expiry, not an error", func(t *testing.T) {
+		_, expiry, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
+		require.NoError(t, err)
+		assert.True(t, expiry.IsZero())
 	})
 }
 
@@ -166,10 +186,11 @@ func TestProviderStrategiesAreDistinct(t *testing.T) {
 
 func TestGCPCredentialsFailurePropagates(t *testing.T) {
 	orig := GCPCredsFn
-	defer func() { GCPCredsFn = orig }()
+	defer func() { GCPCredsFn = orig; ResetCaches() }()
+	ResetCaches()
 
 	want := errors.New("ADC unavailable")
-	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, error) { return nil, want }
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
 
 	_, err := GCP{}.Credentials(context.Background(), "gcr.io/foo/bar")
 	assert.ErrorIs(t, err, want)

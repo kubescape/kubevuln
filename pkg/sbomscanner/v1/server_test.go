@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft/source"
@@ -194,12 +195,13 @@ func TestResolveSource(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			orig := registryauth.GCPCredsFn
-			defer func() { registryauth.GCPCredsFn = orig }()
-			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+			defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+			registryauth.ResetCaches()
+			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
 				if tt.adcErr != nil {
-					return nil, tt.adcErr
+					return nil, time.Time{}, tt.adcErr
 				}
-				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 			}
 
 			var calls [][]image.RegistryCredentials
@@ -242,9 +244,10 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	require.NoError(t, err)
 
 	orig := registryauth.GCPCredsFn
-	defer func() { registryauth.GCPCredsFn = orig }()
-	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
-		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+	defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+	registryauth.ResetCaches()
+	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 	}
 
 	callCount := 0
