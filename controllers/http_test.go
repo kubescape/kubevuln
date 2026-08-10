@@ -520,7 +520,7 @@ func TestHTTPController_MetricsEndpoint(t *testing.T) {
 	c := NewHTTPController(services.NewMockScanService(true), 1)
 	m, err := metrics.New()
 	require.NoError(t, err)
-	c, err = c.WithMetrics(m)
+	_, err = c.WithMetrics(m)
 	require.NoError(t, err)
 
 	router := gin.Default()
@@ -577,6 +577,36 @@ func TestHTTPController_MetricsEndpoint_RecordsRejection(t *testing.T) {
 	assert.True(t, strings.Contains(body, `reason="too_many_requests"`), body)
 	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="too_many_requests"} 1`), body)
 	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
+}
+
+func TestHTTPController_MetricsEndpoint_ExportsScanFallbackMetrics(t *testing.T) {
+	c := NewHTTPController(services.NewMockScanService(true), 1)
+	t.Cleanup(func() {
+		c.Shutdown(5 * time.Second)
+	})
+	m, err := metrics.New()
+	require.NoError(t, err)
+	_, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	metrics.RecordScanFallback(context.Background(), metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
+	metrics.RecordScanFallback(context.Background(), metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
+	metrics.RecordScanFallback(context.Background(), metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategySBOMTooLarge, metrics.FallbackOutcomeClassified)
+	metrics.RecordSourceResolution(context.Background(), metrics.ComponentSidecar, true, false)
+
+	req, _ := http.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="registry_auth",component="sidecar",outcome="failed",strategy="gcp_adc"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="platform",component="sidecar",outcome="failed",strategy="platform_mismatch"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="size_classification",component="sidecar",outcome="classified",strategy="sbom_too_large"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="sidecar",outcome="fallback_failed"} 1`), body)
 }
 
 // TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection is a

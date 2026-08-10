@@ -10,7 +10,7 @@ import (
 
 func TestMockPlatform_GetCVEExceptions(t *testing.T) {
 	m := NewMockPlatform(true, nil)
-	_, err := m.GetCVEExceptions(context.Background())
+	_, _, err := m.GetCVEExceptions(context.Background())
 	assert.NoError(t, err)
 }
 

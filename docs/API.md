@@ -139,6 +139,10 @@ GET /metrics
 | `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome`, `reason` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
 | `kubevuln_scan_rejections_total` | counter | `endpoint`, `reason` (`too_many_requests`/`invalid_request`) | Requests rejected at validation time, before being queued |
 | `kubevuln_worker_pool_queue_depth` | gauge | - | Number of scan jobs currently waiting in the worker pool |
+| `kubevuln_exceptions_degraded_total` | counter | - | Total number of times CVE exception fetching degraded (partially failed) during a scan |
+| `kubevuln_exceptions_matched_total` | counter | `sourceKind` (`SecurityException`/`ClusterSecurityException`) | Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException |
+| `kubevuln_exceptions_expired_total` | counter | `sourceKind` | Total number of SecurityException/ClusterSecurityException CRDs skipped because their `expiresAt` has passed |
+| `kubevuln_exceptions_active` | gauge | - | Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan |
 
 `reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
@@ -540,6 +544,30 @@ curl -X POST http://localhost:8080/v1/scanRegistryImage \
     }
   }'
 ```
+
+### Requesting a Specific Image Platform
+
+For multi-arch images, request a specific OS/architecture (OCI format `os/arch[/variant]`, or a
+bare arch such as `arm64`) via the `platform` arg. An operator can populate this from the scanned
+Pod's node architecture; left unset, kubevuln resolves whatever platform the image manifest
+provides instead of forcing the host's own architecture:
+
+```bash
+curl -X POST http://localhost:8080/v1/sbomCreation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageTag": "myapp:latest",
+    "jobID": "multi-arch-scan-001",
+    "args": {
+      "platform": "linux/arm64"
+    }
+  }'
+```
+
+The platform actually resolved (which may differ from the request if none was given) is recorded
+on the resulting SBOM's `kubescape.io/resolved-platform` annotation. Requesting a platform absent
+from the image's manifest fails the scan with a distinguishable "platform not found" reason
+instead of a generic error.
 
 ---
 

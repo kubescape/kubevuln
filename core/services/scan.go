@@ -33,6 +33,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/client-go/tools/record"
 )
@@ -97,13 +98,26 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 // rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
-// It always uses workload.ImageTagNormalized: ScanCVE/GenerateSBOM/ScanCP payloads populate
-// ImageHash while ScanRegistry payloads never do (registryScanCommandToScanCommand leaves it
-// empty), so a fallback chain that preferred ImageHash resolved to a different key per flow and
-// let a 429 recorded on one flow go unnoticed on the other for the same image. ImageTagNormalized
-// is the one field every flow populates, so it's the only reference guaranteed to line up.
+// It uses workload.ImageTagNormalized along with a hash of any provided credentials.
+// Including the credentials ensures that a 429 encountered by an unauthenticated pull
+// does not cause a cross-tenant denial-of-service for workloads that use valid imagePullSecrets
+// to bypass the rate limit. ImageHash is avoided because ScanRegistry payloads never populate it.
 func rateLimitCacheKey(workload domain.ScanCommand) string {
-	return workload.ImageTagNormalized
+	if len(workload.CredentialsList) == 0 {
+		return workload.ImageTagNormalized
+	}
+	h := sha256.New()
+	for _, cred := range workload.CredentialsList {
+		// codeql[go/weak-crypto, go/weak-password-hashing]
+		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
+			len(cred.Username), cred.Username,
+			len(cred.Password), cred.Password,
+			len(cred.Auth), cred.Auth,
+			len(cred.IdentityToken), cred.IdentityToken,
+			len(cred.RegistryToken), cred.RegistryToken,
+			len(cred.ServerAddress), cred.ServerAddress)
+	}
+	return fmt.Sprintf("%s|%x", workload.ImageTagNormalized, h.Sum(nil))
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
@@ -869,14 +883,18 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	if cve.Content == nil {
 		return cve, false
 	}
-	exceptions, err := s.platform.GetCVEExceptions(ctx)
+	exceptions, stats, err := s.platform.GetCVEExceptions(ctx)
 	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
 	if degraded && s.metrics != nil {
 		s.metrics.ExceptionsDegradedCounter.Add(ctx, 1)
 	}
+	s.recordExceptionsExpired(ctx, stats)
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
+	}
+	if s.metrics != nil {
+		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
 	}
 	if len(exceptions) == 0 {
 		return cve, !degraded
@@ -889,9 +907,43 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		filtered.Annotations = maps.Clone(cve.Annotations)
 	}
 	docCopy := cve.Content.DeepCopy()
-	v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
+	matchedBySource := v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
+	s.recordExceptionsMatched(ctx, matchedBySource)
 	filtered.Content = docCopy
 	return filtered, !degraded
+}
+
+// recordExceptionsExpired reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many exceptions applyExceptionsToManifest's GetCVEExceptions call skipped this scan
+// because their expiresAt had passed (see domain.ExceptionStats). No-op when metrics aren't
+// configured or nothing expired this call.
+func (s *ScanService) recordExceptionsExpired(ctx context.Context, stats domain.ExceptionStats) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range stats.ExpiredBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsExpiredCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
+}
+
+// recordExceptionsMatched reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many CVE matches ApplySecurityExceptions suppressed this scan. No-op when metrics
+// aren't configured or nothing was suppressed this call.
+func (s *ScanService) recordExceptionsMatched(ctx context.Context, matchedBySource map[string]int) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range matchedBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsMatchedCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
 }
 
 // addTimestamp attaches the current timestamp to the context.
@@ -952,6 +1004,16 @@ func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domai
 			logger.L().Ctx(ctx).Warning("ignoring non-boolean value for registry option",
 				helpers.String("key", domain.AttributeSkipTLSVerify),
 				helpers.String("type", fmt.Sprintf("%T", skipTLSVerify)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
+	}
+	if platform, ok := workload.Args[domain.ArgsPlatform]; ok {
+		if p, isString := platform.(string); isString {
+			options.Platform = p
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-string value for registry option",
+				helpers.String("key", domain.ArgsPlatform),
+				helpers.String("type", fmt.Sprintf("%T", platform)),
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}

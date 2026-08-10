@@ -28,7 +28,12 @@ type SBOMCreator interface {
 
 // Platform is the port implemented by adapters to be used in ScanService to report scan results and send telemetry data
 type Platform interface {
-	GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error)
+	// GetCVEExceptions returns the merged cloud + CRD-based exception set for the scan in ctx,
+	// alongside domain.ExceptionStats computed while resolving the CRD-based portion (e.g. how
+	// many SecurityException/ClusterSecurityException CRDs were skipped as expired). Stats are
+	// best-effort: an implementation with nothing to report (a cache hit, no CRD exceptions
+	// present) returns the zero value, not an error.
+	GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, domain.ExceptionStats, error)
 	ReportError(ctx context.Context, err error) error
 	ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error
 	SendStatus(ctx context.Context, step int) error

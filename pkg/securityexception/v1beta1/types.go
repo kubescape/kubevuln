@@ -41,8 +41,23 @@ type VulnerabilityStatus string
 
 const (
 	VulnerabilityStatusNotAffected        VulnerabilityStatus = "not_affected"
+	VulnerabilityStatusAffected           VulnerabilityStatus = "affected"
 	VulnerabilityStatusFixed              VulnerabilityStatus = "fixed"
 	VulnerabilityStatusUnderInvestigation VulnerabilityStatus = "under_investigation"
+)
+
+// VulnerabilityResponse is a typed action taken or planned in response to a vulnerability
+// that is real and applies. It answers "what are we doing about it", which is a separate
+// question from the status "where does it stand", and has no OpenVEX equivalent: the values
+// are aligned with CycloneDX VEX analysis.response[].
+type VulnerabilityResponse string
+
+const (
+	VulnerabilityResponseCanNotFix           VulnerabilityResponse = "can_not_fix"
+	VulnerabilityResponseWillNotFix          VulnerabilityResponse = "will_not_fix"
+	VulnerabilityResponseUpdate              VulnerabilityResponse = "update"
+	VulnerabilityResponseRollback            VulnerabilityResponse = "rollback"
+	VulnerabilityResponseWorkaroundAvailable VulnerabilityResponse = "workaround_available"
 )
 
 // PostureAction is the action to take for a posture exception.
@@ -88,6 +103,13 @@ type VulnerabilityException struct {
 	// ExpiresAt overrides the document-level spec.expiresAt for this entry only.
 	// When unset, the entry inherits the document-level value.
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
+	// ActionStatement describes what is being done about a vulnerability that is real and
+	// applies. It maps to OpenVEX action_statement, which the spec requires for every
+	// affected statement, and is the counterpart to ImpactStatement on the not_affected path.
+	ActionStatement string `json:"actionStatement,omitempty"`
+	// Response carries the typed actions taken or planned for an affected vulnerability.
+	// It is always optional and layers on top of ActionStatement rather than replacing it.
+	Response []VulnerabilityResponse `json:"response,omitempty"`
 }
 
 // VulnerabilityRef identifies a vulnerability by CVE ID.

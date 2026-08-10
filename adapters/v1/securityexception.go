@@ -37,9 +37,12 @@ type suppressionSource struct {
 //
 // Only exceptions whose spec.match applies to target are converted, so an
 // exception scoped by resources/images/objectSelector/namespaceSelector is not
-// applied to workloads it does not target. Expired exceptions are skipped.
-func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) []armotypes.VulnerabilityExceptionPolicy {
+// applied to workloads it does not target. Expired vulnerability entries (see
+// effectiveExpiresAt) are skipped, and counted in the returned
+// domain.ExceptionStats.ExpiredBySource.
+func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) ([]armotypes.VulnerabilityExceptionPolicy, domain.ExceptionStats) {
 	var policies []armotypes.VulnerabilityExceptionPolicy
+	stats := domain.ExceptionStats{ExpiredBySource: map[string]int{}}
 
 	now := time.Now()
 
@@ -54,6 +57,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
+				stats.ExpiredBySource["SecurityException"]++
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -76,6 +80,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
+				stats.ExpiredBySource["ClusterSecurityException"]++
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
@@ -87,7 +92,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 	}
 
-	return policies
+	return policies, stats
 }
 
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
@@ -111,16 +116,57 @@ func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vul
 // converted into an ignore policy.
 //
 // The allowlist approach (fail-closed): only the two VEX statuses that
-// definitively resolve a CVE – not_affected and fixed – produce a
-// suppression policy. Every other value, including the empty string,
-// under_investigation, and any future status that is not yet in the
-// enum, leaves the finding visible in the scan results.
+// definitively resolve a CVE, not_affected and fixed, suppress on the status
+// alone. An affected entry suppresses only when it also states that no
+// remediation is coming (see affectedSuppresses). Every other value, including
+// the empty string, under_investigation, and any future status that is not yet
+// in the enum, leaves the finding visible in the scan results.
 func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
 	if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
 		return false
 	}
 	switch vuln.Status {
 	case sev1beta1.VulnerabilityStatusNotAffected, sev1beta1.VulnerabilityStatusFixed:
+		return true
+	case sev1beta1.VulnerabilityStatusAffected:
+		return affectedSuppresses(vuln)
+	default:
+		return false
+	}
+}
+
+// affectedSuppresses reports whether an affected entry hides its finding.
+//
+// The status alone never does. affected asserts that the vulnerability is real and applies,
+// which is the opposite of an assertion an author would expect to hide a finding, so two
+// further things are required.
+//
+// First an actionStatement. OpenVEX requires one for every affected statement ("a VEX
+// statement MUST include a statement that SHOULD describe actions to remediate or mitigate
+// the vulnerability"), so an entry without one is not a valid affected statement and does not
+// get to suppress.
+//
+// Then a response saying the finding will not be remediated. can_not_fix and will_not_fix
+// both mean no fix is coming, so the risk has been accepted rather than scheduled. update,
+// rollback and workaround_available mean a remediation is planned or already in place, and
+// the finding stays visible until it is confirmed. Every stated response has to be a
+// non-remediating one: an entry pairing will_not_fix with update is still tracking work, and
+// keeping the finding visible is the fail-closed reading of that combination.
+func affectedSuppresses(vuln sev1beta1.VulnerabilityException) bool {
+	if strings.TrimSpace(vuln.ActionStatement) == "" || len(vuln.Response) == 0 {
+		return false
+	}
+	for _, response := range vuln.Response {
+		if !isNonRemediatingResponse(response) {
+			return false
+		}
+	}
+	return true
+}
+
+func isNonRemediatingResponse(response sev1beta1.VulnerabilityResponse) bool {
+	switch response {
+	case sev1beta1.VulnerabilityResponseCanNotFix, sev1beta1.VulnerabilityResponseWillNotFix:
 		return true
 	default:
 		return false
@@ -186,6 +232,16 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 	if s := strings.TrimSpace(vuln.ImpactStatement); s != "" {
 		attrs["impactStatement"] = s
 	}
+	if s := strings.TrimSpace(vuln.ActionStatement); s != "" {
+		attrs["actionStatement"] = s
+	}
+	if len(vuln.Response) > 0 {
+		responses := make([]string, 0, len(vuln.Response))
+		for _, response := range vuln.Response {
+			responses = append(responses, string(response))
+		}
+		attrs["response"] = responses
+	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
 	}
@@ -243,9 +299,17 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 // recorder is optional: when nil, suppression is still logged via logSuppression but no
 // K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
 // deployments without SecurityException CRD integration enabled) are unaffected.
-func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) {
+//
+// The returned map counts each suppressed finding once per distinct sourceKind
+// ("SecurityException"/"ClusterSecurityException") that suppressed it -- not once per
+// suppressing policy, so two policies of the same kind matching one finding (e.g. by ID and
+// by alias) still count as a single match. A policy with no sourceKind attribute (e.g. a
+// cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
+// the CRD-suppression metric.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
+	matchedBySource := map[string]int{}
 	if doc == nil || len(exceptions) == 0 {
-		return
+		return matchedBySource
 	}
 
 	var remaining []v1beta1.Match
@@ -260,11 +324,21 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 				},
 			})
 			logSuppression(m, matched, recorder)
+			matchedKinds := map[string]struct{}{}
+			for _, p := range suppressingPolicies(matched) {
+				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
+					matchedKinds[kind] = struct{}{}
+				}
+			}
+			for kind := range matchedKinds {
+				matchedBySource[kind]++
+			}
 		} else {
 			remaining = append(remaining, m)
 		}
 	}
 	doc.Matches = remaining
+	return matchedBySource
 }
 
 // suppressingPolicies filters matched down to the policies that actually cause suppression,
