@@ -77,38 +77,35 @@ func TestCredentialCache_DistinctKeysDoNotShareEntries(t *testing.T) {
 
 func TestCredentialCache_ConcurrentMissesCollapseToOneFetch(t *testing.T) {
 	c := newCredentialCache("test")
-	var calls, started int32
-	release := make(chan struct{})
+	const n = 20
+
+	var calls, joined int32
+	allJoined := make(chan struct{})
+	// onMiss fires synchronously for every caller that reaches a cache miss, before it
+	// joins the singleflight group. The cache is never populated until fetch returns (see
+	// below), and fetch never returns until every one of the n callers has hit this miss
+	// path, so no caller can ever race ahead and be served a cache hit instead of actually
+	// contending for the same key -- this is a hard guarantee, not a timing-based one.
+	c.onMiss = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
 	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
 		atomic.AddInt32(&calls, 1)
-		<-release // hold the leader here until every caller has actually joined the race
+		<-allJoined
 		return &image.RegistryCredentials{Password: "p"}, time.Now().Add(time.Hour), nil
 	}
 
-	const n = 20
 	var wg sync.WaitGroup
 	wg.Add(n)
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			atomic.AddInt32(&started, 1)
 			_, err := c.get(context.Background(), "k", fetch)
 			assert.NoError(t, err)
 		}()
 	}
-
-	// Don't release the leader's fetch until every goroutine has actually called get():
-	// releasing too early risks the leader finishing and populating the cache before the
-	// rest even started, which would let a non-coalescing implementation (one that calls
-	// fetch on every miss instead of deduping) pass by accident.
-	require.Eventually(t, func() bool {
-		return atomic.LoadInt32(&started) == n
-	}, 2*time.Second, time.Millisecond)
-	// "started" only means each goroutine's call to get() has begun, not that it has
-	// reached the blocking point inside singleflight yet -- give the scheduler a moment to
-	// actually land every one of them there before letting the leader's fetch return.
-	time.Sleep(100 * time.Millisecond)
-	close(release)
 	wg.Wait()
 
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls),

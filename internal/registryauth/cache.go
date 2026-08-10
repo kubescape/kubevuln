@@ -42,6 +42,10 @@ type credentialCache struct {
 	strategy string
 	// now is overridable in tests so expiry can be exercised without a real time.Sleep.
 	now func() time.Time
+	// onMiss, if set, is called synchronously by every caller that reaches a cache miss,
+	// before it joins the singleflight group. Tests use it as a deterministic barrier to
+	// prove real concurrent contention on a miss, instead of a timing-based sleep.
+	onMiss func()
 }
 
 type cacheEntry struct {
@@ -70,6 +74,9 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 	if creds, ok := c.lookup(key); ok {
 		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheHit)
 		return creds, nil
+	}
+	if c.onMiss != nil {
+		c.onMiss()
 	}
 
 	ch := c.group.DoChan(key, func() (interface{}, error) {
