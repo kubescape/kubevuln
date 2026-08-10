@@ -242,6 +242,11 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		}
 		attrs["response"] = responses
 	}
+	// Recorded whenever the entry states a scope at all, even if nothing in it survives
+	// normalization: an entry that asked to be scoped must not fall back to product scope.
+	if len(vuln.Subcomponents) > 0 {
+		attrs[attrSubcomponents] = normalizedSubcomponents(vuln.Subcomponents)
+	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
 	}
@@ -316,6 +321,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	for _, m := range doc.Matches {
 		isFixed, _ := hasKnownFix(m)
 		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
 				Match: m,
