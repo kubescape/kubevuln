@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	ArgsName               = "name"
-	ArgsNamespace          = "namespace"
+	ArgsName      = "name"
+	ArgsNamespace = "namespace"
 	// ArgsPlatform lets a caller request a specific image platform (OCI "os/arch[/variant]",
 	// or a bare arch such as "arm64") for SBOM generation, e.g. an operator populating it from
 	// the scanned Pod's node architecture. Read via optionsFromWorkload into

@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/pkg/vex/join"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
@@ -60,6 +61,7 @@ type ScanService struct {
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
+	vexJoinEngine     *join.JoinEngine
 }
 
 // SetMetrics attaches an optional Metrics instance to the service. It is not
@@ -75,6 +77,11 @@ func (s *ScanService) SetMetrics(m *metrics.Metrics) {
 // recorded as K8s Events) until this is called.
 func (s *ScanService) SetEventRecorder(r record.EventRecorder) {
 	s.eventRecorder = r
+}
+
+// SetVEXJoinEngine attaches an optional JoinEngine to the service for external VEX feed suppression.
+func (s *ScanService) SetVEXJoinEngine(engine *join.JoinEngine) {
+	s.vexJoinEngine = engine
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
@@ -941,7 +948,7 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	if s.metrics != nil {
 		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
 	}
-	if len(exceptions) == 0 {
+	if len(exceptions) == 0 && s.vexJoinEngine == nil {
 		return cve, !degraded
 	}
 	filtered := cve
@@ -953,6 +960,12 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	}
 	docCopy := cve.Content.DeepCopy()
 	matchedBySource := v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
+	if s.vexJoinEngine != nil {
+		vexCounts := s.vexJoinEngine.ApplyVEXFilter(docCopy)
+		for k, v := range vexCounts {
+			matchedBySource[k] += v
+		}
+	}
 	s.recordExceptionsMatched(ctx, matchedBySource)
 	filtered.Content = docCopy
 	return filtered, !degraded
