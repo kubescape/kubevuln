@@ -667,9 +667,19 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 							helpers.String("imageSlug", workload.ImageSlug))
 					}
 					// The stored manifest just changed, so the VEX document describing it is
-					// now stale. Kept in sync under the same condition, so a cache hit that
-					// re-evaluates exceptions updates both or neither.
-					s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+					// now stale. Republish it, but only from a known-complete exception set,
+					// the same rule the cache-miss path follows.
+					//
+					// The manifest is persisted on the looser `exceptionsComplete ||
+					// !hasRemovals` condition because a partial set can only under-suppress,
+					// never wrongly un-suppress, so additions are safe to keep. A VEX document
+					// is a published assertion about which CVEs are suppressed, and one built
+					// from a partial set understates that. Leaving the previous document in
+					// place, written when the set was complete, beats replacing it with a
+					// weaker claim, so the two can briefly disagree until a complete scan.
+					if exceptionsComplete {
+						s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+					}
 				}
 			}
 		}
@@ -845,9 +855,19 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 							helpers.String("imageSlug", workload.ImageSlug))
 					}
 					// The stored manifest just changed, so the VEX document describing it is
-					// now stale. Kept in sync under the same condition, so a cache hit that
-					// re-evaluates exceptions updates both or neither.
-					s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+					// now stale. Republish it, but only from a known-complete exception set,
+					// the same rule the cache-miss path follows.
+					//
+					// The manifest is persisted on the looser `exceptionsComplete ||
+					// !hasRemovals` condition because a partial set can only under-suppress,
+					// never wrongly un-suppress, so additions are safe to keep. A VEX document
+					// is a published assertion about which CVEs are suppressed, and one built
+					// from a partial set understates that. Leaving the previous document in
+					// place, written when the set was complete, beats replacing it with a
+					// weaker claim, so the two can briefly disagree until a complete scan.
+					if exceptionsComplete {
+						s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
+					}
 				}
 			}
 		}

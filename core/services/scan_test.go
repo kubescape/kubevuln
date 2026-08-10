@@ -2407,3 +2407,27 @@ func TestScanService_ScanRegistry_CacheMiss_DegradedFetchSkipsVEX(t *testing.T) 
 
 	assert.Empty(t, repo.vexCalls, "an incomplete exception set must not produce a VEX document")
 }
+
+// A degraded exception fetch must not republish VEX on a cache hit either, even when the
+// change is purely additive and the manifest itself is persisted. The manifest can safely
+// take additions from a partial set; a published VEX document built from one understates
+// which CVEs are suppressed.
+func TestScanService_ScanCVE_CacheHit_DegradedAdditiveSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "the additive change is still persisted to the manifest")
+
+	assert.Empty(t, repo.vexCalls, "but no VEX document is published from a partial exception set")
+}
