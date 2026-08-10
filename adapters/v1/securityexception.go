@@ -320,7 +320,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
 				Match: m,
 				AppliedIgnoreRules: []v1beta1.IgnoreRule{
-					{Vulnerability: m.Vulnerability.ID},
+					buildIgnoreRule(m, matched),
 				},
 			})
 			logSuppression(m, matched, recorder)
@@ -339,6 +339,39 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	}
 	doc.Matches = remaining
 	return matchedBySource
+}
+
+// buildIgnoreRule constructs the IgnoreRule recorded on the manifest for m, populating
+// provenance fields from the first suppressing policy's Attributes (the same values
+// buildSuppressionAttributes calculates and logSuppression already logs), so this
+// information is durably stored on the manifest itself, not only logged. SourceName here
+// carries suppressionRuleID's structured kind/namespace/name form rather than the bare
+// object name, so it stays unambiguous for both namespaced and cluster-scoped exceptions.
+func buildIgnoreRule(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) v1beta1.IgnoreRule {
+	rule := v1beta1.IgnoreRule{Vulnerability: m.Vulnerability.ID}
+
+	suppressing := suppressingPolicies(matched)
+	if len(suppressing) == 0 {
+		return rule
+	}
+	p := suppressing[0]
+
+	if kind, ok := p.Attributes["sourceKind"].(string); ok {
+		rule.SourceKind = kind
+	}
+	if ruleID, ok := p.Attributes["ruleId"].(string); ok {
+		rule.SourceName = ruleID
+	}
+	if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
+		rule.SourceNamespace = ns
+	}
+	if just, ok := p.Attributes["justification"].(string); ok {
+		rule.Justification = just
+	}
+	if impact, ok := p.Attributes["impactStatement"].(string); ok {
+		rule.ImpactStatement = impact
+	}
+	return rule
 }
 
 // suppressingPolicies filters matched down to the policies that actually cause suppression,
