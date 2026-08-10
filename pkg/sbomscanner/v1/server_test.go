@@ -24,6 +24,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/registryauth"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,27 +115,6 @@ func TestCreateSBOM_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestIsGCPRegistry(t *testing.T) {
-	tests := []struct {
-		imageID string
-		want    bool
-	}{
-		{"gcr.io/foo/bar", true},
-		{"us.gcr.io/foo/bar", true},
-		{"us-docker.pkg.dev/foo/bar", true},
-		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
-		{"quay.io/foo/bar", false},
-		{"quay.io/foo/bar-docker.pkg.dev/x", false},
-		{"index.docker.io/library/alpine", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.imageID, func(t *testing.T) {
-			assert.Equal(t, tt.want, isGCPRegistry(tt.imageID))
-		})
-	}
-}
-
 func TestResolveSource(t *testing.T) {
 	err401 := errors.New("401 Unauthorized")
 	err403 := errors.New("403 Forbidden")
@@ -213,9 +193,9 @@ func TestResolveSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orig := gcpCredsFn
-			defer func() { gcpCredsFn = orig }()
-			gcpCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+			orig := registryauth.GCPCredsFn
+			defer func() { registryauth.GCPCredsFn = orig }()
+			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
 				if tt.adcErr != nil {
 					return nil, tt.adcErr
 				}
@@ -261,9 +241,9 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	m, err := metrics.New()
 	require.NoError(t, err)
 
-	orig := gcpCredsFn
-	defer func() { gcpCredsFn = orig }()
-	gcpCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+	orig := registryauth.GCPCredsFn
+	defer func() { registryauth.GCPCredsFn = orig }()
+	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
 		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
 	}
 
@@ -288,8 +268,8 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="sidecar",outcome="fallback_assisted_success"} 1`), body)
 }
 
-// fakeAuthProvider is a scripted registryAuthProvider used to prove
-// resolveSource consults registryAuthProviders generically, not just GCP.
+// fakeAuthProvider is a scripted registryauth.Provider used to prove
+// resolveSource consults registryauth.Providers generically, not just GCP.
 type fakeAuthProvider struct {
 	matchHost string
 	creds     *image.RegistryCredentials
@@ -301,14 +281,16 @@ func (p fakeAuthProvider) Matches(imageID string) bool {
 	return host == p.matchHost
 }
 
-func (p fakeAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
+func (p fakeAuthProvider) Credentials(ctx context.Context, _ string) (*image.RegistryCredentials, error) {
 	return p.creds, p.err
 }
 
+func (p fakeAuthProvider) Strategy() string { return "fake" }
+
 func TestResolveSource_CustomProvider(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{
 			matchHost: "my-registry.example.com",
 			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},
@@ -334,9 +316,9 @@ func TestResolveSource_CustomProvider(t *testing.T) {
 }
 
 func TestResolveSource_ProviderNilCredentialsFallsBackAnonymous(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{matchHost: "my-registry.example.com"},
 	}
 
@@ -362,9 +344,9 @@ func TestResolveSource_ProviderNilCredentialsFallsBackAnonymous(t *testing.T) {
 }
 
 func TestResolveSource_ProviderMatchesUsesPullRef(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{
 			matchHost: "gcr.io",
 			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},

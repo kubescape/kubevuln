@@ -30,6 +30,7 @@ const (
 	FallbackCategorySizeClassification = "size_classification"
 
 	FallbackStrategyAnonymous        = "anonymous"
+	FallbackStrategyECR              = "ecr"
 	FallbackStrategyGCPADC           = "gcp_adc"
 	FallbackStrategyImageTooLarge    = "image_too_large"
 	FallbackStrategyIncomplete       = "incomplete"

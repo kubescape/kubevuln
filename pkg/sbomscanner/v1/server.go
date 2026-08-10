@@ -26,15 +26,10 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/registryauth"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"golang.org/x/oauth2/google"
 )
-
-func isGCPRegistry(imageID string) bool {
-	host, _, _ := strings.Cut(imageID, "/")
-	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
-}
 
 // isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
 //
@@ -81,46 +76,6 @@ func formatResolvedPlatform(os, arch, variant string) string {
 	}
 	return strings.Join(parts, "/")
 }
-func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, err
-	}
-	token, err := creds.TokenSource.Token()
-	if err != nil {
-		return nil, err
-	}
-	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
-}
-
-// gcpCredsFn is an indirection over gcpCredentials so resolveSource can be
-// unit-tested without a live GCP environment.
-var gcpCredsFn = gcpCredentials
-
-// registryAuthProvider supplies registry credentials for hosts it recognizes, so
-// resolveSource can consult cloud-specific auth fallbacks without hard-coding each
-// one into its retry logic.
-type registryAuthProvider interface {
-	// Matches reports whether this provider handles the given pull reference.
-	Matches(imageID string) bool
-	// Credentials fetches credentials for a host this provider matches.
-	Credentials(ctx context.Context) (*image.RegistryCredentials, error)
-}
-
-// gcpAuthProvider resolves credentials for GCR/Artifact Registry hosts via
-// Application Default Credentials.
-type gcpAuthProvider struct{}
-
-func (gcpAuthProvider) Matches(imageID string) bool { return isGCPRegistry(imageID) }
-
-func (gcpAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
-	return gcpCredsFn(ctx)
-}
-
-// registryAuthProviders is the ordered list of cloud registry auth fallbacks resolveSource
-// consults on a 401 Unauthorized, before falling back to anonymous access. Add ECR/ACR
-// providers here as they're implemented.
-var registryAuthProviders = []registryAuthProvider{gcpAuthProvider{}}
 
 // sourceGetter abstracts the syft.GetSource call so the fallback ordering in
 // resolveSource is testable with a scripted implementation.
@@ -144,12 +99,12 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		usedFallback = true
 		unauthorizedErr := err
-		for _, provider := range registryAuthProviders {
+		for _, provider := range registryauth.Providers {
 			if !provider.Matches(pullRef) {
 				continue
 			}
-			if creds, credErr := provider.Credentials(ctx); credErr != nil || creds == nil {
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
+			if creds, credErr := provider.Credentials(ctx, pullRef); credErr != nil || creds == nil {
+				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), metrics.FallbackOutcomeFailed)
 				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
 					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
@@ -160,7 +115,7 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 				if err == nil {
 					outcome = metrics.FallbackOutcomeSucceeded
 				}
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, outcome)
+				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), outcome)
 			}
 			break
 		}
@@ -272,7 +227,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Download image from registry
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for gcpCredentials inside resolveSource.
+		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
 		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
 		return syft.GetSource(ctxWithSize, ref,
 			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
