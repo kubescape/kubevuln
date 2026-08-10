@@ -1692,11 +1692,15 @@ func exceptionPolicyForTest(id string) domain.CVEExceptions {
 // and CVE repository/scanner, returning the service, the version strings needed to seed/read a
 // CVE manifest, and a validated context.
 func newScanCVETestService(t *testing.T, platform ports.Platform, cveRepo ports.CVERepository, cveScanner ports.CVEScanner) (*ScanService, string, string, string, context.Context) {
+	return newScanCVETestServiceVEX(t, platform, cveRepo, cveScanner, false)
+}
+
+func newScanCVETestServiceVEX(t *testing.T, platform ports.Platform, cveRepo ports.CVERepository, cveScanner ports.CVEScanner, vexGeneration bool) (*ScanService, string, string, string, context.Context) {
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	if cveScanner == nil {
 		cveScanner = adapters.NewMockCVEAdapter()
 	}
-	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveScanner, cveRepo, platform, adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveScanner, cveRepo, platform, adapters.NewMockRelevancyAdapter(), true, vexGeneration, true, false, false)
 	ctx := context.TODO()
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
@@ -2258,4 +2262,121 @@ func TestScanCVE_NoSBOMRegeneration_OnCacheHit(t *testing.T) {
 	require.NoError(t, err, "MemoryStorage returns a nil error on a cache miss")
 	require.Nil(t, generatedSBOM.Content, "The generated SBOM should be nil since we avoided regenerating it wastefully")
 
+}
+
+// vexRecordingCVERepository records StoreVEX calls so a test can assert whether a VEX
+// document was written, which the in-memory repository cannot show on its own: its StoreVEX
+// is a no-op that keeps nothing.
+type vexRecordingCVERepository struct {
+	ports.CVERepository
+	vexCalls []domain.CVEManifest
+}
+
+func (v *vexRecordingCVERepository) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	v.vexCalls = append(v.vexCalls, cve)
+	return v.CVERepository.StoreVEX(ctx, cve, cvep, withRelevancy)
+}
+
+// TestScanService_ScanCVE_CacheMiss_GeneratesVEX is the core regression test for #557: ScanCVE
+// had no StoreVEX call anywhere in its body, so an operator running with vexGeneration enabled
+// got no VEX document from the plain per-container scan route at all.
+func TestScanService_ScanCVE_CacheMiss_GeneratesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, true)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a fresh ScanCVE must generate a VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1,
+		"the VEX document must be built from the exception-filtered manifest")
+}
+
+func TestScanService_ScanCVE_CacheMiss_NoVEXWhenDisabled(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, false)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "vexGeneration is off, so nothing should be written")
+}
+
+// A degraded exception fetch means the set is incomplete, so the document would assert fewer
+// suppressions than the user configured. ScanCP already declines to publish in that case.
+func TestScanService_ScanCVE_CacheMiss_DegradedFetchSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, true)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "an incomplete exception set must not produce a VEX document")
+}
+
+// On a cache hit that re-evaluates exceptions, the stored manifest changes, so the VEX document
+// describing it has to change with it or the two disagree until the next cache miss.
+func TestScanService_ScanCVE_CacheHit_ExceptionChangeUpdatesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a changed ignored-match set must update the VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
+}
+
+func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "nothing changed, so the stored VEX document is still accurate")
+}
+
+// TestScanService_ScanRegistry_CacheHit_ExceptionChangeUpdatesVEX covers the second half of
+// #557: ScanRegistry's cache-miss branch stored VEX but its cache-hit branch did not, even
+// though the comment directly above that branch says StoreVEX runs there.
+func TestScanService_ScanRegistry_CacheHit_ExceptionChangeUpdatesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveAdapter, repo,
+		platform, adapters.NewMockRelevancyAdapter(), true, true, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+		JobID:              "job-123",
+	}
+	ctx, err := s.ValidateScanRegistry(ctx, workload)
+	require.NoError(t, err)
+
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx), ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a ScanRegistry cache hit that changes the ignored set must update the VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
 }
