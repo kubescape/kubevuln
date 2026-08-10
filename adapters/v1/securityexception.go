@@ -111,16 +111,57 @@ func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vul
 // converted into an ignore policy.
 //
 // The allowlist approach (fail-closed): only the two VEX statuses that
-// definitively resolve a CVE – not_affected and fixed – produce a
-// suppression policy. Every other value, including the empty string,
-// under_investigation, and any future status that is not yet in the
-// enum, leaves the finding visible in the scan results.
+// definitively resolve a CVE, not_affected and fixed, suppress on the status
+// alone. An affected entry suppresses only when it also states that no
+// remediation is coming (see affectedSuppresses). Every other value, including
+// the empty string, under_investigation, and any future status that is not yet
+// in the enum, leaves the finding visible in the scan results.
 func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
 	if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
 		return false
 	}
 	switch vuln.Status {
 	case sev1beta1.VulnerabilityStatusNotAffected, sev1beta1.VulnerabilityStatusFixed:
+		return true
+	case sev1beta1.VulnerabilityStatusAffected:
+		return affectedSuppresses(vuln)
+	default:
+		return false
+	}
+}
+
+// affectedSuppresses reports whether an affected entry hides its finding.
+//
+// The status alone never does. affected asserts that the vulnerability is real and applies,
+// which is the opposite of an assertion an author would expect to hide a finding, so two
+// further things are required.
+//
+// First an actionStatement. OpenVEX requires one for every affected statement ("a VEX
+// statement MUST include a statement that SHOULD describe actions to remediate or mitigate
+// the vulnerability"), so an entry without one is not a valid affected statement and does not
+// get to suppress.
+//
+// Then a response saying the finding will not be remediated. can_not_fix and will_not_fix
+// both mean no fix is coming, so the risk has been accepted rather than scheduled. update,
+// rollback and workaround_available mean a remediation is planned or already in place, and
+// the finding stays visible until it is confirmed. Every stated response has to be a
+// non-remediating one: an entry pairing will_not_fix with update is still tracking work, and
+// keeping the finding visible is the fail-closed reading of that combination.
+func affectedSuppresses(vuln sev1beta1.VulnerabilityException) bool {
+	if strings.TrimSpace(vuln.ActionStatement) == "" || len(vuln.Response) == 0 {
+		return false
+	}
+	for _, response := range vuln.Response {
+		if !isNonRemediatingResponse(response) {
+			return false
+		}
+	}
+	return true
+}
+
+func isNonRemediatingResponse(response sev1beta1.VulnerabilityResponse) bool {
+	switch response {
+	case sev1beta1.VulnerabilityResponseCanNotFix, sev1beta1.VulnerabilityResponseWillNotFix:
 		return true
 	default:
 		return false
@@ -185,6 +226,16 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 	}
 	if s := strings.TrimSpace(vuln.ImpactStatement); s != "" {
 		attrs["impactStatement"] = s
+	}
+	if s := strings.TrimSpace(vuln.ActionStatement); s != "" {
+		attrs["actionStatement"] = s
+	}
+	if len(vuln.Response) > 0 {
+		responses := make([]string, 0, len(vuln.Response))
+		for _, response := range vuln.Response {
+			responses = append(responses, string(response))
+		}
+		attrs["response"] = responses
 	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
