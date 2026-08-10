@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	"k8s.io/client-go/tools/record"
 )
 
 // cpeMatchDetail builds a cpe-match detail carrying the given version constraint, the
