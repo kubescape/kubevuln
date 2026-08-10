@@ -61,6 +61,9 @@ type Metrics struct {
 	ScanCounter               metric.Int64Counter
 	RejectCounter             metric.Int64Counter
 	ExceptionsDegradedCounter metric.Int64Counter
+	ExceptionsMatchedCounter  metric.Int64Counter
+	ExceptionsExpiredCounter  metric.Int64Counter
+	ExceptionsActiveGauge     metric.Int64Gauge
 	ScanFallbackCounter       metric.Int64Counter
 	SourceResolutionCounter   metric.Int64Counter
 }
@@ -124,6 +127,30 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	exceptionsMatchedCounter, err := meter.Int64Counter(
+		"kubevuln_exceptions_matched_total",
+		metric.WithDescription("Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException, by sourceKind"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	exceptionsExpiredCounter, err := meter.Int64Counter(
+		"kubevuln_exceptions_expired_total",
+		metric.WithDescription("Total number of SecurityException/ClusterSecurityException CRDs skipped because their expiresAt has passed, by sourceKind"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	exceptionsActiveGauge, err := meter.Int64Gauge(
+		"kubevuln_exceptions_active",
+		metric.WithDescription("Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	scanFallbackCounter, err := meter.Int64Counter(
 		"kubevuln_scan_fallbacks_total",
 		metric.WithDescription("Total number of scan fallback strategy changes, by component, category, strategy, and outcome"),
@@ -152,6 +179,9 @@ func New() (*Metrics, error) {
 		ScanCounter:               scanCounter,
 		RejectCounter:             rejectCounter,
 		ExceptionsDegradedCounter: exceptionsDegradedCounter,
+		ExceptionsMatchedCounter:  exceptionsMatchedCounter,
+		ExceptionsExpiredCounter:  exceptionsExpiredCounter,
+		ExceptionsActiveGauge:     exceptionsActiveGauge,
 		ScanFallbackCounter:       scanFallbackCounter,
 		SourceResolutionCounter:   sourceResolutionMetric,
 	}, nil

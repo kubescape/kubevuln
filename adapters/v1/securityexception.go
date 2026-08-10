@@ -37,9 +37,12 @@ type suppressionSource struct {
 //
 // Only exceptions whose spec.match applies to target are converted, so an
 // exception scoped by resources/images/objectSelector/namespaceSelector is not
-// applied to workloads it does not target. Expired exceptions are skipped.
-func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) []armotypes.VulnerabilityExceptionPolicy {
+// applied to workloads it does not target. Expired vulnerability entries (see
+// effectiveExpiresAt) are skipped, and counted in the returned
+// domain.ExceptionStats.ExpiredBySource.
+func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) ([]armotypes.VulnerabilityExceptionPolicy, domain.ExceptionStats) {
 	var policies []armotypes.VulnerabilityExceptionPolicy
+	stats := domain.ExceptionStats{ExpiredBySource: map[string]int{}}
 
 	now := time.Now()
 
@@ -54,6 +57,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
+				stats.ExpiredBySource["SecurityException"]++
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -76,6 +80,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
+				stats.ExpiredBySource["ClusterSecurityException"]++
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
@@ -87,7 +92,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 	}
 
-	return policies
+	return policies, stats
 }
 
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
@@ -294,9 +299,17 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 // recorder is optional: when nil, suppression is still logged via logSuppression but no
 // K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
 // deployments without SecurityException CRD integration enabled) are unaffected.
-func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) {
+//
+// The returned map counts each suppressed finding once per distinct sourceKind
+// ("SecurityException"/"ClusterSecurityException") that suppressed it -- not once per
+// suppressing policy, so two policies of the same kind matching one finding (e.g. by ID and
+// by alias) still count as a single match. A policy with no sourceKind attribute (e.g. a
+// cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
+// the CRD-suppression metric.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
+	matchedBySource := map[string]int{}
 	if doc == nil || len(exceptions) == 0 {
-		return
+		return matchedBySource
 	}
 
 	var remaining []v1beta1.Match
@@ -311,11 +324,21 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 				},
 			})
 			logSuppression(m, matched, recorder)
+			matchedKinds := map[string]struct{}{}
+			for _, p := range suppressingPolicies(matched) {
+				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
+					matchedKinds[kind] = struct{}{}
+				}
+			}
+			for kind := range matchedKinds {
+				matchedBySource[kind]++
+			}
 		} else {
 			remaining = append(remaining, m)
 		}
 	}
 	doc.Matches = remaining
+	return matchedBySource
 }
 
 // suppressingPolicies filters matched down to the policies that actually cause suppression,

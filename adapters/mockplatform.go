@@ -31,21 +31,22 @@ func NewMockPlatform(wantEmptyReport bool, seRepo ports.SecurityExceptionReposit
 }
 
 // GetCVEExceptions returns CRD-based SecurityException policies
-func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
 	_, span := otel.Tracer("").Start(ctx, "MockPlatform.GetCVEExceptions")
 	defer span.End()
 
 	if m.securityExceptionRepo == nil {
-		return domain.CVEExceptions{}, nil
+		return domain.CVEExceptions{}, domain.ExceptionStats{}, nil
 	}
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return domain.CVEExceptions{}, nil
+		return domain.CVEExceptions{}, domain.ExceptionStats{}, nil
 	}
 
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
 	degraded := false
+	stats := domain.ExceptionStats{}
 	seList, cseList, err := m.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(err))
@@ -55,8 +56,9 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	var vulnExceptionList domain.CVEExceptions
 	if len(seList) > 0 || len(cseList) > 0 {
 		target := v1.BuildExceptionTarget(ctx, workload, seList, cseList, m.securityExceptionRepo)
-		crdPolicies := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		crdPolicies, crdStats := v1.ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+		stats = crdStats
 
 		// A selector-based exception whose labels failed to resolve fails closed,
 		// making the merged set incomplete (see matchExceptionTarget).
@@ -67,10 +69,10 @@ func (m MockPlatform) GetCVEExceptions(ctx context.Context) (domain.CVEException
 	}
 
 	if degraded {
-		return vulnExceptionList, domain.ErrExceptionsDegraded
+		return vulnExceptionList, stats, domain.ErrExceptionsDegraded
 	}
 
-	return vulnExceptionList, nil
+	return vulnExceptionList, stats, nil
 }
 
 func (m MockPlatform) ReportError(ctx context.Context, _ error) error {

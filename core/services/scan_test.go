@@ -1621,8 +1621,8 @@ type recordingPlatform struct {
 
 var _ ports.Platform = (*recordingPlatform)(nil)
 
-func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, error) {
-	return p.exceptions, p.getExceptionsErr
+func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
+	return p.exceptions, domain.ExceptionStats{}, p.getExceptionsErr
 }
 
 func (p *recordingPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {

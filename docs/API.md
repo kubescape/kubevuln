@@ -139,6 +139,10 @@ GET /metrics
 | `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome`, `reason` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
 | `kubevuln_scan_rejections_total` | counter | `endpoint`, `reason` (`too_many_requests`/`invalid_request`) | Requests rejected at validation time, before being queued |
 | `kubevuln_worker_pool_queue_depth` | gauge | - | Number of scan jobs currently waiting in the worker pool |
+| `kubevuln_exceptions_degraded_total` | counter | - | Total number of times CVE exception fetching degraded (partially failed) during a scan |
+| `kubevuln_exceptions_matched_total` | counter | `sourceKind` (`SecurityException`/`ClusterSecurityException`) | Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException |
+| `kubevuln_exceptions_expired_total` | counter | `sourceKind` | Total number of SecurityException/ClusterSecurityException CRDs skipped because their `expiresAt` has passed |
+| `kubevuln_exceptions_active` | gauge | - | Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan |
 
 `reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)

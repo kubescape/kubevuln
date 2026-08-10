@@ -215,9 +215,9 @@ func TestConvertScopesByMatch(t *testing.T) {
 				Vulnerabilities: cveEntry,
 			},
 		}}
-		matching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{Image: "docker.io/library/nginx:1.25"})
+		matching, _ := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{Image: "docker.io/library/nginx:1.25"})
 		assert.Len(t, matching, 1)
-		notMatching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{Image: "docker.io/library/redis:7"})
+		notMatching, _ := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{Image: "docker.io/library/redis:7"})
 		assert.Empty(t, notMatching)
 	})
 
@@ -229,9 +229,9 @@ func TestConvertScopesByMatch(t *testing.T) {
 				Vulnerabilities: cveEntry,
 			},
 		}}
-		matching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "nginx"}, WorkloadLabelsResolved: true})
+		matching, _ := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "nginx"}, WorkloadLabelsResolved: true})
 		assert.Len(t, matching, 1)
-		notMatching := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "redis"}, WorkloadLabelsResolved: true})
+		notMatching, _ := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", WorkloadLabels: map[string]string{"app": "redis"}, WorkloadLabelsResolved: true})
 		assert.Empty(t, notMatching)
 	})
 
@@ -242,9 +242,9 @@ func TestConvertScopesByMatch(t *testing.T) {
 				Vulnerabilities: cveEntry,
 			},
 		}}
-		matching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "staging"}, NamespaceLabelsResolved: true})
+		matching, _ := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "staging"}, NamespaceLabelsResolved: true})
 		assert.Len(t, matching, 1)
-		notMatching := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "prod"}, NamespaceLabelsResolved: true})
+		notMatching, _ := ConvertToVulnerabilityExceptionPolicies(nil, cse, ExceptionTarget{NamespaceLabels: map[string]string{"env": "prod"}, NamespaceLabelsResolved: true})
 		assert.Empty(t, notMatching)
 	})
 
@@ -257,7 +257,7 @@ func TestConvertScopesByMatch(t *testing.T) {
 			},
 		}}
 		// even though namespace labels don't match, a namespaced SE is applied
-		policies := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", NamespaceLabels: map[string]string{"env": "staging"}})
+		policies, _ := ConvertToVulnerabilityExceptionPolicies(se, nil, ExceptionTarget{Namespace: "production", NamespaceLabels: map[string]string{"env": "staging"}})
 		assert.Len(t, policies, 1)
 	})
 }
