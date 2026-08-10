@@ -227,9 +227,13 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	vulnsList := make([]containerscan.ShortVulnerabilityResult, 0)
 
 	for i := range vulnerabilities {
-		isIgnored := len(vulnerabilities[i].ExceptionApplied) > 0 &&
-			len(vulnerabilities[i].ExceptionApplied[0].Actions) > 0 &&
-			vulnerabilities[i].ExceptionApplied[0].Actions[0] == armotypes.Ignore
+		// Same predicate ApplySecurityExceptions uses to decide suppression for the stored
+		// manifest. Reading only ExceptionApplied[0].Actions[0] would answer a narrower
+		// question: getCVEExceptionMatchCVENameFromList appends every policy matching the
+		// CVE name without filtering on actions, so the first one is not necessarily the
+		// one carrying Ignore, and the two surfaces would then disagree about whether the
+		// finding is suppressed.
+		isIgnored := hasIgnoreAction(vulnerabilities[i].ExceptionApplied)
 
 		severitiesStats := exculdedSeveritiesStats
 		if !isIgnored {

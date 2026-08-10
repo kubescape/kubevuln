@@ -705,3 +705,77 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 		})
 	}
 }
+
+// Summarize and ApplySecurityExceptions must answer "is this CVE suppressed?" the same way.
+// getCVEExceptionMatchCVENameFromList appends every policy whose VulnerabilityPolicies name
+// the CVE, without filtering on actions, so ExceptionApplied[0] is not necessarily the policy
+// carrying Ignore. Reading only the first policy's first action made the stored manifest hide
+// a finding the backend summary still counted as active.
+func TestSummarize_IgnoreMatchesManifestPredicate(t *testing.T) {
+	ignoring := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "ignoring-policy"},
+		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+	}
+
+	tests := []struct {
+		name            string
+		applied         []armotypes.VulnerabilityExceptionPolicy
+		wantTotalCount  int64
+		wantSuppressedT string
+	}{
+		{
+			name:           "no policies leaves the finding active",
+			applied:        nil,
+			wantTotalCount: 1,
+		},
+		{
+			name:           "a single ignoring policy suppresses",
+			applied:        []armotypes.VulnerabilityExceptionPolicy{ignoring},
+			wantTotalCount: 0,
+		},
+		{
+			name: "ignore carried by a later policy still suppresses",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{PortalBase: armotypes.PortalBase{Name: "no-actions"}},
+				ignoring,
+			},
+			wantTotalCount: 0,
+		},
+		{
+			name: "ignore carried by a later action still suppresses",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					PortalBase: armotypes.PortalBase{Name: "multi-action"},
+					Actions:    []armotypes.VulnerabilityExceptionPolicyActions{"alert_only", armotypes.Ignore},
+				},
+			},
+			wantTotalCount: 0,
+		},
+		{
+			name: "policies without any ignore action leave the finding active",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{PortalBase: armotypes.PortalBase{Name: "alert-only"}, Actions: []armotypes.VulnerabilityExceptionPolicyActions{"alert_only"}},
+			},
+			wantTotalCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vulns := []containerscan.CommonContainerVulnerabilityResult{{
+				Vulnerability: containerscan.Vulnerability{
+					Name:             "CVE-2021-44228",
+					Severity:         "Critical",
+					ExceptionApplied: tt.applied,
+				},
+			}}
+
+			summary, _ := Summarize(v1.ScanResultReport{}, vulns, domain.ScanCommand{}, false, nil)
+
+			assert.Equal(t, tt.wantTotalCount, summary.SeverityStats.TotalCount)
+			// Whatever Summarize decided must match what the manifest path would decide.
+			assert.Equal(t, hasIgnoreAction(tt.applied), summary.SeverityStats.TotalCount == 0,
+				"Summarize and ApplySecurityExceptions must agree on suppression")
+		})
+	}
+}
