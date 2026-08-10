@@ -66,7 +66,7 @@ func classifySBOMError(err error) string {
 func classifySBOMStatus(status string) string {
 	switch status {
 	case helpersv1.TooLarge:
-		return scanfailure.ReasonSBOMTooLarge
+		return scanfailure.ReasonImageTooLarge
 	case helpersv1.Incomplete:
 		return scanfailure.ReasonSBOMIncomplete
 	default:
