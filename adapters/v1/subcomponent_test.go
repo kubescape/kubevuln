@@ -40,6 +40,10 @@ func TestPURLMatches(t *testing.T) {
 		{name: "stated qualifier matching is a match", subcomponent: "pkg:deb/debian/openssl@1.1.1n?arch=amd64", purl: "pkg:deb/debian/openssl@1.1.1n?arch=amd64", want: true},
 		{name: "stated qualifier absent on artifact", subcomponent: "pkg:deb/debian/openssl?arch=amd64", purl: "pkg:deb/debian/openssl@1.1.1n", want: false},
 		{name: "unstated qualifiers are unconstrained", subcomponent: "pkg:deb/debian/openssl?arch=amd64", purl: "pkg:deb/debian/openssl@1.1.1n?arch=amd64&distro=debian-11", want: true},
+		{name: "stated subpath must match", subcomponent: "pkg:generic/foo#lib/a", purl: "pkg:generic/foo#lib/b", want: false},
+		{name: "stated subpath matching is a match", subcomponent: "pkg:generic/foo#lib/a", purl: "pkg:generic/foo#lib/a", want: true},
+		{name: "stated subpath absent on artifact", subcomponent: "pkg:generic/foo#lib/a", purl: "pkg:generic/foo", want: false},
+		{name: "unstated subpath is unconstrained", subcomponent: "pkg:generic/foo", purl: "pkg:generic/foo#lib/a", want: true},
 		{name: "empty artifact purl fails closed", subcomponent: "pkg:npm/lodash", purl: "", want: false},
 		{name: "malformed subcomponent fails closed", subcomponent: "not-a-purl", purl: "pkg:npm/lodash@1.0.0", want: false},
 		{name: "malformed artifact purl fails closed", subcomponent: "pkg:npm/lodash", purl: "lodash@1.0.0", want: false},
@@ -206,7 +210,7 @@ func TestConvertCarriesSubcomponents(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	require.Len(t, policies, 2)
 
@@ -236,7 +240,7 @@ func TestConvertBlankSubcomponentsStaysScoped(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 	require.Len(t, policies, 1)
 
 	_, isScoped := policySubcomponents(policies[0])

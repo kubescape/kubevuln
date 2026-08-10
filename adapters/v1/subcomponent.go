@@ -15,8 +15,10 @@ import (
 // so the value reaches ApplySecurityExceptions with its type intact.
 const attrSubcomponents = "subcomponents"
 
-// normalizedSubcomponents trims and drops empty entries, so a list that is only whitespace
-// is treated as absent (product scope) rather than as a scope nothing can satisfy.
+// normalizedSubcomponents trims entries and drops blank ones, so a list that is only
+// whitespace comes back empty. It says nothing about whether a scope was set: the caller
+// records that separately, so a whitespace-only list stays a scope that matches nothing
+// rather than falling back to product scope.
 func normalizedSubcomponents(subcomponents []string) []string {
 	var out []string
 	for _, s := range subcomponents {
@@ -34,8 +36,8 @@ func normalizedSubcomponents(subcomponents []string) []string {
 // The value is []string for policies built in this process and []interface{} for any that
 // have been through JSON, such as cloud-sourced exceptions; both are accepted so a policy
 // from either source is read the same way. Any other type is still a scope, and one nothing
-// can satisfy — an attribute that cannot be read as a PURL list must not widen the policy
-// back to product scope.
+// can satisfy, since an attribute that cannot be read as a PURL list must not widen the
+// policy back to product scope.
 func policySubcomponents(p armotypes.VulnerabilityExceptionPolicy) ([]string, bool) {
 	raw, ok := p.Attributes[attrSubcomponents]
 	if !ok {
@@ -108,14 +110,19 @@ func purlMatches(subcomponent, purl string) bool {
 	if sub.Version != "" && sub.Version != pkg.Version {
 		return false
 	}
-	// Qualifiers are what separate variants of the same package — arch and distro both
-	// appear on scanned PURLs — so every qualifier the exception states must hold. Ones it
+	// Qualifiers are what separate variants of the same package, and scanned PURLs routinely
+	// carry arch and distro, so every qualifier the exception states must hold. Ones it
 	// leaves out are unconstrained, keeping an unqualified PURL a match for any variant.
 	pkgQualifiers := pkg.Qualifiers.Map()
 	for key, want := range sub.Qualifiers.Map() {
 		if pkgQualifiers[key] != want {
 			return false
 		}
+	}
+	// A subpath narrows the match to one location inside the package, so a stated one has to
+	// match exactly. Same rule as qualifiers: omitting it leaves the location unconstrained.
+	if sub.Subpath != "" && sub.Subpath != pkg.Subpath {
+		return false
 	}
 	return true
 }
