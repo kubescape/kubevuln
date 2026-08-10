@@ -280,6 +280,38 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 	assert.Equal(t, map[string]int{"SecurityException": 1}, matchedBySource)
 }
 
+// TestApplySecurityExceptions_MatchedCountDedupesPerFinding is a regression test: two
+// SecurityException policies suppressing the same finding (by ID and by alias, say) must
+// count as one match for that sourceKind, not two, since exactly one finding was removed.
+func TestApplySecurityExceptions_MatchedCountDedupesPerFinding(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase:            armotypes.PortalBase{Name: "allow-by-id", Attributes: map[string]interface{}{"sourceKind": "SecurityException"}},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+		{
+			PortalBase:            armotypes.PortalBase{Name: "allow-by-alias", Attributes: map[string]interface{}{"sourceKind": "SecurityException"}},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	matchedBySource := ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 1, "one finding should be ignored")
+	assert.Equal(t, map[string]int{"SecurityException": 1}, matchedBySource,
+		"two policies suppressing the same finding must count as a single match")
+}
+
 func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 	expiredOnFix := true
 	doc := &v1beta1.GrypeDocument{

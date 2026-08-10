@@ -249,9 +249,10 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 // K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
 // deployments without SecurityException CRD integration enabled) are unaffected.
 //
-// The returned map counts each suppression by the exception's sourceKind
-// ("SecurityException"/"ClusterSecurityException"), at the same per-policy granularity
-// logSuppression already logs at; a policy with no sourceKind attribute (e.g. a
+// The returned map counts each suppressed finding once per distinct sourceKind
+// ("SecurityException"/"ClusterSecurityException") that suppressed it -- not once per
+// suppressing policy, so two policies of the same kind matching one finding (e.g. by ID and
+// by alias) still count as a single match. A policy with no sourceKind attribute (e.g. a
 // cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
 // the CRD-suppression metric.
 func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
@@ -272,10 +273,14 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 				},
 			})
 			logSuppression(m, matched, recorder)
+			matchedKinds := map[string]struct{}{}
 			for _, p := range suppressingPolicies(matched) {
 				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
-					matchedBySource[kind]++
+					matchedKinds[kind] = struct{}{}
 				}
+			}
+			for kind := range matchedKinds {
+				matchedBySource[kind]++
 			}
 		} else {
 			remaining = append(remaining, m)

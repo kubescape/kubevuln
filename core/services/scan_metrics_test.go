@@ -148,3 +148,67 @@ func TestApplyExceptionsToManifest_RecordsActiveAndMatchedMetrics(t *testing.T) 
 	assert.True(t, strings.Contains(body, "kubevuln_exceptions_active 1"), body)
 	assert.True(t, strings.Contains(body, `kubevuln_exceptions_matched_total{sourceKind="SecurityException"} 1`), body)
 }
+
+// sequentialExceptionsPlatform returns exceptions[0] on the first GetCVEExceptions call and
+// exceptions[1] (and later) on every call after, so a test can drive applyExceptionsToManifest
+// through two scans with different exception sets.
+type sequentialExceptionsPlatform struct {
+	exceptionsPlatform
+	calls      int
+	exceptions []domain.CVEExceptions
+}
+
+func (p *sequentialExceptionsPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
+	i := p.calls
+	if i >= len(p.exceptions) {
+		i = len(p.exceptions) - 1
+	}
+	p.calls++
+	return p.exceptions[i], domain.ExceptionStats{}, nil
+}
+
+// TestApplyExceptionsToManifest_ActiveGaugeResetsToZero is a regression test: the active
+// gauge used to be recorded after the len(exceptions)==0 early return, so a scan with no
+// exceptions following one that had exceptions left kubevuln_exceptions_active stuck at its
+// last nonzero value instead of resetting -- a real Prometheus gauge misreporting bug, not
+// just a missed data point (a counter would eventually recover; a gauge would not).
+func TestApplyExceptionsToManifest_ActiveGaugeResetsToZero(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	onePolicy := domain.CVEExceptions{
+		{
+			PortalBase:            armotypes.PortalBase{Attributes: map[string]interface{}{"sourceKind": "SecurityException"}},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-SUPPRESSED"}},
+		},
+	}
+	s := &ScanService{platform: &sequentialExceptionsPlatform{exceptions: []domain.CVEExceptions{onePolicy, {}}}}
+	s.SetMetrics(m)
+
+	cve := domain.CVEManifest{Content: &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-SUPPRESSED"}}},
+		},
+	}}
+
+	_, complete := s.applyExceptionsToManifest(context.Background(), cve)
+	require.True(t, complete)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+	require.True(t, strings.Contains(w.Body.String(), "kubevuln_exceptions_active 1"), w.Body.String())
+
+	// second scan resolves zero exceptions; the gauge must follow it down to zero
+	_, complete = s.applyExceptionsToManifest(context.Background(), cve)
+	require.True(t, complete)
+
+	req = httptest.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, "kubevuln_exceptions_active 0"), body)
+	assert.False(t, strings.Contains(body, "kubevuln_exceptions_active 1"), body)
+}

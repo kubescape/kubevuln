@@ -880,11 +880,11 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
 	}
-	if len(exceptions) == 0 {
-		return cve, !degraded
-	}
 	if s.metrics != nil {
 		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
+	}
+	if len(exceptions) == 0 {
+		return cve, !degraded
 	}
 	filtered := cve
 	if cve.Labels != nil {

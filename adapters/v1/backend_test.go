@@ -184,6 +184,47 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
 }
 
+// TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry is a regression test:
+// ConvertToVulnerabilityExceptionPolicies only checks an exception's expiresAt on a cache
+// miss, so a cache entry that outlives the CRD exception it was built from would keep
+// suppressing CVEs past that exception's own expiry until the fixed exceptionsCacheTTL
+// elapsed. The cache entry's TTL must instead be bounded to the earliest expiresAt among
+// its policies (see cacheTTLFor), so expiry forces a re-evaluation instead of a stale hit.
+func TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry(t *testing.T) {
+	expiresAt := metav1.NewTime(time.Now().Add(50 * time.Millisecond))
+	crdCalls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			crdCalls++
+			return []sev1beta1.SecurityException{{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					ExpiresAt: &expiresAt,
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-SOON-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					},
+				},
+			}}, nil, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	exceptions, _, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, exceptions, 1, "the not-yet-expired exception should suppress on the first call")
+	assert.Equal(t, 1, crdCalls)
+
+	time.Sleep(75 * time.Millisecond) // past expiresAt, well within exceptionsCacheTTL
+
+	exceptions, _, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Empty(t, exceptions, "an exception that expired mid-TTL must not keep being served from a stale cache entry")
+	assert.Equal(t, 2, crdCalls, "expiry must force re-evaluation instead of a cache hit")
+}
+
 func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheEntries(t *testing.T) {
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
 		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {

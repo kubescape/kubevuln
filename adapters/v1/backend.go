@@ -66,6 +66,29 @@ const (
 	exceptionsCacheTTL              = 1 * time.Minute
 )
 
+// cacheTTLFor bounds base by the earliest ExpirationDate among policies, so a cache entry
+// containing a CRD-based exception never outlives that exception's own expiresAt. Without
+// this, ConvertToVulnerabilityExceptionPolicies' expiry check only ever runs on a cache miss:
+// an exception expiring mid-TTL would otherwise keep being served (and keep suppressing
+// matching CVEs) from the stale cache entry until the fixed exceptionsCacheTTL elapsed,
+// regardless of how soon it actually expired.
+func cacheTTLFor(policies []armotypes.VulnerabilityExceptionPolicy, base time.Duration) time.Duration {
+	ttl := base
+	now := time.Now()
+	for _, p := range policies {
+		if p.ExpirationDate == nil {
+			continue
+		}
+		if until := p.ExpirationDate.Sub(now); until < ttl {
+			ttl = until
+		}
+	}
+	if ttl < 0 {
+		ttl = 0
+	}
+	return ttl
+}
+
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
@@ -240,7 +263,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	if cacheable && a.exceptionsCache != nil {
-		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), cacheTTLFor(vulnExceptionList, exceptionsCacheTTL))
 	}
 
 	if degraded {
