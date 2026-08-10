@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
@@ -610,4 +612,115 @@ func TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection(t 
 	body := w.Body.String()
 	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1`), body)
 	assert.False(t, strings.Contains(body, `reason="too_many_requests"`), body)
+}
+
+// scanErrorService validates every request successfully, then returns a fixed error from
+// whichever scan flow the test exercises -- used to prove HTTPController.recordScan resolves
+// a specific reason label (see scanFailureReason) all the way from the scan service's error,
+// through the worker pool, onto the kubevuln_scans_completed_total/kubevuln_scan_duration_seconds
+// metrics (see #540).
+type scanErrorService struct {
+	*services.MockScanService
+	err error
+}
+
+func (s scanErrorService) GenerateSBOM(context.Context) error { return s.err }
+func (s scanErrorService) ScanCVE(context.Context) error      { return s.err }
+func (s scanErrorService) ScanRegistry(context.Context) error { return s.err }
+
+func (s scanErrorService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func (s scanErrorService) ValidateScanCVE(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func (s scanErrorService) ValidateScanRegistry(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+// TestHTTPController_MetricsEndpoint_RecordsScanFailureReason is a regression test for #540:
+// every scan flow used to collapse its failure into a bare outcome="error" label, discarding
+// the scanfailure.Reason* classification already computed in core/services/scan.go. It now
+// rides along on a *domain.ScanError and lands on the "reason" attribute of both
+// kubevuln_scans_completed_total and kubevuln_scan_duration_seconds, one specific value per
+// endpoint instead of a single opaque bucket.
+func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		endpoint     string
+		register     func(router *gin.Engine, c *HTTPController)
+		wantReason   string
+		unclassified bool // when true, err is a bare error instead of *domain.ScanError
+	}{
+		{
+			name:       "generateSBOM, classified reason",
+			path:       "/v1/generateSBOM",
+			endpoint:   "generateSBOM",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/generateSBOM", c.GenerateSBOM) },
+			wantReason: scanfailure.ReasonSBOMIncomplete,
+		},
+		{
+			name:       "scanCVE, classified reason",
+			path:       "/v1/scanImage",
+			endpoint:   "scanCVE",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/scanImage", c.ScanCVE) },
+			wantReason: scanfailure.ReasonCVEMatchingFailed,
+		},
+		{
+			name:       "scanRegistryImage, classified reason",
+			path:       "/v1/scanRegistryImage",
+			endpoint:   "scanRegistry",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/scanRegistryImage", c.ScanRegistry) },
+			wantReason: scanfailure.ReasonImageAuthFailed,
+		},
+		{
+			name:         "generateSBOM, unclassified error defaults to unexpected",
+			path:         "/v1/generateSBOM",
+			endpoint:     "generateSBOM",
+			register:     func(router *gin.Engine, c *HTTPController) { router.POST("/v1/generateSBOM", c.GenerateSBOM) },
+			wantReason:   scanfailure.ReasonUnexpected,
+			unclassified: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var scanErr error = &domain.ScanError{Reason: tt.wantReason, Err: errors.New("boom")}
+			if tt.unclassified {
+				scanErr = errors.New("boom")
+			}
+			c := &HTTPController{
+				scanService: scanErrorService{MockScanService: services.NewMockScanService(true), err: scanErr},
+				workerPool:  workerpool.New(1),
+			}
+			m, err := metrics.New()
+			require.NoError(t, err)
+			c, err = c.WithMetrics(m)
+			require.NoError(t, err)
+
+			router := gin.Default()
+			tt.register(router, c)
+			router.GET("/metrics", gin.WrapH(m.Handler()))
+
+			file, err := os.Open("../api/v1/testdata/scan.yaml")
+			require.NoError(t, err)
+			req, _ := http.NewRequest("POST", tt.path, file)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			c.Shutdown(5 * time.Second)
+
+			req, _ = http.NewRequest("GET", "/metrics", nil)
+			w = httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			body := w.Body.String()
+			wantSeries := `kubevuln_scans_completed_total{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
+			assert.True(t, strings.Contains(body, wantSeries), body)
+		})
+	}
 }
