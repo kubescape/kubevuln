@@ -88,6 +88,29 @@ func NewSBOMScannerClient(ctx context.Context, socketPath string, readinessTimeo
 	return c, nil
 }
 
+// timeoutSecondsForWire converts a scan timeout to the whole seconds the scanner protocol
+// carries, rounding up so a configured timeout is never shortened.
+//
+// Truncating instead inverts the setting at the low end: the server treats a non-positive
+// TimeoutSeconds as unset and falls back to a five minute default, so a sub-second timeout
+// truncated to zero produces a far longer deadline than the one configured, not a shorter
+// one. The in-process adapter passes the same scanTimeout straight to deadline.New and
+// honours it exactly, so the two SBOM paths would otherwise read one config value very
+// differently.
+//
+// A non-positive timeout is passed through as zero, which is the value that legitimately
+// means "use the server default".
+func timeoutSecondsForWire(timeout time.Duration) int64 {
+	if timeout <= 0 {
+		return 0
+	}
+	seconds := timeout / time.Second
+	if timeout%time.Second != 0 {
+		seconds++
+	}
+	return int64(seconds)
+}
+
 func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*ScanResult, error) {
 	// Map domain credentials to proto
 	creds := make([]*pb.RegistryCredentials, len(req.Options.Credentials))
@@ -110,7 +133,7 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		MaxImageSize:          req.MaxImageSize,
 		MaxSbomSize:           req.MaxSBOMSize,
 		EnableEmbeddedSboms:   req.EnableEmbeddedSBOMs,
-		TimeoutSeconds:        int64(req.Timeout.Seconds()),
+		TimeoutSeconds:        timeoutSecondsForWire(req.Timeout),
 	}
 
 	resp, err := c.client.CreateSBOM(ctx, pbReq)
