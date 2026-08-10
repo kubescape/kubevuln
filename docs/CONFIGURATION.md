@@ -195,6 +195,7 @@ The main configuration file. All options can be overridden via environment varia
 | `storage` | bool | `false` | Enable Kubernetes storage backend (stores SBOMs/CVEs as CRDs) |
 | `namespace` | string | `kubescape` | Kubernetes namespace for storage |
 | `storeFilteredSbom` | bool | `false` | Store relevancy-filtered SBOMs |
+| `riskAcceptance` | bool | `false` | Enable `SecurityException`/`ClusterSecurityException` CRD integration (exception matching, VEX suppression, suppression Events/metrics) — requires `storage: true` as well. See [security-exception-design.md](security-exception-design.md). If `storage` is enabled but this is left unset, matching CRDs are silently ignored: a warning is logged at startup, but no error or metric flags it, so double-check this is set before relying on `SecurityException`/`ClusterSecurityException` CRDs. |
 
 #### Feature Flags
 
@@ -204,6 +205,7 @@ The main configuration file. All options can be overridden via environment varia
 | `nodeSbomGeneration` | bool | `false` | Enable node-level SBOM generation |
 | `partialRelevancy` | bool | `false` | Enable partial relevancy matching |
 | `vexGeneration` | bool | `false` | Generate VEX (Vulnerability Exploitability eXchange) documents |
+| `proxyRegistryMap` | map[string]string | `{}` | Maps a registry hostname to an internal mirror for image pulls, e.g. `{"docker.io": "my-mirror.example.com"}`. Applied to every SBOM-generation path (in-process and sidecar). Config keys are parsed with a `::` delimiter specifically so hostnames containing `.` are treated as a single map key instead of being split into nested keys (see #359/#361) — no special escaping needed in `docker.io`-style keys. |
 
 ### Complete Schema
 
@@ -246,6 +248,15 @@ The main configuration file. All options can be overridden via environment varia
       "default": false
     },
     "partialRelevancy": {
+      "type": "boolean",
+      "default": false
+    },
+    "proxyRegistryMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    },
+    "riskAcceptance": {
       "type": "boolean",
       "default": false
     },
