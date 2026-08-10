@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -256,6 +257,37 @@ func TestResolveSource(t *testing.T) {
 	}
 }
 
+func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	orig := gcpCredsFn
+	defer func() { gcpCredsFn = orig }()
+	gcpCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+	}
+
+	callCount := 0
+	get := func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		callCount++
+		if callCount == 1 {
+			return nil, errors.New("401 Unauthorized")
+		}
+		return nil, nil
+	}
+
+	_, err = resolveSource(context.Background(), get, "gcr.io/project/image", "", image.RegistryOptions{})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+	body := w.Body.String()
+
+	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="registry_auth",component="sidecar",outcome="succeeded",strategy="gcp_adc"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="sidecar",outcome="fallback_assisted_success"} 1`), body)
+}
+
 // fakeAuthProvider is a scripted registryAuthProvider used to prove
 // resolveSource consults registryAuthProviders generically, not just GCP.
 type fakeAuthProvider struct {
@@ -461,6 +493,7 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
 		ImageId:         u.Host + "/test-image",
 		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/amd64",
 		MaxImageSize:    1, // Exceeded by layer size
 		InsecureUseHttp: true,
 	})

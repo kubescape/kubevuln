@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"golang.org/x/oauth2/google"
@@ -80,7 +81,6 @@ func formatResolvedPlatform(os, arch, variant string) string {
 	}
 	return strings.Join(parts, "/")
 }
-
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
 	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
@@ -131,8 +131,10 @@ type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOpti
 // adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
 func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
 	pullRef := imageID
+	usedFallback := false
 	src, err := get(ctx, pullRef, &opts)
 	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		usedFallback = true
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
 			helpers.String("imageTag", imageTag),
 			helpers.String("imageID", imageID))
@@ -140,18 +142,25 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 		src, err = get(ctx, pullRef, &opts)
 	}
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+		usedFallback = true
 		unauthorizedErr := err
 		for _, provider := range registryAuthProviders {
 			if !provider.Matches(pullRef) {
 				continue
 			}
 			if creds, credErr := provider.Credentials(ctx); credErr != nil || creds == nil {
+				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
 				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
 					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
 			} else {
 				opts.Credentials = []image.RegistryCredentials{*creds}
 				src, err = get(ctx, pullRef, &opts)
+				outcome := metrics.FallbackOutcomeFailed
+				if err == nil {
+					outcome = metrics.FallbackOutcomeSucceeded
+				}
+				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, outcome)
 			}
 			break
 		}
@@ -162,11 +171,17 @@ func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag stri
 				helpers.String("imageID", imageID))
 			opts.Credentials = nil
 			src, err = get(ctx, pullRef, &opts)
+			outcome := metrics.FallbackOutcomeFailed
+			if err == nil {
+				outcome = metrics.FallbackOutcomeSucceeded
+			}
+			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
 			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
 				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
 			}
 		}
 	}
+	metrics.RecordSourceResolution(ctx, metrics.ComponentSidecar, usedFallback, err == nil)
 	return src, err
 }
 
@@ -265,6 +280,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyImageTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
@@ -278,6 +294,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			ErrorMessage: err.Error(),
 		}, nil
 	case err != nil && isPlatformMismatch(err):
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		// The requested platform doesn't exist in the image's manifest. StatusReason travels
 		// over gRPC as a plain string; the caller's classifySBOMError also recognizes the
 		// "mismatched platform" text in ErrorMessage directly, so this is reported as a
@@ -301,6 +318,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			StatusReason: domain.ReasonTooManyRequests,
 		}, nil
 	case err != nil:
+		if isPlatformMismatch(err) {
+			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
+		}
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
 		}, nil
@@ -350,6 +370,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 
 	switch {
 	case errors.Is(err, deadline.ErrTimedOut):
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("Syft timed out", helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
 			Status:           helpersv1.Incomplete,
@@ -358,6 +379,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	case err == nil:
 		// continue
 	default:
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		return &pb.CreateSBOMResponse{
 			Status:           helpersv1.Incomplete,
 			ErrorMessage:     err.Error(),
@@ -375,6 +397,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// by the scanner container's memory limit, not by MaxSbomSize.
 	sz := size.Of(syftSBOM)
 	if sz > int(req.MaxSbomSize) {
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategySBOMTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("SBOM exceeds size limit",
 			helpers.Int("maxSBOMSize", int(req.MaxSbomSize)),
 			helpers.Int("size", sz),
