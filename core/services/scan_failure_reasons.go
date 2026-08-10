@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -25,6 +26,9 @@ func classifySBOMError(err error) string {
 	if errors.Is(err, sbomscanner.ErrScannerCrashed) {
 		return scanfailure.ReasonScannerOOMKilled
 	}
+	if errors.Is(err, sbomscanner.ErrScannerUnavailable) {
+		return scanfailure.ReasonSBOMGenerationFailed
+	}
 
 	// Context deadline exceeded → scan timeout
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -41,6 +45,16 @@ func classifySBOMError(err error) string {
 		}
 	}
 
+	// Requested platform doesn't exist in the image's manifest. In-process adapter calls
+	// preserve the typed error; sidecar calls lose it crossing gRPC (ErrorMessage is a plain
+	// string), hence the string fallback below. armoapi-go has no dedicated "platform not
+	// found" reason code (see #512) — ReasonImageNotFound is the closest existing match: the
+	// manifest for the requested platform variant is, in effect, not there.
+	var platformErr *image.ErrPlatformMismatch
+	if errors.As(err, &platformErr) {
+		return scanfailure.ReasonImageNotFound
+	}
+
 	// String-based fallbacks for errors not using typed wrapping
 	errStr := err.Error()
 	switch {
@@ -53,6 +67,10 @@ func classifySBOMError(err error) string {
 	case strings.Contains(errStr, "MANIFEST_SCHEMA_UNSUPPORTED") ||
 		strings.Contains(errStr, "unsupported schema manifest"):
 		return scanfailure.ReasonImageSchemaUnsupported
+	case strings.Contains(errStr, "mismatched platform"):
+		// (*image.ErrPlatformMismatch).Error() text, surfaced as-is by the sidecar path's
+		// generic ErrorMessage fallback (pkg/sbomscanner/v1/server.go's isPlatformMismatch case).
+		return scanfailure.ReasonImageNotFound
 	}
 
 	return scanfailure.ReasonSBOMGenerationFailed

@@ -31,6 +31,7 @@ func TestCreateSBOM_WrapsGRPCDeadlineExceeded(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
+	assert.NotErrorIs(t, err, ErrScannerUnavailable)
 }
 
 func TestCreateSBOM_PassesThroughPlainDeadlineExceeded(t *testing.T) {
@@ -40,18 +41,31 @@ func TestCreateSBOM_PassesThroughPlainDeadlineExceeded(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
+	assert.NotErrorIs(t, err, ErrScannerUnavailable)
 }
 
-func TestCreateSBOM_WrapsGRPCCrashCodes(t *testing.T) {
-	for _, code := range []codes.Code{codes.Unavailable, codes.Aborted} {
-		c := &sbomScannerClient{client: &mockPBScannerClient{
-			createSBOMErr: status.Error(code, "scanner crashed"),
-		}}
-		_, err := c.CreateSBOM(context.Background(), ScanRequest{})
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrScannerCrashed)
-		assert.NotErrorIs(t, err, context.DeadlineExceeded)
-	}
+func TestCreateSBOM_WrapsGRPCTransportCodes(t *testing.T) {
+	c := &sbomScannerClient{client: &mockPBScannerClient{
+		createSBOMErr: status.Error(codes.Unavailable, "transport interrupted"),
+	}}
+
+	_, err := c.CreateSBOM(context.Background(), ScanRequest{})
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotErrorIs(t, err, ErrScannerCrashed)
+}
+
+func TestCreateSBOM_DoesNotWrapGRPCAbortedAsUnavailable(t *testing.T) {
+	c := &sbomScannerClient{client: &mockPBScannerClient{
+		createSBOMErr: status.Error(codes.Aborted, "request aborted"),
+	}}
+
+	_, err := c.CreateSBOM(context.Background(), ScanRequest{})
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotErrorIs(t, err, ErrScannerCrashed)
 }
 
 func TestCreateSBOM_PassesThroughUnrelatedError(t *testing.T) {
@@ -64,4 +78,5 @@ func TestCreateSBOM_PassesThroughUnrelatedError(t *testing.T) {
 	assert.ErrorIs(t, err, unrelated)
 	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
+	assert.NotErrorIs(t, err, ErrScannerUnavailable)
 }

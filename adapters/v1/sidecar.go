@@ -124,6 +124,9 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	// Map response status to domain SBOM
 	domainSBOM.Status = result.Status
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", result.SBOMSize)
+	if result.ResolvedPlatform != "" {
+		domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey] = result.ResolvedPlatform
+	}
 
 	if result.Status == helpersv1.TooLarge {
 		if result.StatusReason != "" {

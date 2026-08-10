@@ -98,7 +98,7 @@ EOF
 make
 
 # Run
-CONFIG_DIR=.dev/config ./kubevuln
+CONFIG_DIR=.dev/config go run ./cmd/http
 ```
 
 ### 5. Verify
@@ -442,8 +442,8 @@ kubevuln/
 Use `make verify` as the default contributor check before opening a pull request. It keeps the fast path local and deterministic:
 
 ```bash
-# Build the Linux amd64 binary, run all tests, run go vet, and lint against
-# changes since the branch point on upstream/main or origin/main
+# Build the Linux amd64 binary, run the default Go tests, run go vet, and lint
+# against changes since the branch point on upstream/main or origin/main
 make verify
 ```
 
@@ -463,7 +463,7 @@ Keep slower or network-backed checks separate from the fast path:
 make verify-image
 
 # Optional runtime smoke check; readiness may wait on vulnerability DB download
-CONFIG_DIR=.dev/config ./kubevuln
+CONFIG_DIR=.dev/config go run ./cmd/http
 
 # Optional integration suite when external dependencies are available
 go test -tags=integration ./...

@@ -116,8 +116,8 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	resp, err := c.client.CreateSBOM(ctx, pbReq)
 	if err != nil {
 		st, ok := status.FromError(err)
-		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Aborted) {
-			return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
+		if ok && st.Code() == codes.Unavailable {
+			return nil, fmt.Errorf("%w: %v", ErrScannerUnavailable, err)
 		}
 		if ok && st.Code() == codes.DeadlineExceeded {
 			return nil, fmt.Errorf("scan timeout: %w: %v", context.DeadlineExceeded, err)
@@ -126,10 +126,11 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	}
 
 	result := &ScanResult{
-		SBOMSize:     resp.SbomSize,
-		Status:       resp.Status,
-		ErrorMessage: resp.ErrorMessage,
-		StatusReason: resp.StatusReason,
+		SBOMSize:         resp.SbomSize,
+		Status:           resp.Status,
+		ErrorMessage:     resp.ErrorMessage,
+		StatusReason:     resp.StatusReason,
+		ResolvedPlatform: resp.ResolvedPlatform,
 	}
 
 	// Deserialize SBOM document if present

@@ -61,14 +61,14 @@ func TestIntegration_HealthCheck(t *testing.T) {
 	assert.NotEmpty(t, version)
 }
 
-func TestIntegration_SimulatedCrash(t *testing.T) {
+func TestIntegration_SimulatedTransportLoss(t *testing.T) {
 	client, srv, sock := startIntegrationServer(t)
 	defer os.Remove(sock)
 	defer client.Close()
 
 	assert.True(t, client.Ready())
 
-	// Kill the server to simulate OOM
+	// Stop the server to simulate a transient sidecar restart / socket disconnect.
 	srv.Stop()
 
 	_, err := client.CreateSBOM(context.Background(), ScanRequest{
@@ -78,7 +78,8 @@ func TestIntegration_SimulatedCrash(t *testing.T) {
 		MaxImageSize: 1024 * 1024 * 1024,
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrScannerCrashed)
+	assert.ErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, ErrScannerCrashed)
 }
 
 func TestIntegration_ReadyCheck(t *testing.T) {

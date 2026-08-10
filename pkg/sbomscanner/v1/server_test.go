@@ -22,6 +22,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
@@ -567,4 +568,122 @@ func TestIsRegistryRateLimited(t *testing.T) {
 			assert.Equal(t, tt.want, isRegistryRateLimited(tt.err))
 		})
 	}
+}
+
+func TestIsPlatformMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "typed platform mismatch",
+			err:  &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"},
+			want: true,
+		},
+		{
+			name: "wrapped typed platform mismatch",
+			err:  fmt.Errorf("resolving source: %w", &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"}),
+			want: true,
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("mismatched platform mentioned but not the typed error"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPlatformMismatch(tt.err))
+		})
+	}
+}
+
+func TestFormatResolvedPlatform(t *testing.T) {
+	tests := []struct {
+		name    string
+		os      string
+		arch    string
+		variant string
+		want    string
+	}{
+		{name: "os and arch", os: "linux", arch: "amd64", want: "linux/amd64"},
+		{name: "os, arch and variant", os: "linux", arch: "arm", variant: "v7", want: "linux/arm/v7"},
+		{name: "neither known", want: ""},
+		{name: "arch known, os unknown", arch: "amd64", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatResolvedPlatform(tt.os, tt.arch, tt.variant))
+		})
+	}
+}
+
+// TestCreateSBOM_PlatformMismatch_LocalRegistry is a regression test for #512: requesting a
+// platform absent from the image's manifest must surface a distinct "platform not found"
+// reason instead of falling into the generic error path.
+func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(100)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {
+					"mediaType": "application/vnd.docker.container.image.v1+json",
+					"size": %d,
+					"digest": "sha256:%s"
+				},
+				"layers": [
+					{
+						"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+						"size": %d,
+						"digest": "sha256:%s"
+					}
+				]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash):
+			w.Write(configBytes)
+		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash):
+			w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/arm64",
+		MaxImageSize:    1 << 30,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Contains(t, resp.ErrorMessage, "mismatched platform")
+	assert.Equal(t, domain.ReasonPlatformNotFound, resp.StatusReason)
+	assert.Empty(t, resp.Status)
 }

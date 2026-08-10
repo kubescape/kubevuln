@@ -26,8 +26,13 @@ kubevuln maps the underlying error to a stable **failure case** and a short **re
 (defined in [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)) rather than
 sending raw error strings. Classification helpers (`classifySBOMError`, `classifySBOMStatus`)
 detect, for example, image auth failures (`errors.As(*transport.Error)`), `MANIFEST_UNKNOWN`,
-and `TooLarge` / `Incomplete` SBOM statuses. The raw error is preserved in a separate `Error`
-field for backend debugging; the reason code drives the user-facing text (mapped downstream).
+`TooLarge` / `Incomplete` SBOM statuses, and requested-but-unavailable image platforms
+(`errors.As(*image.ErrPlatformMismatch)`, or its rendered "mismatched platform" text for scans
+routed through the sidecar, which loses the typed error crossing gRPC). armoapi-go has no
+dedicated "platform not found" code, so this maps to the closest existing one,
+`ReasonImageNotFound` — distinguishing it from the generic `ReasonSBOMGenerationFailed`
+fallback it used to fall into. The raw error is preserved in a separate `Error` field for
+backend debugging; the reason code drives the user-facing text (mapped downstream).
 
 Failure cases: CVE scan failure, SBOM generation failure, OOM kill, backend post failure.
 
