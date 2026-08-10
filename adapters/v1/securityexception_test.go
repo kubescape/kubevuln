@@ -1056,7 +1056,6 @@ func TestConvertAffectedSuppression(t *testing.T) {
 			}
 
 			policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
-
 			if tt.wantSuppressed {
 				require.Len(t, policies, 1)
 				assert.Equal(t, "CVE-2021-44228", policies[0].VulnerabilityPolicies[0].Name)
