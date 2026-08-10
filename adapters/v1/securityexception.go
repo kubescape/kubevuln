@@ -11,8 +11,15 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 )
+
+// securityExceptionAPIVersion is the apiVersion recorded on the ObjectReference used
+// when emitting suppression Events, matching pkg/securityexception/v1beta1's group/version.
+const securityExceptionAPIVersion = "kubescape.io/v1beta1"
 
 // suppressionSource identifies the CRD object a suppression provenance record originated
 // from, so a suppressed CVE can be traced back to the exception (and its scope) that
@@ -21,6 +28,7 @@ type suppressionSource struct {
 	kind      string // "SecurityException" or "ClusterSecurityException"
 	name      string
 	namespace string
+	uid       types.UID
 }
 
 // ConvertToVulnerabilityExceptionPolicies converts SecurityException and
@@ -52,6 +60,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				kind:      "SecurityException",
 				name:      se.Name,
 				namespace: se.Namespace,
+				uid:       se.UID,
 			})
 			policies = append(policies, p)
 		}
@@ -72,6 +81,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
 				kind: "ClusterSecurityException",
 				name: cse.Name,
+				uid:  cse.UID,
 			})
 			policies = append(policies, p)
 		}
@@ -154,6 +164,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
 	}
+	if src.uid != "" {
+		attrs["sourceUID"] = string(src.uid)
+	}
 	if j := strings.TrimSpace(vuln.Justification); j != "" {
 		attrs["justification"] = j
 	}
@@ -213,7 +226,11 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 
 // ApplySecurityExceptions moves CVEs covered by exception policies from
 // doc.Matches to doc.IgnoredMatches with applied ignore rules.
-func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions) {
+//
+// recorder is optional: when nil, suppression is still logged via logSuppression but no
+// K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
+// deployments without SecurityException CRD integration enabled) are unaffected.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) {
 	if doc == nil || len(exceptions) == 0 {
 		return
 	}
@@ -229,7 +246,7 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 					{Vulnerability: m.Vulnerability.ID},
 				},
 			})
-			logSuppression(m, matched)
+			logSuppression(m, matched, recorder)
 		} else {
 			remaining = append(remaining, m)
 		}
@@ -255,7 +272,11 @@ func suppressingPolicies(matched []armotypes.VulnerabilityExceptionPolicy) []arm
 // matched, its scope, and the stated reason/justification. This is logged rather than stored on
 // the manifest because the filtered manifest's IgnoreRule (github.com/kubescape/storage) has no
 // fields for this provenance; see buildSuppressionAttributes for where it is captured.
-func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) {
+//
+// When recorder is non-nil, the same suppression is also recorded as a K8s Event on the
+// SecurityException/ClusterSecurityException object that caused it, so it shows up in
+// `kubectl describe`. The log line is always written regardless of recorder.
+func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy, recorder record.EventRecorder) {
 	for _, p := range suppressingPolicies(matched) {
 		fields := []helpers.IDetails{
 			helpers.String("cve", m.Vulnerability.ID),
@@ -286,7 +307,36 @@ func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionP
 			fields = append(fields, helpers.String("normalizedTarget", target))
 		}
 		logger.L().Info("CVE suppressed by security exception", fields...)
+
+		emitSuppressionEvent(recorder, p, m)
 	}
+}
+
+// emitSuppressionEvent records a K8s Event on the CRD object that produced p, if recorder is
+// configured and p carries enough provenance (kind, name, UID) to build an ObjectReference.
+// A manually-built *corev1.ObjectReference bypasses live Get and scheme registration entirely
+// (client-go/tools/reference.GetReference short-circuits on it), so no K8s client access beyond
+// the recorder itself is needed here.
+func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.VulnerabilityExceptionPolicy, m v1beta1.Match) {
+	if recorder == nil {
+		return
+	}
+	kind, _ := p.Attributes["sourceKind"].(string)
+	uid, _ := p.Attributes["sourceUID"].(string)
+	if kind == "" || p.Name == "" || uid == "" {
+		return
+	}
+	namespace, _ := p.Attributes["sourceNamespace"].(string)
+
+	ref := &corev1.ObjectReference{
+		Kind:       kind,
+		APIVersion: securityExceptionAPIVersion,
+		Name:       p.Name,
+		Namespace:  namespace,
+		UID:        types.UID(uid),
+	}
+	recorder.Eventf(ref, corev1.EventTypeNormal, "VulnerabilitySuppressed",
+		"Suppressed %s in package %s", m.Vulnerability.ID, m.Artifact.Name)
 }
 
 // RestoreSuppressedMatches is the inverse of ApplySecurityExceptions: it returns a copy of doc

@@ -375,10 +375,12 @@ SecurityException CRDs do not use the status subresource. Observability is provi
 
 When a scanner evaluates exceptions during a scan, it emits Events on the SecurityException/ClusterSecurityException resource that was matched:
 
-- **kubevuln**: Emits an Event when a vulnerability exception matches during a scan (e.g., "Matched CVE-2021-44228 on Deployment/nginx-frontend in namespace production")
+- **kubevuln**: Emits a `VulnerabilitySuppressed` Event when a vulnerability exception actually suppresses a finding during a scan (e.g., "Suppressed CVE-2021-44228 in package log4j-core"). The Event is built directly from the `SecurityException`/`ClusterSecurityException` object's name, namespace and UID captured while converting the CRD into an exception policy — no extra `Get` call is needed. Event emission is wired up only when SecurityException CRD integration itself is enabled (`storage` and `riskAcceptance` both configured, see RBAC below); a suppression is always logged regardless, so Event emission being unavailable (no recorder configured, or the scanner's k8s client could not be constructed at startup) never affects suppression behavior itself.
 - **kubescape**: Emits an Event when a posture exception matches during a scan (e.g., "Matched control C-0034 on Deployment/nginx-frontend")
 
 Users can inspect exception activity via `kubectl describe securityexception <name>` and see recent Events. Events are automatically garbage-collected by Kubernetes.
+
+Emitting Events requires the `create`/`patch` RBAC grant on the `events` resource noted above; that grant is deployment-manifest wiring owned by kubescape-operator/helm-charts, not this repo.
 
 ### Expiry
 

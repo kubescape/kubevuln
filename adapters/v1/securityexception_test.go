@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 func TestConvertVulnerabilityExceptions(t *testing.T) {
@@ -263,7 +264,7 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	assert.Len(t, doc.Matches, 1, "one match should remain")
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
@@ -294,7 +295,7 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	// Fix available + expiredOnFix = exception skipped, CVE stays in Matches
 	assert.Len(t, doc.Matches, 1, "CVE with fix should remain in Matches when expiredOnFix is set")
@@ -361,7 +362,7 @@ func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	assert.Len(t, doc.Matches, 1)
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
@@ -370,7 +371,7 @@ func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
 }
 
 func TestApplySecurityExceptions_NilDoc(t *testing.T) {
-	ApplySecurityExceptions(nil, domain.CVEExceptions{})
+	ApplySecurityExceptions(nil, domain.CVEExceptions{}, nil)
 }
 
 func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
@@ -380,7 +381,7 @@ func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, nil)
+	ApplySecurityExceptions(doc, nil, nil)
 
 	assert.Len(t, doc.Matches, 1, "no filtering when no exceptions")
 }
@@ -423,7 +424,7 @@ func TestConvertMixedStatusException(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 	// under_investigation stays in Matches.
 	assert.Len(t, doc.Matches, 1)
@@ -483,7 +484,7 @@ func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
 				},
 			}
 
-			ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+			ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 			assert.Len(t, doc.Matches, 1, "under_investigation CVE must remain in Matches")
 			assert.Empty(t, doc.IgnoredMatches, "under_investigation CVE must not appear in IgnoredMatches")
@@ -546,12 +547,74 @@ func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
 	}
 
 	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
-	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 	assert.Len(t, doc.Matches, 1)
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
 	assert.Len(t, doc.IgnoredMatches, 1)
 	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Vulnerability.ID)
+}
+
+func TestApplySecurityExceptions_EmitsEventWhenRecorderConfigured(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-core"},
+			},
+		},
+	}
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-log4shell", Namespace: "default", UID: "abc-123"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Reason: "accepted risk",
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	require.Len(t, policies, 1)
+	assert.Equal(t, "abc-123", policies[0].Attributes["sourceUID"])
+
+	recorder := record.NewFakeRecorder(1)
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), recorder)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	select {
+	case event := <-recorder.Events:
+		assert.Contains(t, event, "CVE-2021-44228")
+		assert.Contains(t, event, "log4j-core")
+	default:
+		t.Fatal("expected a suppression event to be recorded")
+	}
+}
+
+func TestApplySecurityExceptions_NilRecorderIsNoOp(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		ApplySecurityExceptions(doc, exceptions, nil)
+	})
+	assert.Len(t, doc.IgnoredMatches, 1)
 }
 
 func TestRestoreSuppressedMatches(t *testing.T) {

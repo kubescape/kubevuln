@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/client-go/tools/record"
 )
 
 const (
@@ -57,6 +58,7 @@ type ScanService struct {
 	vexGeneration     bool
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
+	eventRecorder     record.EventRecorder
 }
 
 // SetMetrics attaches an optional Metrics instance to the service. It is not
@@ -64,6 +66,14 @@ type ScanService struct {
 // sites) are unaffected; metric recording is a no-op until this is called.
 func (s *ScanService) SetMetrics(m *metrics.Metrics) {
 	s.metrics = m
+}
+
+// SetEventRecorder attaches an optional EventRecorder to the service. It is not a
+// constructor parameter so existing callers (including the many test call sites) are
+// unaffected; suppression events are a no-op (suppressions are still logged, just not
+// recorded as K8s Events) until this is called.
+func (s *ScanService) SetEventRecorder(r record.EventRecorder) {
+	s.eventRecorder = r
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
@@ -869,7 +879,7 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		filtered.Annotations = maps.Clone(cve.Annotations)
 	}
 	docCopy := cve.Content.DeepCopy()
-	v1.ApplySecurityExceptions(docCopy, exceptions)
+	v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
 	filtered.Content = docCopy
 	return filtered, !degraded
 }
