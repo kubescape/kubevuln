@@ -280,6 +280,49 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 	assert.Equal(t, map[string]int{"SecurityException": 1}, matchedBySource)
 }
 
+// TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance confirms the provenance
+// buildSuppressionAttributes calculates (and logSuppression already logs) is also written
+// onto the stored IgnoreRule itself, not only logged - closing the gap #495's own comment
+// flagged, now that storage#357 gives IgnoreRule fields to hold it.
+func TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "allow-log4shell",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"ruleId":          "SecurityException/production/allow-log4shell",
+					"sourceNamespace": "production",
+					"justification":   "vulnerable_code_not_present",
+					"impactStatement": "Vulnerable component is not loaded into the memory",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	require.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 1)
+	rule := doc.IgnoredMatches[0].AppliedIgnoreRules[0]
+
+	assert.Equal(t, "CVE-2021-44228", rule.Vulnerability)
+	assert.Equal(t, "SecurityException", rule.SourceKind)
+	assert.Equal(t, "SecurityException/production/allow-log4shell", rule.SourceName,
+		"SourceName carries the structured ruleId form, not the bare object name, so it stays unambiguous for cluster-scoped exceptions too")
+	assert.Equal(t, "production", rule.SourceNamespace)
+	assert.Equal(t, "vulnerable_code_not_present", rule.Justification)
+	assert.Equal(t, "Vulnerable component is not loaded into the memory", rule.ImpactStatement)
+}
+
 // TestApplySecurityExceptions_MatchedCountDedupesPerFinding is a regression test: two
 // SecurityException policies suppressing the same finding (by ID and by alias, say) must
 // count as one match for that sourceKind, not two, since exactly one finding was removed.
