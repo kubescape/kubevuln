@@ -26,11 +26,11 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/registryauth"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/opencontainers/go-digest"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/oauth2/google"
 )
 
 // formatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
@@ -45,23 +45,6 @@ func formatResolvedPlatform(os, arch, variant string) string {
 		parts = append(parts, variant)
 	}
 	return strings.Join(parts, "/")
-}
-
-func isGCPRegistry(imageID string) bool {
-	host, _, _ := strings.Cut(imageID, "/")
-	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
-}
-
-func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, err
-	}
-	token, err := creds.TokenSource.Token()
-	if err != nil {
-		return nil, err
-	}
-	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
 }
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
@@ -222,24 +205,24 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
 		usedFallback = true
 		unauthorizedErr := err
-		if isGCPRegistry(pullRef) {
-			if gcpCreds, gcpErr := gcpCredentials(ctx); gcpErr != nil {
-				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
-				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
-					helpers.Error(gcpErr),
+		if provider, ok := registryauth.For(pullRef); ok {
+			if creds, credErr := provider.Credentials(ctx, pullRef); credErr != nil || creds == nil {
+				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), metrics.FallbackOutcomeFailed)
+				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
+					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
 			} else {
-				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
+				registryOptions.Credentials = []image.RegistryCredentials{*creds}
 				src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
 				outcome := metrics.FallbackOutcomeFailed
 				if err == nil {
 					outcome = metrics.FallbackOutcomeSucceeded
 				}
-				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, outcome)
+				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), outcome)
 			}
 		}
-		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
-		// fall back to anonymous access. err/src retain the result of the last attempt.
+		// If no provider matched, its credentials were unavailable, or it succeeded in auth
+		// but still got 401, fall back to anonymous access. err/src retain the last attempt.
 		if err != nil {
 			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))

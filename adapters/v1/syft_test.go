@@ -185,27 +185,6 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 	}
 }
 
-func TestIsGCPRegistry(t *testing.T) {
-	tests := []struct {
-		imageID string
-		want    bool
-	}{
-		{"gcr.io/foo/bar", true},
-		{"us.gcr.io/foo/bar", true},
-		{"us-docker.pkg.dev/foo/bar", true},
-		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
-		{"quay.io/foo/bar", false},
-		{"quay.io/foo/bar-docker.pkg.dev/x", false},
-		{"index.docker.io/library/alpine", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.imageID, func(t *testing.T) {
-			assert.Equal(t, tt.want, isGCPRegistry(tt.imageID))
-		})
-	}
-}
-
 func TestFormatResolvedPlatform(t *testing.T) {
 	tests := []struct {
 		name    string
