@@ -120,6 +120,13 @@ func main() {
 			logger.L().Warning("failed to get k8s config for SecurityException events")
 		}
 	} else {
+		// storage alone means an operator has SecurityException/ClusterSecurityException CRDs
+		// reachable but riskAcceptance unset -- without this log, that combination silently
+		// no-ops (see #562): the NoOpSecurityExceptionRepository below always returns empty
+		// results, indistinguishable at runtime from "no CRDs exist in this cluster".
+		if storage != nil {
+			logger.L().Warning("SecurityException CRD integration disabled: storage is enabled but riskAcceptance is not set; SecurityException/ClusterSecurityException CRDs will not be applied")
+		}
 		seRepo = &repositories.NoOpSecurityExceptionRepository{}
 	}
 
