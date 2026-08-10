@@ -3,9 +3,11 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -18,6 +20,35 @@ import (
 // millisecond-shaped ([0, 5, 10, 25, ...]) and collapse every scan under 5s into
 // a single bucket, which is most of the traffic on this instrument.
 var scanDurationBuckets = []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800}
+
+const (
+	ComponentInProcess = "in_process"
+	ComponentSidecar   = "sidecar"
+
+	FallbackCategoryRegistryAuth       = "registry_auth"
+	FallbackCategoryPlatform           = "platform"
+	FallbackCategorySizeClassification = "size_classification"
+
+	FallbackStrategyAnonymous        = "anonymous"
+	FallbackStrategyGCPADC           = "gcp_adc"
+	FallbackStrategyImageTooLarge    = "image_too_large"
+	FallbackStrategyIncomplete       = "incomplete"
+	FallbackStrategyPlatformMismatch = "platform_mismatch"
+	FallbackStrategySBOMTooLarge     = "sbom_too_large"
+
+	FallbackOutcomeClassified = "classified"
+	FallbackOutcomeFailed     = "failed"
+	FallbackOutcomeSucceeded  = "succeeded"
+
+	SourceResolutionFirstPassSuccess        = "first_pass_success"
+	SourceResolutionFallbackAssistedSuccess = "fallback_assisted_success"
+	SourceResolutionFallbackFailed          = "fallback_failed"
+	SourceResolutionFirstPassFailure        = "first_pass_failure"
+)
+
+var recorderMu sync.RWMutex
+var fallbackCounter metric.Int64Counter
+var sourceResolutionCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -33,6 +64,8 @@ type Metrics struct {
 	ExceptionsMatchedCounter  metric.Int64Counter
 	ExceptionsExpiredCounter  metric.Int64Counter
 	ExceptionsActiveGauge     metric.Int64Gauge
+	ScanFallbackCounter       metric.Int64Counter
+	SourceResolutionCounter   metric.Int64Counter
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -118,6 +151,27 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	scanFallbackCounter, err := meter.Int64Counter(
+		"kubevuln_scan_fallbacks_total",
+		metric.WithDescription("Total number of scan fallback strategy changes, by component, category, strategy, and outcome"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceResolutionMetric, err := meter.Int64Counter(
+		"kubevuln_scan_source_resolution_total",
+		metric.WithDescription("Total number of source-resolution outcomes, distinguishing first-pass and fallback-assisted scans"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	recorderMu.Lock()
+	fallbackCounter = scanFallbackCounter
+	sourceResolutionCounter = sourceResolutionMetric
+	recorderMu.Unlock()
+
 	return &Metrics{
 		provider:                  provider,
 		handler:                   promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
@@ -128,6 +182,8 @@ func New() (*Metrics, error) {
 		ExceptionsMatchedCounter:  exceptionsMatchedCounter,
 		ExceptionsExpiredCounter:  exceptionsExpiredCounter,
 		ExceptionsActiveGauge:     exceptionsActiveGauge,
+		ScanFallbackCounter:       scanFallbackCounter,
+		SourceResolutionCounter:   sourceResolutionMetric,
 	}, nil
 }
 
@@ -146,4 +202,41 @@ func (m *Metrics) Meter() metric.Meter {
 // Handler returns the http.Handler serving Prometheus exposition-format text.
 func (m *Metrics) Handler() http.Handler {
 	return m.handler
+}
+
+func RecordScanFallback(ctx context.Context, component, category, strategy, outcome string) {
+	recorderMu.RLock()
+	counter := fallbackCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("component", component),
+		attribute.String("category", category),
+		attribute.String("strategy", strategy),
+		attribute.String("outcome", outcome),
+	))
+}
+
+func RecordSourceResolution(ctx context.Context, component string, usedFallback, success bool) {
+	recorderMu.RLock()
+	counter := sourceResolutionCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	outcome := SourceResolutionFirstPassFailure
+	switch {
+	case usedFallback && success:
+		outcome = SourceResolutionFallbackAssistedSuccess
+	case usedFallback && !success:
+		outcome = SourceResolutionFallbackFailed
+	case !usedFallback && success:
+		outcome = SourceResolutionFirstPassSuccess
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("component", component),
+		attribute.String("outcome", outcome),
+	))
 }

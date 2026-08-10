@@ -20,6 +20,8 @@ func TestNewAndHandler(t *testing.T) {
 	m.ScanDuration.Record(context.Background(), 0.5, metric.WithAttributes())
 	m.RejectCounter.Add(context.Background(), 1, metric.WithAttributes())
 	m.ExceptionsDegradedCounter.Add(context.Background(), 1, metric.WithAttributes())
+	RecordScanFallback(context.Background(), ComponentInProcess, FallbackCategoryRegistryAuth, FallbackStrategyAnonymous, FallbackOutcomeSucceeded)
+	RecordSourceResolution(context.Background(), ComponentInProcess, true, true)
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -31,6 +33,8 @@ func TestNewAndHandler(t *testing.T) {
 	assert.True(t, strings.Contains(body, "kubevuln_scan_duration_seconds"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_scan_rejections_total"), body)
 	assert.True(t, strings.Contains(body, "kubevuln_exceptions_degraded_total"), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="registry_auth",component="in_process",outcome="succeeded",strategy="anonymous"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="in_process",outcome="fallback_assisted_success"} 1`), body)
 }
 
 func TestMeterRegistersObservableGauge(t *testing.T) {

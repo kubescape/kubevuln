@@ -167,6 +167,9 @@ ldd kubevuln
 ### Running Tests
 
 ```bash
+# Run the default local verification workflow
+make verify
+
 # Run all tests
 go test ./...
 
@@ -418,22 +421,52 @@ kubevuln/
 │  2. Make changes                                                 │
 │     └── Edit files, add tests                                    │
 │                                                                  │
-│  3. Run tests                                                    │
-│     └── go test ./...                                           │
+│  3. Run the fast local verification workflow                     │
+│     └── make verify                                             │
 │                                                                  │
-│  4. Run linter                                                   │
-│     └── golangci-lint run                                        │
+│  4. Run slower checks as needed                                  │
+│     └── make verify-image                                        │
+│     └── CONFIG_DIR=.dev/config ./kubevuln                       │
 │                                                                  │
-│  5. Build and verify                                             │
-│     └── make && CONFIG_DIR=.dev/config ./kubevuln               │
-│                                                                  │
-│  6. Commit changes                                               │
+│  5. Commit changes                                               │
 │     └── git commit -m "Add feature X"                           │
 │                                                                  │
-│  7. Push and create PR                                           │
+│  6. Push and create PR                                           │
 │     └── git push origin feature/my-feature                       │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### Local Validation Workflow
+
+Use `make verify` as the default contributor check before opening a pull request. It keeps the fast path local and deterministic:
+
+```bash
+# Build the Linux amd64 binary, run all tests, run go vet, and lint against
+# changes since the branch point on upstream/main or origin/main
+make verify
+```
+
+`make verify` expands to these targets:
+
+```bash
+make build   # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln cmd/http/main.go
+make test    # go test ./...
+make vet     # go vet ./...
+make lint    # golangci-lint run --new-from-rev "$(git merge-base HEAD upstream/main || git merge-base HEAD origin/main)"
+```
+
+Keep slower or network-backed checks separate from the fast path:
+
+```bash
+# Slower container image build that can require Docker/buildx and network pulls
+make verify-image
+
+# Optional runtime smoke check; readiness may wait on vulnerability DB download
+CONFIG_DIR=.dev/config ./kubevuln
+
+# Optional integration suite when external dependencies are available
+go test -tags=integration ./...
 ```
 
 ### Code Style

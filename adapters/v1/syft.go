@@ -25,6 +25,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/opencontainers/go-digest"
@@ -192,9 +193,11 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
 	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
+	usedFallback := false
 	src, err := syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
 
 	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+		usedFallback = true
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
 			helpers.String("imageTag", imageTag),
 			helpers.String("imageID", imageID))
@@ -203,15 +206,22 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	}
 
 	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+		usedFallback = true
 		unauthorizedErr := err
 		if isGCPRegistry(pullRef) {
 			if gcpCreds, gcpErr := gcpCredentials(ctx); gcpErr != nil {
+				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
 				logger.L().Debug("GCP ADC unavailable, falling back to anonymous",
 					helpers.Error(gcpErr),
 					helpers.String("imageID", imageID))
 			} else {
 				registryOptions.Credentials = []image.RegistryCredentials{*gcpCreds}
 				src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
+				outcome := metrics.FallbackOutcomeFailed
+				if err == nil {
+					outcome = metrics.FallbackOutcomeSucceeded
+				}
+				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, outcome)
 			}
 		}
 		// If GCP ADC was not attempted, succeeded in auth but still got 401, or the image is not a GCP registry,
@@ -221,14 +231,22 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 				helpers.String("imageID", imageID))
 			registryOptions.Credentials = nil
 			src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
+			outcome := metrics.FallbackOutcomeFailed
+			if err == nil {
+				outcome = metrics.FallbackOutcomeSucceeded
+			}
+			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
 			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
 				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
 			}
 		}
 	}
 
+	metrics.RecordSourceResolution(ctx, metrics.ComponentInProcess, usedFallback, err == nil)
+
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
+		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyImageTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(s.maxImageSize)),
 			helpers.String("imageID", imageID))
@@ -240,6 +258,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		domainSBOM.Status = helpersv1.Unauthorize
 		return domainSBOM, err
 	case err != nil:
+		var platformErr *image.ErrPlatformMismatch
+		if errors.As(err, &platformErr) {
+			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
+		}
 		return domainSBOM, err
 	}
 
@@ -283,6 +305,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	})
 	switch {
 	case errors.Is(err, deadline.ErrTimedOut):
+		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("Syft timed out",
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.Incomplete
@@ -290,6 +313,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	case err == nil:
 		// continue
 	default:
+		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		// also mark as incomplete if we failed to extract packages
 		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, err
@@ -305,6 +329,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	sz := size.Of(syftSBOM)
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
 	if sz > s.maxSBOMSize {
+		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategySBOMTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("SBOM exceeds size limit",
 			helpers.Int("maxImageSize", s.maxSBOMSize),
 			helpers.Int("size", sz),
