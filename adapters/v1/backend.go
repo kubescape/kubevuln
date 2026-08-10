@@ -153,14 +153,14 @@ var statuses = []string{
 	sysreport.JobDone,
 }
 
-func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.GetCVEExceptions")
 	defer span.End()
 
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrCastingWorkload
+		return nil, domain.ExceptionStats{}, domain.ErrCastingWorkload
 	}
 
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
@@ -181,7 +181,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 	if cacheable && a.exceptionsCache != nil {
 		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
-			return cached.(domain.CVEExceptions), nil
+			// A cache hit skips CRD re-evaluation entirely, so there is nothing new to
+			// report this call; the zero value is correct, not a missing measurement.
+			return cached.(domain.CVEExceptions), domain.ExceptionStats{}, nil
 		}
 	}
 
@@ -199,11 +201,12 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
-		return nil, err
+		return nil, domain.ExceptionStats{}, err
 	}
 
 	// Merge CRD-based exceptions
 	degraded := false
+	stats := domain.ExceptionStats{}
 	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if crdErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
@@ -215,8 +218,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 	if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
-		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		crdPolicies, crdStats := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+		stats = crdStats
 
 		// A selector-based exception whose labels failed to resolve fails closed
 		// (see matchExceptionTarget), which is also a self-healing degradation and
@@ -233,10 +237,10 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	if degraded {
-		return vulnExceptionList, domain.ErrExceptionsDegraded
+		return vulnExceptionList, stats, domain.ErrExceptionsDegraded
 	}
 
-	return vulnExceptionList, nil
+	return vulnExceptionList, stats, nil
 }
 
 // ReportError reports the given error to the platform
@@ -395,7 +399,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// get exceptions
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, _, err := a.GetCVEExceptions(ctx)
 	if err != nil && !errors.Is(err, domain.ErrExceptionsDegraded) {
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}

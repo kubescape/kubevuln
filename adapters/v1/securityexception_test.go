@@ -42,9 +42,10 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
+	policies, stats := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
 
 	assert.Len(t, policies, 2)
+	assert.Empty(t, stats.ExpiredBySource, "no exception here has expired")
 
 	// Namespaced exception
 	assert.Equal(t, "vulnerabilityExceptionPolicy", policies[0].PolicyType)
@@ -98,7 +99,7 @@ func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{Kind: "Deployment", Name: "web"})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{Kind: "Deployment", Name: "web"})
 	require.Len(t, policies, 2)
 
 	nsPolicy := policies[0]
@@ -156,7 +157,7 @@ func TestConvertExpiredOnFix(t *testing.T) {
 				},
 			}
 
-			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 			assert.Len(t, policies, 1)
 
 			if tt.wantNil {
@@ -205,10 +206,12 @@ func TestConvertSkipsExpired(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
+	policies, stats := ConvertToVulnerabilityExceptionPolicies(exceptions, clusterExceptions, ExceptionTarget{})
 
 	assert.Len(t, policies, 1)
 	assert.Equal(t, "CVE-VALID", policies[0].VulnerabilityPolicies[0].Name)
+	assert.Equal(t, map[string]int{"SecurityException": 1, "ClusterSecurityException": 1}, stats.ExpiredBySource,
+		"one expired namespaced and one expired cluster-scoped exception should each be counted once")
 }
 
 func TestConvertMatchResources(t *testing.T) {
@@ -231,7 +234,7 @@ func TestConvertMatchResources(t *testing.T) {
 
 	// target matches the first resource entry (Deployment/my-app)
 	target := ExceptionTarget{Namespace: "production", Kind: "Deployment", Name: "my-app"}
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, target)
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, target)
 
 	assert.Len(t, policies, 1)
 	assert.Len(t, policies[0].Designatores, 2)
@@ -257,13 +260,14 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 
 	exceptions := domain.CVEExceptions{
 		{
+			PortalBase:            armotypes.PortalBase{Attributes: map[string]interface{}{"sourceKind": "SecurityException"}},
 			PolicyType:            "vulnerabilityExceptionPolicy",
 			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
 			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	matchedBySource := ApplySecurityExceptions(doc, exceptions)
 
 	assert.Len(t, doc.Matches, 1, "one match should remain")
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
@@ -272,6 +276,7 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 	assert.Equal(t, "CVE-2021-44228", doc.IgnoredMatches[0].Vulnerability.ID)
 	assert.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 1)
 	assert.Equal(t, "CVE-2021-44228", doc.IgnoredMatches[0].AppliedIgnoreRules[0].Vulnerability)
+	assert.Equal(t, map[string]int{"SecurityException": 1}, matchedBySource)
 }
 
 func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
@@ -335,7 +340,7 @@ func TestConvertShouldSuppressAllowlist(t *testing.T) {
 					},
 				},
 			}
-			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+			policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 			assert.Len(t, policies, tt.wantPolicies, "status=%q id=%q", tt.status, tt.id)
 			if tt.wantName != "" {
 				assert.Equal(t, tt.wantName, policies[0].VulnerabilityPolicies[0].Name, "policy name should be trimmed")
@@ -410,7 +415,7 @@ func TestConvertMixedStatusException(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	// Only not_affected produces a policy; under_investigation must not.
 	assert.Len(t, policies, 1)
@@ -465,14 +470,14 @@ func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
 						Spec:       sev1beta1.SecurityExceptionSpec{Vulnerabilities: vulns},
 					},
 				}
-				policies = ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+				policies, _ = ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 			} else {
 				clusterExceptions := []sev1beta1.ClusterSecurityException{
 					{
 						Spec: sev1beta1.SecurityExceptionSpec{Vulnerabilities: vulns},
 					},
 				}
-				policies = ConvertToVulnerabilityExceptionPolicies(nil, clusterExceptions, ExceptionTarget{})
+				policies, _ = ConvertToVulnerabilityExceptionPolicies(nil, clusterExceptions, ExceptionTarget{})
 			}
 
 			assert.Empty(t, policies, "under_investigation must not produce a suppression policy")
@@ -509,7 +514,7 @@ func TestConvertVulnerabilityExceptions_Aliases(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	assert.Len(t, policies, 1)
 	names := make([]string, 0, len(policies[0].VulnerabilityPolicies))
@@ -545,7 +550,7 @@ func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
 		},
 	}
 
-	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
 
 	assert.Len(t, doc.Matches, 1)

@@ -30,6 +30,9 @@ type Metrics struct {
 	ScanCounter               metric.Int64Counter
 	RejectCounter             metric.Int64Counter
 	ExceptionsDegradedCounter metric.Int64Counter
+	ExceptionsMatchedCounter  metric.Int64Counter
+	ExceptionsExpiredCounter  metric.Int64Counter
+	ExceptionsActiveGauge     metric.Int64Gauge
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -91,13 +94,40 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	exceptionsMatchedCounter, err := meter.Int64Counter(
+		"kubevuln_exceptions_matched_total",
+		metric.WithDescription("Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException, by sourceKind"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	exceptionsExpiredCounter, err := meter.Int64Counter(
+		"kubevuln_exceptions_expired_total",
+		metric.WithDescription("Total number of SecurityException/ClusterSecurityException CRDs skipped because their expiresAt has passed, by sourceKind"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	exceptionsActiveGauge, err := meter.Int64Gauge(
+		"kubevuln_exceptions_active",
+		metric.WithDescription("Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Metrics{
-		provider:      provider,
-		handler:       promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
+		provider:                  provider,
+		handler:                   promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
 		ScanDuration:              scanDuration,
 		ScanCounter:               scanCounter,
 		RejectCounter:             rejectCounter,
 		ExceptionsDegradedCounter: exceptionsDegradedCounter,
+		ExceptionsMatchedCounter:  exceptionsMatchedCounter,
+		ExceptionsExpiredCounter:  exceptionsExpiredCounter,
+		ExceptionsActiveGauge:     exceptionsActiveGauge,
 	}, nil
 }
 

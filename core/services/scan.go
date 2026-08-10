@@ -33,6 +33,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -849,17 +850,21 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	if cve.Content == nil {
 		return cve, false
 	}
-	exceptions, err := s.platform.GetCVEExceptions(ctx)
+	exceptions, stats, err := s.platform.GetCVEExceptions(ctx)
 	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
 	if degraded && s.metrics != nil {
 		s.metrics.ExceptionsDegradedCounter.Add(ctx, 1)
 	}
+	s.recordExceptionsExpired(ctx, stats)
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
 	}
 	if len(exceptions) == 0 {
 		return cve, !degraded
+	}
+	if s.metrics != nil {
+		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
 	}
 	filtered := cve
 	if cve.Labels != nil {
@@ -869,9 +874,43 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		filtered.Annotations = maps.Clone(cve.Annotations)
 	}
 	docCopy := cve.Content.DeepCopy()
-	v1.ApplySecurityExceptions(docCopy, exceptions)
+	matchedBySource := v1.ApplySecurityExceptions(docCopy, exceptions)
+	s.recordExceptionsMatched(ctx, matchedBySource)
 	filtered.Content = docCopy
 	return filtered, !degraded
+}
+
+// recordExceptionsExpired reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many exceptions applyExceptionsToManifest's GetCVEExceptions call skipped this scan
+// because their expiresAt had passed (see domain.ExceptionStats). No-op when metrics aren't
+// configured or nothing expired this call.
+func (s *ScanService) recordExceptionsExpired(ctx context.Context, stats domain.ExceptionStats) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range stats.ExpiredBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsExpiredCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
+}
+
+// recordExceptionsMatched reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many CVE matches ApplySecurityExceptions suppressed this scan. No-op when metrics
+// aren't configured or nothing was suppressed this call.
+func (s *ScanService) recordExceptionsMatched(ctx context.Context, matchedBySource map[string]int) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range matchedBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsMatchedCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
 }
 
 // addTimestamp attaches the current timestamp to the context.

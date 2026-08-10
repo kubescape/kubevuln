@@ -142,7 +142,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 			if tt.workload {
 				ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			}
-			got, err := a.GetCVEExceptions(ctx)
+			got, _, err := a.GetCVEExceptions(ctx)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetCVEExceptions() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -164,12 +164,12 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 		ContainerName: "container",
 	})
 
-	got1, err := a.GetCVEExceptions(ctx)
+	got1, _, err := a.GetCVEExceptions(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, got1, 1)
 	assert.Equal(t, 1, calls, "first call should hit the backend")
 
-	got2, err := a.GetCVEExceptions(ctx)
+	got2, _, err := a.GetCVEExceptions(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, got1, got2)
 	assert.Equal(t, 1, calls, "second call for the same workload should be served from cache")
@@ -179,7 +179,7 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 		Wlid:          "wlid://cluster-c/namespace-ns2/deployment-d2",
 		ContainerName: "container2",
 	})
-	_, err = a.GetCVEExceptions(otherCtx)
+	_, _, err = a.GetCVEExceptions(otherCtx)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
 }
@@ -204,11 +204,11 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 		return nil, nil
 	}
 
-	nginx, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
+	nginx, _, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
 	assert.NoError(t, err)
 	assert.Len(t, nginx, 1)
 
-	redis, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
+	redis, _, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
 	assert.NoError(t, err)
 	assert.Empty(t, redis, "different images for the same workload must not share cached exception results")
 }
@@ -233,11 +233,11 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 		return nil, nil
 	}
 
-	nginx, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
+	nginx, _, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
 	assert.NoError(t, err)
 	assert.Len(t, nginx, 1)
 
-	redis, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
+	redis, _, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
 	assert.NoError(t, err)
 	assert.Empty(t, redis, "registry scans for different images must not share cached exception results")
 }
@@ -255,9 +255,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
 }
@@ -286,9 +286,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *tes
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
 	assert.Equal(t, 2, calls, "a real CRD list failure must disable caching, not just a faked one")
 }
@@ -320,9 +320,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
@@ -967,11 +967,12 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 		Wlid: "wlid://cluster-test/namespace-default/deployment-myapp",
 	})
 
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, stats, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Len(t, exceptions, 2, "should merge cloud + CRD exceptions")
 	assert.Equal(t, "CVE-CLOUD-1", exceptions[0].VulnerabilityPolicies[0].Name)
 	assert.Equal(t, "CVE-CRD-1", exceptions[1].VulnerabilityPolicies[0].Name)
+	assert.Empty(t, stats.ExpiredBySource, "nothing expired in this scenario")
 }
 
 func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
@@ -1003,7 +1004,7 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 		ImageTagNormalized: "docker.io/library/nginx:1.25",
 	})
 
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, _, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
 }
@@ -1239,7 +1240,7 @@ func TestShouldRetryReport(t *testing.T) {
 
 func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	backend := &BackendAdapter{
-		clusterConfig: armometadata.ClusterConfig{},
+		clusterConfig:         armometadata.ClusterConfig{},
 		securityExceptionRepo: &testSecurityExceptionRepo{},
 		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
@@ -1251,7 +1252,7 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), domain.TimestampKey{}, int64(123456))
 	ctx = context.WithValue(ctx, domain.ScanIDKey{}, "56275825-4c07-4e3f-9a4c-53f05b0d0c2e")
-	
+
 	// Create a scan command with non-string args
 	workload := domain.ScanCommand{
 		Wlid: "wlid://cluster-x/namespace-y/deployment-z",
@@ -1260,12 +1261,12 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 		},
 	}
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
-	
+
 	cve := domain.CVEManifest{
 		Content: &v1beta1.GrypeDocument{},
 	}
 	cvep := domain.CVEManifest{}
-	
+
 	// Ensure it does NOT panic
 	assert.NotPanics(t, func() {
 		_ = backend.SubmitCVE(ctx, cve, cvep)
