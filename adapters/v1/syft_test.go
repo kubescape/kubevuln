@@ -3,7 +3,9 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -371,4 +373,26 @@ func TestRewriteImageRef(t *testing.T) {
 			assert.Equal(t, tt.want, rewriteImageRef(tt.imageRef, tt.proxyMap))
 		})
 	}
+}
+
+func Test_syftAdapter_CreateSBOM_CanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	_, err := adapter.CreateSBOM(ctx, "test", "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501", "library/alpine:latest", domain.RegistryOptions{})
+
+	require.True(t, errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled"))
+}
+
+func Test_syftAdapter_CreateSBOM_TimeoutContext(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	<-ctx.Done() // wait for context deadline
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	sbom, err := adapter.CreateSBOM(ctx, "test", "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501", "library/alpine:latest", domain.RegistryOptions{})
+
+	assert.NoError(t, err)
+	assert.Equal(t, helpersv1.Incomplete, sbom.Status)
 }
