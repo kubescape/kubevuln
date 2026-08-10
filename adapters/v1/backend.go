@@ -54,9 +54,16 @@ var _ ports.Platform = (*BackendAdapter)(nil)
 // exceptionsCacheTTL bounds how stale a cached exceptions/CRD merge can be before the next scan
 // re-fetches from the backend and cluster; exceptions rarely change within a scan burst, so this
 // avoids a network + CRD round trip on every single container scan.
+//
+// exceptionsCache is process-local (see #528): each Kubevuln replica keeps its own copy, so a
+// SecurityException change observed by one pod is not visible to the others until their own
+// cache entries expire. 1m (rather than the 5m this used to be) bounds that cross-pod worst case
+// to something closer to the underlying CRD-list cache's own 30s TTL
+// (repositories/apiserver.go's securityExceptionListCacheTTL), while still avoiding a
+// network+CRD round trip on every single container scan within a burst.
 const (
 	exceptionsCacheCleaningInterval = 1 * time.Minute
-	exceptionsCacheTTL              = 5 * time.Minute
+	exceptionsCacheTTL              = 1 * time.Minute
 )
 
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
@@ -244,6 +251,14 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.ReportError")
 	defer span.End()
 
+	if err == nil {
+		return nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	report, err2 := a.reportFromContext(ctx)
 	if err2 != nil {
 		return err2
@@ -331,6 +346,10 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.SendStatus")
 	defer span.End()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	report, err := a.reportFromContext(ctx)
 	if err != nil {

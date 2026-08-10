@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 func TestConvertVulnerabilityExceptions(t *testing.T) {
@@ -263,7 +264,7 @@ func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	assert.Len(t, doc.Matches, 1, "one match should remain")
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
@@ -294,7 +295,7 @@ func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	// Fix available + expiredOnFix = exception skipped, CVE stays in Matches
 	assert.Len(t, doc.Matches, 1, "CVE with fix should remain in Matches when expiredOnFix is set")
@@ -361,7 +362,7 @@ func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, exceptions)
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	assert.Len(t, doc.Matches, 1)
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
@@ -370,7 +371,7 @@ func TestApplySecurityExceptions_CaseInsensitive(t *testing.T) {
 }
 
 func TestApplySecurityExceptions_NilDoc(t *testing.T) {
-	ApplySecurityExceptions(nil, domain.CVEExceptions{})
+	ApplySecurityExceptions(nil, domain.CVEExceptions{}, nil)
 }
 
 func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
@@ -380,7 +381,7 @@ func TestApplySecurityExceptions_NoExceptions(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, nil)
+	ApplySecurityExceptions(doc, nil, nil)
 
 	assert.Len(t, doc.Matches, 1, "no filtering when no exceptions")
 }
@@ -423,7 +424,7 @@ func TestConvertMixedStatusException(t *testing.T) {
 		},
 	}
 
-	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 	// under_investigation stays in Matches.
 	assert.Len(t, doc.Matches, 1)
@@ -483,7 +484,7 @@ func TestUnderInvestigationDoesNotSuppress(t *testing.T) {
 				},
 			}
 
-			ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+			ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 			assert.Len(t, doc.Matches, 1, "under_investigation CVE must remain in Matches")
 			assert.Empty(t, doc.IgnoredMatches, "under_investigation CVE must not appear in IgnoredMatches")
@@ -546,12 +547,74 @@ func TestApplySecurityExceptions_MatchesByAlias(t *testing.T) {
 	}
 
 	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
-	ApplySecurityExceptions(doc, domain.CVEExceptions(policies))
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), nil)
 
 	assert.Len(t, doc.Matches, 1)
 	assert.Equal(t, "CVE-2023-9999", doc.Matches[0].Vulnerability.ID)
 	assert.Len(t, doc.IgnoredMatches, 1)
 	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Vulnerability.ID)
+}
+
+func TestApplySecurityExceptions_EmitsEventWhenRecorderConfigured(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-core"},
+			},
+		},
+	}
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-log4shell", Namespace: "default", UID: "abc-123"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Reason: "accepted risk",
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	require.Len(t, policies, 1)
+	assert.Equal(t, "abc-123", policies[0].Attributes["sourceUID"])
+
+	recorder := record.NewFakeRecorder(1)
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), recorder)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	select {
+	case event := <-recorder.Events:
+		assert.Contains(t, event, "CVE-2021-44228")
+		assert.Contains(t, event, "log4j-core")
+	default:
+		t.Fatal("expected a suppression event to be recorded")
+	}
+}
+
+func TestApplySecurityExceptions_NilRecorderIsNoOp(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		ApplySecurityExceptions(doc, exceptions, nil)
+	})
+	assert.Len(t, doc.IgnoredMatches, 1)
 }
 
 func TestRestoreSuppressedMatches(t *testing.T) {
@@ -689,4 +752,129 @@ func TestSuppressingPolicies_FiltersNonIgnoreActions(t *testing.T) {
 
 	require.Len(t, out, 1)
 	assert.Equal(t, "allow-log4shell", out[0].Name)
+}
+
+func TestConvertPerEntryExpiresAt(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	tests := []struct {
+		name       string
+		docLevel   *metav1.Time
+		entry      *metav1.Time
+		suppressed bool
+	}{
+		{name: "entry overrides an expired document", docLevel: &past, entry: &future, suppressed: true},
+		{name: "entry overrides a live document", docLevel: &future, entry: &past, suppressed: false},
+		{name: "entry inherits an expired document", docLevel: &past, entry: nil, suppressed: false},
+		{name: "entry inherits a live document", docLevel: &future, entry: nil, suppressed: true},
+		{name: "no expiry anywhere never expires", docLevel: nil, entry: nil, suppressed: true},
+		{name: "entry expiry without a document default", docLevel: nil, entry: &past, suppressed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exceptions := []sev1beta1.SecurityException{
+				{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+					Spec: sev1beta1.SecurityExceptionSpec{
+						ExpiresAt: tt.docLevel,
+						Vulnerabilities: []sev1beta1.VulnerabilityException{
+							{
+								Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2026-31808"},
+								Status:        sev1beta1.VulnerabilityStatusNotAffected,
+								ExpiresAt:     tt.entry,
+							},
+						},
+					},
+				},
+			}
+
+			policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+			if tt.suppressed {
+				require.Len(t, policies, 1)
+				assert.Equal(t, "CVE-2026-31808", policies[0].VulnerabilityPolicies[0].Name)
+			} else {
+				assert.Empty(t, policies)
+			}
+		})
+	}
+}
+
+// A single document mixing per-entry expiries is the case that previously forced authors to
+// split one review into several CRDs: the document-level check expired every entry at once.
+func TestConvertPerEntryExpiresAtWithinOneDocument(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &future,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-INHERITS"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED-EARLY"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &past},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXTENDED"}, Status: sev1beta1.VulnerabilityStatusFixed, ExpiresAt: &future},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	require.Len(t, policies, 2)
+	assert.Equal(t, "CVE-INHERITS", policies[0].VulnerabilityPolicies[0].Name)
+	assert.Equal(t, "CVE-EXTENDED", policies[1].VulnerabilityPolicies[0].Name)
+}
+
+func TestConvertPerEntryExpiresAtClusterScoped(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	future := metav1.NewTime(time.Now().Add(1 * time.Hour))
+
+	clusterExceptions := []sev1beta1.ClusterSecurityException{
+		{
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &past,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-CLUSTER-EXTENDED"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &future},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(nil, clusterExceptions, ExceptionTarget{})
+
+	require.Len(t, policies, 1)
+	assert.Equal(t, "CVE-CLUSTER-EXTENDED", policies[0].VulnerabilityPolicies[0].Name)
+}
+
+// The policy handed downstream must carry the same expiry the suppression decision used,
+// otherwise a per-entry override would be dropped on the way to the backend.
+func TestConvertPerEntryExpiresAtSetsExpirationDate(t *testing.T) {
+	docLevel := metav1.NewTime(time.Now().Add(1 * time.Hour))
+	entryLevel := metav1.NewTime(time.Now().Add(48 * time.Hour))
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &docLevel,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-INHERITS"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-OVERRIDES"}, Status: sev1beta1.VulnerabilityStatusNotAffected, ExpiresAt: &entryLevel},
+				},
+			},
+		},
+	}
+
+	policies := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	require.Len(t, policies, 2)
+	require.NotNil(t, policies[0].ExpirationDate)
+	assert.Equal(t, docLevel.Time, *policies[0].ExpirationDate)
+	require.NotNil(t, policies[1].ExpirationDate)
+	assert.Equal(t, entryLevel.Time, *policies[1].ExpirationDate)
 }

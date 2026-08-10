@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/client-go/tools/record"
 )
 
 const (
@@ -57,6 +58,7 @@ type ScanService struct {
 	vexGeneration     bool
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
+	eventRecorder     record.EventRecorder
 }
 
 // SetMetrics attaches an optional Metrics instance to the service. It is not
@@ -64,6 +66,14 @@ type ScanService struct {
 // sites) are unaffected; metric recording is a no-op until this is called.
 func (s *ScanService) SetMetrics(m *metrics.Metrics) {
 	s.metrics = m
+}
+
+// SetEventRecorder attaches an optional EventRecorder to the service. It is not a
+// constructor parameter so existing callers (including the many test call sites) are
+// unaffected; suppression events are a no-op (suppressions are still logged, just not
+// recorded as K8s Events) until this is called.
+func (s *ScanService) SetEventRecorder(r record.EventRecorder) {
+	s.eventRecorder = r
 }
 
 var _ ports.ScanService = (*ScanService)(nil)
@@ -174,16 +184,25 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 				helpers.String("imageSlug", workload.ImageSlug))
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-			return domain.ErrTooManyRequests
+			return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
 		}
 		// create SBOM
 		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
 		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 		if err != nil {
+			reason := classifySBOMError(err)
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				classifySBOMError(err), err)
-			return err
+				reason, err)
+			return &domain.ScanError{Reason: reason, Err: err}
 		}
+	}
+
+	// do not treat a timed out or too-large SBOM as a successful scan — mirrors the same
+	// check in ScanCP/ScanCVE/ScanRegistry, which this flow had lost track of (see #540)
+	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
+		reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
+		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
+		return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 	}
 
 	// store SBOM
@@ -192,7 +211,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 				scanfailure.ReasonSBOMStorageFailed, err)
-			return err
+			return &domain.ScanError{Reason: scanfailure.ReasonSBOMStorageFailed, Err: err}
 		}
 	}
 
@@ -537,7 +556,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 						helpers.String("imageSlug", workload.ImageSlug))
 					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 						scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-					return domain.ErrTooManyRequests
+					return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
 				}
 				// create SBOM
 				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
@@ -558,7 +577,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 								helpers.String("imageSlug", workload.ImageSlug))
 						}
 					}
-					return fmt.Errorf("creating SBOM: %w", err)
+					return &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", err)}
 				}
 				// store SBOM
 				if s.storage {
@@ -577,9 +596,9 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 		// do not process timed out SBOM
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
-			return domain.ErrIncompleteSBOM
+			reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
+			return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 		}
 	}
 
@@ -590,7 +609,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
 				scanfailure.ReasonCVEMatchingFailed, err)
-			return fmt.Errorf("scanning SBOM: %w", err)
+			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning SBOM: %w", err)}
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
@@ -655,7 +674,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 				scanfailure.ReasonResultUploadFailed, err)
-			return fmt.Errorf("submitting CVEs: %w", err)
+			return &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: fmt.Errorf("submitting CVEs: %w", err)}
 		}
 	}
 
@@ -715,7 +734,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 					helpers.String("imageSlug", workload.ImageSlug))
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
 					scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-				return domain.ErrTooManyRequests
+				return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
 			}
 			// create SBOM
 			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
@@ -726,9 +745,10 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 					logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
 						helpers.String("imageSlug", workload.ImageSlug))
 				}
+				reason := classifySBOMError(err)
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					classifySBOMError(err), err)
-				return err
+					reason, err)
+				return &domain.ScanError{Reason: reason, Err: err}
 			}
 
 			if s.storage {
@@ -742,9 +762,9 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 		// do not process timed out SBOM
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
-			return domain.ErrIncompleteSBOM
+			reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
+			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
+			return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 		}
 
 		// scan for CVE
@@ -757,7 +777,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			}
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
 				scanfailure.ReasonCVEMatchingFailed, err)
-			return err
+			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: err}
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
@@ -834,7 +854,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	if err != nil {
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 			scanfailure.ReasonResultUploadFailed, err)
-		return err
+		return &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: err}
 	}
 	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
@@ -881,7 +901,7 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		filtered.Annotations = maps.Clone(cve.Annotations)
 	}
 	docCopy := cve.Content.DeepCopy()
-	v1.ApplySecurityExceptions(docCopy, exceptions)
+	v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
 	filtered.Content = docCopy
 	return filtered, !degraded
 }
@@ -1069,21 +1089,45 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 		}
 	}
 
-	// filter relevant relationships. A relationship is relevant if the child is a relevant file
-	relationshipsArtifacts := mapset.NewSet[string]()
+	// filter relevant relationships and their transitively-relevant ancestor artifacts. A
+	// relationship is relevant if its child is a relevant file, or transitively, if its child
+	// is an artifact already known to be relevant (e.g. a package nested inside another
+	// package's archive). This walks the relationship graph to a fixed point instead of a
+	// fixed number of passes: Syft does not document or guarantee any particular relationship
+	// ordering, and a fixed number of passes can silently drop artifacts nested more than one
+	// level below the direct file owner depending on that order (see #514).
+	childToRelationships := make(map[string][]v1beta1.SyftRelationship, len(sbom.Content.ArtifactRelationships))
 	for _, relationship := range sbom.Content.ArtifactRelationships {
-		if addedFileIDs.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) { // if the child is a relevant file
-			relationshipsArtifacts.Add(relationship.Parent)
-			addedRelationshipIDs.Add(getRelationshipID(relationship))
-			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
-		}
+		childToRelationships[relationship.Child] = append(childToRelationships[relationship.Child], relationship)
 	}
 
-	// Add children of relevant relationships (that the parent is not relevant)
+	// Compute the closure first (which relationships/artifacts are relevant) without emitting
+	// anything: addedFileIDs.ToSlice() has no stable order, so a traversal that appends
+	// relationships as it discovers them would make the output order vary between calls on
+	// the same input whenever there's more than one relevant file. Emitting afterward, in a
+	// single pass over sbom.Content.ArtifactRelationships, keeps the output in the same
+	// deterministic source order the pre-fix code always had.
+	relationshipsArtifacts := mapset.NewSet[string]()
+	frontier := addedFileIDs.ToSlice()
+	for len(frontier) > 0 {
+		var next []string
+		for _, childID := range frontier {
+			for _, relationship := range childToRelationships[childID] {
+				relationshipID := getRelationshipID(relationship)
+				if addedRelationshipIDs.Contains(relationshipID) {
+					continue
+				}
+				addedRelationshipIDs.Add(relationshipID)
+				if relationshipsArtifacts.Add(relationship.Parent) {
+					next = append(next, relationship.Parent)
+				}
+			}
+		}
+		frontier = next
+	}
+
 	for _, relationship := range sbom.Content.ArtifactRelationships {
-		if relationshipsArtifacts.Contains(relationship.Child) && !addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
-			relationshipsArtifacts.Add(relationship.Parent)
-			addedRelationshipIDs.Add(getRelationshipID(relationship))
+		if addedRelationshipIDs.Contains(getRelationshipID(relationship)) {
 			filteredSBOM.Content.ArtifactRelationships = append(filteredSBOM.Content.ArtifactRelationships, relationship)
 		}
 	}

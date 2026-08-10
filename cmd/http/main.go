@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/config"
@@ -25,6 +26,11 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 func main() {
@@ -94,9 +100,25 @@ func main() {
 
 	// SecurityException CRD integration requires storage and riskAcceptance RBAC
 	var seRepo ports.SecurityExceptionRepository
+	var eventRecorder record.EventRecorder
 	if storage != nil && c.RiskAcceptance {
 		seRepo = storage
 		logger.L().Info("SecurityException CRD integration enabled")
+
+		// Event recording is best-effort: a confirmed suppression is always logged
+		// regardless, so a missing/broken k8s config here should not block startup.
+		if k8sConfig := k8sinterface.GetK8sConfig(); k8sConfig != nil {
+			if clientset, err := kubernetes.NewForConfig(k8sConfig); err != nil {
+				logger.L().Ctx(ctx).Warning("failed to build k8s clientset for SecurityException events", helpers.Error(err))
+			} else {
+				broadcaster := record.NewBroadcaster()
+				broadcaster.StartStructuredLogging(0)
+				broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: clientset.CoreV1().Events("")})
+				eventRecorder = broadcaster.NewRecorder(runtime.NewScheme(), corev1.EventSource{Component: "kubevuln"})
+			}
+		} else {
+			logger.L().Warning("failed to get k8s config for SecurityException events")
+		}
 	} else {
 		seRepo = &repositories.NoOpSecurityExceptionRepository{}
 	}
@@ -121,6 +143,9 @@ func main() {
 		relevancyProvider = adapters.NewMockRelevancyAdapter()
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
+	if eventRecorder != nil {
+		service.SetEventRecorder(eventRecorder)
+	}
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 
 	m, err := metrics.New()

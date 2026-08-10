@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -116,26 +115,11 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		// iterate over all vulnerabilities
 		for _, m := range grypeDocument.Matches {
 			var isFixed int
-			var version string
 			description := m.Vulnerability.Description
 			link := linkToVuln(m.Vulnerability.ID)
-			if len(m.Vulnerability.Fix.Versions) != 0 {
+			fixed, version := hasKnownFix(m)
+			if fixed {
 				isFixed = 1
-				version = suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions)
-			} else {
-				// also check CPE matches
-				for _, detail := range m.MatchDetails {
-					var found match.CPEResult
-					err := json.Unmarshal(detail.Found, &found)
-					if err == nil {
-						// we assume that if a higher version is mentioned in the CPE, then it is fixed somewhere
-						if strings.Contains(found.VersionConstraint, "<") {
-							isFixed = 1
-							version = "unknown"
-							break
-						}
-					}
-				}
 			}
 			if description == "" && len(m.RelatedVulnerabilities) > 0 {
 				description = m.RelatedVulnerabilities[0].Description

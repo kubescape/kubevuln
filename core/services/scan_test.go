@@ -44,6 +44,9 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 		toomanyrequests bool
 		workload        bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error GenerateSBOM returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "phase 1, no workload",
@@ -60,18 +63,21 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
-			name:     "phase 1, timeout",
-			timeout:  true,
-			workload: true,
-			wantErr:  false, // we no longer check for timeout
+			name:       "phase 1, timeout",
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
 			name:            "phase 1, too many requests",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "phase 2, get SBOM failed",
@@ -86,6 +92,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			storeError: true,
 			workload:   true,
 			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMStorageFailed,
 		},
 		{
 			name:     "phase 2, create and store SBOM",
@@ -124,12 +131,23 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			if tt.workload {
 				ctx, _ = s.ValidateGenerateSBOM(ctx, workload)
 			}
-			if err := s.GenerateSBOM(ctx); (err != nil) != tt.wantErr {
+			err := s.GenerateSBOM(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
 				_, err := s.ValidateGenerateSBOM(ctx, workload)
 				assert.Equal(t, domain.ErrTooManyRequests, err)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				// a timed-out/too-large SBOM must be surfaced as a failure (see #540), not
+				// silently stored and reported as success like every other scan flow already does
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
@@ -456,6 +474,9 @@ func TestScanService_ScanCVE(t *testing.T) {
 		workload        bool
 		wantEmptyReport bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error ScanCVE returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "no workload",
@@ -472,12 +493,14 @@ func TestScanService_ScanCVE(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:            "create SBOM too many requests",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:      "empty wlid",
@@ -530,12 +553,13 @@ func TestScanService_ScanCVE(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:     "timeout SBOM",
-			sbom:     true,
-			storage:  true,
-			timeout:  true,
-			workload: true,
-			wantErr:  true,
+			name:       "timeout SBOM",
+			sbom:       true,
+			storage:    true,
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 	}
 	for _, tt := range tests {
@@ -575,12 +599,21 @@ func TestScanService_ScanCVE(t *testing.T) {
 					_ = storageCVE.StoreCVE(ctx, cve, false)
 				}
 			}
-			if err := s.ScanCVE(ctx); (err != nil) != tt.wantErr {
+			err := s.ScanCVE(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanCVE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				_, err := s.ValidateScanCVE(ctx, workload)
-				assert.Equal(t, domain.ErrTooManyRequests, err)
+				_, verr := s.ValidateScanCVE(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, verr)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
@@ -882,6 +915,9 @@ func TestScanService_ScanRegistry(t *testing.T) {
 		toomanyrequests bool
 		workload        bool
 		wantErr         bool
+		// wantReason, when non-empty, asserts the error ScanRegistry returns is a
+		// *domain.ScanError carrying this scanfailure.Reason* value (see #540).
+		wantReason string
 	}{
 		{
 			name:     "no workload",
@@ -893,18 +929,21 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			createSBOMError: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
-			name:     "timeout SBOM",
-			timeout:  true,
-			workload: true,
-			wantErr:  true,
+			name:       "timeout SBOM",
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
 			name:            "toomanyrequests SBOM",
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "scan",
@@ -939,12 +978,21 @@ func TestScanService_ScanRegistry(t *testing.T) {
 				ctx, _ = s.ValidateScanRegistry(ctx, workload)
 				require.NoError(t, err)
 			}
-			if err := s.ScanRegistry(ctx); (err != nil) != tt.wantErr {
+			err := s.ScanRegistry(ctx)
+			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.toomanyrequests {
-				_, err := s.ValidateScanRegistry(ctx, workload)
-				assert.Equal(t, domain.ErrTooManyRequests, err)
+				_, verr := s.ValidateScanRegistry(ctx, workload)
+				assert.Equal(t, domain.ErrTooManyRequests, verr)
+			}
+			if tt.wantReason != "" {
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
+			}
+			if tt.timeout {
+				assert.ErrorIs(t, err, domain.ErrIncompleteSBOM)
 			}
 		})
 	}
@@ -1931,6 +1979,107 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 
 	require.Len(t, platform.submitted, 1, "ScanCP cache hit must still submit the manifest to the backend")
 	assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend must receive the unfiltered manifest on a ScanCP cache hit")
+}
+
+// TestFilterSBOM_TransitiveClosure is a regression test for #514: filterSBOM used to walk
+// ArtifactRelationships in exactly two fixed passes, which only ever caught relevant artifacts
+// up to one hop past the direct file owner, and even that one hop depended on the order
+// ArtifactRelationships happened to be in (Syft does not document or guarantee any particular
+// order). This constructs a 3-level containment chain - file F is owned by pkg-A, pkg-A is
+// contained in pkg-B, pkg-B is contained in pkg-C - with the relationships listed
+// outermost-first (C->B, B->A, A->F), the ordering that reproduced the bug.
+func TestFilterSBOM_TransitiveClosure(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	sbom := domain.SBOM{
+		Content: &v1beta1.SyftDocument{
+			Files: []v1beta1.SyftFile{
+				{ID: "file-F", Location: v1beta1.Coordinates{RealPath: "/app/relevant.class"}},
+			},
+			Artifacts: []v1beta1.SyftPackage{
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A", Name: "A"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B", Name: "B"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-C", Name: "C"}},
+			},
+			ArtifactRelationships: []v1beta1.SyftRelationship{
+				{Parent: "pkg-C", Child: "pkg-B", Type: "contains"},
+				{Parent: "pkg-B", Child: "pkg-A", Type: "contains"},
+				{Parent: "pkg-A", Child: "file-F", Type: "contains"},
+			},
+		},
+	}
+
+	relevantFiles := mapset.NewSet[string]()
+	relevantFiles.Add("/app/relevant.class")
+
+	filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+	require.NoError(t, err)
+
+	var gotIDs []string
+	for _, a := range filtered.Content.Artifacts {
+		gotIDs = append(gotIDs, a.ID)
+	}
+	assert.ElementsMatch(t, []string{"pkg-A", "pkg-B", "pkg-C"}, gotIDs,
+		"every artifact that transitively contains a relevant file must be kept, regardless of relationship order")
+
+	var gotRelationshipPairs []string
+	for _, r := range filtered.Content.ArtifactRelationships {
+		gotRelationshipPairs = append(gotRelationshipPairs, r.Parent+"->"+r.Child)
+	}
+	assert.ElementsMatch(t, []string{"pkg-A->file-F", "pkg-B->pkg-A", "pkg-C->pkg-B"}, gotRelationshipPairs)
+}
+
+// TestFilterSBOM_PreservesSourceRelationshipOrder is a regression test for CodeRabbit's
+// review on #515: the BFS fix for #514 emitted relationships as it discovered them, but
+// mapset's ToSlice() has no stable order, so with multiple relevant files the output order
+// could vary between calls on the same input. filterSBOM must emit ArtifactRelationships in
+// the same order they appear in sbom.Content.ArtifactRelationships, filtered down to the
+// relevant ones - not in discovery order.
+func TestFilterSBOM_PreservesSourceRelationshipOrder(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	// Two independent relevant files, each with its own 2-level chain, interleaved in the
+	// source relationship list rather than grouped by file.
+	sourceRelationships := []v1beta1.SyftRelationship{
+		{Parent: "pkg-B1", Child: "pkg-A1", Type: "contains"},
+		{Parent: "pkg-A2", Child: "file-F2", Type: "contains"},
+		{Parent: "pkg-A1", Child: "file-F1", Type: "contains"},
+		{Parent: "pkg-B2", Child: "pkg-A2", Type: "contains"},
+	}
+
+	sbom := domain.SBOM{
+		Content: &v1beta1.SyftDocument{
+			Files: []v1beta1.SyftFile{
+				{ID: "file-F1", Location: v1beta1.Coordinates{RealPath: "/app/f1.class"}},
+				{ID: "file-F2", Location: v1beta1.Coordinates{RealPath: "/app/f2.class"}},
+			},
+			Artifacts: []v1beta1.SyftPackage{
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A1", Name: "A1"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B1", Name: "B1"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A2", Name: "A2"}},
+				{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-B2", Name: "B2"}},
+			},
+			ArtifactRelationships: sourceRelationships,
+		},
+	}
+
+	relevantFiles := mapset.NewSet[string]()
+	relevantFiles.Add("/app/f1.class")
+	relevantFiles.Add("/app/f2.class")
+
+	filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+	require.NoError(t, err)
+
+	// Every source relationship is relevant here, so the filtered order must equal the
+	// source order exactly - not just contain the same elements.
+	require.Equal(t, sourceRelationships, filtered.Content.ArtifactRelationships,
+		"filterSBOM must emit ArtifactRelationships in source order, not discovery order")
 }
 
 func TestScanService_ScanRegistry_RateLimitBackoff(t *testing.T) {

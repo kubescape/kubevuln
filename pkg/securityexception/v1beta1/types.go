@@ -85,6 +85,9 @@ type VulnerabilityException struct {
 	Justification   string              `json:"justification,omitempty"`
 	ImpactStatement string              `json:"impactStatement,omitempty"`
 	ExpiredOnFix    bool                `json:"expiredOnFix,omitempty"`
+	// ExpiresAt overrides the document-level spec.expiresAt for this entry only.
+	// When unset, the entry inherits the document-level value.
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 }
 
 // VulnerabilityRef identifies a vulnerability by CVE ID.

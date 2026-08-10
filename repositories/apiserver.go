@@ -22,8 +22,8 @@ import (
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
-	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	fakespdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1/fake"
 	"github.com/openvex/go-vex/pkg/vex"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
@@ -31,8 +31,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -123,9 +127,57 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	}, nil
 }
 
-func NewFakeAPIServerStorage(namespace string) *APIServerStore {
+type fakeStorageClientset struct {
+	k8stesting.Fake
+	tracker k8stesting.ObjectTracker
+}
+
+func (c *fakeStorageClientset) SpdxV1beta1() spdxv1beta1.SpdxV1beta1Interface {
+	return &fakespdxv1beta1.FakeSpdxV1beta1{Fake: &c.Fake}
+}
+
+func (c *fakeStorageClientset) Tracker() k8stesting.ObjectTracker {
+	return c.tracker
+}
+
+func newFakeStorageClientset(objects ...runtime.Object) *fakeStorageClientset {
+	scheme := runtime.NewScheme()
+	metav1.AddToGroupVersion(scheme, schema.GroupVersion{Version: "v1"})
+	if err := v1beta1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
+	codecs := serializer.NewCodecFactory(scheme)
+	tracker := k8stesting.NewFieldManagedObjectTracker(
+		scheme,
+		codecs.UniversalDecoder(),
+		managedfields.NewDeducedTypeConverter(),
+	)
+	for _, obj := range objects {
+		if err := tracker.Add(obj); err != nil {
+			panic(err)
+		}
+	}
+
+	clientset := &fakeStorageClientset{tracker: tracker}
+	clientset.AddReactor("*", "*", k8stesting.ObjectReaction(tracker))
+	clientset.AddWatchReactor("*", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		var opts metav1.ListOptions
+		if watchAction, ok := action.(k8stesting.WatchActionImpl); ok {
+			opts = watchAction.ListOptions
+		}
+		w, err := tracker.Watch(action.GetResource(), action.GetNamespace(), opts)
+		if err != nil {
+			return false, nil, err
+		}
+		return true, w, nil
+	})
+
+	return clientset
+}
+
+func newFakeAPIServerStore(namespace string, storageClient spdxv1beta1.SpdxV1beta1Interface) *APIServerStore {
 	return &APIServerStore{
-		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		StorageClient: storageClient,
 		// The fake dynamic client requires every GVR it will List() to have a registered
 		// list kind up front (fakedynamic.NewSimpleDynamicClient's default of an empty
 		// scheme panics on List() otherwise) - register the two GVRs GetSecurityExceptions
@@ -137,6 +189,10 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 		Namespace:                  namespace,
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
 	}
+}
+
+func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APIServerStore {
+	return newFakeAPIServerStore(namespace, newFakeStorageClientset(objects...).SpdxV1beta1())
 }
 
 // GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
@@ -488,23 +544,25 @@ func parseSeverities(cve domain.CVEManifest, cvep domain.CVEManifest, withReleva
 	var unknown int64
 	var unknownRelevant int64
 
-	for i := range cve.Content.Matches {
-		switch cve.Content.Matches[i].Vulnerability.Severity {
-		case domain.CriticalSeverity:
-			critical += 1
-		case domain.HighSeverity:
-			high += 1
-		case domain.MediumSeverity:
-			medium += 1
-		case domain.LowSeverity:
-			low += 1
-		case domain.NegligibleSeverity:
-			negligible += 1
-		case domain.UnknownSeverity:
-			unknown += 1
+	if cve.Content != nil {
+		for i := range cve.Content.Matches {
+			switch cve.Content.Matches[i].Vulnerability.Severity {
+			case domain.CriticalSeverity:
+				critical += 1
+			case domain.HighSeverity:
+				high += 1
+			case domain.MediumSeverity:
+				medium += 1
+			case domain.LowSeverity:
+				low += 1
+			case domain.NegligibleSeverity:
+				negligible += 1
+			case domain.UnknownSeverity:
+				unknown += 1
+			}
 		}
 	}
-	if withRelevancy {
+	if withRelevancy && cvep.Content != nil {
 		for i := range cvep.Content.Matches {
 			switch cvep.Content.Matches[i].Vulnerability.Severity {
 			case domain.CriticalSeverity:
@@ -903,6 +961,9 @@ func buildActionStatement(v v1beta1.Match) string {
 }
 
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+	if cvep == nil || cvep.Content == nil {
+		return nil
+	}
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
@@ -953,39 +1014,40 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 		},
 	}
 
-	// Loop over the Vulnerability struct and add each vulnerability to the VEX document
-	for _, v := range cve.Content.Matches {
-		var aliases []string
-		for _, alias := range v.RelatedVulnerabilities {
-			aliases = append(aliases, alias.ID)
-		}
-
-		product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
-		if err != nil {
-			return err
-		}
-
-		vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-			Vulnerability: v1beta1.VexVulnerability{
-				ID:          v.Vulnerability.DataSource,
-				Name:        v.Vulnerability.ID,
-				Description: v.Vulnerability.Description,
-				Aliases:     aliases,
-			},
-
-			Products: []v1beta1.Product{
-				*product,
-			},
-
-			Status:          v1beta1.Status(vex.StatusNotAffected),
-			Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-			ImpactStatement: "Vulnerable component is not loaded into the memory",
-		})
-	}
-
-	// Add ignored vulnerabilities as not_affected with SecurityException impact statement
+	// Loop over the Vulnerability struct and add each vulnerability to the VEX document, and
+	// add ignored vulnerabilities as not_affected with SecurityException impact statement.
+	// Both loops read cve.Content, so both are guarded by the same nil check.
 	if cve.Content != nil {
+		for _, v := range cve.Content.Matches {
+			var aliases []string
+			for _, alias := range v.RelatedVulnerabilities {
+				aliases = append(aliases, alias.ID)
+			}
+
+			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+
+			if err != nil {
+				return err
+			}
+
+			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:          v.Vulnerability.DataSource,
+					Name:        v.Vulnerability.ID,
+					Description: v.Vulnerability.Description,
+					Aliases:     aliases,
+				},
+
+				Products: []v1beta1.Product{
+					*product,
+				},
+
+				Status:          v1beta1.Status(vex.StatusNotAffected),
+				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+				ImpactStatement: "Vulnerable component is not loaded into the memory",
+			})
+		}
+
 		for _, v := range cve.Content.IgnoredMatches {
 			var aliases []string
 			for _, alias := range v.RelatedVulnerabilities {
@@ -1189,54 +1251,13 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
-	for _, v := range cve.Content.IgnoredMatches {
-		found := false
-		for _, s := range vexDoc.Statements {
-			if s.Vulnerability.Name != v.Vulnerability.ID {
-				continue
-			}
-			if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-				continue
-			}
-			if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Add the vulnerability to the VEX document
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-			if err != nil {
-				return err
-			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerability was ignored by a SecurityException",
-			})
-		}
-	}
-
+	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
+	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
 	ignoredMap := make(map[string]bool)
-	for _, v := range cve.Content.IgnoredMatches {
-		ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+	if cve.Content != nil {
+		for _, v := range cve.Content.IgnoredMatches {
+			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+		}
 	}
 
 	// Reset every statement back to the baseline "not affected" status before

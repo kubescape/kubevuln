@@ -106,7 +106,7 @@ metadata:
 spec:
   author: "team-platform@example.com"
   reason: "Accepted risks for Q2 2026 release"
-  expiresAt: "2026-07-01T00:00:00Z"
+  expiresAt: "2026-12-31T00:00:00Z"
 
   match:
     objectSelector:
@@ -130,6 +130,7 @@ spec:
       status: "not_affected"
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
+      expiresAt: "2026-09-15T00:00:00Z"  # expires earlier than spec.expiresAt
 
   posture:
     - controlID: "C-0034"
@@ -375,14 +376,16 @@ SecurityException CRDs do not use the status subresource. Observability is provi
 
 When a scanner evaluates exceptions during a scan, it emits Events on the SecurityException/ClusterSecurityException resource that was matched:
 
-- **kubevuln**: Emits an Event when a vulnerability exception matches during a scan (e.g., "Matched CVE-2021-44228 on Deployment/nginx-frontend in namespace production")
+- **kubevuln**: Emits a `VulnerabilitySuppressed` Event when a vulnerability exception actually suppresses a finding during a scan (e.g., "Suppressed CVE-2021-44228 in package log4j-core"). The Event is built directly from the `SecurityException`/`ClusterSecurityException` object's name, namespace and UID captured while converting the CRD into an exception policy — no extra `Get` call is needed. Event emission is wired up only when SecurityException CRD integration itself is enabled (`storage` and `riskAcceptance` both configured, see RBAC below); a suppression is always logged regardless, so Event emission being unavailable (no recorder configured, or the scanner's k8s client could not be constructed at startup) never affects suppression behavior itself.
 - **kubescape**: Emits an Event when a posture exception matches during a scan (e.g., "Matched control C-0034 on Deployment/nginx-frontend")
 
 Users can inspect exception activity via `kubectl describe securityexception <name>` and see recent Events. Events are automatically garbage-collected by Kubernetes.
 
+Emitting Events requires the `create`/`patch` RBAC grant on the `events` resource noted above; that grant is deployment-manifest wiring owned by kubescape-operator/helm-charts, not this repo.
+
 ### Expiry
 
-Expiry (`expiresAt`) is evaluated at scan time by the scanners — no controller or status update is needed. When a scanner reads a SecurityException and `expiresAt` is in the past, the exception is simply skipped. This means:
+Expiry (`expiresAt`) is evaluated at scan time by the scanners — no controller or status update is needed. It may be set at the document level (`spec.expiresAt`) and overridden per entry (`vulnerabilities[].expiresAt`); an entry without its own value inherits the document-level one. When a scanner reads a SecurityException and an entry's effective `expiresAt` is in the past, that entry is simply skipped. This means:
 
 - No component writes to the SecurityException status subresource
 - Expired exceptions remain in the cluster until explicitly deleted by the user
