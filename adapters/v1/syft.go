@@ -33,6 +33,20 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+// formatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
+// fields Syft/stereoscope actually resolved an image against. Returns "" unless both os and
+// architecture are known.
+func formatResolvedPlatform(os, arch, variant string) string {
+	if os == "" || arch == "" {
+		return ""
+	}
+	parts := []string{os, arch}
+	if variant != "" {
+		parts = append(parts, variant)
+	}
+	return strings.Join(parts, "/")
+}
+
 func isGCPRegistry(imageID string) bool {
 	host, _, _ := strings.Cut(imageID, "/")
 	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
@@ -258,11 +272,24 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		domainSBOM.Status = helpersv1.Unauthorize
 		return domainSBOM, err
 	case err != nil:
+		// Requested-but-unavailable platforms surface here as *image.ErrPlatformMismatch
+		// (from stereoscope, once it has positively resolved the image but its OS/arch don't
+		// match options.Platform). Propagated as-is: classifySBOMError in core/services
+		// recognizes it via errors.As and reports a distinct "platform not found" reason
+		// instead of the generic SBOM-generation-failed fallback (see #512).
 		var platformErr *image.ErrPlatformMismatch
 		if errors.As(err, &platformErr) {
 			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		}
 		return domainSBOM, err
+	}
+
+	// record the platform actually resolved, whether it was explicitly requested or left for
+	// Syft to pick, so a silently-wrong-arch SBOM is inspectable after the fact (see #512).
+	if meta, ok := src.Describe().Metadata.(source.ImageMetadata); ok {
+		if resolved := formatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant); resolved != "" {
+			domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey] = resolved
+		}
 	}
 
 	// generate SBOM

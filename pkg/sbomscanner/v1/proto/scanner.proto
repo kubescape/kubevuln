@@ -37,8 +37,12 @@ message CreateSBOMResponse {
   int64 sbom_size = 3;
   // Error message (for non-terminal errors that should be propagated)
   string error_message = 4;
-  // The status reason if status is TooLarge
+  // A short reason code refining status or error_message (e.g. domain.ReasonImageTooLarge,
+  // domain.ReasonTooManyRequests, domain.ReasonPlatformNotFound)
   string status_reason = 5;
+  // The OCI platform ("os/arch[/variant]") actually resolved and used for this scan, set on
+  // success regardless of whether the caller requested one explicitly or left it empty
+  string resolved_platform = 6;
 }
 
 message HealthRequest {}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -94,6 +95,24 @@ func TestClassifySBOMError(t *testing.T) {
 				},
 			}),
 			expected: scanfailure.ReasonImageSchemaUnsupported,
+		},
+		{
+			name: "typed platform mismatch from the in-process adapter",
+			err: &image.ErrPlatformMismatch{
+				ExpectedPlatform: "linux/arm64",
+				Err:              fmt.Errorf("image platform=\"linux/amd64\""),
+			},
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "wrapped typed platform mismatch",
+			err:      fmt.Errorf("resolving source: %w", &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"}),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "string-based platform mismatch crossing gRPC from the sidecar",
+			err:      fmt.Errorf("mismatched platform (expected linux/arm64): image platform=\"linux/amd64\""),
+			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
 			name:     "generic error falls back to SBOM generation failed",
