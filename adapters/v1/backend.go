@@ -262,8 +262,13 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		}
 	}
 
-	if cacheable && a.exceptionsCache != nil {
-		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), cacheTTLFor(vulnExceptionList, exceptionsCacheTTL))
+	// A non-positive TTL means a policy has already expired by the time we're about to
+	// cache it (e.g. lost a race with its own expiresAt between conversion and this
+	// point). akyoto/cache only reaps entries on its cleaning-interval sweep, not the
+	// instant their TTL elapses, so a Set with ttl<=0 would still be readable as a cache
+	// hit until the next sweep -- skip the write entirely rather than rely on that.
+	if ttl := cacheTTLFor(vulnExceptionList, exceptionsCacheTTL); cacheable && a.exceptionsCache != nil && ttl > 0 {
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), ttl)
 	}
 
 	if degraded {

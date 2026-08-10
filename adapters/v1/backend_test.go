@@ -225,6 +225,31 @@ func TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry(t *testing
 	assert.Equal(t, 2, crdCalls, "expiry must force re-evaluation instead of a cache hit")
 }
 
+// TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy is a regression test:
+// cacheTTLFor returns 0 (not negative) for a policy whose ExpirationDate has already passed
+// by the time it's about to be cached (e.g. a cloud-sourced policy the backend API returned
+// with a past expirationDate). akyoto/cache only reaps entries on its cleaning-interval
+// sweep, not the instant a 0-second TTL elapses, so writing it at all would let it keep
+// being served as a cache hit until that sweep ran. The write must be skipped outright.
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy(t *testing.T) {
+	calls := 0
+	past := time.Now().Add(-1 * time.Hour)
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{ExpirationDate: &past}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, _, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, calls)
+
+	_, _, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "an already-expired policy must not be cached, forcing a re-fetch on the next call")
+}
+
 func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheEntries(t *testing.T) {
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
 		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
