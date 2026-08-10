@@ -36,6 +36,20 @@ var (
 	ErrExceptionsDegraded = errors.New("exception set is incomplete")
 )
 
+// ScanError wraps a scan-flow error together with the scanfailure.Reason* classification
+// (github.com/armosec/armoapi-go/scanfailure) already computed at the point of failure, so
+// callers up the stack — namely the HTTP controller's Prometheus metrics — can recover the
+// specific reason via errors.As without re-deriving it from the error string. Unwrap exposes
+// the original error unchanged, so existing errors.Is-based checks (e.g. against
+// ErrTooManyRequests or ErrPartialContainerProfile) keep working exactly as before.
+type ScanError struct {
+	Reason string
+	Err    error
+}
+
+func (e *ScanError) Error() string { return e.Err.Error() }
+func (e *ScanError) Unwrap() error { return e.Err }
+
 type ScanIDKey struct{}
 type TimestampKey struct{}
 type WorkloadKey struct{}

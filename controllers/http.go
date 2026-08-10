@@ -8,6 +8,7 @@ import (
 	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/go-logger"
@@ -62,16 +63,36 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 // recordScan records the outcome and duration of a background scan job for the given endpoint.
 // outcome is one of "success", "partial", or "error" -- see the ScanCP call site, where a
 // domain.ErrPartialContainerProfile result is a warning-level expected outcome, not a failure.
-func (h HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string) {
+// err is the error returned by the scan (nil for success/partial) and is only consulted to
+// resolve the bounded reason label on a failed outcome; see scanFailureReason.
+func (h HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string, err error) {
 	if h.metrics == nil {
 		return
 	}
 	attrs := metric.WithAttributes(
 		attribute.String("endpoint", endpoint),
 		attribute.String("outcome", outcome),
+		attribute.String("reason", scanFailureReason(outcome, err)),
 	)
 	h.metrics.ScanCounter.Add(ctx, 1, attrs)
 	h.metrics.ScanDuration.Record(ctx, time.Since(start).Seconds(), attrs)
+}
+
+// scanFailureReason resolves the bounded scanfailure.Reason* label for a scan-outcome metric.
+// Successful/partial outcomes carry no specific failure reason ("none"). A failed outcome whose
+// error was classified via *domain.ScanError (set at the point of failure in
+// core/services/scan.go, alongside the equivalent ReportScanFailure call to the platform)
+// surfaces that reason; any other error defaults to scanfailure.ReasonUnexpected, keeping the
+// label's cardinality fixed regardless of what an unclassified error's message happens to say.
+func scanFailureReason(outcome string, err error) string {
+	if outcome != "error" {
+		return "none"
+	}
+	var scanErr *domain.ScanError
+	if errors.As(err, &scanErr) && scanErr.Reason != "" {
+		return scanErr.Reason
+	}
+	return scanfailure.ReasonUnexpected
 }
 
 // recordRejection records a validation-time rejection for the given endpoint. reason is
@@ -129,7 +150,7 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 		if err != nil {
 			outcome = "error"
 		}
-		h.recordScan(bgCtx, "generateSBOM", start, outcome)
+		h.recordScan(bgCtx, "generateSBOM", start, outcome, err)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
@@ -191,20 +212,20 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 		err = h.scanService.ScanCP(bgCtx)
 		if err != nil {
 			if errors.Is(err, domain.ErrPartialContainerProfile) {
-				h.recordScan(bgCtx, "scanCP", start, "partial")
+				h.recordScan(bgCtx, "scanCP", start, "partial", err)
 				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			} else {
-				h.recordScan(bgCtx, "scanCP", start, "error")
+				h.recordScan(bgCtx, "scanCP", start, "error", err)
 				logger.L().Ctx(bgCtx).Error("service error - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			}
 		} else {
-			h.recordScan(bgCtx, "scanCP", start, "success")
+			h.recordScan(bgCtx, "scanCP", start, "success", nil)
 		}
 	})
 }
@@ -246,7 +267,7 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 		if err != nil {
 			outcome = "error"
 		}
-		h.recordScan(bgCtx, "scanCVE", start, outcome)
+		h.recordScan(bgCtx, "scanCVE", start, outcome, err)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
@@ -333,7 +354,7 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 		if err != nil {
 			outcome = "error"
 		}
-		h.recordScan(bgCtx, "scanRegistry", start, outcome)
+		h.recordScan(bgCtx, "scanRegistry", start, outcome, err)
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
