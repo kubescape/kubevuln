@@ -7,11 +7,10 @@
 // the sidecar had been made extensible. The providers live here so a registry added for one
 // path is available to the other.
 //
-// Each provider's Credentials call is cached (see cache.go) and keyed by whatever the
-// credential's scope actually is -- a single key for GCP, since Application Default
-// Credentials aren't registry-specific, and one key per AWS region for ECR, since a token
-// is only valid for the region it was issued in. Entries are reused until the cloud
-// provider's own reported expiry (an ECR token, for example, is valid 12 hours), and
+// Each provider's Credentials call is cached (see cache.go) and keyed by registry host, so
+// two different registries -- or two different AWS accounts that happen to share a region --
+// never share a cache entry. Entries are reused until the cloud provider's own reported
+// expiry (an ECR token, for example, is valid 12 hours), and
 // concurrent scans racing a cache miss for the same key collapse into a single upstream
 // fetch, so a burst of scans against the same registry doesn't turn into a burst of STS/ADC
 // requests.
@@ -78,15 +77,15 @@ func (GCP) Matches(imageID string) bool { return IsGCPRegistry(imageID) }
 
 func (GCP) Strategy() string { return metrics.FallbackStrategyGCPADC }
 
-// gcpCache is a single entry, not one per registry host: Application Default Credentials
-// are scoped to the ambient GCP identity, not to any particular GCR/Artifact Registry host,
-// so every GCP pull shares the same cached token.
+// gcpCache is keyed by registry host, not a single shared entry: although Application
+// Default Credentials resolve from one ambient identity, workload identity federation can
+// map different namespaces/projects to different service accounts, so nothing here
+// guarantees the token is actually the same across every GCR/Artifact Registry host a pod
+// happens to pull from. Keying by host keeps that assumption from ever being load-bearing.
 var gcpCache = newCredentialCache(metrics.FallbackStrategyGCPADC)
 
-const gcpCacheKey = "adc"
-
-func (GCP) Credentials(ctx context.Context, _ string) (*image.RegistryCredentials, error) {
-	return gcpCache.get(ctx, gcpCacheKey, GCPCredsFn)
+func (GCP) Credentials(ctx context.Context, imageID string) (*image.RegistryCredentials, error) {
+	return gcpCache.get(ctx, host(imageID), GCPCredsFn)
 }
 
 // IsGCPRegistry reports whether imageID is hosted on GCR or Artifact Registry.
@@ -134,13 +133,17 @@ func (ECR) Matches(imageID string) bool { return ecrRegion(imageID) != "" }
 
 func (ECR) Strategy() string { return metrics.FallbackStrategyECR }
 
-// ecrCache is keyed by region, mirroring ECRCredsFn's own parameter: a token is only valid
-// for the region it was issued in, so two regions can never share an entry.
+// ecrCache is keyed by registry host, not just region: an ECR hostname embeds both the
+// account ID and the region (123456789012.dkr.ecr.us-east-1.amazonaws.com), and a token
+// requested via the ambient credential chain is scoped to whichever account that chain
+// resolves to for the request. Keying by region alone would let two different AWS accounts
+// pulling from the same region collide on one cache entry -- the second account would be
+// handed the first account's token and get a 401.
 var ecrCache = newCredentialCache(metrics.FallbackStrategyECR)
 
 func (ECR) Credentials(ctx context.Context, imageID string) (*image.RegistryCredentials, error) {
 	region := ecrRegion(imageID)
-	return ecrCache.get(ctx, region, func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+	return ecrCache.get(ctx, host(imageID), func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
 		return ECRCredsFn(ctx, region)
 	})
 }

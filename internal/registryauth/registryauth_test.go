@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,6 +82,74 @@ func TestECRCredentialsUsesRegionFromReference(t *testing.T) {
 	assert.Equal(t, "ap-south-1", gotRegion)
 	assert.Equal(t, "AWS", creds.Username)
 	assert.Equal(t, "secret", creds.Password)
+}
+
+// Two AWS accounts pulling through the same region must not share a cache entry: the
+// ambient credential chain resolves a token scoped to one specific account, so handing that
+// token to a pull against a different account fails with a 401.
+func TestECRCredentialsIsolatesCacheAcrossAccountsInSameRegion(t *testing.T) {
+	orig := ECRCredsFn
+	defer func() { ECRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	calls := map[string]int{}
+	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, time.Time, error) {
+		calls[region]++
+		return &image.RegistryCredentials{Username: "AWS", Password: region}, time.Now().Add(time.Hour), nil
+	}
+
+	accountA := "111111111111.dkr.ecr.us-east-1.amazonaws.com/app:v1"
+	accountB := "222222222222.dkr.ecr.us-east-1.amazonaws.com/app:v1"
+
+	credsA, err := ECR{}.Credentials(context.Background(), accountA)
+	require.NoError(t, err)
+	credsB, err := ECR{}.Credentials(context.Background(), accountB)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, calls["us-east-1"], "same-region pull from a different account must not be served from the first account's cache entry")
+
+	// Fetch each account again: both should now be served from their own cache entry, not
+	// refetched and not cross-served from the other account's entry.
+	credsA2, err := ECR{}.Credentials(context.Background(), accountA)
+	require.NoError(t, err)
+	credsB2, err := ECR{}.Credentials(context.Background(), accountB)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, calls["us-east-1"], "repeat pulls for already-cached accounts must not refetch")
+	assert.Same(t, credsA, credsA2)
+	assert.Same(t, credsB, credsB2)
+}
+
+// GCP credentials are cached per registry host: nothing in Credentials guarantees the
+// ambient identity resolves to the same token for every GCR/Artifact Registry host a pod
+// might pull from (workload identity federation can map different callers to different
+// service accounts), so one host's cached token must never be handed out for another host.
+func TestGCPCredentialsIsolatesCacheAcrossHosts(t *testing.T) {
+	orig := GCPCredsFn
+	defer func() { GCPCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	var calls int32
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		n := atomic.AddInt32(&calls, 1)
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: string(rune('a' + n))}, time.Now().Add(time.Hour), nil
+	}
+
+	hostA := "gcr.io/foo/bar:v1"
+	hostB := "us-docker.pkg.dev/project/repo/image:v1"
+
+	credsA, err := GCP{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	credsB, err := GCP{}.Credentials(context.Background(), hostB)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "a different registry host must not be served from another host's cache entry")
+	assert.NotEqual(t, credsA.Password, credsB.Password)
+
+	credsA2, err := GCP{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	assert.Same(t, credsA, credsA2, "repeat pulls for an already-cached host must not refetch")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
 func TestCredentialsFromAuthorizationToken(t *testing.T) {

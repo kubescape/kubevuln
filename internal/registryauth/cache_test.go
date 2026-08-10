@@ -77,11 +77,11 @@ func TestCredentialCache_DistinctKeysDoNotShareEntries(t *testing.T) {
 
 func TestCredentialCache_ConcurrentMissesCollapseToOneFetch(t *testing.T) {
 	c := newCredentialCache("test")
-	var calls int32
+	var calls, started int32
 	release := make(chan struct{})
 	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
 		atomic.AddInt32(&calls, 1)
-		<-release // hold every concurrent caller here until they've all arrived
+		<-release // hold the leader here until every caller has actually joined the race
 		return &image.RegistryCredentials{Password: "p"}, time.Now().Add(time.Hour), nil
 	}
 
@@ -91,10 +91,23 @@ func TestCredentialCache_ConcurrentMissesCollapseToOneFetch(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
+			atomic.AddInt32(&started, 1)
 			_, err := c.get(context.Background(), "k", fetch)
 			assert.NoError(t, err)
 		}()
 	}
+
+	// Don't release the leader's fetch until every goroutine has actually called get():
+	// releasing too early risks the leader finishing and populating the cache before the
+	// rest even started, which would let a non-coalescing implementation (one that calls
+	// fetch on every miss instead of deduping) pass by accident.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&started) == n
+	}, 2*time.Second, time.Millisecond)
+	// "started" only means each goroutine's call to get() has begun, not that it has
+	// reached the blocking point inside singleflight yet -- give the scheduler a moment to
+	// actually land every one of them there before letting the leader's fetch return.
+	time.Sleep(100 * time.Millisecond)
 	close(release)
 	wg.Wait()
 

@@ -15,6 +15,13 @@ import (
 // pull moments later.
 const expiryLeeway = 1 * time.Minute
 
+// fetchTimeout bounds a single upstream credential fetch, independent of any one caller's
+// context. The fetch runs once per singleflight key and is shared by every concurrent
+// caller racing that key, so it must not be tied to whichever caller happened to become
+// the leader: that caller's context canceling must not abort the fetch -- and therefore
+// the result -- for every other caller still waiting on it.
+const fetchTimeout = 30 * time.Second
+
 // credentialFetch is a provider's underlying fetch: it returns credentials plus the time
 // they stop being valid. A zero expiry means "no reported expiry" -- the credential is
 // still returned, but not cached, since there's nothing to bound the cache entry's
@@ -51,20 +58,30 @@ func newCredentialCache(strategy string) *credentialCache {
 // and caches the result when fetch reports a non-zero expiry. Fetch errors are never
 // cached: a transient failure (e.g. a momentary STS/ADC hiccup) must not poison the cache
 // for other callers or the next scan.
+//
+// The shared fetch runs under its own fetchTimeout-bounded context, not ctx: singleflight
+// hands the leader's result to every caller waiting on the same key, so running the fetch
+// under one specific caller's ctx would fail every other caller the instant that one
+// caller's context was canceled. Each caller instead races the shared result against its
+// own ctx via DoChan, so a caller can give up on its own terms without affecting the
+// fetch (which keeps running, and still populates the cache for whoever asks next) or any
+// other waiting caller.
 func (c *credentialCache) get(ctx context.Context, key string, fetch credentialFetch) (*image.RegistryCredentials, error) {
 	if creds, ok := c.lookup(key); ok {
 		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheHit)
 		return creds, nil
 	}
 
-	v, err, _ := c.group.Do(key, func() (interface{}, error) {
+	ch := c.group.DoChan(key, func() (interface{}, error) {
 		// Re-check under the singleflight key: a caller that lost the race to become the
 		// leader for this key may have been given a result already cached by the winner
 		// of an earlier, now-resolved Do call for the same key.
 		if creds, ok := c.lookup(key); ok {
 			return creds, nil
 		}
-		creds, expiry, ferr := fetch(ctx)
+		fetchCtx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		creds, expiry, ferr := fetch(fetchCtx)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -75,12 +92,18 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 		}
 		return creds, nil
 	})
-	if err != nil {
+
+	select {
+	case <-ctx.Done():
 		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
-		return nil, err
+		return nil, ctx.Err()
+	case res := <-ch:
+		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*image.RegistryCredentials), nil
 	}
-	metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
-	return v.(*image.RegistryCredentials), nil
 }
 
 func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) {
