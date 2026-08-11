@@ -54,6 +54,7 @@ var recorderMu sync.RWMutex
 var fallbackCounter metric.Int64Counter
 var sourceResolutionCounter metric.Int64Counter
 var registryAuthCacheCounter metric.Int64Counter
+var singleflightHitsCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -71,6 +72,7 @@ type Metrics struct {
 	ExceptionsActiveGauge     metric.Int64Gauge
 	ScanFallbackCounter       metric.Int64Counter
 	SourceResolutionCounter   metric.Int64Counter
+	SingleflightHitsCounter   metric.Int64Counter
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -180,10 +182,19 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	singleflightHitsMetric, err := meter.Int64Counter(
+		"kubevuln_singleflight_hits_total",
+		metric.WithDescription("Total number of times a concurrent scan request was deduplicated by singleflight, by target"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	recorderMu.Lock()
 	fallbackCounter = scanFallbackCounter
 	sourceResolutionCounter = sourceResolutionMetric
 	registryAuthCacheCounter = registryAuthCacheMetric
+	singleflightHitsCounter = singleflightHitsMetric
 	recorderMu.Unlock()
 
 	return &Metrics{
@@ -198,6 +209,7 @@ func New() (*Metrics, error) {
 		ExceptionsActiveGauge:     exceptionsActiveGauge,
 		ScanFallbackCounter:       scanFallbackCounter,
 		SourceResolutionCounter:   sourceResolutionMetric,
+		SingleflightHitsCounter:   singleflightHitsMetric,
 	}, nil
 }
 
@@ -268,5 +280,17 @@ func RecordSourceResolution(ctx context.Context, component string, usedFallback,
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("component", component),
 		attribute.String("outcome", outcome),
+	))
+}
+
+func RecordSingleflightHit(ctx context.Context, target string) {
+	recorderMu.RLock()
+	counter := singleflightHitsCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("target", target),
 	))
 }
