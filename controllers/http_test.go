@@ -756,3 +756,45 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 		})
 	}
 }
+
+// ImageSlug is the storage key for the SBOM and the CVE manifest, so equivalent references to
+// the same image must produce the same slug. Deriving it from the raw tag gave each reference
+// form its own key, so every form missed the cache and regenerated the SBOM from scratch, and
+// the rate-limit and exception caches (which key on the normalized reference) disagreed with
+// storage about which image was in play.
+func Test_registryScanCommandToScanCommand_SlugIsStableAcrossEquivalentReferences(t *testing.T) {
+	equivalent := []string{
+		"nginx",
+		"nginx:latest",
+		"library/nginx:latest",
+		"docker.io/library/nginx:latest",
+		"index.docker.io/library/nginx:latest",
+	}
+
+	var slugs []string
+	for _, ref := range equivalent {
+		cmd := registryScanCommandToScanCommand(wssc.RegistryScanCommand{
+			ImageScanParams: wssc.ImageScanParams{ImageTag: ref},
+		})
+		assert.NotEmpty(t, cmd.ImageSlug, "slug must resolve for %q", ref)
+		slugs = append(slugs, cmd.ImageSlug)
+	}
+
+	for i, got := range slugs {
+		assert.Equal(t, slugs[0], got,
+			"%q and %q are the same image and must share a storage key", equivalent[0], equivalent[i])
+	}
+}
+
+// A different image must still get a different key.
+func Test_registryScanCommandToScanCommand_SlugDistinguishesImages(t *testing.T) {
+	slugFor := func(ref string) string {
+		return registryScanCommandToScanCommand(wssc.RegistryScanCommand{
+			ImageScanParams: wssc.ImageScanParams{ImageTag: ref},
+		}).ImageSlug
+	}
+
+	assert.NotEqual(t, slugFor("nginx:latest"), slugFor("nginx:1.25"))
+	assert.NotEqual(t, slugFor("nginx:latest"), slugFor("alpine:latest"))
+	assert.NotEqual(t, slugFor("docker.io/library/nginx:latest"), slugFor("quay.io/library/nginx:latest"))
+}

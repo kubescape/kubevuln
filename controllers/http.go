@@ -365,16 +365,24 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 }
 
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
+	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
 		ImageTag:           c.ImageTag,
-		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		ImageTagNormalized: imageTagNormalized,
 		JobID:              c.JobID,
 		ParentJobID:        c.ParentJobID,
 		Args:               c.Args,
 		Session:            sessionChainToSession(c.Session),
 	}
-	if slug, err := names.ImageInfoToSlug(c.ImageTag, "nohash"); err == nil {
+	// Derive the slug from the normalized reference, as the in-cluster path does. ImageSlug
+	// is the storage key for the SBOM and the CVE manifest, so deriving it from the raw tag
+	// gave the same image a different key per reference form ("nginx:latest" and
+	// "docker.io/library/nginx:latest" are the same image), and every equivalent form missed
+	// the cache and regenerated the SBOM from scratch. The rate-limit and exception caches
+	// already key on the normalized reference, so this also stops the caches disagreeing
+	// about which image they are talking about.
+	if slug, err := names.ImageInfoToSlug(imageTagNormalized, "nohash"); err == nil {
 		command.ImageSlug = slug
 	}
 	return command
