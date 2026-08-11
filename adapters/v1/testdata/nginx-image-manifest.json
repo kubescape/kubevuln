@@ -22,42 +22,42 @@
       "parentLayerHash":"",
       "createdBy":"LABEL maintainer=NGINX Docker Maintainers \u003cdocker-maint@nginx.com\u003e",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":2
+      "layerOrder":1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NGINX_VERSION=1.27.0",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":3
+      "layerOrder":1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NJS_VERSION=0.8.4",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":4
+      "layerOrder":1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NJS_RELEASE=2~bookworm",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":5
+      "layerOrder":1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV PKG_RELEASE=2~bookworm",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":6
+      "layerOrder":1
     },
     {
       "layerHash":"sha256:3a0cf035bbfcc7852c38d4d236673b6a0d9454e5f2621800814d1633e729ea20",
       "parentLayerHash":"",
       "createdBy":"RUN /bin/sh -c set -x     \u0026\u0026 groupadd --system --gid 101 nginx     \u0026\u0026 useradd --system --gid nginx --no-create-home --home /nonexistent --comment \"nginx user\" --shell /bin/false --uid 101 nginx     \u0026\u0026 apt-get update     \u0026\u0026 apt-get install --no-install-recommends --no-install-suggests -y gnupg1 ca-certificates     \u0026\u0026     NGINX_GPGKEY=573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62;     NGINX_GPGKEY_PATH=/etc/apt/keyrings/nginx-archive-keyring.gpg;     export GNUPGHOME=\"$(mktemp -d)\";     found='';     for server in         hkp://keyserver.ubuntu.com:80         pgp.mit.edu     ; do         echo \"Fetching GPG key $NGINX_GPGKEY from $server\";         gpg1 --keyserver \"$server\" --keyserver-options timeout=10 --recv-keys \"$NGINX_GPGKEY\" \u0026\u0026 found=yes \u0026\u0026 break;     done;     test -z \"$found\" \u0026\u0026 echo \u003e\u00262 \"error: failed to fetch GPG key $NGINX_GPGKEY\" \u0026\u0026 exit 1;     gpg1 --export \"$NGINX_GPGKEY\" \u003e \"$NGINX_GPGKEY_PATH\" ;     rm -rf \"$GNUPGHOME\";     apt-get remove --purge --auto-remove -y gnupg1 \u0026\u0026 rm -rf /var/lib/apt/lists/*     \u0026\u0026 dpkgArch=\"$(dpkg --print-architecture)\"     \u0026\u0026 nginxPackages=\"         nginx=${NGINX_VERSION}-${PKG_RELEASE}         nginx-module-xslt=${NGINX_VERSION}-${PKG_RELEASE}         nginx-module-geoip=${NGINX_VERSION}-${PKG_RELEASE}         nginx-module-image-filter=${NGINX_VERSION}-${PKG_RELEASE}         nginx-module-njs=${NGINX_VERSION}+${NJS_VERSION}-${NJS_RELEASE}     \"     \u0026\u0026 case \"$dpkgArch\" in         amd64|arm64)             echo \"deb [signed-by=$NGINX_GPGKEY_PATH] https://nginx.org/packages/mainline/debian/ bookworm nginx\" \u003e\u003e /etc/apt/sources.list.d/nginx.list             \u0026\u0026 apt-get update             ;;         *)             echo \"deb-src [signed-by=$NGINX_GPGKEY_PATH] https://nginx.org/packages/mainline/debian/ bookworm nginx\" \u003e\u003e /etc/apt/sources.list.d/nginx.list                         \u0026\u0026 tempDir=\"$(mktemp -d)\"             \u0026\u0026 chmod 777 \"$tempDir\"                         \u0026\u0026 savedAptMark=\"$(apt-mark showmanual)\"                         \u0026\u0026 apt-get update             \u0026\u0026 apt-get build-dep -y $nginxPackages             \u0026\u0026 (                 cd \"$tempDir\"                 \u0026\u0026 DEB_BUILD_OPTIONS=\"nocheck parallel=$(nproc)\"                     apt-get source --compile $nginxPackages             )                         \u0026\u0026 apt-mark showmanual | xargs apt-mark auto \u003e /dev/null             \u0026\u0026 { [ -z \"$savedAptMark\" ] || apt-mark manual $savedAptMark; }                         \u0026\u0026 ls -lAFh \"$tempDir\"             \u0026\u0026 ( cd \"$tempDir\" \u0026\u0026 dpkg-scanpackages . \u003e Packages )             \u0026\u0026 grep '^Package: ' \"$tempDir/Packages\"             \u0026\u0026 echo \"deb [ trusted=yes ] file://$tempDir ./\" \u003e /etc/apt/sources.list.d/temp.list             \u0026\u0026 apt-get -o Acquire::GzipIndexes=false update             ;;     esac         \u0026\u0026 apt-get install --no-install-recommends --no-install-suggests -y                         $nginxPackages                         gettext-base                         curl     \u0026\u0026 apt-get remove --purge --auto-remove -y \u0026\u0026 rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/nginx.list         \u0026\u0026 if [ -n \"$tempDir\" ]; then         apt-get purge -y --auto-remove         \u0026\u0026 rm -rf \"$tempDir\" /etc/apt/sources.list.d/temp.list;     fi     \u0026\u0026 ln -sf /dev/stdout /var/log/nginx/access.log     \u0026\u0026 ln -sf /dev/stderr /var/log/nginx/error.log     \u0026\u0026 mkdir /docker-entrypoint.d # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":7,
+      "layerOrder":1,
       "size":95802212
     },
     {
@@ -65,7 +65,7 @@
       "parentLayerHash":"",
       "createdBy":"COPY docker-entrypoint.sh / # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":8,
+      "layerOrder":2,
       "size":1620
     },
     {
@@ -73,7 +73,7 @@
       "parentLayerHash":"",
       "createdBy":"COPY 10-listen-on-ipv6-by-default.sh /docker-entrypoint.d # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":9,
+      "layerOrder":3,
       "size":2125
     },
     {
@@ -81,7 +81,7 @@
       "parentLayerHash":"",
       "createdBy":"COPY 15-local-resolvers.envsh /docker-entrypoint.d # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":10,
+      "layerOrder":4,
       "size":336
     },
     {
@@ -89,7 +89,7 @@
       "parentLayerHash":"",
       "createdBy":"COPY 20-envsubst-on-templates.sh /docker-entrypoint.d # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":11,
+      "layerOrder":5,
       "size":3018
     },
     {
@@ -97,7 +97,7 @@
       "parentLayerHash":"",
       "createdBy":"COPY 30-tune-worker-processes.sh /docker-entrypoint.d # buildkit",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":12,
+      "layerOrder":6,
       "size":4619
     },
     {
@@ -105,28 +105,28 @@
       "parentLayerHash":"",
       "createdBy":"ENTRYPOINT [\"/docker-entrypoint.sh\"]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":13
+      "layerOrder":7
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"EXPOSE map[80/tcp:{}]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":14
+      "layerOrder":7
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"STOPSIGNAL SIGQUIT",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":15
+      "layerOrder":7
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"CMD [\"nginx\" \"-g\" \"daemon off;\"]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":16
+      "layerOrder":7
     }
   ]
 }

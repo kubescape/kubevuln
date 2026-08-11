@@ -200,6 +200,62 @@ func Test_parseLayersPayload(t *testing.T) {
 	}
 }
 
+// Test_layerOrder_consistentBetweenManifestAndVulnerabilities guards #617: a vulnerability's
+// LayerOrder (via parseLayersPayload, which DomainToArmo attaches to each vulnerability) and
+// the same layer's LayerOrder in ParseImageManifest's output must agree, so a consumer can
+// correlate a vulnerability to its build step. History mixes metadata-only entries (no layer)
+// between real, layer-producing ones, which is what previously made the two disagree.
+func Test_layerOrder_consistentBetweenManifestAndVulnerabilities(t *testing.T) {
+	config := containerRegistryV1.ConfigFile{
+		History: []containerRegistryV1.History{
+			{CreatedBy: "FROM base", EmptyLayer: false},
+			{CreatedBy: "ENV FOO=bar", EmptyLayer: true},
+			{CreatedBy: "LABEL x=y", EmptyLayer: true},
+			{CreatedBy: "COPY app /app", EmptyLayer: false},
+			{CreatedBy: "CMD [\"/app\"]", EmptyLayer: true},
+		},
+		RootFS: containerRegistryV1.RootFS{
+			DiffIDs: []containerRegistryV1.Hash{
+				{Algorithm: "sha256", Hex: "aaaa000000000000000000000000000000000000000000000000000000000000"},
+				{Algorithm: "sha256", Hex: "bbbb000000000000000000000000000000000000000000000000000000000000"},
+			},
+		},
+	}
+	configBytes, err := json.Marshal(config)
+	assert.NoError(t, err)
+
+	imageMetadata := source.ImageMetadata{
+		RawConfig: configBytes,
+		Layers: []source.LayerMetadata{
+			{Digest: "sha256:aaaa000000000000000000000000000000000000000000000000000000000000", Size: 100},
+			{Digest: "sha256:bbbb000000000000000000000000000000000000000000000000000000000000", Size: 200},
+		},
+	}
+	targetBytes, err := json.Marshal(imageMetadata)
+	assert.NoError(t, err)
+
+	layerMap, err := parseLayersPayload(imageMetadata)
+	assert.NoError(t, err)
+
+	imageManifest, err := ParseImageManifest(&v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{Type: "image", Target: targetBytes},
+	})
+	assert.NoError(t, err)
+
+	checked := 0
+	for _, layer := range imageManifest.Layers {
+		if layer.LayerHash == "" {
+			continue
+		}
+		vulnLayer, ok := layerMap[layer.LayerHash]
+		assert.True(t, ok, "layer %s missing from parseLayersPayload's map", layer.LayerHash)
+		assert.Equal(t, vulnLayer.LayerOrder, layer.LayerOrder,
+			"LayerOrder for layer %s disagrees between ParseImageManifest and parseLayersPayload", layer.LayerHash)
+		checked++
+	}
+	assert.Equal(t, 2, checked, "expected to check both real layers")
+}
+
 func Test_suggestedVersion(t *testing.T) {
 	tests := []struct {
 		name     string
