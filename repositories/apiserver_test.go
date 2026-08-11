@@ -10,6 +10,7 @@ import (
 
 	"github.com/akyoto/cache"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -19,8 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/retry"
@@ -2039,6 +2042,131 @@ func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testin
 	_, _, err = a.GetSecurityExceptions(context.TODO(), "")
 	require.NoError(t, err, "a failed List() must not be cached, so the next call retries instead of replaying the failure")
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
+// ctxCapturingResource wraps a dynamic.ResourceInterface, invoking a hook synchronously with
+// the ctx passed into List/Get, before delegating to the real call. The hook lets a test cancel
+// the caller's ctx *while the K8s API call is in flight* and assert the effect on the ctx the
+// call actually received - the only way to distinguish a derived ctx (context.WithTimeout(ctx,
+// ...), which is canceled immediately) from a context.WithoutCancel-detached one (which is not),
+// since by the time the surrounding APIServerStore method returns, its own `defer cancel()`
+// has already canceled the derived ctx either way.
+type ctxCapturingResource struct {
+	dynamic.ResourceInterface
+	hook func(ctx context.Context)
+}
+
+func (r *ctxCapturingResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if r.hook != nil {
+		r.hook(ctx)
+	}
+	return r.ResourceInterface.List(ctx, opts)
+}
+
+func (r *ctxCapturingResource) Get(ctx context.Context, name string, opts metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if r.hook != nil {
+		r.hook(ctx)
+	}
+	return r.ResourceInterface.Get(ctx, name, opts, subresources...)
+}
+
+// Namespace mutates the receiver in place (rather than returning a fresh wrapper) so that a
+// subsequent List/Get on the namespaced handle still runs through the same hook.
+func (r *ctxCapturingResource) Namespace(ns string) dynamic.ResourceInterface {
+	r.ResourceInterface = r.ResourceInterface.(dynamic.NamespaceableResourceInterface).Namespace(ns)
+	return r
+}
+
+// ctxCapturingDynamicClient wraps a dynamic.Interface, returning the pre-registered
+// ctxCapturingResource for a GVR (see resources) so a test's hook is preserved, or a
+// pass-through one otherwise.
+type ctxCapturingDynamicClient struct {
+	dynamic.Interface
+	resources map[schema.GroupVersionResource]*ctxCapturingResource
+}
+
+func (c *ctxCapturingDynamicClient) Resource(gvr schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	if c.resources == nil {
+		c.resources = map[schema.GroupVersionResource]*ctxCapturingResource{}
+	}
+	if _, ok := c.resources[gvr]; !ok {
+		c.resources[gvr] = &ctxCapturingResource{ResourceInterface: c.Interface.Resource(gvr)}
+	}
+	return c.resources[gvr]
+}
+
+// requireHookObservesCancellation builds a hook for ctxCapturingResource that, the first time
+// it runs, cancels the caller's ctx and asserts the ctx received by the K8s API call is
+// canceled too - proving it derives from the caller's ctx instead of detaching from it via
+// context.WithoutCancel.
+func requireHookObservesCancellation(t *testing.T, cancel func()) (hook func(ctx context.Context), called *bool) {
+	t.Helper()
+	calledFlag := false
+	return func(ctx context.Context) {
+		calledFlag = true
+		select {
+		case <-ctx.Done():
+			t.Error("ctx passed to the K8s API call must not already be canceled before the caller's ctx is canceled")
+		default:
+		}
+		cancel()
+		assert.ErrorIs(t, ctx.Err(), context.Canceled, "canceling the caller's ctx must cancel the ctx passed to the K8s API call")
+	}, &calledFlag
+}
+
+func TestAPIServerStore_GetSecurityExceptions_HonorsCallerCancellation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+	a := &APIServerStore{DynamicClient: wrapped, Namespace: "kubescape"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hook, called := requireHookObservesCancellation(t, cancel)
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		clusterSecurityExceptionGVR: {ResourceInterface: dynClient.Resource(clusterSecurityExceptionGVR), hook: hook},
+	}
+
+	_, _, err := a.GetSecurityExceptions(ctx, "kubescape")
+	require.NoError(t, err)
+	require.True(t, *called, "the List call the hook was attached to must have run")
+}
+
+func TestAPIServerStore_GetWorkloadLabels_HonorsCallerCancellation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+	a := &APIServerStore{DynamicClient: wrapped, Namespace: "kubescape"}
+
+	podGVR, err := k8sinterface.GetGroupVersionResource("Pod")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hook, called := requireHookObservesCancellation(t, cancel)
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		podGVR: {ResourceInterface: dynClient.Resource(podGVR), hook: hook},
+	}
+
+	_, _ = a.GetWorkloadLabels(ctx, "kubescape", "Pod", "mypod")
+	require.True(t, *called, "the Get call the hook was attached to must have run")
+}
+
+func TestAPIServerStore_GetNamespaceLabels_HonorsCallerCancellation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+	a := &APIServerStore{DynamicClient: wrapped, Namespace: "kubescape"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hook, called := requireHookObservesCancellation(t, cancel)
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		namespaceGVR: {ResourceInterface: dynClient.Resource(namespaceGVR), hook: hook},
+	}
+
+	_, _ = a.GetNamespaceLabels(ctx, "myns")
+	require.True(t, *called, "the Get call the hook was attached to must have run")
 }
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {

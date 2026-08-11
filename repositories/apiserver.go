@@ -210,9 +210,7 @@ func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APISe
 // never cached, so a transient apiserver hiccup self-heals on the next call instead of being
 // pinned for the TTL.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
-	// Use a detached context with timeout — the scan context may be canceled
-	// before the CRD listing completes due to rate limiting.
-	listCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	var listErrs []error
@@ -313,7 +311,7 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
-	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(gvr).Namespace(namespace).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
@@ -331,7 +329,7 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 	if name == "" {
 		return nil, nil
 	}
-	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
