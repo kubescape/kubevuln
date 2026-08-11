@@ -145,7 +145,14 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 		}
 		if resp.StatusCode != http.StatusOK {
 			defer resp.Body.Close()
-			retryErr := fmt.Errorf("received status code: %d", resp.StatusCode)
+			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			bodyStr := strings.TrimSpace(string(bodyBytes))
+			var retryErr error
+			if bodyStr != "" {
+				retryErr = fmt.Errorf("received status code: %d, body: %s", resp.StatusCode, bodyStr)
+			} else {
+				retryErr = fmt.Errorf("received status code: %d", resp.StatusCode)
+			}
 			if !shouldRetryReport(resp) {
 				return nil, backoff.Permanent(retryErr)
 			}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/go-logger"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
@@ -1359,4 +1361,80 @@ func TestBackendAdapter_SendStatusAbortsPromptlyOnCtxCancellation(t *testing.T) 
 	cancel()
 	err := backend.SendStatus(ctx, 0)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// TestHttpPostWithContext_IncludesResponseBodyInError verifies that httpPostWithContext captures non-200 response body snippets up to 512 bytes and truncates beyond that boundary.
+func TestHttpPostWithContext_IncludesResponseBodyInError(t *testing.T) {
+	// Marker 'B' is at byte index 512 (the 513th byte), proving truncation occurs at exactly 512 bytes.
+	longBody := strings.Repeat("A", 512) + "B" + "EXCLUSIVE_TAIL_HEADER"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(longBody))
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "received status code: 429")
+	assert.Contains(t, err.Error(), strings.Repeat("A", 512))
+	assert.NotContains(t, err.Error(), "B")
+	assert.NotContains(t, err.Error(), "EXCLUSIVE_TAIL_HEADER")
+}
+
+// TestHttpPostWithContext_EmptyResponseBody verifies the status-code-only error format when non-200 response body is empty.
+func TestHttpPostWithContext_EmptyResponseBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, "received status code: 500", err.Error())
+}
+
+// TestBackendAdapter_PostResults_429RateLimitLogging verifies that postResults detects 429 rate-limiting errors and logs vendor guidance.
+func TestBackendAdapter_PostResults_429RateLimitLogging(t *testing.T) {
+	backend := &BackendAdapter{
+		httpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+			return nil, fmt.Errorf("received status code: 429, body: quota exceeded")
+		},
+	}
+
+	report := v1.ScanResultReport{
+		Designators: identifiers.PortalDesignator{
+			Attributes: map[string]string{
+				identifiers.AttributeCustomerGUID: "test-guid",
+			},
+		},
+	}
+
+	// Capture logger output to verify the rate-limit guidance log message
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	logger.InitLogger("pretty")
+
+	err := backend.postResults(context.Background(), report, "http://localhost", "nginx:latest", "wlid://cluster-a/namespace-b/deployment-c")
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	logger.InitLogger("pretty")
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	logOutput := buf.String()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "429")
+	assert.Contains(t, err.Error(), "quota exceeded")
+	assert.Contains(t, logOutput, "failed sending vulnerabilities report due to rate limiting (429 Too Many Requests)")
 }

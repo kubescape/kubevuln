@@ -15,6 +15,8 @@ import (
 	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
+	"github.com/kubescape/k8s-interface/names"
+	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
@@ -338,6 +340,10 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		assert.Equal(t, tests[i].Credentialslist, scanComm.CredentialsList)
 		assert.Equal(t, tests[i].ImageTag, scanComm.ImageTag)
 		assert.Equal(t, tools.NormalizeReference(tests[i].ImageTag), scanComm.ImageTagNormalized)
+		assert.Equal(t, v1.NormalizeImageID("", tests[i].ImageTag), scanComm.ImageHash)
+		expectedSlug, err := names.ImageInfoToSlug(tools.NormalizeReference(tests[i].ImageTag), "nohash")
+		require.NoError(t, err)
+		assert.Equal(t, expectedSlug, scanComm.ImageSlug)
 		assert.Equal(t, tests[i].JobID, scanComm.JobID)
 		assert.Equal(t, tests[i].ParentJobID, scanComm.ParentJobID)
 	}

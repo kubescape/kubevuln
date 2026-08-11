@@ -364,17 +364,20 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	})
 }
 
+// registryScanCommandToScanCommand converts a RegistryScanCommand into a domain.ScanCommand, populating normalized image reference, image hash, and image slug.
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
+	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
+		ImageHash:          v1.NormalizeImageID("", c.ImageTag),
 		ImageTag:           c.ImageTag,
-		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		ImageTagNormalized: imageTagNormalized,
 		JobID:              c.JobID,
 		ParentJobID:        c.ParentJobID,
 		Args:               c.Args,
 		Session:            sessionChainToSession(c.Session),
 	}
-	if slug, err := names.ImageInfoToSlug(c.ImageTag, "nohash"); err == nil {
+	if slug, err := names.ImageInfoToSlug(imageTagNormalized, "nohash"); err == nil {
 		command.ImageSlug = slug
 	}
 	return command
