@@ -121,6 +121,49 @@ func TestHTTPController_Ready(t *testing.T) {
 	}
 }
 
+func TestHTTPController_Diagnostics(t *testing.T) {
+	tests := []struct {
+		name         string
+		diagnostics  func(ctx context.Context) domain.Diagnostics
+		expectedBody string
+	}{
+		{
+			name:         "not configured",
+			diagnostics:  nil,
+			expectedBody: `{"scanMode":"","sbomCreatorVersion":"","cveScannerVersion":"","cveDBVersion":"","scanTimeout":"","scannerReadinessTimeout":"","storageEnabled":false,"riskAcceptanceEnabled":false}`,
+		},
+		{
+			name: "sidecar mode with storage and risk acceptance enabled",
+			diagnostics: func(context.Context) domain.Diagnostics {
+				return domain.Diagnostics{
+					ScanMode:                domain.ScanModeSidecar,
+					SBOMCreatorVersion:      "syft-1.2.3",
+					CVEScannerVersion:       "grype-4.5.6-matching-adaptive",
+					CVEDBVersion:            "db-2026-08-11",
+					ScanTimeout:             "5m0s",
+					ScannerReadinessTimeout: "1m0s",
+					StorageEnabled:          true,
+					RiskAcceptanceEnabled:   true,
+				}
+			},
+			expectedBody: `{"scanMode":"sidecar","sbomCreatorVersion":"syft-1.2.3","cveScannerVersion":"grype-4.5.6-matching-adaptive","cveDBVersion":"db-2026-08-11","scanTimeout":"5m0s","scannerReadinessTimeout":"1m0s","storageEnabled":true,"riskAcceptanceEnabled":true}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := HTTPController{diagnostics: tt.diagnostics}
+			router := gin.Default()
+			path := "/v1/diagnostics"
+			router.GET(path, c.Diagnostics)
+			req, _ := http.NewRequest("GET", path, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, w.Code)
+			assert.JSONEq(t, tt.expectedBody, w.Body.String(), w.Body.String())
+		})
+	}
+}
+
 func TestHTTPController_ScanCVE(t *testing.T) {
 	tests := []struct {
 		name         string
