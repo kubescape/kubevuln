@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
@@ -1090,14 +1091,36 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 		if cred.RegistryToken != "" {
 			rc.Token = cred.RegistryToken
 		}
-		if cred.Username != "" && cred.Password != "" {
-			rc.Username = cred.Username
-			rc.Password = cred.Password
+		username, password := cred.Username, cred.Password
+		if username == "" && password == "" && cred.Auth != "" {
+			username, password = credentialsFromAuth(cred.Auth)
+		}
+		if username != "" && password != "" {
+			rc.Username = username
+			rc.Password = password
 		}
 
 		registryCredentials[i] = rc
 	}
 	return registryCredentials
+}
+
+// credentialsFromAuth decodes the standard Docker "auth" field: base64 of "username:password".
+// It's the canonical field in a .dockerconfigjson pull secret; username/password are only
+// supplementary and are often absent. Kubernetes' documented way to reuse an existing docker
+// login (kubectl create secret generic --from-file=.dockerconfigjson=~/.docker/config.json)
+// produces entries where only auth is set, so falling back to it here is required for those
+// credentials to reach the registry pull at all, rather than being silently dropped.
+func credentialsFromAuth(auth string) (username, password string) {
+	decoded, err := base64.StdEncoding.DecodeString(auth)
+	if err != nil {
+		return "", ""
+	}
+	username, password, found := strings.Cut(string(decoded), ":")
+	if !found {
+		return "", ""
+	}
+	return username, password
 }
 
 // parseAuthorityFromServerAddress extracts the authority host:port from a server address.

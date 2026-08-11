@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1206,9 +1207,16 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 			Username:      "armosec+testrobot2",
 			Password:      "dummyPassword111",
 		},
+		{
+			// Mirrors a .dockerconfigjson entry produced by reusing an existing
+			// `docker login` (kubectl create secret generic --from-file=.dockerconfigjson=...):
+			// only Auth is set, Username/Password are empty. See #611.
+			ServerAddress: "registry.example.com",
+			Auth:          base64.StdEncoding.EncodeToString([]byte("registryuser:registrypass")),
+		},
 	}
 	registryCredentials := registryCredentialsFromCredentialsList(creds)
-	assert.Equal(t, 3, len(registryCredentials))
+	assert.Equal(t, 4, len(registryCredentials))
 	assert.Equal(t, "quay.io", registryCredentials[0].Authority)
 	assert.Equal(t, "armosec+testrobot1", registryCredentials[0].Username)
 	assert.Equal(t, "dummyPassword", registryCredentials[0].Password)
@@ -1218,6 +1226,50 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 	assert.Equal(t, "quay.io", registryCredentials[2].Authority)
 	assert.Equal(t, "armosec+testrobot2", registryCredentials[2].Username)
 	assert.Equal(t, "dummyPassword111", registryCredentials[2].Password)
+	assert.Equal(t, "registry.example.com", registryCredentials[3].Authority)
+	assert.Equal(t, "registryuser", registryCredentials[3].Username)
+	assert.Equal(t, "registrypass", registryCredentials[3].Password)
+}
+
+func Test_credentialsFromAuth(t *testing.T) {
+	tests := []struct {
+		name         string
+		auth         string
+		wantUsername string
+		wantPassword string
+	}{
+		{
+			name:         "valid base64 user:pass",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass")),
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "password containing a colon is preserved",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass:word")),
+			wantUsername: "user",
+			wantPassword: "pass:word",
+		},
+		{
+			name: "empty auth",
+			auth: "",
+		},
+		{
+			name: "not valid base64",
+			auth: "not-base64!!!",
+		},
+		{
+			name: "decodes but has no colon separator",
+			auth: base64.StdEncoding.EncodeToString([]byte("userpass")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			username, password := credentialsFromAuth(tt.auth)
+			assert.Equal(t, tt.wantUsername, username)
+			assert.Equal(t, tt.wantPassword, password)
+		})
+	}
 }
 
 func Test_parseAuthorityFromServerAddress(t *testing.T) {
