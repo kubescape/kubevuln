@@ -235,8 +235,13 @@ func main() {
 	// doesn't silently run past the pod's terminationGracePeriodSeconds
 	controller.Shutdown(c.ShutdownTimeout)
 
-	if err := m.Shutdown(srvCtx); err != nil {
-		logger.L().Ctx(srvCtx).Error("metrics provider shutdown error", helpers.Error(err))
+	// srvCtx's 5s budget is spent by now (controller.Shutdown alone can take up to
+	// ShutdownTimeout, 20s by default), so reusing it here would hand the meter
+	// provider an already-expired context and skip the final metrics flush.
+	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer metricsCancel()
+	if err := m.Shutdown(metricsCtx); err != nil {
+		logger.L().Ctx(metricsCtx).Error("metrics provider shutdown error", helpers.Error(err))
 	}
 
 	logger.L().Info("kubevuln exiting")
