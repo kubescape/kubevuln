@@ -185,7 +185,7 @@ The main configuration file. All options can be overridden via environment varia
 |--------|------|---------|-------------|
 | `listingURL` | string | `https://grype.anchore.io/databases` | Grype vulnerability database URL |
 | `cveMatchingMode` | string | `adaptive` | CPE matching policy: `off` (Grype defaults everywhere), `on` (aggressive CPE matching everywhere), or `adaptive` (CPE matching everywhere except trusted-vendor images, which fall back to Grype defaults). See [CVE Matching Mode](#cve-matching-mode). |
-| `trustedVendors` | []string | `["echo","chainguard","wolfi","minimos"]` | Distro identifiers (as recognised by Grype's distro detection) treated as trusted vendors in `adaptive` mode. Override to add/remove vendors without a release. |
+| `trustedVendors` | []string | `["echo","chainguard","wolfi","minimos"]` | Distro identifiers (as recognised by Grype's distro detection) treated as trusted vendors in `adaptive` mode. Override to add/remove vendors without a release. Via `TRUSTEDVENDORS` env var, use a comma-separated list, e.g. `TRUSTEDVENDORS=echo,chainguard`. |
 | `useDefaultMatchers` | bool | `false` | **Deprecated**, kept for backward compatibility. Maps to `cveMatchingMode`: `true` -> `off`, `false` -> `on`. An explicit `cveMatchingMode` always wins. |
 
 #### Storage Options
@@ -205,7 +205,7 @@ The main configuration file. All options can be overridden via environment varia
 | `nodeSbomGeneration` | bool | `false` | Enable node-level SBOM generation |
 | `partialRelevancy` | bool | `false` | Enable partial relevancy matching |
 | `vexGeneration` | bool | `false` | Generate VEX (Vulnerability Exploitability eXchange) documents |
-| `proxyRegistryMap` | map[string]string | `{}` | Maps a registry hostname to an internal mirror for image pulls, e.g. `{"docker.io": "my-mirror.example.com"}`. Applied to every SBOM-generation path (in-process and sidecar). Config keys are parsed with a `::` delimiter specifically so hostnames containing `.` are treated as a single map key instead of being split into nested keys (see #359/#361) — no special escaping needed in `docker.io`-style keys. |
+| `proxyRegistryMap` | map[string]string | `{}` | Maps a registry hostname to an internal mirror for image pulls, e.g. `{"docker.io": "my-mirror.example.com"}`. Applied to every SBOM-generation path (in-process and sidecar). Config keys are parsed with a `::` delimiter specifically so hostnames containing `.` are treated as a single map key instead of being split into nested keys (see #359/#361) — no special escaping needed in `docker.io`-style keys. Via `PROXYREGISTRYMAP` env var, pass the whole map as a JSON object string, e.g. `PROXYREGISTRYMAP={"docker.io":"my-mirror.example.com"}`. |
 
 ### Complete Schema
 

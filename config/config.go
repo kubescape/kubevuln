@@ -156,12 +156,44 @@ func LoadConfig(path string) (Config, error) {
 			config.CVEMatchingMode, CVEMatchingOff, CVEMatchingOn, CVEMatchingAdaptive)
 	}
 
+	// Same AutomaticEnv/Unmarshal gap as cveMatchingMode above, but for slice/map
+	// fields: Unmarshal silently drops env-only values for []string and
+	// map[string]string, so an env-only TRUSTEDVENDORS/PROXYREGISTRYMAP would
+	// otherwise be lost. Read through viper's getters when the field was
+	// actually set (via file or env) rather than trusting the unmarshalled
+	// struct field alone.
+	if v.IsSet("trustedVendors") {
+		config.TrustedVendors = trustedVendorsFromViper(v)
+	}
 	if len(config.TrustedVendors) == 0 {
 		// copy to avoid aliasing the package-level default slice
 		config.TrustedVendors = append([]string{}, defaultTrustedVendors...)
 	}
 
+	if v.IsSet("proxyRegistryMap") {
+		config.ProxyRegistryMap = v.GetStringMapString("proxyRegistryMap")
+	}
+
 	return config, nil
+}
+
+// trustedVendorsFromViper resolves trustedVendors regardless of whether it came
+// from the JSON config file (already a []interface{}, handled fine by
+// GetStringSlice) or from a TRUSTEDVENDORS environment variable (a plain string,
+// which GetStringSlice does not split): env values are a comma-separated list,
+// e.g. TRUSTEDVENDORS=echo,chainguard.
+func trustedVendorsFromViper(v *viper.Viper) []string {
+	raw, ok := v.Get("trustedVendors").(string)
+	if !ok {
+		return v.GetStringSlice("trustedVendors")
+	}
+	var vendors []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			vendors = append(vendors, part)
+		}
+	}
+	return vendors
 }
 
 type clusterDataBackendServicesConfig struct {

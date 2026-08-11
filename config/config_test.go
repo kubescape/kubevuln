@@ -255,3 +255,27 @@ func TestLoadConfigProxyRegistryMap(t *testing.T) {
 	}
 	assert.Equal(t, expected, config.ProxyRegistryMap)
 }
+
+// TestLoadConfigTrustedVendorsEnv verifies an env-only TRUSTEDVENDORS override is
+// honored instead of being silently dropped and replaced by defaultTrustedVendors
+// (AutomaticEnv values for []string fields are not populated by Unmarshal, so the
+// resolution must read through viper's getters, same as cveMatchingMode).
+func TestLoadConfigTrustedVendorsEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("TRUSTEDVENDORS", "foo, bar")
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"foo", "bar"}, c.TrustedVendors)
+}
+
+// TestLoadConfigProxyRegistryMapEnv verifies an env-only PROXYREGISTRYMAP override
+// (a JSON object string) is honored instead of being silently dropped
+// (AutomaticEnv values for map[string]string fields are not populated by
+// Unmarshal, so the resolution must read through viper's getters).
+func TestLoadConfigProxyRegistryMapEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":"env-mirror.example.com"}`)
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{"docker.io": "env-mirror.example.com"}, c.ProxyRegistryMap)
+}
