@@ -335,6 +335,10 @@ func TestSanitizeLabel_AlwaysProducesAValidLabel(t *testing.T) {
 		{name: "leading and trailing together", input: ".myapp.", want: "myapp"},
 		{name: "interior dashes are preserved", input: "foo._bar", want: "foo--bar"},
 		{name: "all offending characters yield empty", input: "...", want: ""},
+		// Not an enumerated set: anything a DNS1123 label may not contain is replaced.
+		{name: "unlisted ascii is replaced", input: "foo+bar", want: "foo-bar"},
+		{name: "tilde is replaced", input: "foo~bar", want: "foo-bar"},
+		{name: "non-ascii is replaced", input: "café", want: "caf"},
 		{name: "empty stays empty", input: "", want: ""},
 	}
 

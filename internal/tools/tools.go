@@ -31,7 +31,12 @@ func PackageVersion(name string) string {
 	return "unknown"
 }
 
-var offendingChars = regexp.MustCompile("[@:/ ._]")
+// offendingChars matches everything a DNS1123 label may not contain, rather than an
+// enumerated set. Listing the characters seen in image references ("[@:/ ._]") left anything
+// unlisted to pass through unchanged and fail validation, so the label was dropped: "foo+bar"
+// and non-ASCII input both survived substitution intact. Applied after lowercasing, so no
+// uppercase reaches it.
+var offendingChars = regexp.MustCompile("[^a-z0-9-]")
 
 // SanitizeLabel sanitizes a string to be a valid DNS1123 label.
 //
