@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 )
 
@@ -159,7 +158,7 @@ func TestExpiredOnFixAgreesAcrossPaths(t *testing.T) {
 
 	// storage path
 	doc := &v1beta1.GrypeDocument{Source: singleLayerSource, Matches: []v1beta1.Match{match}}
-	ApplySecurityExceptions(doc, exceptions, record.NewFakeRecorder(10))
+	ApplySecurityExceptions(doc, exceptions, nil)
 	storageSuppressed := len(doc.IgnoredMatches) == 1
 
 	// report path
@@ -189,7 +188,7 @@ func TestExpiredOnFixAgreesAcrossPathsWhenUnfixed(t *testing.T) {
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 
 	doc := &v1beta1.GrypeDocument{Source: singleLayerSource, Matches: []v1beta1.Match{match}}
-	ApplySecurityExceptions(doc, exceptions, record.NewFakeRecorder(10))
+	ApplySecurityExceptions(doc, exceptions, nil)
 
 	results, err := DomainToArmo(ctx, v1beta1.GrypeDocument{Source: singleLayerSource, Matches: []v1beta1.Match{match}}, exceptions)
 	require.NoError(t, err)
