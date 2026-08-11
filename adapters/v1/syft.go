@@ -188,7 +188,15 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
-	ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, s.maxImageSize)
+	ctxWithTimeout := ctx
+	if s.scanTimeout > 0 {
+		var cancel context.CancelFunc
+		ctxWithTimeout, cancel = context.WithTimeout(ctx, s.scanTimeout)
+		defer cancel()
+	}
+
+	//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
+	ctxWithSize := context.WithValue(ctxWithTimeout, image.MaxImageSize, s.maxImageSize)
 	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
 	usedFallback := false
 	src, err := syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
@@ -206,7 +214,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		usedFallback = true
 		unauthorizedErr := err
 		if provider, ok := registryauth.For(pullRef); ok {
-			if creds, credErr := provider.Credentials(ctx, pullRef); credErr != nil || creds == nil {
+			if creds, credErr := provider.Credentials(ctxWithTimeout, pullRef); credErr != nil || creds == nil {
 				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), metrics.FallbackOutcomeFailed)
 				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
 					helpers.Error(credErr),
@@ -242,6 +250,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	metrics.RecordSourceResolution(ctx, metrics.ComponentInProcess, usedFallback, err == nil)
 
 	switch {
+	// Note: stereoscope/oci-registry wraps deadline errors in a custom error type that does not implement Unwrap(),
+	// so strings.Contains check is required alongside errors.Is.
+	case err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded")):
+		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
+		logger.L().Ctx(ctx).Warning("Syft timed out during image resolution",
+			helpers.String("imageID", imageID))
+		domainSBOM.Status = helpersv1.Incomplete
+		return domainSBOM, nil
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyImageTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("Image exceeds size limit",
@@ -312,14 +328,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			// ask Syft to also scan the image for embedded SBOMs
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}
-		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
+		syftSBOM, err = syft.CreateSBOM(ctxWithSize, src, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", err)
 		}
 		return nil
 	})
 	switch {
-	case errors.Is(err, deadline.ErrTimedOut):
+	case errors.Is(err, deadline.ErrTimedOut) || errors.Is(err, context.DeadlineExceeded) || (err != nil && strings.Contains(err.Error(), "context deadline exceeded")):
 		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("Syft timed out",
 			helpers.String("imageID", imageID))
