@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type VEXStatement struct {
 	CVE           string    `json:"cve"`
 	Status        string    `json:"status"` // "not_affected" | "fixed" | "under_investigation" | "affected"
 	Justification string    `json:"justification,omitempty"`
+	SourceURL     string    `json:"sourceUrl"`
 	StatementRef  string    `json:"statementRef"`
 	ProductPURL   string    `json:"productPurl"`
 	Timestamp     time.Time `json:"timestamp"`
@@ -22,14 +24,35 @@ type VEXParser interface {
 	Parse(r io.Reader, emit func(VEXStatement) error) error
 }
 
-// OpenVEXStreamParser parses OpenVEX JSON documents using streaming tokens.
-type OpenVEXStreamParser struct {
-	SourceURL string
+// skipValue skips a JSON value in a stream without materializing it.
+func skipValue(dec *json.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if delim, ok := t.(json.Delim); ok {
+		if delim == '{' || delim == '[' {
+			depth := 1
+			for depth > 0 {
+				t, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				if d, ok := t.(json.Delim); ok {
+					if d == '{' || d == '[' {
+						depth++
+					} else if d == '}' || d == ']' {
+						depth--
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
-func (p *OpenVEXStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) error {
-	dec := json.NewDecoder(r)
-
+// scanRootObject iterates over a JSON object's keys and delegates to handlers.
+func scanRootObject(dec *json.Decoder, handlers map[string]func(*json.Decoder) error) error {
 	t, err := dec.Token()
 	if err != nil {
 		return err
@@ -38,8 +61,6 @@ func (p *OpenVEXStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) 
 		return fmt.Errorf("expected JSON object start, got %v", t)
 	}
 
-	docTimestamp := time.Now()
-
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
@@ -47,19 +68,48 @@ func (p *OpenVEXStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) 
 		}
 		key, ok := keyToken.(string)
 		if !ok {
-			continue
+			return fmt.Errorf("expected string key, got %v", keyToken)
 		}
 
-		switch key {
-		case "timestamp":
+		if handler, exists := handlers[key]; exists {
+			if err := handler(dec); err != nil {
+				return err
+			}
+		} else {
+			if err := skipValue(dec); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Read closing brace
+	_, err = dec.Token()
+	return err
+}
+
+// OpenVEXStreamParser parses OpenVEX JSON documents using streaming tokens.
+type OpenVEXStreamParser struct {
+	SourceURL string
+}
+
+func (p *OpenVEXStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) error {
+	dec := json.NewDecoder(r)
+
+	var docTimestamp time.Time
+	var bufferedStatements []VEXStatement
+
+	handlers := map[string]func(*json.Decoder) error{
+		"timestamp": func(d *json.Decoder) error {
 			var tsStr string
-			if err := dec.Decode(&tsStr); err == nil {
+			if err := d.Decode(&tsStr); err == nil {
 				if parsedTs, err := time.Parse(time.RFC3339, tsStr); err == nil {
 					docTimestamp = parsedTs
 				}
 			}
-		case "statements":
-			t, err := dec.Token()
+			return nil
+		},
+		"statements": func(d *json.Decoder) error {
+			t, err := d.Token()
 			if err != nil {
 				return err
 			}
@@ -68,45 +118,72 @@ func (p *OpenVEXStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) 
 			}
 
 			statementIdx := 0
-			for dec.More() {
+			for d.More() {
 				var rawStmt struct {
 					Vulnerability struct {
 						Name string `json:"name"`
 					} `json:"vulnerability"`
-					Status        string   `json:"status"`
-					Justification string   `json:"justification"`
-					Products      []string `json:"products"`
+					Status        string            `json:"status"`
+					Justification string            `json:"justification"`
+					Products      []json.RawMessage `json:"products"`
 				}
-				if err := dec.Decode(&rawStmt); err != nil {
+				if err := d.Decode(&rawStmt); err != nil {
 					return err
 				}
 
-				for _, prod := range rawStmt.Products {
+				for _, prodRaw := range rawStmt.Products {
+					prodStr := string(prodRaw)
+					var purl string
+					if strings.HasPrefix(prodStr, `"`) {
+						var s string
+						if err := json.Unmarshal(prodRaw, &s); err == nil {
+							purl = s
+						}
+					} else if strings.HasPrefix(prodStr, `{`) {
+						var obj struct {
+							ID string `json:"@id"`
+						}
+						if err := json.Unmarshal(prodRaw, &obj); err == nil && obj.ID != "" {
+							purl = obj.ID
+						} else {
+							// skip objects without @id
+							continue
+						}
+					} else {
+						continue
+					}
+
 					stmt := VEXStatement{
 						CVE:           rawStmt.Vulnerability.Name,
 						Status:        rawStmt.Status,
 						Justification: rawStmt.Justification,
+						SourceURL:     p.SourceURL,
 						StatementRef:  fmt.Sprintf("%s/statement/%d", p.SourceURL, statementIdx),
-						ProductPURL:   prod,
-						Timestamp:     docTimestamp,
+						ProductPURL:   purl,
 					}
-					if err := emit(stmt); err != nil {
-						return err
-					}
+					bufferedStatements = append(bufferedStatements, stmt)
 				}
 				statementIdx++
 			}
 
 			// Read closing bracket of statements array
-			if _, err := dec.Token(); err != nil {
-				return err
-			}
-		default:
-			// Skip other root properties
-			var skip interface{}
-			if err := dec.Decode(&skip); err != nil {
-				return err
-			}
+			_, err = d.Token()
+			return err
+		},
+	}
+
+	if err := scanRootObject(dec, handlers); err != nil {
+		return err
+	}
+
+	if docTimestamp.IsZero() {
+		docTimestamp = time.Now()
+	}
+
+	for i := range bufferedStatements {
+		bufferedStatements[i].Timestamp = docTimestamp
+		if err := emit(bufferedStatements[i]); err != nil {
+			return err
 		}
 	}
 
@@ -121,40 +198,74 @@ type CSAFStreamParser struct {
 func (p *CSAFStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) error {
 	dec := json.NewDecoder(r)
 
-	t, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	if delim, ok := t.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object start, got %v", t)
-	}
+	var docTimestamp time.Time
+	var bufferedStatements []VEXStatement
+	productMap := make(map[string]string) // product_id -> PURL
 
-	docTimestamp := time.Now()
-
-	for dec.More() {
-		keyToken, err := dec.Token()
-		if err != nil {
-			return err
+	// Helper for parsing branches
+	var parseBranches func(branches []json.RawMessage)
+	parseBranches = func(branches []json.RawMessage) {
+		for _, bRaw := range branches {
+			var b struct {
+				Product struct {
+					ProductID string `json:"product_id"`
+					ProductIdentificationHelper struct {
+						PURL string `json:"purl"`
+					} `json:"product_identification_helper"`
+				} `json:"product"`
+				Branches []json.RawMessage `json:"branches"`
+			}
+			if err := json.Unmarshal(bRaw, &b); err != nil {
+				continue
+			}
+			if b.Product.ProductID != "" && b.Product.ProductIdentificationHelper.PURL != "" {
+				productMap[b.Product.ProductID] = b.Product.ProductIdentificationHelper.PURL
+			}
+			if len(b.Branches) > 0 {
+				parseBranches(b.Branches)
+			}
 		}
-		key, ok := keyToken.(string)
-		if !ok {
-			continue
-		}
+	}
 
-		switch key {
-		case "document":
+	handlers := map[string]func(*json.Decoder) error{
+		"document": func(d *json.Decoder) error {
 			var doc struct {
 				Tracking struct {
 					InitialReleaseDate string `json:"initial_release_date"`
 				} `json:"tracking"`
 			}
-			if err := dec.Decode(&doc); err == nil {
+			if err := d.Decode(&doc); err == nil {
 				if parsedTs, err := time.Parse(time.RFC3339, doc.Tracking.InitialReleaseDate); err == nil {
 					docTimestamp = parsedTs
 				}
 			}
-		case "vulnerabilities":
-			t, err := dec.Token()
+			return nil
+		},
+		"product_tree": func(d *json.Decoder) error {
+			var pt struct {
+				FullProductNames []struct {
+					ProductID string `json:"product_id"`
+					ProductIdentificationHelper struct {
+						PURL string `json:"purl"`
+					} `json:"product_identification_helper"`
+				} `json:"full_product_names"`
+				Branches []json.RawMessage `json:"branches"`
+			}
+			if err := d.Decode(&pt); err != nil {
+				return err
+			}
+			for _, fpn := range pt.FullProductNames {
+				if fpn.ProductID != "" && fpn.ProductIdentificationHelper.PURL != "" {
+					productMap[fpn.ProductID] = fpn.ProductIdentificationHelper.PURL
+				}
+			}
+			if len(pt.Branches) > 0 {
+				parseBranches(pt.Branches)
+			}
+			return nil
+		},
+		"vulnerabilities": func(d *json.Decoder) error {
+			t, err := d.Token()
 			if err != nil {
 				return err
 			}
@@ -163,7 +274,7 @@ func (p *CSAFStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) err
 			}
 
 			vulnIdx := 0
-			for dec.More() {
+			for d.More() {
 				var rawVuln struct {
 					CVE           string `json:"cve"`
 					ProductStatus struct {
@@ -171,7 +282,7 @@ func (p *CSAFStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) err
 						Fixed            []string `json:"fixed"`
 					} `json:"product_status"`
 				}
-				if err := dec.Decode(&rawVuln); err != nil {
+				if err := d.Decode(&rawVuln); err != nil {
 					return err
 				}
 
@@ -181,41 +292,55 @@ func (p *CSAFStreamParser) Parse(r io.Reader, emit func(VEXStatement) error) err
 						stmt := VEXStatement{
 							CVE:          rawVuln.CVE,
 							Status:       "not_affected",
+							SourceURL:    p.SourceURL,
 							StatementRef: fmt.Sprintf("%s/vuln/%d/not_affected/%s", p.SourceURL, vulnIdx, prodID),
-							ProductPURL:  prodID, // Maps to package identifier
-							Timestamp:    docTimestamp,
+							ProductPURL:  prodID, // Will be resolved to PURL later
 						}
-						if err := emit(stmt); err != nil {
-							return err
-						}
+						bufferedStatements = append(bufferedStatements, stmt)
 					}
 					// Handle fixed
 					for _, prodID := range rawVuln.ProductStatus.Fixed {
 						stmt := VEXStatement{
 							CVE:          rawVuln.CVE,
 							Status:       "fixed",
+							SourceURL:    p.SourceURL,
 							StatementRef: fmt.Sprintf("%s/vuln/%d/fixed/%s", p.SourceURL, vulnIdx, prodID),
-							ProductPURL:  prodID,
-							Timestamp:    docTimestamp,
+							ProductPURL:  prodID, // Will be resolved to PURL later
 						}
-						if err := emit(stmt); err != nil {
-							return err
-						}
+						bufferedStatements = append(bufferedStatements, stmt)
 					}
 				}
 				vulnIdx++
 			}
+			_, err = d.Token()
+			return err
+		},
+	}
 
-			// Read closing bracket of vulnerabilities array
-			if _, err := dec.Token(); err != nil {
-				return err
-			}
-		default:
-			// Skip other properties
-			var skip interface{}
-			if err := dec.Decode(&skip); err != nil {
-				return err
-			}
+	if err := scanRootObject(dec, handlers); err != nil {
+		return err
+	}
+
+	if docTimestamp.IsZero() {
+		docTimestamp = time.Now()
+	}
+
+	for i := range bufferedStatements {
+		// Resolve productID to PURL
+		if purl, ok := productMap[bufferedStatements[i].ProductPURL]; ok && purl != "" {
+			bufferedStatements[i].ProductPURL = purl
+		} else {
+			// Skip unresolved products
+			continue
+		}
+
+		if bufferedStatements[i].ProductPURL == "" {
+			continue // Never emit an empty ProductPURL
+		}
+
+		bufferedStatements[i].Timestamp = docTimestamp
+		if err := emit(bufferedStatements[i]); err != nil {
+			return err
 		}
 	}
 

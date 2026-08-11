@@ -33,7 +33,8 @@ func TestScanService_SetVEXJoinEngine_SuppressesFindings(t *testing.T) {
 			CVE:           "CVE-2026-9999",
 			Status:        "not_affected",
 			Justification: "vulnerable_code_not_present",
-			StatementRef:  "http://vendor.example.com/vex/1",
+			SourceURL:     "http://vendor.example.com/vex",
+			StatementRef:  "http://vendor.example.com/vex/statement/1",
 			ProductPURL:   "pkg:alpine/openssl@3.0.2",
 			Timestamp:     time.Now(),
 		},
@@ -72,6 +73,7 @@ func TestScanService_SetVEXJoinEngine_SuppressesFindings(t *testing.T) {
 	assert.Equal(t, "CVE-2026-9999", filtered.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 	require.Len(t, filtered.Content.IgnoredMatches[0].AppliedIgnoreRules, 1)
 	assert.Equal(t, "VEXSource", filtered.Content.IgnoredMatches[0].AppliedIgnoreRules[0].SourceKind)
-	assert.Equal(t, "http://vendor.example.com/vex/1", filtered.Content.IgnoredMatches[0].AppliedIgnoreRules[0].SourceName)
+	assert.Equal(t, "http://vendor.example.com/vex", filtered.Content.IgnoredMatches[0].AppliedIgnoreRules[0].SourceName)
+	assert.Equal(t, "http://vendor.example.com/vex/statement/1", filtered.Content.IgnoredMatches[0].AppliedIgnoreRules[0].SourceNamespace)
 	assert.Equal(t, "vulnerable_code_not_present", filtered.Content.IgnoredMatches[0].AppliedIgnoreRules[0].Justification)
 }

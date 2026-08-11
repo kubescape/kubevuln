@@ -38,7 +38,7 @@ func (je *JoinEngine) ApplyVEXFilter(doc *v1beta1.GrypeDocument) map[string]int 
 			for i := range stmts {
 				stmt := &stmts[i]
 				// Match PURL using the OpenVEX-aligned packageurl-go algorithm (PR #542)
-				if stmt.ProductPURL == "" || PURLMatches(stmt.ProductPURL, m.Artifact.PURL) {
+				if stmt.ProductPURL != "" && PURLMatches(stmt.ProductPURL, m.Artifact.PURL) {
 					if stmt.Status == "not_affected" || stmt.Status == "fixed" {
 						matchedStmt = stmt
 						break
@@ -52,10 +52,11 @@ func (je *JoinEngine) ApplyVEXFilter(doc *v1beta1.GrypeDocument) map[string]int 
 					Match: m,
 					AppliedIgnoreRules: []v1beta1.IgnoreRule{
 						{
-							Vulnerability: m.Vulnerability.ID,
-							SourceKind:    "VEXSource",
-							SourceName:    matchedStmt.StatementRef,
-							Justification: matchedStmt.Justification,
+							Vulnerability:   m.Vulnerability.ID,
+							SourceKind:      "VEXSource",
+							SourceName:      matchedStmt.SourceURL,
+							SourceNamespace: matchedStmt.StatementRef,
+							Justification:   matchedStmt.Justification,
 						},
 					},
 				})

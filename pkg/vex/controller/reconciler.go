@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubevuln/pkg/vexsource/v1beta1"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,7 +51,9 @@ func (r *VEXSourceReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	defer func() {
 		// Only update if status changed to save apiserver calls
 		if originalStatus != nil && !r.statusEqual(originalStatus, &vexSource.Status) {
-			_ = r.Status().Update(ctx, vexSource)
+			if updateErr := r.Status().Update(ctx, vexSource); updateErr != nil {
+				ctrl.LoggerFrom(ctx).Error(updateErr, "Failed to update VEXSource status")
+			}
 		}
 	}()
 
@@ -58,6 +61,7 @@ func (r *VEXSourceReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	//nolint:gosec // URL is provided by cluster admin via CRD configuration.
 	httpReq, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, vexSource.Spec.URL, nil)
 	if err != nil {
 		r.setStatusFailed(vexSource, "InvalidURL", err.Error())
@@ -105,7 +109,7 @@ func (r *VEXSourceReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 	}
 
 	// 4. Persist statements via conflict-safe writer
-	err = storage.PersistVEXStatements(ctx, vexSource.Name, vexSource.Namespace, parsedStatements, func(ctx context.Context, name, namespace string, statements []parser.VEXStatement) error {
+	err = storage.PersistVEXStatements(ctx, func(ctx context.Context) error {
 		// In a real integration, this would write to the OpenVulnerabilityExchangeContainer storage API.
 		// For the scope of the Reconciler itself, we execute the callback provided to the storage layer.
 		return nil
@@ -138,9 +142,9 @@ func (r *VEXSourceReconciler) setStatusFailed(vs *v1beta1.VEXSource, reason, msg
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            msg,
-		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: vs.Generation,
 	}
-	r.setCondition(&vs.Status.Conditions, cond)
+	meta.SetStatusCondition(&vs.Status.Conditions, cond)
 }
 
 func (r *VEXSourceReconciler) setStatusSynced(vs *v1beta1.VEXSource) {
@@ -149,33 +153,35 @@ func (r *VEXSourceReconciler) setStatusSynced(vs *v1beta1.VEXSource) {
 		Status:             metav1.ConditionTrue,
 		Reason:             "SyncSuccessful",
 		Message:            "Successfully ingested VEX feed",
-		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: vs.Generation,
 	}
-	r.setCondition(&vs.Status.Conditions, cond)
-}
-
-func (r *VEXSourceReconciler) setCondition(conditions *[]metav1.Condition, newCond metav1.Condition) {
-	for i, existing := range *conditions {
-		if existing.Type == newCond.Type {
-			if existing.Status != newCond.Status || existing.Reason != newCond.Reason {
-				(*conditions)[i] = newCond
-			}
-			return
-		}
-	}
-	*conditions = append(*conditions, newCond)
+	meta.SetStatusCondition(&vs.Status.Conditions, cond)
 }
 
 func (r *VEXSourceReconciler) statusEqual(a, b *v1beta1.VEXSourceStatus) bool {
-	// Simple pointer/length check for optimization, in production use semantic equality
 	if a == nil || b == nil {
 		return a == b
 	}
 	if a.IngestedStatementCount != b.IngestedStatementCount {
 		return false
 	}
+	if (a.LastFetchedTime == nil && b.LastFetchedTime != nil) || (a.LastFetchedTime != nil && b.LastFetchedTime == nil) {
+		return false
+	}
+	if a.LastFetchedTime != nil && !a.LastFetchedTime.Equal(b.LastFetchedTime) {
+		return false
+	}
 	if len(a.Conditions) != len(b.Conditions) {
 		return false
+	}
+	for i := range a.Conditions {
+		if a.Conditions[i].Type != b.Conditions[i].Type ||
+			a.Conditions[i].Status != b.Conditions[i].Status ||
+			a.Conditions[i].Reason != b.Conditions[i].Reason ||
+			a.Conditions[i].Message != b.Conditions[i].Message ||
+			a.Conditions[i].ObservedGeneration != b.Conditions[i].ObservedGeneration {
+			return false
+		}
 	}
 	return true
 }

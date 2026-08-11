@@ -70,7 +70,7 @@ func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 
 	conn, err := grpc.NewClient("unix:"+sock,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

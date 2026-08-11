@@ -75,6 +75,7 @@ func TestJoinEngine_ApplyVEXFilter(t *testing.T) {
 			CVE:           "CVE-2026-1000",
 			Status:        "not_affected",
 			Justification: "vulnerable_code_not_in_execute_path",
+			SourceURL:     "http://example.com/vex",
 			StatementRef:  "http://example.com/vex/statement/1",
 			ProductPURL:   "pkg:alpine/openssl@3.0.2",
 			Timestamp:     time.Now(),
@@ -108,7 +109,8 @@ func TestJoinEngine_ApplyVEXFilter(t *testing.T) {
 	assert.Equal(t, "CVE-2026-1000", doc.IgnoredMatches[0].Match.Vulnerability.ID)
 	require.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 1)
 	assert.Equal(t, "VEXSource", doc.IgnoredMatches[0].AppliedIgnoreRules[0].SourceKind)
-	assert.Equal(t, "http://example.com/vex/statement/1", doc.IgnoredMatches[0].AppliedIgnoreRules[0].SourceName)
+	assert.Equal(t, "http://example.com/vex", doc.IgnoredMatches[0].AppliedIgnoreRules[0].SourceName)
+	assert.Equal(t, "http://example.com/vex/statement/1", doc.IgnoredMatches[0].AppliedIgnoreRules[0].SourceNamespace)
 	assert.Equal(t, "vulnerable_code_not_in_execute_path", doc.IgnoredMatches[0].AppliedIgnoreRules[0].Justification)
 }
 

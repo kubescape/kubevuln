@@ -23,3 +23,5 @@ kubevuln
 .vscode/
 
 app.env
+
+http

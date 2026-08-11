@@ -943,7 +943,11 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	s.recordExceptionsExpired(ctx, stats)
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
-		return cve, false
+		if s.vexJoinEngine == nil {
+			return cve, false
+		}
+		// Continue with an empty SecurityException set so VEX still runs
+		exceptions = nil
 	}
 	if s.metrics != nil {
 		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))

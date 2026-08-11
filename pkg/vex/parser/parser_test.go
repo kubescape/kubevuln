@@ -52,15 +52,31 @@ func TestCSAFStreamParser(t *testing.T) {
 				"initial_release_date": "2026-08-10T15:00:00Z"
 			}
 		},
+		"product_tree": {
+			"full_product_names": [
+				{
+					"product_id": "prod-1",
+					"product_identification_helper": {
+						"purl": "pkg:rhel/openssl@3.0.1"
+					}
+				},
+				{
+					"product_id": "prod-2",
+					"product_identification_helper": {
+						"purl": "pkg:rhel/openssl@3.0.2"
+					}
+				}
+			]
+		},
 		"vulnerabilities": [
 			{
 				"cve": "CVE-2026-8888",
 				"product_status": {
 					"known_not_affected": [
-						"pkg:rhel/openssl@3.0.1"
+						"prod-1"
 					],
 					"fixed": [
-						"pkg:rhel/openssl@3.0.2"
+						"prod-2"
 					]
 				}
 			}
@@ -81,10 +97,10 @@ func TestCSAFStreamParser(t *testing.T) {
 	assert.Equal(t, "CVE-2026-8888", results[0].CVE)
 	assert.Equal(t, "not_affected", results[0].Status)
 	assert.Equal(t, "pkg:rhel/openssl@3.0.1", results[0].ProductPURL)
-	assert.Equal(t, "http://example.com/csaf/vuln/0/not_affected/pkg:rhel/openssl@3.0.1", results[0].StatementRef)
+	assert.Equal(t, "http://example.com/csaf/vuln/0/not_affected/prod-1", results[0].StatementRef)
 
 	assert.Equal(t, "CVE-2026-8888", results[1].CVE)
 	assert.Equal(t, "fixed", results[1].Status)
 	assert.Equal(t, "pkg:rhel/openssl@3.0.2", results[1].ProductPURL)
-	assert.Equal(t, "http://example.com/csaf/vuln/0/fixed/pkg:rhel/openssl@3.0.2", results[1].StatementRef)
+	assert.Equal(t, "http://example.com/csaf/vuln/0/fixed/prod-2", results[1].StatementRef)
 }
