@@ -47,6 +47,10 @@ func formatResolvedPlatform(os, arch, variant string) string {
 	return strings.Join(parts, "/")
 }
 
+// createSBOMFn is an indirection over syft.CreateSBOM so the deadline handling in
+// CreateSBOM can be unit-tested without cataloguing a real image.
+var createSBOMFn = syft.CreateSBOM
+
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
 	maxImageSize      int64
@@ -299,6 +303,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// generate SBOM
 	// use a deadline to prevent the process from hanging for too long
 	var syftSBOM *sbom.SBOM
+	// Buffered so a goroutine abandoned by the deadline can always publish and exit, even
+	// when nobody is left to receive.
+	generated := make(chan *sbom.SBOM, 1)
 	// ensure no parallel pulls
 	s.pullMutex.Lock()
 	defer s.pullMutex.Unlock()
@@ -328,10 +335,16 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			// ask Syft to also scan the image for embedded SBOMs
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}
-		syftSBOM, err = syft.CreateSBOM(ctxWithSize, src, cfg)
-		if err != nil {
-			return fmt.Errorf("failed to generate SBOM: %w", err)
+		// This closure can outlive the call: deadline.Run cannot stop its work function and
+		// documents as much, and Syft's cataloguers do not observe cancellation either, so on
+		// timeout it keeps running after CreateSBOM has already returned Incomplete. It must
+		// therefore not touch any variable the caller reads. Keep the result local and publish
+		// it on the channel, which is only received from once dl.Run reports success.
+		created, createErr := createSBOMFn(ctxWithSize, src, cfg)
+		if createErr != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", createErr)
 		}
+		generated <- created
 		return nil
 	})
 	switch {
@@ -342,7 +355,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		domainSBOM.Status = helpersv1.Incomplete
 		return domainSBOM, nil
 	case err == nil:
-		// continue
+		// dl.Run reports success only once the work function returned nil, which it does
+		// after publishing, so this receive cannot block.
+		syftSBOM = <-generated
 	default:
 		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		// also mark as incomplete if we failed to extract packages

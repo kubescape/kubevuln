@@ -1,9 +1,21 @@
 package v1
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/sbom"
+	"github.com/anchore/syft/syft/source"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -395,4 +407,90 @@ func Test_syftAdapter_CreateSBOM_TimeoutContext(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, helpersv1.Incomplete, sbom.Status)
+}
+
+// mockRegistryImage serves a minimal single-layer image so syft.GetSource resolves without a
+// network, letting a test reach CreateSBOM's deadline handling. Returns the registry host.
+func mockRegistryImage(t *testing.T) string {
+	t.Helper()
+
+	layer := &bytes.Buffer{}
+	gz := gzip.NewWriter(layer)
+	tw := tar.NewWriter(gz)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "etc/hostname", Mode: 0o644, Size: 4}))
+	_, err := tw.Write([]byte("test"))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	layerBytes := layer.Bytes()
+	layerHash := fmt.Sprintf("%x", sha256.Sum256(layerBytes))
+
+	uncompressed := &bytes.Buffer{}
+	zr, err := gzip.NewReader(bytes.NewReader(layerBytes))
+	require.NoError(t, err)
+	_, err = io.Copy(uncompressed, zr)
+	require.NoError(t, err)
+	diffID := fmt.Sprintf("%x", sha256.Sum256(uncompressed.Bytes()))
+
+	configBytes := []byte(fmt.Sprintf(
+		`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffID))
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case "/v2/test-image/blobs/sha256:" + configHash:
+			_, _ = w.Write(configBytes)
+		case "/v2/test-image/blobs/sha256:" + layerHash:
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	return u.Host
+}
+
+// deadline.Run cannot stop its work function, and Syft's cataloguers do not observe
+// cancellation, so on timeout the Syft goroutine keeps running and finishes after CreateSBOM
+// has already returned Incomplete. The work function must therefore share nothing with the
+// caller. Run under -race, this fails if it writes a variable the caller reads.
+func Test_syftAdapter_CreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
+	host := mockRegistryImage(t)
+
+	finished := make(chan struct{})
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		time.Sleep(1500 * time.Millisecond)
+		defer close(finished)
+		return &sbom.SBOM{}, nil
+	}
+
+	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil)
+	domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+
+	require.NoError(t, err)
+	assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status, "the deadline must surface as Incomplete")
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stand-in Syft never finished")
+	}
+	assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status, "the late write must not affect the result")
 }
