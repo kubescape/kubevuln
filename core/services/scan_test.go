@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
@@ -152,6 +154,72 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			}
 		})
 	}
+}
+
+// perImageSBOMCreator names each SBOM after the slug it was asked for, and holds every
+// caller inside CreateSBOM until all of them have arrived, so the callers provably contend
+// rather than finishing one after another.
+type perImageSBOMCreator struct {
+	calls   int32
+	arrived int32
+	total   int32
+	all     chan struct{}
+}
+
+func (c *perImageSBOMCreator) CreateSBOM(_ context.Context, name, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	atomic.AddInt32(&c.calls, 1)
+	if atomic.AddInt32(&c.arrived, 1) == c.total {
+		close(c.all)
+	}
+	// Bounded, because the point of the test is that both callers get here. If they are
+	// merged onto one key only one ever does, and an unbounded wait would hang instead of
+	// failing on the assertion below.
+	select {
+	case <-c.all:
+	case <-time.After(2 * time.Second):
+	}
+	return domain.SBOM{Name: name, SBOMCreatorVersion: c.Version(), Content: &v1beta1.SyftDocument{}}, nil
+}
+
+func (c *perImageSBOMCreator) Version() string        { return "Mock SBOM 1.0" }
+func (c *perImageSBOMCreator) GetMaxImageSize() int64 { return 0 }
+func (c *perImageSBOMCreator) GetMaxSBOMSize() int    { return 0 }
+func (c *perImageSBOMCreator) GetMemoryLimit() string { return "" }
+
+// A mutable tag can point at two digests at once, mid-rollout or after a repush. Those are
+// different images, stored under different slugs, so they must not be deduplicated into one
+// another: the loser would be handed an SBOM for an image it is not scanning, and since the
+// CVE manifest takes its name from the SBOM, its findings would be filed under the other
+// image's slug.
+func TestScanService_getOrCreateSBOM_SameTagDifferentDigestsAreNotShared(t *testing.T) {
+	creator := &perImageSBOMCreator{total: 2, all: make(chan struct{})}
+	store := repositories.NewMemoryStorage(false, false)
+	// storage off: this is about which callers share a key, and MemoryStore's maps are
+	// unguarded, so two workers storing at once race the double rather than the code.
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workloads := []domain.ScanCommand{
+		{ImageTagNormalized: "repo/app:latest", ImageHash: "sha256:aaaaaaaaaaaa", ImageSlug: "repo-app-latest-aaaaaaaaaaaa"},
+		{ImageTagNormalized: "repo/app:latest", ImageHash: "sha256:bbbbbbbbbbbb", ImageSlug: "repo-app-latest-bbbbbbbbbbbb"},
+	}
+
+	names := make([]string, len(workloads))
+	var wg sync.WaitGroup
+	for i := range workloads {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sbom, _, err := s.getOrCreateSBOM(context.TODO(), workloads[i])
+			assert.NoError(t, err)
+			names[i] = sbom.Name
+		}(i)
+	}
+	wg.Wait()
+
+	for i, w := range workloads {
+		assert.Equal(t, w.ImageSlug, names[i], "each workload must get the SBOM for its own image")
+	}
+	assert.Equal(t, int32(2), atomic.LoadInt32(&creator.calls), "two digests are two images, not one")
 }
 
 func TestScanService_ScanCP(t *testing.T) {
