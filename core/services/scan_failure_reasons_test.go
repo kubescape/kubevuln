@@ -155,7 +155,7 @@ func TestClassifySBOMStatus(t *testing.T) {
 		{
 			name:     "TooLarge status",
 			status:   helpersv1.TooLarge,
-			expected: scanfailure.ReasonSBOMTooLarge,
+			expected: scanfailure.ReasonImageTooLarge,
 		},
 		{
 			name:     "Incomplete status",
@@ -217,18 +217,18 @@ func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
 			expected: scanfailure.ReasonScannerOOMKilled,
 		},
 		{
-			name:   "TooLarge without OOM annotation falls back to SBOM too large",
+			name:   "TooLarge without OOM annotation falls back to Image too large",
 			status: helpersv1.TooLarge,
 			annotations: map[string]string{
 				helpersv1.StatusMetadataKey: "SBOM size exceeds limit",
 			},
-			expected: scanfailure.ReasonSBOMTooLarge,
+			expected: scanfailure.ReasonImageTooLarge,
 		},
 		{
 			name:        "TooLarge with no annotations",
 			status:      helpersv1.TooLarge,
 			annotations: map[string]string{},
-			expected:    scanfailure.ReasonSBOMTooLarge,
+			expected:    scanfailure.ReasonImageTooLarge,
 		},
 		{
 			name:        "Incomplete status ignores annotations",
