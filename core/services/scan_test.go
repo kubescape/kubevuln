@@ -2431,3 +2431,45 @@ func TestScanService_ScanCVE_CacheHit_DegradedAdditiveSkipsVEX(t *testing.T) {
 
 	assert.Empty(t, repo.vexCalls, "but no VEX document is published from a partial exception set")
 }
+
+// getSBOM discards an SBOM that was rejected under limits which have since changed, so a
+// rescan can admit an image the operator has just made room for. ScanRegistry called the
+// repository directly and skipped that, so it kept serving a cached TooLarge verdict forever:
+// raising maxImageSize had no effect on the registry path while it worked on every other one.
+func TestScanService_ScanRegistry_StaleTooLargeSBOMIsRescanned(t *testing.T) {
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	repo := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, repo, adapters.NewMockCVEAdapter(), repo,
+		&recordingPlatform{}, v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)),
+		true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	ctx, err := s.ValidateScanRegistry(ctx, domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/nginx:latest",
+	})
+	require.NoError(t, err)
+
+	// Stored when the image-size limit was 1 byte. The current limit differs, so this
+	// verdict no longer reflects the configuration and must not be reused.
+	require.NoError(t, repo.StoreSBOM(ctx, domain.SBOM{
+		Name:               "imageSlug",
+		SBOMCreatorVersion: sbomAdapter.Version(),
+		Status:             helpersv1.TooLarge,
+		Content:            &v1beta1.SyftDocument{},
+		Annotations: map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonImageTooLarge,
+			domain.MaxImageSizeAnnotationKey: "1",
+		},
+	}, false))
+	require.NotEqual(t, "1", fmt.Sprintf("%d", sbomAdapter.GetMaxImageSize()),
+		"the test needs the current limit to differ from the stored one")
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	stored, err := repo.GetSBOM(ctx, "imageSlug", sbomAdapter.Version())
+	require.NoError(t, err)
+	assert.NotEqual(t, helpersv1.TooLarge, stored.Status,
+		"the stale TooLarge SBOM must be replaced by a fresh scan, not served again")
+}

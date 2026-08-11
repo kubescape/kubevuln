@@ -738,7 +738,12 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	if cve.Content == nil {
 		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			// Go through getSBOM rather than the repository directly, as GenerateSBOM,
+			// ScanCP and ScanCVE all do. It is what discards an SBOM that was rejected
+			// under limits which have since changed, so without it a registry scan keeps
+			// serving a cached TooLarge verdict even after the operator raised
+			// maxImageSize, maxSBOMSize or the scanner memory limit to admit that image.
+			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
