@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -2472,4 +2473,75 @@ func TestScanService_ScanRegistry_StaleTooLargeSBOMIsRescanned(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, helpersv1.TooLarge, stored.Status,
 		"the stale TooLarge SBOM must be replaced by a fresh scan, not served again")
+}
+
+type blockingSBOMCreator struct {
+	ports.SBOMCreator
+	calls   int
+	onStart func()
+	mu      sync.Mutex
+}
+
+func (b *blockingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	if b.onStart != nil {
+		b.onStart()
+	}
+	return b.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
+}
+
+func TestScanService_SingleflightSBOMDeduplication(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	blockingCreator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		onStart: func() {
+			once.Do(func() {
+				close(started)
+			})
+			<-release
+		},
+	}
+
+	service := NewScanService(
+		blockingCreator,
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockCVEAdapter(),
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockPlatform(false, nil),
+		adapters.NewMockRelevancyAdapter(),
+		true, false, true, false, false,
+	)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library/alpine:latest",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+	const numGoroutines = 5
+	var startWg sync.WaitGroup
+	var wg sync.WaitGroup
+	startWg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_ = service.GenerateSBOM(ctx)
+		}()
+	}
+
+	startWg.Wait() // ensure all 5 goroutines are running before unblocking singleflight worker
+	<-started      // wait for singleflight worker to enter CreateSBOM
+	close(release) // allow singleflight worker to finish
+	wg.Wait()
+
+	assert.Equal(t, 1, blockingCreator.calls, "CreateSBOM should be called exactly once for concurrent identical requests")
 }

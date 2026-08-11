@@ -35,6 +35,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -60,6 +61,7 @@ type ScanService struct {
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
+	sfGroup           singleflight.Group
 }
 
 // SetMetrics attaches an optional Metrics instance to the service. It is not
@@ -168,35 +170,9 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		return domain.ErrCastingWorkload
 	}
 
-	// check if SBOM is already available
-	sbom := domain.SBOM{}
-	var err error
-	if s.storage {
-		sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-				helpers.String("imageSlug", workload.ImageSlug))
-		}
-	}
-
-	// if SBOM is not available, create it
-	if sbom.Content == nil {
-		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-			logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-				helpers.String("imageSlug", workload.ImageSlug))
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-			return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
-		}
-		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-		if err != nil {
-			reason := classifySBOMError(err)
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				reason, err)
-			return &domain.ScanError{Reason: reason, Err: err}
-		}
+	sbom, created, err := s.getOrCreateSBOM(ctx, workload)
+	if err != nil {
+		return err
 	}
 
 	// do not treat a timed out or too-large SBOM as a successful scan — mirrors the same
@@ -207,8 +183,8 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 	}
 
-	// store SBOM
-	if s.storage {
+	// store SBOM if newly created
+	if s.storage && created {
 		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
@@ -292,63 +268,17 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 		// check if we need SBOM
 		if cve.Content == nil || s.storage {
-			// check if SBOM is already available
-			if s.storage {
-				sbom, err = s.getSBOM(ctx, slug, s.sbomCreator.Version())
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-					// no continue, we might create it
-				}
+			var sbomErr error
+			sbom, _, sbomErr = s.getOrCreateSBOM(ctx, subWorkload)
+			if sbomErr != nil {
+				logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(sbomErr),
+					helpers.String("imageSlug", slug))
+				continue // we need the SBOM
 			}
-
-			// if SBOM is not available, create it
-			if sbom.Content == nil {
-				if s.sbomGeneration {
-					// a previous container in this loop (or a previous request) may have
-					// already recorded this exact image as rate limited; skip pulling it
-					// again instead of hammering the registry with another attempt
-					if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(subWorkload)); ok {
-						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-							helpers.String("imageSlug", slug))
-						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-						continue
-					}
-					// create SBOM
-					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, rateLimitCacheKey(subWorkload))
-					if err != nil {
-						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
-							helpers.String("imageSlug", slug))
-						reason := classifySBOMError(err)
-						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							reason, err)
-						if s.storage &&
-							subWorkload.Wlid != "" &&
-							subWorkload.ContainerName != "" &&
-							reason == scanfailure.ReasonImageSchemaUnsupported {
-							if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
-								logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
-									helpers.String("imageSlug", slug))
-							}
-						}
-						continue // we need the SBOM
-					}
-					// store SBOM
-					if s.storage {
-						err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-							// no continue, storing the SBOM is not critical
-						}
-					}
-				} else {
-					logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
-						helpers.String("imageSlug", slug))
-					continue // we need the SBOM
-				}
+			if !s.sbomGeneration && sbom.Content == nil {
+				logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
+					helpers.String("imageSlug", slug))
+				continue // we need the SBOM
 			}
 
 			// check SBOM status
@@ -536,59 +466,20 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	// check if we need SBOM
 	if cve.Content == nil {
-		// check if SBOM is already available
-		if s.storage {
-			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
+		var sbomErr error
+		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
+		if sbomErr != nil {
+			var scanErr *domain.ScanError
+			if errors.As(sbomErr, &scanErr) {
+				return &domain.ScanError{Reason: scanErr.Reason, Err: fmt.Errorf("creating SBOM: %w", scanErr.Err)}
 			}
+			reason := classifySBOMError(sbomErr)
+			return &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", sbomErr)}
 		}
-
-		// if SBOM is not available, create it
-		if sbom.Content == nil {
-			if s.sbomGeneration {
-				if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-					logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-						helpers.String("imageSlug", workload.ImageSlug))
-					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-					return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
-				}
-				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-				s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-				if err != nil {
-					reason := classifySBOMError(err)
-					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						reason, err)
-					// surface a per-workload record for schema-unsupported images so UIs
-					// do not show the workload as silently unscanned; skip image-only
-					// scans where there is no workload to attach the stub to
-					if s.storage &&
-						workload.Wlid != "" &&
-						workload.ContainerName != "" &&
-						reason == scanfailure.ReasonImageSchemaUnsupported {
-						if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
-							logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
-								helpers.String("imageSlug", workload.ImageSlug))
-						}
-					}
-					return &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", err)}
-				}
-				// store SBOM
-				if s.storage {
-					err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-				}
-			} else {
-				logger.L().Ctx(ctx).Warning("missing SBOM",
-					helpers.String("imageSlug", workload.ImageSlug))
-				return domain.ErrMissingSBOM
-			}
+		if !s.sbomGeneration && sbom.Content == nil {
+			logger.L().Ctx(ctx).Warning("missing SBOM",
+				helpers.String("imageSlug", workload.ImageSlug))
+			return domain.ErrMissingSBOM
 		}
 
 		// do not process timed out SBOM
@@ -737,49 +628,20 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 	sbom := domain.SBOM{}
 	if cve.Content == nil {
-		if s.storage {
-			// Go through getSBOM rather than the repository directly, as GenerateSBOM,
-			// ScanCP and ScanCVE all do. It is what discards an SBOM that was rejected
-			// under limits which have since changed, so without it a registry scan keeps
-			// serving a cached TooLarge verdict even after the operator raised
-			// maxImageSize, maxSBOMSize or the scanner memory limit to admit that image.
-			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
+		var sbomErr error
+		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
+		if sbomErr != nil {
+			repErr := s.platform.ReportError(ctx, sbomErr)
+			if repErr != nil {
+				logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-		}
-
-		if sbom.Content == nil {
-			if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-				logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-					helpers.String("imageSlug", workload.ImageSlug))
-				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-				return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
+			var scanErr *domain.ScanError
+			if errors.As(sbomErr, &scanErr) {
+				return scanErr
 			}
-			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-			s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-			if err != nil {
-				repErr := s.platform.ReportError(ctx, err)
-				if repErr != nil {
-					logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
-						helpers.String("imageSlug", workload.ImageSlug))
-				}
-				reason := classifySBOMError(err)
-				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					reason, err)
-				return &domain.ScanError{Reason: reason, Err: err}
-			}
-
-			if s.storage {
-				err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-						helpers.String("imageSlug", workload.ImageSlug))
-				}
-			}
+			reason := classifySBOMError(sbomErr)
+			return &domain.ScanError{Reason: reason, Err: sbomErr}
 		}
 
 		// do not process timed out SBOM
@@ -1427,4 +1289,77 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 	}
 
 	return sbom, nil
+}
+
+// getOrCreateSBOM retrieves an existing SBOM from storage, or creates and stores one via singleflight
+// deduplication if multiple goroutines race to build an SBOM for the same image.
+func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, bool, error) {
+	if !s.sbomGeneration {
+		return domain.SBOM{}, false, nil
+	}
+
+	opts := optionsFromWorkload(ctx, workload)
+	key := fmt.Sprintf("%s|%s|http:%t|skiptls:%t", rateLimitCacheKey(workload), opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
+
+	// Detach workerCtx from caller cancellation so the singleflight worker job completes for all waiters even if the leader cancels early
+	workerCtx := context.WithoutCancel(ctx)
+
+	ch := s.sfGroup.DoChan(key, func() (interface{}, error) {
+		// Re-check storage inside singleflight worker in case another worker stored it while we waited
+		if s.storage {
+			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && sbom.Content != nil {
+				return sbom, nil
+			}
+		}
+
+		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+			logger.L().Ctx(workerCtx).Warning("skipping SBOM creation, image pull previously rate limited",
+				helpers.String("imageSlug", workload.ImageSlug))
+			_ = s.platform.ReportScanFailure(workerCtx, scanfailure.ScanFailureSBOMGeneration,
+				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+			return domain.SBOM{}, &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
+		}
+
+		// create SBOM
+		sbom, err := s.sbomCreator.CreateSBOM(workerCtx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, opts)
+		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
+		if err != nil {
+			reason := classifySBOMError(err)
+			_ = s.platform.ReportScanFailure(workerCtx, scanfailure.ScanFailureSBOMGeneration,
+				reason, err)
+			if s.storage &&
+				workload.Wlid != "" &&
+				workload.ContainerName != "" &&
+				reason == scanfailure.ReasonImageSchemaUnsupported {
+				if stubErr := s.cveRepository.StoreCVESummaryStub(workerCtx, helpersv1.UnsupportedSchema); stubErr != nil {
+					logger.L().Ctx(workerCtx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+			return domain.SBOM{}, &domain.ScanError{Reason: reason, Err: err}
+		}
+
+		// store SBOM in storage before completing so all waiting callers share the stored result
+		if s.storage && sbom.Content != nil {
+			if storeErr := s.sbomRepository.StoreSBOM(workerCtx, sbom, false); storeErr != nil {
+				logger.L().Ctx(workerCtx).Warning("storing singleflight deduplicated SBOM", helpers.Error(storeErr),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+		}
+
+		return sbom, nil
+	})
+
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return domain.SBOM{}, false, res.Err
+		}
+		if res.Shared {
+			metrics.RecordSingleflightHit(ctx, "sbom_generation")
+		}
+		return res.Val.(domain.SBOM), !res.Shared, nil
+	case <-ctx.Done():
+		return domain.SBOM{}, false, ctx.Err()
+	}
 }
