@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -49,25 +50,35 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 		wantStatus        string
 	}{
 		{
+			// Platform is pinned explicitly so this assertion is stable across host
+			// architectures: with no platform requested, stereoscope's registry provider
+			// defaults to runtime.GOARCH (see defaultPlatformIfNil in
+			// github.com/anchore/stereoscope/pkg/image/oci), which would otherwise resolve
+			// a different manifest - and produce a different SBOM than this fixture - on
+			// an arm64 runner than on the amd64 runner the fixture was captured on.
 			name:    "empty image produces empty SBOM",
 			imageID: "library/hello-world@sha256:aa0cc8055b82dc2509bed2e19b275c8f463506616377219d9642221ab53cf9fe",
 			format:  "testdata/hello-world-sbom.format.json",
+			options: domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:    "schema v1 image produces well-formed SBOM",
 			imageID: "quay.io/jitesoft/debian:stretch-slim",
 			format:  "testdata/stretch-slim-sbom.format.json",
+			options: domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:    "valid image produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  "testdata/alpine-sbom.format.json",
+			options: domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:    "public image with invalid registry credentials falls back to unauthenticated and produces well-formed SBOM",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  "testdata/alpine-sbom.format.json",
 			options: domain.RegistryOptions{
+				Platform: "linux/amd64",
 				Credentials: []domain.RegistryCredentials{
 					{
 						Authority: "index.docker.io",
@@ -84,6 +95,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:       "",
 			maxImageSize: 1,
 			wantStatus:   helpersv1.TooLarge,
+			options:      domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:        "big image produces too large SBOM because of maxSBOMSize",
@@ -91,6 +103,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:      "",
 			maxSBOMSize: 1,
 			wantStatus:  helpersv1.TooLarge,
+			options:     domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:        "big image produces incomplete SBOM because of scanTimeout",
@@ -98,6 +111,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			format:      "",
 			scanTimeout: 1 * time.Millisecond,
 			wantStatus:  helpersv1.Incomplete,
+			options:     domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:    "system tests image",
@@ -110,18 +124,21 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			imageID:  "9ccc948e83b22cd3fc6919b4e3e44536530cc9426a13b8d5e07bf3b2bd1b0f22",
 			imageTag: "quay.io/kubescape/kubescape:v3.0.3",
 			wantErr:  false,
+			options:  domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:     "digest as imageID 2",
 			imageID:  "sha256:335bba9e861b88fa8b7bb9250bcd69b7a33f83da4fee93f9fc0eedc6f34e28ba",
 			imageTag: "registry.k8s.io/kube-scheduler:v1.28.4",
 			wantErr:  false,
+			options:  domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:     "registry scan",
 			imageID:  "",
 			imageTag: "quay.io/matthiasb_1/kubevuln:latest",
 			wantErr:  false,
+			options:  domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:              "embedded sbom scan",
@@ -129,12 +146,14 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			scanEmbeddedSBOMs: true,
 			wantErr:           false,
 			format:            "testdata/alpine-embedded-sbom.json",
+			options:           domain.RegistryOptions{Platform: "linux/amd64"},
 		},
 		{
 			name:    "public image with invalid credentials falls back to unauthenticated",
 			imageID: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 			format:  "testdata/alpine-sbom.format.json",
 			options: domain.RegistryOptions{
+				Platform: "linux/amd64",
 				Credentials: []domain.RegistryCredentials{
 					{
 						Authority: "index.docker.io",
@@ -493,4 +512,147 @@ func Test_syftAdapter_CreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.
 		t.Fatal("stand-in Syft never finished")
 	}
 	assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status, "the late write must not affect the result")
+}
+
+// archRegistryVariant is one platform-specific manifest+config+layer served by
+// mockMultiArchRegistry below.
+type archRegistryVariant struct {
+	arch          string
+	layerBytes    []byte
+	layerHash     string
+	configBytes   []byte
+	configHash    string
+	manifestBytes []byte
+	manifestHash  string
+}
+
+func buildArchRegistryVariant(t *testing.T, arch, marker string) archRegistryVariant {
+	t.Helper()
+
+	layer := &bytes.Buffer{}
+	gz := gzip.NewWriter(layer)
+	tw := tar.NewWriter(gz)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "etc/hostname", Mode: 0o644, Size: int64(len(marker))}))
+	_, err := tw.Write([]byte(marker))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	layerBytes := layer.Bytes()
+	layerHash := fmt.Sprintf("%x", sha256.Sum256(layerBytes))
+
+	uncompressed := &bytes.Buffer{}
+	zr, err := gzip.NewReader(bytes.NewReader(layerBytes))
+	require.NoError(t, err)
+	_, err = io.Copy(uncompressed, zr)
+	require.NoError(t, err)
+	diffID := fmt.Sprintf("%x", sha256.Sum256(uncompressed.Bytes()))
+
+	configBytes := []byte(fmt.Sprintf(
+		`{"architecture":%q,"os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, arch, diffID))
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	manifestBytes := []byte(fmt.Sprintf(`{
+		"schemaVersion": 2,
+		"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+		"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+		"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+	}`, len(configBytes), configHash, len(layerBytes), layerHash))
+	manifestHash := fmt.Sprintf("%x", sha256.Sum256(manifestBytes))
+
+	return archRegistryVariant{
+		arch:          arch,
+		layerBytes:    layerBytes,
+		layerHash:     layerHash,
+		configBytes:   configBytes,
+		configHash:    configHash,
+		manifestBytes: manifestBytes,
+		manifestHash:  manifestHash,
+	}
+}
+
+// mockMultiArchRegistry serves a Docker manifest list (fat manifest) with distinct amd64 and
+// arm64 entries under the same tag, purely from local fixtures. It lets platform-resolution
+// tests assert deterministic behavior on both architectures without depending on the host's
+// runtime.GOARCH or reaching a real registry. Returns the registry host.
+func mockMultiArchRegistry(t *testing.T) string {
+	t.Helper()
+
+	amd64 := buildArchRegistryVariant(t, "amd64", "amd64-marker")
+	arm64 := buildArchRegistryVariant(t, "arm64", "arm64-marker")
+	variantsByManifestHash := map[string]archRegistryVariant{
+		amd64.manifestHash: amd64,
+		arm64.manifestHash: arm64,
+	}
+	blobsByHash := map[string][]byte{
+		amd64.configHash: amd64.configBytes,
+		amd64.layerHash:  amd64.layerBytes,
+		arm64.configHash: arm64.configBytes,
+		arm64.layerHash:  arm64.layerBytes,
+	}
+
+	indexBytes := []byte(fmt.Sprintf(`{
+		"schemaVersion": 2,
+		"mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+		"manifests": [
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "amd64", "os": "linux"}},
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "arm64", "os": "linux"}}
+		]
+	}`, len(amd64.manifestBytes), amd64.manifestHash, len(arm64.manifestBytes), arm64.manifestHash))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.list.v2+json")
+			_, _ = w.Write(indexBytes)
+		case strings.HasPrefix(r.URL.Path, "/v2/test-image/manifests/sha256:"):
+			digest := strings.TrimPrefix(r.URL.Path, "/v2/test-image/manifests/sha256:")
+			if v, ok := variantsByManifestHash[digest]; ok {
+				w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+				_, _ = w.Write(v.manifestBytes)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasPrefix(r.URL.Path, "/v2/test-image/blobs/sha256:"):
+			digest := strings.TrimPrefix(r.URL.Path, "/v2/test-image/blobs/sha256:")
+			if b, ok := blobsByHash[digest]; ok {
+				_, _ = w.Write(b)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	return u.Host
+}
+
+// Test_syftAdapter_CreateSBOM_MultiArchLocalRegistry is a regression test for architecture-
+// dependent test behavior: with no platform requested, stereoscope's registry provider
+// defaults to runtime.GOARCH (see defaultPlatformIfNil in
+// github.com/anchore/stereoscope/pkg/image/oci), so a manifest-list image resolves
+// differently depending on which architecture the test happens to run on. Requesting the
+// platform explicitly, against a local manifest list serving both amd64 and arm64, must
+// resolve the matching entry regardless of the host's own architecture.
+func Test_syftAdapter_CreateSBOM_MultiArchLocalRegistry(t *testing.T) {
+	host := mockMultiArchRegistry(t)
+
+	for _, platform := range []string{"linux/amd64", "linux/arm64"} {
+		t.Run(platform, func(t *testing.T) {
+			adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+			domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest",
+				domain.RegistryOptions{Platform: platform, InsecureUseHTTP: true})
+
+			require.NoError(t, err)
+			assert.Equal(t, platform, domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey],
+				"resolved platform must match what was requested, independent of the host's runtime.GOARCH=%s", runtime.GOARCH)
+		})
+	}
 }
