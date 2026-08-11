@@ -58,6 +58,10 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			}
 			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
 				stats.ExpiredBySource["SecurityException"]++
+
+				logger.L().Debug("security exception suppression expired",
+					helpers.String("name", se.Name),
+					helpers.String("namespace", se.Namespace))
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -81,6 +85,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 			}
 			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
 				stats.ExpiredBySource["ClusterSecurityException"]++
+
+				logger.L().Debug("cluster security exception suppression expired",
+					helpers.String("name", cse.Name))
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
