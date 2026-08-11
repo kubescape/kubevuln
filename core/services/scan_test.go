@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -2490,6 +2492,66 @@ func (b *blockingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, ima
 		b.onStart()
 	}
 	return b.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
+}
+
+// kubevuln_singleflight_hits_total is meant to count requests that singleflight spared
+// from doing the work. res.Shared does not identify those: it means the result went to more
+// than one caller, which is true of the leader as well, so a burst of N collapsing to one
+// creation reported N deduplicated requests instead of N-1.
+func TestScanService_SingleflightHitsCountOnlyDeduplicatedCallers(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	creator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	// storage off, so a caller that arrives late and starts its own round reaches CreateSBOM
+	// rather than being served by the worker's storage re-check. That keeps "callers that
+	// ran the work" equal to CreateSBOM calls, which is what the assertion below leans on.
+	store := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library-alpine-latest-1234567890ab",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890ab",
+	}
+
+	const callers = 5
+	var startWg, wg sync.WaitGroup
+	startWg.Add(callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := s.getOrCreateSBOM(context.TODO(), workload)
+			assert.NoError(t, err)
+		}()
+	}
+	startWg.Wait()
+	<-started
+	close(release)
+	wg.Wait()
+
+	// Every caller either did the work or was spared it, so the two must add up, whether or
+	// not one of them was late enough to start a round of its own.
+	creator.mu.Lock()
+	ranTheWork := creator.calls
+	creator.mu.Unlock()
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	assert.Contains(t, w.Body.String(),
+		fmt.Sprintf(`kubevuln_singleflight_hits_total{target="sbom_generation"} %d`, callers-ranTheWork),
+		"the caller that did the work is not one of the callers it spared")
 }
 
 func TestScanService_SingleflightSBOMDeduplication(t *testing.T) {
