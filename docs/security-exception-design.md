@@ -131,6 +131,8 @@ spec:
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
       expiresAt: "2026-09-15T00:00:00Z"  # expires earlier than spec.expiresAt
+      subcomponents:                      # scope the acceptance to specific packages
+        - "pkg:npm/elliptic"
 
   posture:
     - controlID: "C-0034"
@@ -335,9 +337,13 @@ The key insight is that by converting CRD data into existing `armotypes.Vulnerab
 
 ## Identifier Bridging
 
-Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`) and optionally scoped to specific images via `match.images` glob patterns. This covers the common use cases of excepting a known CVE globally or within specific images.
+Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`), optionally scoped to specific images via `match.images` glob patterns, and optionally narrowed to individual packages via `vulnerabilities[].subcomponents`. This covers excepting a known CVE globally, within specific images, or only where it appears in a named package.
 
-**Future extension — `products` (purl-based package matching)**: A future version may add OpenVEX-style `products` fields using Package URLs (purls) for fine-grained matching at the package level inside an SBOM (e.g., `pkg:deb/debian/openssl@1.1.1`). This is deferred from v1 as CVE ID + image pattern matching is sufficient for most use cases, and purl matching adds significant complexity (purl parsing, SBOM correlation, version range matching).
+**`subcomponents` (purl-based package matching)**: Entries may carry a list of Package URLs, mirroring OpenVEX `statements[].products[].subcomponents[]`. The acceptance then applies only to findings whose package matches one of the listed purls; an unversioned purl (`pkg:npm/elliptic`) matches any version, and a version-qualified purl (`pkg:deb/debian/openssl@1.1.1n`) matches only that version. Qualifiers and subpaths work the same way: every qualifier the entry states must match (`?arch=amd64` does not cover an `arm64` build), and a stated subpath must match exactly (`#lib/a` does not cover `#lib/b`), while anything the entry omits is unconstrained. An entry with no `subcomponents` applies at product scope.
+
+Matching fails closed. A finding whose package has no purl, an entry whose purl cannot be parsed, and an entry whose `subcomponents` list contains nothing usable all leave the finding visible rather than suppressing it, so an entry that asked to be scoped never widens back to product scope. The same scope is applied to the exceptions reported to the backend, so both surfaces agree on which findings an entry covers.
+
+**Future extension, version ranges**: `subcomponents` matches a purl exactly or at any version, with no range expressions (CycloneDX's `affects[].versions[].range`). Ranges can be added later without changing the `subcomponents` shape.
 
 ## Authorization & Validation
 
@@ -440,4 +446,4 @@ The vulnerability exception entries align with OpenVEX statements:
 
 Every value in `response[]` must be a non-remediating one for the finding to be suppressed. An entry pairing `will_not_fix` with `update` is still tracking work, so the finding stays visible.
 
-Note: OpenVEX `products` (purl-based product/subcomponent matching) is deferred to a future version. See "Identifier Bridging" above.
+Note: subcomponent matching by purl is supported, see "Identifier Bridging" above. What remains deferred is full OpenVEX `products` modelling: an entry scopes to packages via `subcomponents`, but the product itself is still identified by `match.images` rather than by a product purl.

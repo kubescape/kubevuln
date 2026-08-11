@@ -4,7 +4,7 @@ BINARY_NAME=kubevuln
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 TAG=v0.0.0
 
-.PHONY: build test vet lint verify verify-image
+.PHONY: build test vet lint lint-all verify verify-image
 
 build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
@@ -16,12 +16,16 @@ vet:
 	go vet ./...
 
 lint:
-	@base=$$(git merge-base HEAD upstream/main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true); \
+	@base_ref=$${GITHUB_BASE_REF:-main}; \
+	base=$$(git merge-base HEAD upstream/$$base_ref 2>/dev/null || git merge-base HEAD origin/$$base_ref 2>/dev/null || true); \
 	if [ -n "$$base" ]; then \
-		golangci-lint run --new-from-rev "$$base"; \
+		golangci-lint run --timeout=5m --new-from-rev="$$base"; \
 	else \
-		golangci-lint run; \
+		golangci-lint run --timeout=5m; \
 	fi
+
+lint-all:
+	golangci-lint run --timeout=5m
 
 verify: build test vet lint
 

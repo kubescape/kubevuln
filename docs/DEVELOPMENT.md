@@ -442,8 +442,9 @@ kubevuln/
 Use `make verify` as the default contributor check before opening a pull request. It keeps the fast path local and deterministic:
 
 ```bash
-# Build the Linux amd64 binary, run the default Go tests, run go vet, and lint
-# against changes since the branch point on upstream/main or origin/main
+# Build the Linux amd64 binary, run the default Go tests, run go vet, and fail
+# only on lint findings introduced by changes since the branch point on
+# upstream/main or origin/main
 make verify
 ```
 
@@ -453,7 +454,8 @@ make verify
 make build   # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln cmd/http/main.go
 make test    # go test ./...
 make vet     # go vet ./...
-make lint    # golangci-lint run --new-from-rev "$(git merge-base HEAD upstream/main || git merge-base HEAD origin/main)"
+make lint    # full-tree golangci-lint filtered to findings introduced in this branch
+make lint-all # optional full-tree backlog view
 ```
 
 Keep slower or network-backed checks separate from the fast path:
@@ -475,8 +477,11 @@ go test -tags=integration ./...
 # Format code
 go fmt ./...
 
-# Run linter
-golangci-lint run
+# Run the branch-scoped linter used by the contributor workflow
+make lint
+
+# Optional: inspect the current full-tree lint backlog
+make lint-all
 
 # Fix common issues
 golangci-lint run --fix

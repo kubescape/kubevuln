@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
@@ -65,12 +67,13 @@ func TestECRMatchesAndRegion(t *testing.T) {
 // registry in another, so ambient AWS config is not a safe source for it.
 func TestECRCredentialsUsesRegionFromReference(t *testing.T) {
 	orig := ECRCredsFn
-	defer func() { ECRCredsFn = orig }()
+	defer func() { ECRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
 
 	var gotRegion string
-	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, error) {
+	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, time.Time, error) {
 		gotRegion = region
-		return &image.RegistryCredentials{Username: "AWS", Password: "secret"}, nil
+		return &image.RegistryCredentials{Username: "AWS", Password: "secret"}, time.Now().Add(time.Hour), nil
 	}
 
 	creds, err := ECR{}.Credentials(context.Background(), "123456789012.dkr.ecr.ap-south-1.amazonaws.com/app:v1")
@@ -79,6 +82,74 @@ func TestECRCredentialsUsesRegionFromReference(t *testing.T) {
 	assert.Equal(t, "ap-south-1", gotRegion)
 	assert.Equal(t, "AWS", creds.Username)
 	assert.Equal(t, "secret", creds.Password)
+}
+
+// Two AWS accounts pulling through the same region must not share a cache entry: the
+// ambient credential chain resolves a token scoped to one specific account, so handing that
+// token to a pull against a different account fails with a 401.
+func TestECRCredentialsIsolatesCacheAcrossAccountsInSameRegion(t *testing.T) {
+	orig := ECRCredsFn
+	defer func() { ECRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	calls := map[string]int{}
+	ECRCredsFn = func(_ context.Context, region string) (*image.RegistryCredentials, time.Time, error) {
+		calls[region]++
+		return &image.RegistryCredentials{Username: "AWS", Password: region}, time.Now().Add(time.Hour), nil
+	}
+
+	accountA := "111111111111.dkr.ecr.us-east-1.amazonaws.com/app:v1"
+	accountB := "222222222222.dkr.ecr.us-east-1.amazonaws.com/app:v1"
+
+	credsA, err := ECR{}.Credentials(context.Background(), accountA)
+	require.NoError(t, err)
+	credsB, err := ECR{}.Credentials(context.Background(), accountB)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, calls["us-east-1"], "same-region pull from a different account must not be served from the first account's cache entry")
+
+	// Fetch each account again: both should now be served from their own cache entry, not
+	// refetched and not cross-served from the other account's entry.
+	credsA2, err := ECR{}.Credentials(context.Background(), accountA)
+	require.NoError(t, err)
+	credsB2, err := ECR{}.Credentials(context.Background(), accountB)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, calls["us-east-1"], "repeat pulls for already-cached accounts must not refetch")
+	assert.Same(t, credsA, credsA2)
+	assert.Same(t, credsB, credsB2)
+}
+
+// GCP credentials are cached per registry host: nothing in Credentials guarantees the
+// ambient identity resolves to the same token for every GCR/Artifact Registry host a pod
+// might pull from (workload identity federation can map different callers to different
+// service accounts), so one host's cached token must never be handed out for another host.
+func TestGCPCredentialsIsolatesCacheAcrossHosts(t *testing.T) {
+	orig := GCPCredsFn
+	defer func() { GCPCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	var calls int32
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		n := atomic.AddInt32(&calls, 1)
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: string(rune('a' + n))}, time.Now().Add(time.Hour), nil
+	}
+
+	hostA := "gcr.io/foo/bar:v1"
+	hostB := "us-docker.pkg.dev/project/repo/image:v1"
+
+	credsA, err := GCP{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	credsB, err := GCP{}.Credentials(context.Background(), hostB)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "a different registry host must not be served from another host's cache entry")
+	assert.NotEqual(t, credsA.Password, credsB.Password)
+
+	credsA2, err := GCP{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	assert.Same(t, credsA, credsA2, "repeat pulls for an already-cached host must not refetch")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
 func TestCredentialsFromAuthorizationToken(t *testing.T) {
@@ -90,7 +161,7 @@ func TestCredentialsFromAuthorizationToken(t *testing.T) {
 	}
 
 	t.Run("decodes user and password", func(t *testing.T) {
-		creds, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
+		creds, _, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
 		require.NoError(t, err)
 		assert.Equal(t, "AWS", creds.Username)
 		assert.Equal(t, "pa55word", creds.Password)
@@ -99,34 +170,52 @@ func TestCredentialsFromAuthorizationToken(t *testing.T) {
 	// ECR passwords are opaque blobs that routinely contain colons, so only the first one
 	// separates the user from the password.
 	t.Run("password may contain colons", func(t *testing.T) {
-		creds, err := credentialsFromAuthorizationToken(tokenFor("AWS:aa:bb:cc"))
+		creds, _, err := credentialsFromAuthorizationToken(tokenFor("AWS:aa:bb:cc"))
 		require.NoError(t, err)
 		assert.Equal(t, "AWS", creds.Username)
 		assert.Equal(t, "aa:bb:cc", creds.Password)
 	})
 
 	t.Run("nil output", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(nil)
+		_, _, err := credentialsFromAuthorizationToken(nil)
 		assert.ErrorIs(t, err, errNoAuthorizationData)
 	})
 
 	t.Run("no authorization data", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{})
+		_, _, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{})
 		assert.ErrorIs(t, err, errNoAuthorizationData)
 	})
 
 	t.Run("token without a colon", func(t *testing.T) {
-		_, err := credentialsFromAuthorizationToken(tokenFor("no-separator"))
+		_, _, err := credentialsFromAuthorizationToken(tokenFor("no-separator"))
 		assert.ErrorIs(t, err, errMalformedAuthorizationToken)
 	})
 
 	t.Run("token is not base64", func(t *testing.T) {
 		bad := "!!!not-base64!!!"
-		_, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
+		_, _, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
 			AuthorizationData: []ecrtypes.AuthorizationData{{AuthorizationToken: &bad}},
 		})
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, errNoAuthorizationData)
+	})
+
+	// The cache relies on this expiry to know when to refetch (see cache.go), so it must
+	// come from ECR's own response, not be assumed from the package doc's "12 hours".
+	t.Run("reports ECR's own expiry", func(t *testing.T) {
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:pa55word"))
+		want := time.Now().Add(6 * time.Hour).Truncate(time.Second)
+		_, expiry, err := credentialsFromAuthorizationToken(&ecr.GetAuthorizationTokenOutput{
+			AuthorizationData: []ecrtypes.AuthorizationData{{AuthorizationToken: &encoded, ExpiresAt: &want}},
+		})
+		require.NoError(t, err)
+		assert.True(t, want.Equal(expiry))
+	})
+
+	t.Run("no ExpiresAt yields a zero expiry, not an error", func(t *testing.T) {
+		_, expiry, err := credentialsFromAuthorizationToken(tokenFor("AWS:pa55word"))
+		require.NoError(t, err)
+		assert.True(t, expiry.IsZero())
 	})
 }
 
@@ -166,10 +255,11 @@ func TestProviderStrategiesAreDistinct(t *testing.T) {
 
 func TestGCPCredentialsFailurePropagates(t *testing.T) {
 	orig := GCPCredsFn
-	defer func() { GCPCredsFn = orig }()
+	defer func() { GCPCredsFn = orig; ResetCaches() }()
+	ResetCaches()
 
 	want := errors.New("ADC unavailable")
-	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, error) { return nil, want }
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
 
 	_, err := GCP{}.Credentials(context.Background(), "gcr.io/foo/bar")
 	assert.ErrorIs(t, err, want)

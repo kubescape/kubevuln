@@ -45,11 +45,15 @@ const (
 	SourceResolutionFallbackAssistedSuccess = "fallback_assisted_success"
 	SourceResolutionFallbackFailed          = "fallback_failed"
 	SourceResolutionFirstPassFailure        = "first_pass_failure"
+
+	RegistryAuthCacheHit  = "hit"
+	RegistryAuthCacheMiss = "miss"
 )
 
 var recorderMu sync.RWMutex
 var fallbackCounter metric.Int64Counter
 var sourceResolutionCounter metric.Int64Counter
+var registryAuthCacheCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -168,9 +172,18 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	registryAuthCacheMetric, err := meter.Int64Counter(
+		"kubevuln_registry_auth_cache_total",
+		metric.WithDescription("Total number of registry auth credential lookups, by provider strategy and cache result (hit/miss)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	recorderMu.Lock()
 	fallbackCounter = scanFallbackCounter
 	sourceResolutionCounter = sourceResolutionMetric
+	registryAuthCacheCounter = registryAuthCacheMetric
 	recorderMu.Unlock()
 
 	return &Metrics{
@@ -217,6 +230,22 @@ func RecordScanFallback(ctx context.Context, component, category, strategy, outc
 		attribute.String("category", category),
 		attribute.String("strategy", strategy),
 		attribute.String("outcome", outcome),
+	))
+}
+
+// RecordRegistryAuthCache reports a registry-auth credential lookup's cache outcome
+// (RegistryAuthCacheHit/RegistryAuthCacheMiss), labeled by the provider strategy
+// (FallbackStrategyGCPADC/FallbackStrategyECR) that served it.
+func RecordRegistryAuthCache(ctx context.Context, strategy, result string) {
+	recorderMu.RLock()
+	counter := registryAuthCacheCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("strategy", strategy),
+		attribute.String("result", result),
 	))
 }
 

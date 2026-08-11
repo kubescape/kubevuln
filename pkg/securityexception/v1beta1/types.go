@@ -110,6 +110,11 @@ type VulnerabilityException struct {
 	// Response carries the typed actions taken or planned for an affected vulnerability.
 	// It is always optional and layers on top of ActionStatement rather than replacing it.
 	Response []VulnerabilityResponse `json:"response,omitempty"`
+	// Subcomponents scopes the exception to specific packages within the matched
+	// product, as PURLs. Semantics follow OpenVEX statements[].products[].subcomponents[]:
+	// an unversioned PURL matches any version, a version-qualified PURL matches only
+	// that version. When empty, the exception applies at product scope.
+	Subcomponents []string `json:"subcomponents,omitempty"`
 }
 
 // VulnerabilityRef identifies a vulnerability by CVE ID.

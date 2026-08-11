@@ -17,8 +17,11 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -194,12 +197,13 @@ func TestResolveSource(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			orig := registryauth.GCPCredsFn
-			defer func() { registryauth.GCPCredsFn = orig }()
-			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+			defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+			registryauth.ResetCaches()
+			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
 				if tt.adcErr != nil {
-					return nil, tt.adcErr
+					return nil, time.Time{}, tt.adcErr
 				}
-				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 			}
 
 			var calls [][]image.RegistryCredentials
@@ -242,9 +246,10 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	require.NoError(t, err)
 
 	orig := registryauth.GCPCredsFn
-	defer func() { registryauth.GCPCredsFn = orig }()
-	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
-		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+	defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+	registryauth.ResetCaches()
+	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 	}
 
 	callCount := 0
@@ -668,4 +673,82 @@ func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
 	assert.Contains(t, resp.ErrorMessage, "mismatched platform")
 	assert.Equal(t, domain.ReasonPlatformNotFound, resp.StatusReason)
 	assert.Empty(t, resp.Status)
+}
+
+// TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft covers the deadline path: deadline.Run
+// does not (and documents that it cannot) stop the work function, and Syft's cataloguers do
+// not observe cancellation, so on timeout the Syft goroutine keeps running and finishes after
+// the handler has already returned Incomplete.
+//
+// The work function must therefore share nothing with the handler. Run under -race, this test
+// fails if the goroutine writes a variable the handler reads.
+func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash):
+			_, _ = w.Write(configBytes)
+		case fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash):
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Stand in for Syft: outlive the deadline, then return a result exactly as the real
+	// cataloguer would once it finishes naturally.
+	finished := make(chan struct{})
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		time.Sleep(1500 * time.Millisecond)
+		defer close(finished)
+		return &sbom.SBOM{}, nil
+	}
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/amd64",
+		MaxImageSize:    1 << 30,
+		MaxSbomSize:     1 << 30,
+		TimeoutSeconds:  1,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the deadline must surface as Incomplete")
+
+	// Let the abandoned goroutine finish while the handler's result is being read, which is
+	// the window the race lived in.
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stand-in Syft never finished")
+	}
+	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the late write must not affect the response")
 }

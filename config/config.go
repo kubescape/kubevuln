@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,24 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/spf13/viper"
 )
+
+type timeoutBoundServiceDiscoveryGetter struct {
+	schema.IServiceDiscoveryClient
+	httpClient *http.Client
+}
+
+func (g timeoutBoundServiceDiscoveryGetter) Get() (io.Reader, error) {
+	response, err := g.httpClient.Get(g.GetServiceDiscoveryUrl())
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("server (%s) responded: %v", g.GetHost(), response.StatusCode)
+	}
+	return response.Body, nil
+}
 
 // CVEMatchingMode controls how kubevuln configures Grype's CPE-based matching.
 type CVEMatchingMode string
@@ -224,9 +243,7 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	if err != nil {
 		return nil, err
 	}
-	// http.DefaultClient has no timeout by default; cap the startup discovery call.
-	http.DefaultClient = &http.Client{Timeout: 30 * time.Second}
-	services, err := servicediscovery.GetServices(client)
+	services, err := loadBackendServicesFromAPI(client, &http.Client{Timeout: 30 * time.Second})
 	if err == nil {
 		return services, nil
 	}
@@ -238,4 +255,11 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 		return fallbackServices, nil
 	}
 	return nil, errors.Join(err, fallbackErr)
+}
+
+func loadBackendServicesFromAPI(client schema.IServiceDiscoveryClient, httpClient *http.Client) (schema.IBackendServices, error) {
+	return servicediscovery.GetServices(timeoutBoundServiceDiscoveryGetter{
+		IServiceDiscoveryClient: client,
+		httpClient:              httpClient,
+	})
 }

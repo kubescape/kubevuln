@@ -77,6 +77,10 @@ func formatResolvedPlatform(os, arch, variant string) string {
 	return strings.Join(parts, "/")
 }
 
+// createSBOMFn is an indirection over syft.CreateSBOM so the deadline handling in
+// CreateSBOM can be unit-tested without cataloguing a real image.
+var createSBOMFn = syft.CreateSBOM
+
 // sourceGetter abstracts the syft.GetSource call so the fallback ordering in
 // resolveSource is testable with a scripted implementation.
 type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error)
@@ -295,6 +299,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		timeout = 5 * time.Minute
 	}
 	dl := deadline.New(timeout)
+	// Buffered so the abandoned goroutine below can always publish and exit, even when
+	// nobody is left to receive.
+	generated := make(chan *sbom.SBOM, 1)
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
@@ -314,12 +321,17 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		// NOTE: Syft's cataloguers do not support context cancellation (see
 		// https://github.com/anchore/syft/issues/3705). The deadline.Run wrapper
 		// will return ErrTimedOut, but the Syft goroutine may continue until it
-		// finishes naturally. This is an accepted tradeoff — the sidecar's memory
+		// finishes naturally. This is an accepted tradeoff, the sidecar's memory
 		// limit will OOM-kill the container if resource usage grows unbounded.
-		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
-		if err != nil {
-			return fmt.Errorf("failed to generate SBOM: %w", err)
+		//
+		// Because this goroutine outlives the timeout, it must not touch any variable
+		// the handler reads. It keeps its result local and publishes it on a channel,
+		// which the handler only receives from once dl.Run has reported success.
+		created, createErr := createSBOMFn(context.Background(), src, cfg)
+		if createErr != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", createErr)
 		}
+		generated <- created
 		return nil
 	})
 
@@ -332,7 +344,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	case err == nil:
-		// continue
+		// dl.Run only reports success once the work function returned nil, which it does
+		// after publishing, so this receive cannot block.
+		syftSBOM = <-generated
 	default:
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		return &pb.CreateSBOMResponse{
