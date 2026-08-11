@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"k8s.io/apimachinery/pkg/util/validation"
 	"os"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -311,4 +313,68 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 func TestCleanupStaleTempDirs_NonexistentDir(t *testing.T) {
 	_, err := CleanupStaleTempDirs(path.Join(t.TempDir(), "does-not-exist"), "stereoscope-", time.Hour)
 	require.Error(t, err)
+}
+
+// LabelsFromImageID drops any label that fails DNS1123 validation, so a value SanitizeLabel
+// leaves invalid disappears silently instead of being stored in a degraded form. These are
+// the inputs that used to produce one.
+func TestSanitizeLabel_AlwaysProducesAValidLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "already valid is unchanged", input: "nginx-1-25", want: "nginx-1-25"},
+		{name: "offending characters become dashes", input: "nginx:1.25", want: "nginx-1-25"},
+		// The reference grammar allows uppercase in a tag, but a DNS1123 label must be lowercase.
+		{name: "uppercase tag is lowercased", input: "v1.0-RC1", want: "v1-0-rc1"},
+		{name: "mixed case repository", input: "Registry.IO/Team/App", want: "registry-io-team-app"},
+		// Adjacent offending characters collapse into several dashes, so stripping one is not enough.
+		{name: "several trailing dashes are all stripped", input: "registry.io/team/app:v1_.", want: "registry-io-team-app-v1"},
+		{name: "leading offending character is stripped", input: "_myapp", want: "myapp"},
+		{name: "leading and trailing together", input: ".myapp.", want: "myapp"},
+		{name: "interior dashes are preserved", input: "foo._bar", want: "foo--bar"},
+		{name: "all offending characters yield empty", input: "...", want: ""},
+		// Not an enumerated set: anything a DNS1123 label may not contain is replaced.
+		{name: "unlisted ascii is replaced", input: "foo+bar", want: "foo-bar"},
+		{name: "tilde is replaced", input: "foo~bar", want: "foo-bar"},
+		{name: "non-ascii is replaced", input: "café", want: "caf"},
+		{name: "empty stays empty", input: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeLabel(tt.input)
+			assert.Equal(t, tt.want, got)
+			if got != "" {
+				assert.Empty(t, validation.IsDNS1123Label(got),
+					"SanitizeLabel must return a valid DNS1123 label, got %q", got)
+			}
+		})
+	}
+}
+
+// Truncation at 63 characters can land on a dash, which would otherwise leave the label
+// ending in one and therefore invalid.
+func TestSanitizeLabel_TruncationNeverEndsOnADash(t *testing.T) {
+	// 62 characters, so the 63rd is the separator introduced for the dot.
+	input := strings.Repeat("a", 62) + ".suffix"
+
+	got := SanitizeLabel(input)
+
+	assert.LessOrEqual(t, len(got), 63)
+	assert.Empty(t, validation.IsDNS1123Label(got), "got %q", got)
+	assert.Equal(t, strings.Repeat("a", 62), got)
+}
+
+// The labels these feed are dropped when invalid, so an image whose tag carries uppercase
+// used to lose its image-tag label entirely.
+func TestLabelsFromImageID_UppercaseTagIsKept(t *testing.T) {
+	labels := LabelsFromImageID("registry.io/team/app:v1.0-RC1")
+
+	assert.Equal(t, "v1-0-rc1", labels[helpersv1.ImageTagMetadataKey])
+	assert.Equal(t, "registry-io-team-app", labels[helpersv1.ImageNameMetadataKey])
+	for key, value := range labels {
+		assert.Empty(t, validation.IsDNS1123Label(value), "label %q has invalid value %q", key, value)
+	}
 }
