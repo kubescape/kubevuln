@@ -171,7 +171,11 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	if v.IsSet("proxyRegistryMap") {
-		config.ProxyRegistryMap = v.GetStringMapString("proxyRegistryMap")
+		proxyMap, err := proxyRegistryMapFromViper(v)
+		if err != nil {
+			return Config{}, err
+		}
+		config.ProxyRegistryMap = proxyMap
 	}
 
 	return config, nil
@@ -194,6 +198,26 @@ func trustedVendorsFromViper(v *viper.Viper) []string {
 		}
 	}
 	return vendors
+}
+
+// proxyRegistryMapFromViper resolves proxyRegistryMap regardless of whether it
+// came from the JSON config file (already a map[string]interface{}, handled
+// fine by GetStringMapString) or from a PROXYREGISTRYMAP environment variable
+// (a plain JSON-object string, e.g. PROXYREGISTRYMAP={"docker.io":"mirror"}).
+// GetStringMapString discards JSON decode errors and silently returns an empty
+// map, which would disable registry mirroring on a malformed env value without
+// any indication why, so the env case is parsed explicitly here and any error
+// is surfaced to the caller instead.
+func proxyRegistryMapFromViper(v *viper.Viper) (map[string]string, error) {
+	raw, ok := v.Get("proxyRegistryMap").(string)
+	if !ok {
+		return v.GetStringMapString("proxyRegistryMap"), nil
+	}
+	var proxyMap map[string]string
+	if err := json.Unmarshal([]byte(raw), &proxyMap); err != nil {
+		return nil, fmt.Errorf("invalid proxyRegistryMap: %w", err)
+	}
+	return proxyMap, nil
 }
 
 type clusterDataBackendServicesConfig struct {

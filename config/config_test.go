@@ -279,3 +279,15 @@ func TestLoadConfigProxyRegistryMapEnv(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, map[string]string{"docker.io": "env-mirror.example.com"}, c.ProxyRegistryMap)
 }
+
+// TestLoadConfigProxyRegistryMapEnv_Invalid verifies a malformed PROXYREGISTRYMAP
+// env value fails config loading with an error instead of GetStringMapString's
+// default behavior of silently discarding the decode error and returning an
+// empty map, which would disable registry mirroring with no indication why.
+func TestLoadConfigProxyRegistryMapEnv_Invalid(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":`)
+	_, err := LoadConfig("testdata")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "proxyRegistryMap")
+}
