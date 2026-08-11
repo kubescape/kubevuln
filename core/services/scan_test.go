@@ -225,6 +225,98 @@ func TestScanService_getOrCreateSBOM_SameTagDifferentDigestsAreNotShared(t *test
 	assert.Equal(t, int32(2), atomic.LoadInt32(&creator.calls), "two digests are two images, not one")
 }
 
+// sizeCappedSBOMCreator mirrors the TooLarge path in adapters/v1/syft.go, which returns
+// before Content is ever assigned: the SBOM carries a status and the annotations getSBOM
+// re-checks against the current limits, but no document. NewMockSBOMAdapter cannot stand in
+// here, as it always fills Content.
+type sizeCappedSBOMCreator struct {
+	calls int
+	// status is what the adapter settled on, TooLarge or Incomplete. Both come back with no
+	// document; only TooLarge carries the limit annotations getSBOM re-checks.
+	status string
+}
+
+func (c *sizeCappedSBOMCreator) CreateSBOM(_ context.Context, name, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	c.calls++
+	sbom := domain.SBOM{
+		Name:               name,
+		SBOMCreatorVersion: c.Version(),
+		Status:             c.status,
+	}
+	if c.status == helpersv1.TooLarge {
+		sbom.Annotations = map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonImageTooLarge,
+			domain.MaxImageSizeAnnotationKey: "512",
+		}
+	}
+	return sbom, nil
+}
+
+func (c *sizeCappedSBOMCreator) Version() string        { return "Mock SBOM 1.0" }
+func (c *sizeCappedSBOMCreator) GetMaxImageSize() int64 { return 512 }
+func (c *sizeCappedSBOMCreator) GetMaxSBOMSize() int    { return 0 }
+func (c *sizeCappedSBOMCreator) GetMemoryLimit() string { return "" }
+
+func generateSBOMContext(t *testing.T, s *ScanService) context.Context {
+	t.Helper()
+	ctx, err := s.ValidateGenerateSBOM(context.TODO(), domain.ScanCommand{
+		ImageSlug: "imageSlug",
+		ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+	})
+	require.NoError(t, err)
+	return ctx
+}
+
+// A TooLarge or Incomplete SBOM has no Content, so gating the store on Content meant the
+// verdict was never written and every later scan of that image pulled it again to reach the
+// same answer. StoreSBOM persists it as a status-only marker precisely so it can be reused.
+func TestScanService_GenerateSBOM_RemembersTooLargeVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.TooLarge}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	require.Equal(t, 1, storage.SBOMStores(), "the verdict must be persisted")
+	require.Equal(t, 1, creator.calls)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM, "still a failure")
+	assert.Equal(t, 1, creator.calls, "the stored verdict must be reused, not recomputed")
+	assert.Equal(t, 1, storage.SBOMStores(), "and not written again on the way through")
+}
+
+// Incomplete is the other status that comes back without a document, but it means the scan
+// timed out, and getSBOM has no staleness rule for it. Stored, it would read back as a
+// cache hit at the same scanner version forever and no retry would ever happen.
+func TestScanService_GenerateSBOM_DoesNotPersistIncompleteVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.Incomplete}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 0, storage.SBOMStores(), "a timeout must not be persisted")
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 2, creator.calls, "and must be retried on the next scan")
+}
+
+// getOrCreateSBOM stores what it creates, so storing again in the flow wrote the same
+// document to the apiserver twice.
+func TestScanService_GenerateSBOM_StoresCreatedSBOMOnce(t *testing.T) {
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "a newly created SBOM must be stored once")
+
+	// the second call is served from storage, and StoreSBOM is a Create that falls back to
+	// Get plus a full Update of the spec, so writing it back is not free
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "an SBOM read back from storage must not be stored again")
+}
+
 func TestScanService_ScanCP(t *testing.T) {
 	tests := []struct {
 		createSBOMError bool
