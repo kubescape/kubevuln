@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -133,20 +132,25 @@ func (a *BackendAdapter) postResults(
 
 	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
-			helpers.String("image", imagetag),
-			helpers.String("wlid", wlid))
+		errStr := err.Error()
+		if strings.Contains(errStr, "429") || strings.Contains(errStr, "Too Many Requests") {
+			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report due to rate limiting (429 Too Many Requests). Please ask your vendor for support",
+				helpers.Error(err),
+				helpers.String("image", imagetag),
+				helpers.String("wlid", wlid))
+		} else {
+			logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
+				helpers.String("image", imagetag),
+				helpers.String("wlid", wlid))
+		}
 		return err
 	}
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
-		if resp.StatusCode == http.StatusTooManyRequests {
-			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report due to rate limiting (429 Too Many Requests). Please ask your vendor for support", helpers.Error(err), helpers.String("body", body))
-		} else {
-			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
-		}
-
+		logger.L().Ctx(ctx).Error("failed reading response body from event receiver", helpers.Error(err),
+			helpers.String("image", imagetag),
+			helpers.String("wlid", wlid))
 		return err
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
