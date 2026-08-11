@@ -255,3 +255,39 @@ func TestLoadConfigProxyRegistryMap(t *testing.T) {
 	}
 	assert.Equal(t, expected, config.ProxyRegistryMap)
 }
+
+// TestLoadConfigTrustedVendorsEnv verifies an env-only TRUSTEDVENDORS override is
+// honored instead of being silently dropped and replaced by defaultTrustedVendors
+// (AutomaticEnv values for []string fields are not populated by Unmarshal, so the
+// resolution must read through viper's getters, same as cveMatchingMode).
+func TestLoadConfigTrustedVendorsEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("TRUSTEDVENDORS", "foo, bar")
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"foo", "bar"}, c.TrustedVendors)
+}
+
+// TestLoadConfigProxyRegistryMapEnv verifies an env-only PROXYREGISTRYMAP override
+// (a JSON object string) is honored instead of being silently dropped
+// (AutomaticEnv values for map[string]string fields are not populated by
+// Unmarshal, so the resolution must read through viper's getters).
+func TestLoadConfigProxyRegistryMapEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":"env-mirror.example.com"}`)
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{"docker.io": "env-mirror.example.com"}, c.ProxyRegistryMap)
+}
+
+// TestLoadConfigProxyRegistryMapEnv_Invalid verifies a malformed PROXYREGISTRYMAP
+// env value fails config loading with an error instead of GetStringMapString's
+// default behavior of silently discarding the decode error and returning an
+// empty map, which would disable registry mirroring with no indication why.
+func TestLoadConfigProxyRegistryMapEnv_Invalid(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":`)
+	_, err := LoadConfig("testdata")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "proxyRegistryMap")
+}

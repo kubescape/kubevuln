@@ -156,12 +156,68 @@ func LoadConfig(path string) (Config, error) {
 			config.CVEMatchingMode, CVEMatchingOff, CVEMatchingOn, CVEMatchingAdaptive)
 	}
 
+	// Same AutomaticEnv/Unmarshal gap as cveMatchingMode above, but for slice/map
+	// fields: Unmarshal silently drops env-only values for []string and
+	// map[string]string, so an env-only TRUSTEDVENDORS/PROXYREGISTRYMAP would
+	// otherwise be lost. Read through viper's getters when the field was
+	// actually set (via file or env) rather than trusting the unmarshalled
+	// struct field alone.
+	if v.IsSet("trustedVendors") {
+		config.TrustedVendors = trustedVendorsFromViper(v)
+	}
 	if len(config.TrustedVendors) == 0 {
 		// copy to avoid aliasing the package-level default slice
 		config.TrustedVendors = append([]string{}, defaultTrustedVendors...)
 	}
 
+	if v.IsSet("proxyRegistryMap") {
+		proxyMap, err := proxyRegistryMapFromViper(v)
+		if err != nil {
+			return Config{}, err
+		}
+		config.ProxyRegistryMap = proxyMap
+	}
+
 	return config, nil
+}
+
+// trustedVendorsFromViper resolves trustedVendors regardless of whether it came
+// from the JSON config file (already a []interface{}, handled fine by
+// GetStringSlice) or from a TRUSTEDVENDORS environment variable (a plain string,
+// which GetStringSlice does not split): env values are a comma-separated list,
+// e.g. TRUSTEDVENDORS=echo,chainguard.
+func trustedVendorsFromViper(v *viper.Viper) []string {
+	raw, ok := v.Get("trustedVendors").(string)
+	if !ok {
+		return v.GetStringSlice("trustedVendors")
+	}
+	var vendors []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			vendors = append(vendors, part)
+		}
+	}
+	return vendors
+}
+
+// proxyRegistryMapFromViper resolves proxyRegistryMap regardless of whether it
+// came from the JSON config file (already a map[string]interface{}, handled
+// fine by GetStringMapString) or from a PROXYREGISTRYMAP environment variable
+// (a plain JSON-object string, e.g. PROXYREGISTRYMAP={"docker.io":"mirror"}).
+// GetStringMapString discards JSON decode errors and silently returns an empty
+// map, which would disable registry mirroring on a malformed env value without
+// any indication why, so the env case is parsed explicitly here and any error
+// is surfaced to the caller instead.
+func proxyRegistryMapFromViper(v *viper.Viper) (map[string]string, error) {
+	raw, ok := v.Get("proxyRegistryMap").(string)
+	if !ok {
+		return v.GetStringMapString("proxyRegistryMap"), nil
+	}
+	var proxyMap map[string]string
+	if err := json.Unmarshal([]byte(raw), &proxyMap); err != nil {
+		return nil, fmt.Errorf("invalid proxyRegistryMap: %w", err)
+	}
+	return proxyMap, nil
 }
 
 type clusterDataBackendServicesConfig struct {
