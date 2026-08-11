@@ -30,6 +30,7 @@ type HTTPController struct {
 	scanService ports.ScanService
 	workerPool  *workerpool.WorkerPool
 	metrics     *metrics.Metrics
+	diagnostics func(ctx context.Context) domain.Diagnostics
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -58,6 +59,16 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 		return h, err
 	}
 	return h, nil
+}
+
+// WithDiagnostics attaches the callback the Diagnostics handler uses to report the
+// scan mode and backend versions currently in effect. A callback (rather than a
+// fixed value) is required because the CVE DB version changes as the background
+// updater in GrypeAdapter refreshes it (see adapters/v1/grype.go). It is a no-op to
+// call the handler without this having been set, returning the struct's zero value.
+func (h *HTTPController) WithDiagnostics(f func(ctx context.Context) domain.Diagnostics) *HTTPController {
+	h.diagnostics = f
+	return h
 }
 
 // recordScan records the outcome and duration of a background scan job for the given endpoint.
@@ -173,6 +184,17 @@ func (h HTTPController) Ready(c *gin.Context) {
 	}
 
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
+}
+
+// Diagnostics reports the scan mode and backend versions resolved at startup, so
+// operators can query the running configuration directly instead of inferring it
+// from logs. See domain.Diagnostics for the excluded (credential) fields.
+func (h HTTPController) Diagnostics(c *gin.Context) {
+	if h.diagnostics == nil {
+		c.JSON(http.StatusOK, domain.Diagnostics{})
+		return
+	}
+	c.JSON(http.StatusOK, h.diagnostics(c.Request.Context()))
 }
 
 // ScanCP unmarshalls the payload and calls scanService.ScanCP
