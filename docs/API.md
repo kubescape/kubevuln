@@ -143,6 +143,9 @@ GET /metrics
 | `kubevuln_exceptions_matched_total` | counter | `sourceKind` (`SecurityException`/`ClusterSecurityException`) | Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException |
 | `kubevuln_exceptions_expired_total` | counter | `sourceKind` | Total number of SecurityException/ClusterSecurityException CRDs skipped because their `expiresAt` has passed |
 | `kubevuln_exceptions_active` | gauge | - | Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan |
+| `kubevuln_scan_fallbacks_total` | counter | `component` (`in_process`/`sidecar`), `category` (`registry_auth`/`platform`/`size_classification`), `strategy` (`anonymous`/`ecr`/`gcp_adc`/`image_too_large`/`incomplete`/`platform_mismatch`/`sbom_too_large`), `outcome` (`classified`/`failed`/`succeeded`) | Fallbacks taken while resolving or classifying a scan, such as retrying a 401 with cloud credentials or falling back to anonymous access |
+| `kubevuln_scan_source_resolution_total` | counter | `component`, `outcome` (`first_pass_success`/`fallback_assisted_success`/`fallback_failed`/`first_pass_failure`) | Whether pulling the image succeeded outright or only after a fallback, which is what distinguishes a healthy registry from one that works only by retry |
+| `kubevuln_registry_auth_cache_total` | counter | `strategy` (`ecr`/`gcp_adc`), `result` (`hit`/`miss`) | Registry auth credential lookups served from cache versus fetched from the cloud provider |
 
 `reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
