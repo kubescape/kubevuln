@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -157,7 +158,13 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 				return nil, backoff.Permanent(retryErr)
 			}
 			if wait, ok := parseRetryAfter(resp); ok {
-				return nil, backoff.RetryAfter(int(wait.Round(time.Second).Seconds()))
+				if wait > 0 {
+					wait = wait.Round(time.Second)
+					if wait == 0 {
+						wait = time.Second
+					}
+				}
+				return nil, backoff.RetryAfter(int(wait.Seconds()))
 			}
 			return nil, retryErr
 		}
@@ -176,7 +183,8 @@ func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 		return 0, false
 	}
 	if seconds, err := strconv.ParseInt(v, 10, 64); err == nil {
-		if seconds < 0 {
+		const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+		if seconds < 0 || seconds > maxRetryAfterSeconds {
 			return 0, false
 		}
 		return time.Duration(seconds) * time.Second, true

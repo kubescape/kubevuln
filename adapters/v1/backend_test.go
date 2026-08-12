@@ -1450,6 +1450,7 @@ func TestParseRetryAfter(t *testing.T) {
 		{"valid seconds", "120", true, 120 * time.Second},
 		{"zero seconds", "0", true, 0},
 		{"negative seconds rejected", "-5", false, 0},
+		{"overflowing seconds rejected", "9223372037", false, 0},
 		{"garbage value rejected", "not-a-valid-value", false, 0},
 		{"valid future HTTP-date", time.Now().Add(2 * time.Hour).UTC().Format(http.TimeFormat), true, 2 * time.Hour},
 		{"past HTTP-date clamped to zero, not negative", time.Now().Add(-2 * time.Hour).UTC().Format(http.TimeFormat), true, 0},
