@@ -105,8 +105,18 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 // does not cause a cross-tenant denial-of-service for workloads that use valid imagePullSecrets
 // to bypass the rate limit. ImageHash is avoided because ScanRegistry payloads never populate it.
 func rateLimitCacheKey(workload domain.ScanCommand) string {
-	if len(workload.CredentialsList) == 0 {
+	fingerprint := credentialsFingerprint(workload)
+	if fingerprint == "" {
 		return workload.ImageTagNormalized
+	}
+	return fmt.Sprintf("%s|%s", workload.ImageTagNormalized, fingerprint)
+}
+
+// credentialsFingerprint hashes the workload's credentials, so that keys built from it keep
+// callers holding different credentials apart. Empty when the workload carries none.
+func credentialsFingerprint(workload domain.ScanCommand) string {
+	if len(workload.CredentialsList) == 0 {
+		return ""
 	}
 	h := sha256.New()
 	for _, cred := range workload.CredentialsList {
@@ -119,7 +129,21 @@ func rateLimitCacheKey(workload domain.ScanCommand) string {
 			len(cred.RegistryToken), cred.RegistryToken,
 			len(cred.ServerAddress), cred.ServerAddress)
 	}
-	return fmt.Sprintf("%s|%x", workload.ImageTagNormalized, h.Sum(nil))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// sbomSingleflightKey identifies the SBOM a caller is about to produce, so concurrent
+// callers only share work when they are asking for the same one.
+//
+// It keys on ImageSlug rather than the image tag. The slug carries the image digest and is
+// what the SBOM is stored under, so it is the identity of the object being created. The tag
+// is not: a mutable tag can point at two different digests at the same time, during a
+// rollout or after a repush, and those are different images that must not share a result.
+// rateLimitCacheKey leaves the digest out on purpose, because a registry rate limits by
+// repository rather than by digest, which makes it the wrong identity here.
+func sbomSingleflightKey(workload domain.ScanCommand, opts domain.RegistryOptions) string {
+	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t", workload.ImageSlug, credentialsFingerprint(workload),
+		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
@@ -1299,7 +1323,7 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 	}
 
 	opts := optionsFromWorkload(ctx, workload)
-	key := fmt.Sprintf("%s|%s|http:%t|skiptls:%t", rateLimitCacheKey(workload), opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
+	key := sbomSingleflightKey(workload, opts)
 
 	// Detach workerCtx from caller cancellation so the singleflight worker job completes for all waiters even if the leader cancels early
 	workerCtx := context.WithoutCancel(ctx)
