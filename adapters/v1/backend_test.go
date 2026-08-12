@@ -28,8 +28,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
-	"github.com/kubescape/go-logger"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -675,6 +675,48 @@ func TestMarkRelevantVulnerabilities(t *testing.T) {
 				assert.Equal(t, want, *v.IsRelevant, "IsRelevant mismatch for %s", id)
 			}
 		})
+	}
+}
+
+// A package name is not unique within an image: two versions of one library sitting side by
+// side is ordinary in Java and Node images, and each produces its own vulnerability record
+// under the same name. Keying relevancy on the CVE and the name alone marked the version that
+// was never loaded relevant because the other one was, which is the opposite of what the
+// relevancy scan is for.
+func TestMarkRelevantVulnerabilities_DistinguishesPackageVersions(t *testing.T) {
+	vuln := func(cve, pkg, version string) containerscan.CommonContainerVulnerabilityResult {
+		return containerscan.CommonContainerVulnerabilityResult{
+			Vulnerability: containerscan.Vulnerability{
+				Name:               cve,
+				RelatedPackageName: pkg,
+				PackageVersion:     version,
+			},
+		}
+	}
+
+	vulnerabilities := []containerscan.CommonContainerVulnerabilityResult{
+		vuln("CVE-2024-0001", "commons-collections", "3.2.1"),
+		vuln("CVE-2024-0001", "commons-collections", "4.4"),
+		vuln("CVE-2024-0002", "log4j-core", "2.14.1"),
+	}
+	// only the 4.4 copy is actually loaded
+	relevant := []containerscan.CommonContainerVulnerabilityResult{
+		vuln("CVE-2024-0001", "commons-collections", "4.4"),
+	}
+
+	markRelevantVulnerabilities(vulnerabilities, relevant)
+
+	want := map[string]bool{
+		"CVE-2024-0001+commons-collections@3.2.1": false,
+		"CVE-2024-0001+commons-collections@4.4":   true,
+		"CVE-2024-0002+log4j-core@2.14.1":         false,
+	}
+	for _, v := range vulnerabilities {
+		id := v.Name + "+" + v.RelatedPackageName + "@" + v.PackageVersion
+		expected, ok := want[id]
+		require.True(t, ok, "unexpected vulnerability %s", id)
+		require.NotNil(t, v.IsRelevant, "IsRelevant should be set for %s", id)
+		assert.Equal(t, expected, *v.IsRelevant, "IsRelevant mismatch for %s", id)
 	}
 }
 
