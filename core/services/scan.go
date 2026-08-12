@@ -1387,6 +1387,14 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 	select {
 	case res := <-ch:
 		if res.Err != nil {
+			// The leader already reported this failure with its own workload identity
+			// from inside the closure. Every other caller sharing the same result would
+			// otherwise go completely unreported to the backend under its own JobID/Wlid
+			// -- singleflight only executes one closure per key, so this is the only
+			// place a waiter's own failure report can still be sent. See #642.
+			if !ran {
+				s.reportWaiterSBOMFailure(workerCtx, res.Err)
+			}
 			return domain.SBOM{}, nil, res.Err
 		}
 		if !ran {
@@ -1397,4 +1405,20 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 	case <-ctx.Done():
 		return domain.SBOM{}, nil, ctx.Err()
 	}
+}
+
+// reportWaiterSBOMFailure re-emits ReportScanFailure for a singleflight caller whose own
+// closure never ran (a "waiter"), using the same reason/error the leader already reported
+// with its own workload identity. err is always the *domain.ScanError the closure in
+// getOrCreateSBOM returns on failure; the classifySBOMError fallback only guards against
+// that invariant changing.
+func (s *ScanService) reportWaiterSBOMFailure(ctx context.Context, err error) {
+	reason := classifySBOMError(err)
+	reportErr := err
+	var scanErr *domain.ScanError
+	if errors.As(err, &scanErr) {
+		reason = scanErr.Reason
+		reportErr = scanErr.Err
+	}
+	_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, reportErr)
 }
