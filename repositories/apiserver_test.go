@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
@@ -2050,6 +2051,39 @@ func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testin
 	_, _, err = a.GetSecurityExceptions(context.TODO(), "")
 	require.NoError(t, err, "a failed List() must not be cached, so the next call retries instead of replaying the failure")
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
+func TestAPIServerStore_InvalidateSecurityExceptionCacheForObject(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+	a.securityExceptionListCache.Set("se/ns-a", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set("se/ns-b", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, []sev1beta1.ClusterSecurityException{{}}, time.Minute)
+
+	a.invalidateSecurityExceptionCacheForObject(&unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"namespace": "ns-a",
+		},
+	}})
+
+	_, ok := a.securityExceptionListCache.Get("se/ns-a")
+	assert.False(t, ok, "the changed namespace must be evicted immediately")
+	_, ok = a.securityExceptionListCache.Get("se/ns-b")
+	assert.True(t, ok, "other namespaces must stay cached")
+	_, ok = a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey)
+	assert.True(t, ok, "cluster-scoped exceptions must not be evicted by a namespaced change")
+}
+
+func TestAPIServerStore_InvalidateClusterSecurityExceptionCache(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+	a.securityExceptionListCache.Set("se/ns-a", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, []sev1beta1.ClusterSecurityException{{}}, time.Minute)
+
+	a.invalidateClusterSecurityExceptionCache()
+
+	_, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey)
+	assert.False(t, ok, "cluster-scoped cache must be evicted immediately")
+	_, ok = a.securityExceptionListCache.Get("se/ns-a")
+	assert.True(t, ok, "namespaced exceptions must stay cached")
 }
 
 // ctxCapturingResource wraps a dynamic.ResourceInterface, invoking a hook synchronously with
