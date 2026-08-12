@@ -172,7 +172,7 @@ All scan endpoints accept a JSON payload and return immediately with a `200 OK` 
 
 Look up the current lifecycle state for a previously submitted `jobID`.
 
-```
+```http
 GET /v1/scanStatus/:jobID
 ```
 
@@ -183,11 +183,11 @@ GET /v1/scanStatus/:jobID
 | `jobID` | string | Submitted job identifier |
 | `endpoint` | string | Async scan endpoint handling this job |
 | `state` | string | One of `queued`, `running`, `succeeded`, `failed`, or `abandoned` |
-| `phase` | string | Current service phase, for example `sbom_generation`, `cve_matching`, or `result_upload` |
+| `phase` | string | Current service phase. Reported values include `queued`, `running`, `relevancy_lookup`, `cve_lookup`, `sbom_generation`, `sbom_storage`, `cve_matching`, `result_storage`, `result_upload`, `completed`, and `abandoned` |
 | `reason` | string | Machine readable terminal reason for `failed` or `abandoned` jobs |
 | `acceptedAt` | string | RFC3339 timestamp when the request was accepted |
-| `startedAt` | string | RFC3339 timestamp when execution began |
-| `finishedAt` | string | RFC3339 timestamp when the job reached a terminal state |
+| `startedAt` | string | RFC3339 timestamp when execution began. Omitted while the job is still queued |
+| `finishedAt` | string | RFC3339 timestamp when the job reached a terminal state. Omitted until the job succeeds, fails, or is abandoned |
 | `updatedAt` | string | RFC3339 timestamp of the latest lifecycle transition |
 
 #### Response

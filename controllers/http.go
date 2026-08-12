@@ -167,7 +167,9 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		h.ensureStatuses().markRunning(newScan.JobID)
+		if !h.ensureStatuses().markRunning(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.GenerateSBOM(bgCtx)
 		outcome := "success"
@@ -261,7 +263,9 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		h.ensureStatuses().markRunning(newScan.JobID)
+		if !h.ensureStatuses().markRunning(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanCP(bgCtx)
 		if err != nil {
@@ -321,7 +325,9 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		h.ensureStatuses().markRunning(newScan.JobID)
+		if !h.ensureStatuses().markRunning(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanCVE(bgCtx)
 		outcome := "success"
@@ -417,7 +423,9 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		h.ensureStatuses().markRunning(newScan.JobID)
+		if !h.ensureStatuses().markRunning(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanRegistry(bgCtx)
 		outcome := "success"

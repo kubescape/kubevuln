@@ -297,6 +297,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 		// check if we need SBOM
 		if cve.Content == nil || s.storage {
+			domain.UpdateScanPhase(mainCtx, "sbom_generation")
 			var sbomErr error
 			sbom, _, sbomErr = s.getOrCreateSBOM(ctx, subWorkload)
 			if sbomErr != nil {
@@ -324,6 +325,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		var cveExceptionsComplete bool
 		// if CVE manifest is not available, create it
 		if cve.Content == nil {
+			domain.UpdateScanPhase(mainCtx, "cve_matching")
 			// scan for CVE
 			cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 			if err != nil {
@@ -339,6 +341,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 			// store filtered CVE
 			if s.storage {
+				domain.UpdateScanPhase(mainCtx, "result_storage")
 				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -414,6 +417,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 		}
 		// submit CVE manifest to platform
+		domain.UpdateScanPhase(mainCtx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, cvep)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),

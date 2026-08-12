@@ -867,7 +867,9 @@ func TestHTTPController_ScanStatus_Succeeded(t *testing.T) {
 
 	assert.Equal(t, "generateSBOM", status.Endpoint)
 	assert.Equal(t, "completed", status.Phase)
-	assert.True(t, status.AcceptedAt.Before(status.FinishedAt) || status.AcceptedAt.Equal(status.FinishedAt))
+	require.NotNil(t, status.StartedAt)
+	require.NotNil(t, status.FinishedAt)
+	assert.True(t, status.AcceptedAt.Before(*status.FinishedAt) || status.AcceptedAt.Equal(*status.FinishedAt))
 	assert.False(t, status.StartedAt.IsZero())
 	assert.False(t, status.FinishedAt.IsZero())
 	assert.Empty(t, status.Reason)
@@ -905,6 +907,7 @@ func TestHTTPController_ScanStatus_Failed(t *testing.T) {
 
 	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason)
 	assert.Equal(t, "completed", status.Phase)
+	require.NotNil(t, status.FinishedAt)
 	assert.False(t, status.FinishedAt.IsZero())
 }
 
@@ -967,6 +970,7 @@ func TestHTTPController_ScanStatus_AbandonedOnShutdown(t *testing.T) {
 
 	assert.Equal(t, domain.ScanReasonShutdownAbandoned, status.Reason)
 	assert.Equal(t, string(domain.ScanStateAbandoned), status.Phase)
+	require.NotNil(t, status.FinishedAt)
 	assert.False(t, status.FinishedAt.IsZero())
 
 	release()
