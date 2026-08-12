@@ -377,7 +377,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	if sz > s.maxSBOMSize {
 		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategySBOMTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Ctx(ctx).Warning("SBOM exceeds size limit",
-			helpers.Int("maxImageSize", s.maxSBOMSize),
+			helpers.Int("maxSBOMSize", s.maxSBOMSize),
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.TooLarge
