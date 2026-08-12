@@ -452,6 +452,122 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 	assert.True(t, foundIgnored2, "Second IgnoredMatch should be included in the VEX document during update")
 }
 
+func TestAPIServerStore_storeVEX_preservesSecurityExceptionSemantics(t *testing.T) {
+	ignoredMatches := []v1beta1.IgnoredMatch{
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-NOT-AFFECTED", DataSource: "https://example.test/CVE-NOT-AFFECTED"},
+				},
+				Artifact: v1beta1.GrypePackage{PURL: "pkg:deb/debian/not-affected@1.0"},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "CVE-NOT-AFFECTED",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/not-affected",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusNotAffected),
+				Justification:   "component is compiled without the vulnerable feature",
+				ImpactStatement: "runtime path is unreachable in this deployment",
+			}},
+		},
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-FIXED", DataSource: "https://example.test/CVE-FIXED"},
+				},
+				Artifact: v1beta1.GrypePackage{PURL: "pkg:deb/debian/fixed@2.0"},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "CVE-FIXED",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/fixed",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusFixed),
+				Justification:   "patch validated in downstream image build",
+				ImpactStatement: "rolled out via golden base image",
+			}},
+		},
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-AFFECTED", DataSource: "https://example.test/CVE-AFFECTED"},
+				},
+				Artifact: v1beta1.GrypePackage{PURL: "pkg:deb/debian/affected@3.0"},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "CVE-AFFECTED",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/affected",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusAffected),
+				Justification:   "accepted risk",
+				ImpactStatement: "compensating controls limit exposure",
+			}},
+		},
+	}
+
+	cveManifest := domain.CVEManifest{
+		Name: name,
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey: "registry.k8s.io/coredns/coredns:v1.10.1",
+		},
+		Content: &v1beta1.GrypeDocument{
+			IgnoredMatches: ignoredMatches,
+		},
+	}
+	cveManifestFiltered := cveManifest
+	cveManifestFiltered.Content = &v1beta1.GrypeDocument{
+		IgnoredMatches: append([]v1beta1.IgnoredMatch(nil), ignoredMatches...),
+	}
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err, "updateVEX should preserve the same SecurityException-derived semantics")
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	got := map[string]v1beta1.Statement{}
+	for _, stmt := range vexContainer.Spec.Statements {
+		got[stmt.Vulnerability.Name] = stmt
+	}
+
+	require.Contains(t, got, "CVE-NOT-AFFECTED")
+	assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), got["CVE-NOT-AFFECTED"].Status)
+	assert.Equal(t, v1beta1.Justification("component is compiled without the vulnerable feature"), got["CVE-NOT-AFFECTED"].Justification)
+	assert.Equal(t, "runtime path is unreachable in this deployment", got["CVE-NOT-AFFECTED"].ImpactStatement)
+	assert.Empty(t, got["CVE-NOT-AFFECTED"].ActionStatement)
+	assert.Empty(t, got["CVE-NOT-AFFECTED"].StatusNotes)
+
+	require.Contains(t, got, "CVE-FIXED")
+	assert.Equal(t, v1beta1.Status(sev1beta1.VulnerabilityStatusFixed), got["CVE-FIXED"].Status)
+	assert.Empty(t, got["CVE-FIXED"].Justification)
+	assert.Empty(t, got["CVE-FIXED"].ImpactStatement)
+	assert.Empty(t, got["CVE-FIXED"].ActionStatement)
+	assert.Equal(t, "justification: patch validated in downstream image build; impact: rolled out via golden base image", got["CVE-FIXED"].StatusNotes)
+
+	require.Contains(t, got, "CVE-AFFECTED")
+	assert.Equal(t, v1beta1.Status(vex.StatusAffected), got["CVE-AFFECTED"].Status)
+	assert.Empty(t, got["CVE-AFFECTED"].Justification)
+	assert.Empty(t, got["CVE-AFFECTED"].ImpactStatement)
+	assert.Equal(t, securityExceptionAcceptedRiskAction, got["CVE-AFFECTED"].ActionStatement)
+	assert.Equal(t, "justification: accepted risk; impact: compensating controls limit exposure", got["CVE-AFFECTED"].StatusNotes)
+}
+
 // TestAPIServerStore_storeVEX_updateRestoresNotAffected guards against a regression where
 // updateVEX only ever promoted statements to "affected" and never reset them back to
 // "not_affected" once the corresponding CVE/package pair stopped being relevant.

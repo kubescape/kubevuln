@@ -1071,6 +1071,95 @@ func statementHasPURL(products []v1beta1.Product, purl string) bool {
 // more specific remediation string.
 const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
 
+const (
+	defaultLocalImpactStatement         = "Vulnerable component is not loaded into the memory"
+	securityExceptionImpactStatement    = "Vulnerability was ignored by a SecurityException"
+	securityExceptionAcceptedRiskAction = "A SecurityException accepted this vulnerability as an affected finding"
+)
+
+type ignoredVEXAssessment struct {
+	status          v1beta1.Status
+	justification   v1beta1.Justification
+	impactStatement string
+	actionStatement string
+	statusNotes     string
+}
+
+func defaultIgnoredVEXAssessment() ignoredVEXAssessment {
+	return ignoredVEXAssessment{
+		status:          v1beta1.Status(vex.StatusNotAffected),
+		justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+		impactStatement: securityExceptionImpactStatement,
+	}
+}
+
+func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
+	assessment := defaultIgnoredVEXAssessment()
+	rule, ok := securityExceptionIgnoreRule(m)
+	if !ok {
+		return assessment
+	}
+
+	switch strings.TrimSpace(rule.FixState) {
+	case string(sev1beta1.VulnerabilityStatusFixed):
+		assessment.status = v1beta1.Status(sev1beta1.VulnerabilityStatusFixed)
+		assessment.justification = ""
+		assessment.impactStatement = ""
+		assessment.statusNotes = ignoredMatchStatusNotes(rule)
+	case string(sev1beta1.VulnerabilityStatusAffected):
+		assessment.status = v1beta1.Status(vex.StatusAffected)
+		assessment.justification = ""
+		assessment.impactStatement = ""
+		assessment.actionStatement = securityExceptionAcceptedRiskAction
+		assessment.statusNotes = ignoredMatchStatusNotes(rule)
+	case "", string(sev1beta1.VulnerabilityStatusNotAffected):
+		if j := strings.TrimSpace(rule.Justification); j != "" {
+			assessment.justification = v1beta1.Justification(j)
+		}
+		if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
+			assessment.impactStatement = impact
+		}
+	default:
+		if j := strings.TrimSpace(rule.Justification); j != "" {
+			assessment.justification = v1beta1.Justification(j)
+		}
+		if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
+			assessment.impactStatement = impact
+		}
+	}
+
+	return assessment
+}
+
+func securityExceptionIgnoreRule(m v1beta1.IgnoredMatch) (v1beta1.IgnoreRule, bool) {
+	for _, rule := range m.AppliedIgnoreRules {
+		switch rule.SourceKind {
+		case "SecurityException", "ClusterSecurityException":
+			return rule, true
+		}
+	}
+	return v1beta1.IgnoreRule{}, false
+}
+
+func ignoredMatchStatusNotes(rule v1beta1.IgnoreRule) string {
+	parts := make([]string, 0, 2)
+	if j := strings.TrimSpace(rule.Justification); j != "" {
+		parts = append(parts, "justification: "+j)
+	}
+	if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
+		parts = append(parts, "impact: "+impact)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func applyIgnoredMatchAssessment(stmt *v1beta1.Statement, assessment ignoredVEXAssessment) {
+	stmt.Status = assessment.status
+	stmt.Justification = assessment.justification
+	stmt.ImpactStatement = assessment.impactStatement
+	stmt.ActionStatement = assessment.actionStatement
+	stmt.StatusNotes = assessment.statusNotes
+}
+
 // buildActionStatement returns a remediation string for an affected VEX statement. When the
 // match reports a fixed state with known fix versions, it names them; otherwise it falls back
 // to defaultActionStatement.
@@ -1104,6 +1193,7 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 							vexDoc.Statements[i].Justification = ""
 							vexDoc.Statements[i].ImpactStatement = ""
 							vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
+							vexDoc.Statements[i].StatusNotes = ""
 							foundProduct = true
 						}
 						if foundProduct {
@@ -1173,7 +1263,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 
 				Status:          v1beta1.Status(vex.StatusNotAffected),
 				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerable component is not loaded into the memory",
+				ImpactStatement: defaultLocalImpactStatement,
 			})
 		}
 
@@ -1189,7 +1279,7 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 				return err
 			}
 
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+			stmt := v1beta1.Statement{
 				ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
 				Vulnerability: v1beta1.VexVulnerability{
 					ID:          v.Vulnerability.DataSource,
@@ -1201,11 +1291,9 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 				Products: []v1beta1.Product{
 					*product,
 				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerability was ignored by a SecurityException",
-			})
+			}
+			applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
+			vexDoc.Statements = append(vexDoc.Statements, stmt)
 		}
 	}
 
@@ -1255,9 +1343,7 @@ func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifes
 					for _, sc := range p.Subcomponents {
 						if sc.ID == v.Artifact.PURL {
 							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
-							vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
-							vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
-							vexDoc.Statements[i].ActionStatement = ""
+							applyIgnoredMatchAssessment(&vexDoc.Statements[i], ignoredMatchAssessment(v))
 							foundProduct = true
 						}
 						if foundProduct {
@@ -1343,7 +1429,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 					Status:          v1beta1.Status(vex.StatusNotAffected),
 					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-					ImpactStatement: "Vulnerable component is not loaded into the memory",
+					ImpactStatement: defaultLocalImpactStatement,
 				})
 			}
 		}
@@ -1378,7 +1464,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 					return err
 				}
 
-				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
+				stmt := v1beta1.Statement{
 					ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
 					Vulnerability: v1beta1.VexVulnerability{
 						ID:          v.Vulnerability.DataSource,
@@ -1390,21 +1476,19 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 					Products: []v1beta1.Product{
 						*product,
 					},
-
-					Status:          v1beta1.Status(vex.StatusNotAffected),
-					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-					ImpactStatement: "Vulnerability was ignored by a SecurityException",
-				})
+				}
+				applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
+				vexDoc.Statements = append(vexDoc.Statements, stmt)
 			}
 		}
 	}
 
 	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
 	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
-	ignoredMap := make(map[string]bool)
+	ignoredMap := make(map[string]ignoredVEXAssessment)
 	if cve.Content != nil {
 		for _, v := range cve.Content.IgnoredMatches {
-			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = ignoredMatchAssessment(v)
 		}
 	}
 
@@ -1419,16 +1503,21 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
+		vexDoc.Statements[i].ImpactStatement = defaultLocalImpactStatement
 		vexDoc.Statements[i].ActionStatement = ""
+		vexDoc.Statements[i].StatusNotes = ""
 
+		var assessment ignoredVEXAssessment
 		isIgnored := anyPURLMatches(vexDoc.Statements[i].Products, func(purl string) bool {
-			return ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]
+			if ignoredAssessment, ok := ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]; ok {
+				assessment = ignoredAssessment
+				return true
+			}
+			return false
 		})
 
 		if isIgnored {
-			vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
-		} else {
-			vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
+			applyIgnoredMatchAssessment(&vexDoc.Statements[i], assessment)
 		}
 	}
 

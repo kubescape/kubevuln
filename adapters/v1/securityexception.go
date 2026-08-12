@@ -227,6 +227,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		"sourceKind": src.kind,
 		"ruleId":     suppressionRuleID(src),
 	}
+	if status := strings.TrimSpace(string(vuln.Status)); status != "" {
+		attrs["status"] = status
+	}
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
 	}
@@ -378,6 +381,9 @@ func buildIgnoreRule(m v1beta1.Match, matched []armotypes.VulnerabilityException
 	if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
 		rule.SourceNamespace = ns
 	}
+	if status, ok := p.Attributes["status"].(string); ok {
+		rule.FixState = status
+	}
 	if just, ok := p.Attributes["justification"].(string); ok {
 		rule.Justification = just
 	}
@@ -513,7 +519,13 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 		return false
 	}
 	r := im.AppliedIgnoreRules[0]
-	return r.FixState == "" && r.Package == nil
+	if r.Package != nil {
+		return false
+	}
+	if r.SourceKind != "" || r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
+		return true
+	}
+	return r.FixState == ""
 }
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
