@@ -98,6 +98,9 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		parentLayer := map[string]string{
 			dummyLayer: parentLayerHash,
 		}
+		// ...and one of layer to its position in the image, so the earliest layer a package
+		// appears in can be picked directly rather than by walking the chain from the root.
+		layerPosition := map[string]int{}
 
 		target, err := NewTargetFromSource(grypeDocument.Source)
 		if err != nil {
@@ -106,9 +109,10 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 		if target.IsImageTarget() {
 			imageMetadata := target.GetImageMetadata()
-			for _, layer := range imageMetadata.Layers {
+			for i, layer := range imageMetadata.Layers {
 				parentLayer[layer.Digest] = parentLayerHash
 				parentLayerHash = layer.Digest
+				layerPosition[layer.Digest] = i
 			}
 		}
 
@@ -202,10 +206,15 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 			// fill extra layer information
 			for i, v := range vulnerabilityResults {
+				// The package is introduced by the earliest layer it appears in. This used to
+				// walk the parent chain from "", which meant it only ever resolved for a
+				// package present in the image's first layer: for anything added by a later
+				// layer no element could start the chain, and the result stayed empty.
 				earlyLayer := ""
+				earlyPosition := 0
 				for j, layer := range v.Layers {
-					if layer.ParentLayerHash == earlyLayer {
-						earlyLayer = layer.LayerHash
+					if position, ok := layerPosition[layer.LayerHash]; ok && (earlyLayer == "" || position < earlyPosition) {
+						earlyLayer, earlyPosition = layer.LayerHash, position
 					}
 					if l, ok := data[layer.LayerHash]; ok {
 						if layer.LayerInfo == nil {
@@ -215,6 +224,11 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						vulnerabilityResults[i].Layers[j].CreatedTime = l.CreatedTime
 						vulnerabilityResults[i].Layers[j].LayerOrder = l.LayerOrder
 					}
+				}
+				if earlyLayer == "" && len(v.Layers) > 0 {
+					// No layer of this package is one of the image's own, which is the case
+					// for a match with no locations: it is given the placeholder layer above.
+					earlyLayer = v.Layers[0].LayerHash
 				}
 				vulnerabilityResults[i].IntroducedInLayer = earlyLayer
 			}
