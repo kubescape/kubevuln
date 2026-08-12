@@ -1328,7 +1328,14 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 	// Detach workerCtx from caller cancellation so the singleflight worker job completes for all waiters even if the leader cancels early
 	workerCtx := context.WithoutCancel(ctx)
 
+	// ran reports whether this caller's own closure was the one singleflight executed.
+	// singleflight's res.Shared cannot answer that: it means the result was handed to more
+	// than one caller, so it is true for the leader too, and counting on it would report the
+	// caller that did the work as one of the callers that were spared it. Only read in the
+	// res branch below, where receiving happens-after the closure returns.
+	ran := false
 	ch := s.sfGroup.DoChan(key, func() (interface{}, error) {
+		ran = true
 		// Re-check storage inside singleflight worker in case another worker stored it while we waited
 		if s.storage {
 			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && sbom.Content != nil {
@@ -1379,7 +1386,7 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 		if res.Err != nil {
 			return domain.SBOM{}, false, res.Err
 		}
-		if res.Shared {
+		if !ran {
 			metrics.RecordSingleflightHit(ctx, "sbom_generation")
 		}
 		return res.Val.(domain.SBOM), !res.Shared, nil
