@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -803,5 +804,175 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			wantDurationSeries := `kubevuln_scan_duration_seconds_count{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
 			assert.True(t, strings.Contains(body, wantDurationSeries), body)
 		})
+	}
+}
+
+type statusFlowScanService struct {
+	*services.MockScanService
+	err       error
+	blockCh   <-chan struct{}
+	startedCh chan<- struct{}
+	phase     string
+}
+
+func (s statusFlowScanService) GenerateSBOM(ctx context.Context) error {
+	if s.phase != "" {
+		domain.UpdateScanPhase(ctx, s.phase)
+	}
+	if s.startedCh != nil {
+		select {
+		case s.startedCh <- struct{}{}:
+		default:
+		}
+	}
+	if s.blockCh != nil {
+		<-s.blockCh
+	}
+	return s.err
+}
+
+func (s statusFlowScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func TestHTTPController_ScanStatus_Succeeded(t *testing.T) {
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		phase:           "result_upload",
+	}, 1)
+	t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:1","jobID":"job-success"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ = http.NewRequest("GET", "/v1/scanStatus/job-success", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateSucceeded
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, "generateSBOM", status.Endpoint)
+	assert.Equal(t, "completed", status.Phase)
+	assert.True(t, status.AcceptedAt.Before(status.FinishedAt) || status.AcceptedAt.Equal(status.FinishedAt))
+	assert.False(t, status.StartedAt.IsZero())
+	assert.False(t, status.FinishedAt.IsZero())
+	assert.Empty(t, status.Reason)
+}
+
+func TestHTTPController_ScanStatus_Failed(t *testing.T) {
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		err:             &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: errors.New("boom")},
+	}, 1)
+	t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:2","jobID":"job-failed"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ = http.NewRequest("GET", "/v1/scanStatus/job-failed", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason)
+	assert.Equal(t, "completed", status.Phase)
+	assert.False(t, status.FinishedAt.IsZero())
+}
+
+func TestHTTPController_ScanStatus_AbandonedOnShutdown(t *testing.T) {
+	blocked := make(chan struct{})
+	started := make(chan struct{}, 1)
+	release := func() {
+		select {
+		case <-blocked:
+		default:
+			close(blocked)
+		}
+	}
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		blockCh:         blocked,
+		startedCh:       started,
+	}, 1)
+	t.Cleanup(release)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	firstReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:3","jobID":"job-running"}`))
+	firstW := httptest.NewRecorder()
+	router.ServeHTTP(firstW, firstReq)
+	require.Equal(t, http.StatusOK, firstW.Code, firstW.Body.String())
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first job did not start in time")
+	}
+
+	secondReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:4","jobID":"job-abandoned"}`))
+	secondW := httptest.NewRecorder()
+	router.ServeHTTP(secondW, secondReq)
+	require.Equal(t, http.StatusOK, secondW.Code, secondW.Body.String())
+
+	done := make(chan struct{})
+	go func() {
+		c.Shutdown(20 * time.Millisecond)
+		close(done)
+	}()
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ := http.NewRequest("GET", "/v1/scanStatus/job-abandoned", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateAbandoned
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, domain.ScanReasonShutdownAbandoned, status.Reason)
+	assert.Equal(t, string(domain.ScanStateAbandoned), status.Phase)
+	assert.False(t, status.FinishedAt.IsZero())
+
+	release()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish in time")
 	}
 }

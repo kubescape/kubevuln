@@ -195,6 +195,7 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if !ok {
 		return domain.ErrCastingWorkload
 	}
+	domain.UpdateScanPhase(ctx, "sbom_generation")
 
 	sbom, storeErr, err := s.getOrCreateSBOM(ctx, workload)
 	if err != nil {
@@ -246,6 +247,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(mainCtx, "relevancy_lookup")
 
 	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name, s.partialRelevancy)
 	if err != nil {
@@ -444,6 +446,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	logger.L().Info("scan started",
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(ctx, "cve_lookup")
 
 	// check if CVE manifest is already available
 	var err error
@@ -459,6 +462,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	// check if we need SBOM
 	if cve.Content == nil {
+		domain.UpdateScanPhase(ctx, "sbom_generation")
 		var sbomErr error
 		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
 		if sbomErr != nil {
@@ -485,6 +489,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
+		domain.UpdateScanPhase(ctx, "cve_matching")
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
@@ -498,6 +503,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 		// store filtered CVE
 		if s.storage {
+			domain.UpdateScanPhase(ctx, "result_storage")
 			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -521,6 +527,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	// submit CVE manifest to platform, only if we have a wlid
 	if workload.Wlid != "" {
+		domain.UpdateScanPhase(ctx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
@@ -551,6 +558,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	logger.L().Info("registry scan started",
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(ctx, "scan_started")
 
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
@@ -562,6 +570,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// check if CVE manifest is already available
 	cve := domain.CVEManifest{}
 	if s.storage {
+		domain.UpdateScanPhase(ctx, "cve_lookup")
 		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
@@ -571,6 +580,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 	sbom := domain.SBOM{}
 	if cve.Content == nil {
+		domain.UpdateScanPhase(ctx, "sbom_generation")
 		var sbomErr error
 		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
 		if sbomErr != nil {
@@ -595,6 +605,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		// scan for CVE
+		domain.UpdateScanPhase(ctx, "cve_matching")
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			repErr := s.platform.ReportError(ctx, err)
@@ -612,6 +623,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 		// store filtered CVE
 		if s.storage {
+			domain.UpdateScanPhase(ctx, "result_storage")
 			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -634,6 +646,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	}
 
 	// report scan success to platform
+	domain.UpdateScanPhase(ctx, "result_upload")
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),

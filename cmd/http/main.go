@@ -212,6 +212,7 @@ func main() {
 		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
 		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
 		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
+		group.GET("/scanStatus/:jobID", controller.ScanStatus)
 	}
 
 	srv := &http.Server{
