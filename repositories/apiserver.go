@@ -1177,6 +1177,14 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		for _, v := range cve.Content.Matches {
 			found := false
 			for _, s := range vexDoc.Statements {
+				// Only our own statements count as already present. An external one is
+				// another author's assessment, and every step below that maintains a
+				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
+				// so treating it as ours would drop kubescape's assessment of this
+				// vulnerability from the document instead of recording it alongside theirs.
+				if !isLocalStatement(s.ID) {
+					continue
+				}
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}
@@ -1223,6 +1231,14 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		for _, v := range cve.Content.IgnoredMatches {
 			found := false
 			for _, s := range vexDoc.Statements {
+				// Only our own statements count as already present. An external one is
+				// another author's assessment, and every step below that maintains a
+				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
+				// so treating it as ours would drop kubescape's assessment of this
+				// vulnerability from the document instead of recording it alongside theirs.
+				if !isLocalStatement(s.ID) {
+					continue
+				}
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}

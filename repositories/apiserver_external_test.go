@@ -104,3 +104,77 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 	}
 	assert.True(t, foundLegacy, "Legacy statement should remain in the document")
 }
+
+// #595 made updateVEX leave external statements alone, but the dedup that decides whether
+// to append kubevuln's own statement still scans every statement rather than only the local
+// ones. An external statement covering a vulnerability kubevuln also found therefore
+// suppresses kubevuln's statement for it entirely, and since every assessment step
+// (mark-affected, mark-ignored, reset-to-baseline) is local-only, that vulnerability ends up
+// with no kubescape assessment in the document at all.
+func TestAPIServerStore_updateVEX_externalStatementDoesNotSuppressLocalOne(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	// Take one statement kubevuln generated, so the vulnerability and package are ones the
+	// manifest really contains, and swap it for an external statement covering the same pair.
+	var target v1beta1.Statement
+	for _, s := range vexContainer.Spec.Statements {
+		if isLocalStatement(s.ID) && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+			target = s
+			break
+		}
+	}
+	require.NotEmpty(t, target.Vulnerability.Name, "expected the first pass to generate statements")
+	pkg := target.Products[0].Subcomponents[0].ID
+
+	external := *target.DeepCopy()
+	external.ID = "https://chainguard.dev/vex/statement/" + target.Vulnerability.Name
+	external.Status = v1beta1.Status(vex.StatusAffected)
+	external.ImpactStatement = "External feed assessed this one"
+
+	kept := make([]v1beta1.Statement, 0, len(vexContainer.Spec.Statements))
+	for _, s := range vexContainer.Spec.Statements {
+		if s.ID != target.ID {
+			kept = append(kept, s)
+		}
+	}
+	vexContainer.Spec.Statements = append(kept, external)
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	updated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	foundLocal, foundExternal := false, false
+	for _, s := range updated.Spec.Statements {
+		if s.Vulnerability.Name != target.Vulnerability.Name {
+			continue
+		}
+		if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 || s.Products[0].Subcomponents[0].ID != pkg {
+			continue
+		}
+		if isLocalStatement(s.ID) {
+			foundLocal = true
+			continue
+		}
+		foundExternal = true
+		assert.Equal(t, external.Status, s.Status, "the external statement must still be untouched")
+		assert.Equal(t, external.ImpactStatement, s.ImpactStatement)
+	}
+	assert.True(t, foundExternal, "the external statement must survive")
+	assert.True(t, foundLocal, "kubescape must still record its own assessment alongside the external one")
+}
