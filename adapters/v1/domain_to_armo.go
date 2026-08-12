@@ -352,13 +352,19 @@ func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.Im
 		Layers:       []containerscan.ESLayer{},
 	}
 
+	// LayerOrder counts real, layer-producing history entries only, matching
+	// parseLayersPayload's indexing (which builds the layerMap DomainToArmo attaches to
+	// each vulnerability). History also contains metadata-only entries (ENV, LABEL, CMD,
+	// etc.) that don't produce a layer; counting those too, as the raw loop index would,
+	// gives every real layer a different LayerOrder here than in the vulnerability report
+	// for the same layer hash, breaking any lookup that correlates the two by LayerOrder.
 	layerIndex := 0
-	for i, historyLayer := range config.History {
+	for _, historyLayer := range config.History {
 		layerInfo := containerscan.ESLayer{
 			LayerInfo: &containerscan.LayerInfo{
 				CreatedBy:   historyLayer.CreatedBy,
 				CreatedTime: &historyLayer.Created.Time,
-				LayerOrder:  i,
+				LayerOrder:  layerIndex,
 			},
 		}
 		if !historyLayer.EmptyLayer && layerIndex < len(rawManifest.Layers) {
