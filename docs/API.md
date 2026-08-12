@@ -147,6 +147,7 @@ GET /metrics
 | `kubevuln_scan_source_resolution_total` | counter | `component`, `outcome` (`first_pass_success`/`fallback_assisted_success`/`fallback_failed`/`first_pass_failure`) | Whether pulling the image succeeded outright or only after a fallback, which is what distinguishes a healthy registry from one that works only by retry |
 | `kubevuln_registry_auth_cache_total` | counter | `strategy` (`ecr`/`gcp_adc`), `result` (`hit`/`miss`) | Registry auth credential lookups served from cache versus fetched from the cloud provider |
 | `kubevuln_singleflight_hits_total` | counter | `target` (`sbom_generation`) | Scan requests that arrived while the same work was already in flight and were served by it, so they did not generate an SBOM of their own. Counts the requests spared the work, not the one doing it |
+| `kubevuln_retry_attempts_total` | counter | `operation` (`source_resolution`/`sbom_generation`), `outcome` (`attempt`/`success`/`exhausted`) | Retry attempts executed during transient error backoff, distinguishing individual attempts, successes after retry, and exhausted retries |
 
 `reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
