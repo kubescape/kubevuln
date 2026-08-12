@@ -43,6 +43,15 @@ import (
 const (
 	vulnerabilityManifestSummaryKindPlural string = "vulnerabilitymanifests"
 	vulnSummaryContNameFormat              string = "%s-%s-%s" // "<kind>-<name>-<container-name>"
+
+	// timestampMetadataKey is the scan time, in Unix seconds, stamped on every summary
+	// manifest kubevuln writes. It lives here rather than coming from
+	// k8s-interface/instanceidhandler/v1/helpers, like every other metadata key on these
+	// objects, because that package has no key for it: its nearest neighbour,
+	// ReportTimestampMetadataKey ("kubescape.io/report-timestamp"), is a different key
+	// written by a different component. Changing the string would orphan the annotation on
+	// already-stored manifests, so it stays as it is.
+	timestampMetadataKey string = "kubescape.io/timestamp"
 )
 
 // securityExceptionListCacheCleaningInterval/TTL bound how stale the raw SecurityException/
@@ -603,7 +612,7 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrMissingTimestamp
 	}
-	enrichedAnnotations["kubescape.io/timestamp"] = strconv.FormatInt(timestamp, 10) // TODO: use a constant
+	enrichedAnnotations[timestampMetadataKey] = strconv.FormatInt(timestamp, 10)
 	enrichedAnnotations[helpersv1.WlidMetadataKey] = workload.Wlid
 	enrichedAnnotations[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 

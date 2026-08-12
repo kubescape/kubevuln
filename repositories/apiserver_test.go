@@ -1030,11 +1030,19 @@ func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, tests[i].workload.ContainerName)
 
-		val, exist = enrichedAnnotations["kubescape.io/timestamp"]
+		val, exist = enrichedAnnotations[timestampMetadataKey]
 		assert.Equal(t, exist, true)
 		assert.Equal(t, val, "1734957372")
 	}
 
+}
+
+// The key is part of the shape of every summary manifest already in storage: changing it
+// would strand the old annotation on those objects and silently stop anything reading it.
+// Worth pinning explicitly, since the code and the test above both go through the constant
+// now and would agree with each other whatever it said.
+func TestTimestampMetadataKeyIsStable(t *testing.T) {
+	assert.Equal(t, "kubescape.io/timestamp", timestampMetadataKey)
 }
 
 func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
