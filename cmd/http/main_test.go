@@ -17,6 +17,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsRiskAcceptanceActive(t *testing.T) {
+	storage := repositories.NewFakeAPIServerStorage("kubescape")
+
+	tests := []struct {
+		name           string
+		storage        *repositories.APIServerStore
+		riskAcceptance bool
+		want           bool
+	}{
+		{
+			name:           "storage configured and flag enabled",
+			storage:        storage,
+			riskAcceptance: true,
+			want:           true,
+		},
+		{
+			name:           "storage configured but flag disabled",
+			storage:        storage,
+			riskAcceptance: false,
+			want:           false,
+		},
+		{
+			name:           "flag enabled but storage not configured",
+			storage:        nil,
+			riskAcceptance: true,
+			want:           false,
+		},
+		{
+			name:           "neither storage nor flag configured",
+			storage:        nil,
+			riskAcceptance: false,
+			want:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRiskAcceptanceActive(tt.storage, tt.riskAcceptance))
+		})
+	}
+}
+
 func TestScan(t *testing.T) {
 	tests := []struct {
 		name         string

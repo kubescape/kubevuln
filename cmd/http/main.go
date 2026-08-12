@@ -104,7 +104,8 @@ func main() {
 	// SecurityException CRD integration requires storage and riskAcceptance RBAC
 	var seRepo ports.SecurityExceptionRepository
 	var eventRecorder record.EventRecorder
-	if storage != nil && c.RiskAcceptance {
+	riskAcceptanceActive := isRiskAcceptanceActive(storage, c.RiskAcceptance)
+	if riskAcceptanceActive {
 		seRepo = storage
 		logger.L().Info("SecurityException CRD integration enabled")
 
@@ -166,7 +167,7 @@ func main() {
 			ScanTimeout:             c.ScanTimeout.String(),
 			ScannerReadinessTimeout: c.ScannerReadinessTimeout.String(),
 			StorageEnabled:          c.Storage,
-			RiskAcceptanceEnabled:   c.RiskAcceptance,
+			RiskAcceptanceEnabled:   riskAcceptanceActive,
 		}
 	})
 
@@ -256,4 +257,12 @@ func main() {
 	}
 
 	logger.L().Info("kubevuln exiting")
+}
+
+// isRiskAcceptanceActive reports whether SecurityException/ClusterSecurityException
+// CRD integration is actually wired up, as opposed to the raw --risk-acceptance
+// config flag: integration also requires storage to be configured, since without
+// it seRepo falls back to NoOpSecurityExceptionRepository regardless of the flag.
+func isRiskAcceptanceActive(storage *repositories.APIServerStore, riskAcceptance bool) bool {
+	return storage != nil && riskAcceptance
 }
