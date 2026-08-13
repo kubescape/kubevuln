@@ -2236,6 +2236,70 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 // order). This constructs a 3-level containment chain - file F is owned by pkg-A, pkg-A is
 // contained in pkg-B, pkg-B is contained in pkg-C - with the relationships listed
 // outermost-first (C->B, B->A, A->F), the ordering that reproduced the bug.
+// RelevantFiles carries two kinds of placeholder. DynamicIdentifier ("⋯") is one segment,
+// so those paths keep their segment count and the #448 bucket is right for them.
+// WildcardIdentifier ("*") is zero or more segments, and the detector produces it by
+// collapsing runs of "⋯", so "/a/⋯/⋯/b" reaches us as "/a/*/b". Those were not
+// picked up as dynamic at all, so the file, its package and everything above it were dropped
+// and the relevancy scan called a loaded package not relevant.
+func TestFilterSBOM_WildcardRelevantPaths(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	d := dynamicpathdetector.DynamicIdentifier
+	w := dynamicpathdetector.WildcardIdentifier
+
+	tests := []struct {
+		name    string
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"one segment placeholder", "/usr/lib/" + d + "/mod.so", "/usr/lib/python3/mod.so", true},
+		{"one segment placeholder cannot span two", "/usr/lib/" + d + "/mod.so", "/usr/lib/a/b/mod.so", false},
+		{"wildcard spanning several segments", "/usr/lib/" + w + "/mod.so", "/usr/lib/a/b/mod.so", true},
+		{"wildcard spanning none", "/usr/lib/" + w + "/mod.so", "/usr/lib/mod.so", true},
+		{"trailing wildcard", "/usr/lib/" + w, "/usr/lib/a/b/c", true},
+		{"both placeholders together", "/usr/lib/" + d + "/" + w + "/mod.so", "/usr/lib/a/b/c/mod.so", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sbom := domain.SBOM{
+				Content: &v1beta1.SyftDocument{
+					Files: []v1beta1.SyftFile{
+						{ID: "file-F", Location: v1beta1.Coordinates{RealPath: tt.path}},
+					},
+					Artifacts: []v1beta1.SyftPackage{
+						{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A", Name: "A"}},
+					},
+					ArtifactRelationships: []v1beta1.SyftRelationship{
+						{Parent: "pkg-A", Child: "file-F", Type: "contains"},
+					},
+				},
+			}
+
+			relevantFiles := mapset.NewSet[string]()
+			relevantFiles.Add(tt.pattern)
+
+			filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+			require.NoError(t, err)
+
+			if !tt.want {
+				assert.Empty(t, filtered.Content.Files, "%q must not match %q", tt.pattern, tt.path)
+				assert.Empty(t, filtered.Content.Artifacts)
+				return
+			}
+			require.Len(t, filtered.Content.Files, 1, "the file matched by %q must survive the filter", tt.pattern)
+			assert.Equal(t, tt.path, filtered.Content.Files[0].Location.RealPath)
+			require.Len(t, filtered.Content.Artifacts, 1, "and so must the package that owns it")
+			assert.Equal(t, "pkg-A", filtered.Content.Artifacts[0].ID)
+		})
+	}
+}
+
 func TestFilterSBOM_TransitiveClosure(t *testing.T) {
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",

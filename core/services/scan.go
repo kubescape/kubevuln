@@ -1068,11 +1068,20 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	addedFileIDs := mapset.NewSet[string]()
 	addedRelationshipIDs := mapset.NewSet[string]()
 
-	// filter relevant files with dynamic paths, indexed by segment count since
-	// CompareDynamic only ever matches paths with the same number of segments
+	// Split the relevant files that carry a placeholder, because the two kinds behave
+	// differently. DynamicIdentifier ("⋯") stands for exactly one segment, so such a path
+	// can only ever match one with the same number of segments and is indexed by that count
+	// (see #448). WildcardIdentifier ("*") stands for zero or more segments: the detector
+	// produces it by collapsing runs of "⋯" (so "/a/⋯/⋯/b" is stored as "/a/*/b"),
+	// and it can match a path with any number of segments, so no bucket holds it and it has
+	// to be compared against every file.
 	dynamicPathsBySegmentCount := make(map[int][]string)
+	var wildcardPaths []string
 	relevantFiles.Each(func(file string) bool {
-		if strings.Contains(file, dynamicpathdetector.DynamicIdentifier) {
+		switch {
+		case strings.Contains(file, dynamicpathdetector.WildcardIdentifier):
+			wildcardPaths = append(wildcardPaths, file)
+		case strings.Contains(file, dynamicpathdetector.DynamicIdentifier):
 			segmentCount := strings.Count(file, "/")
 			dynamicPathsBySegmentCount[segmentCount] = append(dynamicPathsBySegmentCount[segmentCount], file)
 		}
@@ -1089,13 +1098,13 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 				continue
 			}
-			// then try dynamic match (expensive lookup), limited to candidates with a matching segment count
-			for _, dynamicPath := range dynamicPathsBySegmentCount[strings.Count(f.Location.RealPath, "/")] {
-				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
-					addedFileIDs.Add(f.ID)
-					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
-					break
-				}
+			// then try dynamic match (expensive lookup): the one bucket a fixed-width
+			// placeholder path could be in, plus the wildcard paths, which fit no bucket
+			realPath := f.Location.RealPath
+			if matchesAnyDynamicPath(realPath, dynamicPathsBySegmentCount[strings.Count(realPath, "/")]) ||
+				matchesAnyDynamicPath(realPath, wildcardPaths) {
+				addedFileIDs.Add(f.ID)
+				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 			}
 		}
 	}
@@ -1152,6 +1161,17 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	}
 
 	return filteredSBOM, nil
+}
+
+// matchesAnyDynamicPath reports whether path is matched by any of the placeholder-carrying
+// relevant-file paths in candidates.
+func matchesAnyDynamicPath(path string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if dynamicpathdetector.CompareDynamic(candidate, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // getRelationshipID returns a unique string identifier for a Syft relationship.
