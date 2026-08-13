@@ -46,6 +46,13 @@ type credentialCache struct {
 	// before it joins the singleflight group. Tests use it as a deterministic barrier to
 	// prove real concurrent contention on a miss, instead of a timing-based sleep.
 	onMiss func()
+	// onJoined, if set, is called synchronously by every caller once it has joined the
+	// singleflight group for a key. This is the one moment onMiss cannot express: onMiss
+	// fires just before DoChan, so a caller can still be descheduled in between, miss the
+	// in-flight execution entirely and start a fresh one that re-checks straight into a
+	// cache hit. Tests that need every caller provably waiting on the same fetch release
+	// the leader from here instead.
+	onJoined func()
 }
 
 type cacheEntry struct {
@@ -79,13 +86,25 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 		c.onMiss()
 	}
 
+	// pending is the outcome this caller still owes once it is actually served. It stays
+	// coalesced unless this caller's own closure runs, since exactly one caller's closure
+	// runs per key and the rest are served by it at no upstream cost. It is cleared when the
+	// closure fetches, because a fetch is counted there instead: one upstream call has to be
+	// one miss whether or not this caller sticks around for it.
+	//
+	// Only read in the ch branch below, where receiving from ch happens-after the closure
+	// returns. Reading it on the ctx.Done() path would race with the closure still running.
+	pending := metrics.RegistryAuthCacheCoalesced
 	ch := c.group.DoChan(key, func() (interface{}, error) {
 		// Re-check under the singleflight key: a caller that lost the race to become the
 		// leader for this key may have been given a result already cached by the winner
 		// of an earlier, now-resolved Do call for the same key.
 		if creds, ok := c.lookup(key); ok {
+			pending = metrics.RegistryAuthCacheHit
 			return creds, nil
 		}
+		pending = ""
+		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
 		fetchCtx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		creds, expiry, ferr := fetch(fetchCtx)
@@ -99,13 +118,19 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 		}
 		return creds, nil
 	})
+	if c.onJoined != nil {
+		c.onJoined()
+	}
 
 	select {
 	case <-ctx.Done():
-		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
+		// Nothing to record: this caller gave up before its lookup resolved either way. The
+		// fetch it was waiting on is unaffected and reports its own outcome when it lands.
 		return nil, ctx.Err()
 	case res := <-ch:
-		metrics.RecordRegistryAuthCache(ctx, c.strategy, metrics.RegistryAuthCacheMiss)
+		if pending != "" {
+			metrics.RecordRegistryAuthCache(ctx, c.strategy, pending)
+		}
 		if res.Err != nil {
 			return nil, res.Err
 		}

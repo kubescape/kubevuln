@@ -46,8 +46,13 @@ const (
 	SourceResolutionFallbackFailed          = "fallback_failed"
 	SourceResolutionFirstPassFailure        = "first_pass_failure"
 
-	RegistryAuthCacheHit  = "hit"
+	RegistryAuthCacheHit = "hit"
+	// RegistryAuthCacheMiss is recorded only by the caller whose lookup actually reached the
+	// cloud provider, so a sum over this value is the number of upstream credential fetches.
 	RegistryAuthCacheMiss = "miss"
+	// RegistryAuthCacheCoalesced is recorded by a caller that missed the cache but was served
+	// by another caller's in-flight fetch, so it cost no upstream request.
+	RegistryAuthCacheCoalesced = "coalesced"
 )
 
 var recorderMu sync.RWMutex
@@ -176,7 +181,7 @@ func New() (*Metrics, error) {
 
 	registryAuthCacheMetric, err := meter.Int64Counter(
 		"kubevuln_registry_auth_cache_total",
-		metric.WithDescription("Total number of registry auth credential lookups, by provider strategy and cache result (hit/miss)"),
+		metric.WithDescription("Total number of registry auth credential lookups, by provider strategy and cache result (hit/miss/coalesced)"),
 	)
 	if err != nil {
 		return nil, err
@@ -246,7 +251,7 @@ func RecordScanFallback(ctx context.Context, component, category, strategy, outc
 }
 
 // RecordRegistryAuthCache reports a registry-auth credential lookup's cache outcome
-// (RegistryAuthCacheHit/RegistryAuthCacheMiss), labeled by the provider strategy
+// (RegistryAuthCacheHit/RegistryAuthCacheMiss/RegistryAuthCacheCoalesced), labeled by the provider strategy
 // (FallbackStrategyGCPADC/FallbackStrategyECR) that served it.
 func RecordRegistryAuthCache(ctx context.Context, strategy, result string) {
 	recorderMu.RLock()

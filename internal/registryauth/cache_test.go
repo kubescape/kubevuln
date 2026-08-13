@@ -3,12 +3,14 @@ package registryauth
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,4 +165,127 @@ func TestCredentialCache_Reset(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "reset must force the next call to refetch")
+}
+
+// scrapeMetrics renders the current metric values in Prometheus text format.
+func scrapeMetrics(t *testing.T, m *metrics.Metrics) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	require.Equal(t, 200, w.Code)
+	return w.Body.String()
+}
+
+// The point of collapsing concurrent lookups is to cut upstream credential fetches, so
+// result="miss" has to count those fetches. Counting every caller that missed the cache
+// instead makes the metric read the same whether the collapsing works or not.
+func TestCredentialCache_CoalescedCallersAreNotCountedAsUpstreamFetches(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c := newCredentialCache("ecr")
+	const n = 20
+
+	var calls, joined int32
+	allJoined := make(chan struct{})
+	// Released once every caller has joined the group, not merely reached the miss path: a
+	// caller descheduled between the two starts its own execution once the leader is done
+	// and is served a cache hit, which is a real outcome but not the one under test here.
+	c.onJoined = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
+	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		atomic.AddInt32(&calls, 1)
+		<-allJoined
+		return &image.RegistryCredentials{Password: "p"}, time.Now().Add(time.Hour), nil
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := c.get(context.Background(), "k", fetch)
+			assert.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
+
+	body := scrapeMetrics(t, m)
+	assert.Contains(t, body, `kubevuln_registry_auth_cache_total{result="miss",strategy="ecr"} 1`,
+		"one upstream fetch must be one miss, not one per caller")
+	assert.Contains(t, body, `kubevuln_registry_auth_cache_total{result="coalesced",strategy="ecr"} 19`,
+		"callers served by another caller's in-flight fetch cost no upstream request")
+
+	// A later lookup is served from the entry the shared fetch cached.
+	_, err = c.get(context.Background(), "k", fetch)
+	require.NoError(t, err)
+	assert.Contains(t, scrapeMetrics(t, m), `kubevuln_registry_auth_cache_total{result="hit",strategy="ecr"} 1`)
+}
+
+// The re-check inside the singleflight closure is a cache read like any other, so it counts
+// as a hit. Recording it where the caller is served, rather than inside the closure, keeps
+// it consistent with the other two: a caller that never gets its result records nothing.
+func TestCredentialCache_RecheckInsideSingleflightRecordsHit(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c := newCredentialCache("ecr")
+
+	// onMiss fires after the first lookup misses and before this caller joins the group,
+	// which is exactly the window in which another caller can populate the cache, and the
+	// only way the closure's re-check ever finds anything.
+	c.onMiss = func() {
+		c.mu.Lock()
+		c.entries["k"] = cacheEntry{creds: &image.RegistryCredentials{Password: "p"}, expiry: time.Now().Add(time.Hour)}
+		c.mu.Unlock()
+	}
+	var calls int32
+	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		atomic.AddInt32(&calls, 1)
+		return &image.RegistryCredentials{Password: "other"}, time.Now().Add(time.Hour), nil
+	}
+
+	creds, err := c.get(context.Background(), "k", fetch)
+	require.NoError(t, err)
+	assert.Equal(t, "p", creds.Password)
+	assert.Zero(t, atomic.LoadInt32(&calls), "the re-check found it, so nothing was fetched")
+
+	body := scrapeMetrics(t, m)
+	assert.Contains(t, body, `kubevuln_registry_auth_cache_total{result="hit",strategy="ecr"} 1`)
+	assert.NotContains(t, body, `result="miss"`)
+	assert.NotContains(t, body, `result="coalesced"`)
+}
+
+// A caller that gives up has no lookup outcome to report, and recording one made abandoned
+// waits indistinguishable from fetches.
+func TestCredentialCache_AbandonedCallerRecordsNoOutcome(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c := newCredentialCache("ecr")
+
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{})
+	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		close(started)
+		<-release
+		return &image.RegistryCredentials{Password: "p"}, time.Now().Add(time.Hour), nil
+	}
+
+	// The leader holds the key while a second caller waits on it, then gives up.
+	go func() { _, _ = c.get(context.Background(), "k", fetch) }()
+	<-started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = c.get(ctx, "k", fetch)
+	require.ErrorIs(t, err, context.Canceled)
+
+	body := scrapeMetrics(t, m)
+	assert.NotContains(t, body, `result="coalesced"`,
+		"a caller that abandoned its wait was never served")
+	assert.Contains(t, body, `kubevuln_registry_auth_cache_total{result="miss",strategy="ecr"} 1`,
+		"the only miss is the in-flight fetch, not the caller that walked away from it")
 }
