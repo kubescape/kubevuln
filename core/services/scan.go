@@ -351,43 +351,9 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				}
 			}
 		} else {
-			// A cached manifest was filtered against the exception set at store time.
-			// Reconstruct the unfiltered manifest so the CURRENT exception set is
-			// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-			// un-suppress findings) and SubmitCVE/StoreVEX receive the same
-			// unfiltered data a cache miss would produce.
-			prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-			cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
-
-			if s.storage {
-				curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-				if !maps.Equal(prevIgnored, curIgnored) {
-					// Persist additions freely, but never persist removals when the
-					// exception set is incomplete: a transient SecurityException CRD
-					// list failure must not look like a deletion and wipe suppression
-					// from the stored manifest.
-					hasRemovals := false
-					for k := range prevIgnored {
-						if _, ok := curIgnored[k]; !ok {
-							hasRemovals = true
-							break
-						}
-					}
-					if cveExceptionsComplete || !hasRemovals {
-						err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-						}
-						err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-						}
-					}
-				}
-			}
+			// VEX is not published here: ScanCP republishes it later, once
+			// filteredCvep is also available, gated on both exceptionsComplete flags.
+			cve, filteredCve, cveExceptionsComplete = s.reconcileCachedCVE(ctx, cve, slug, false)
 		}
 
 		// generate SBOM' from SBOM and relevant files
@@ -550,57 +516,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			}
 		}
 	} else {
-		// A cached manifest was filtered against the exception set at store time.
-		// Reconstruct the unfiltered manifest so the CURRENT exception set is
-		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-		// un-suppress findings) and SubmitCVE/StoreVEX receive the same unfiltered
-		// data a cache miss would produce.
-		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		if s.storage {
-			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-			if !maps.Equal(prevIgnored, curIgnored) {
-				// Persist additions freely, but never persist removals when the
-				// exception set is incomplete: a transient SecurityException CRD
-				// list failure must not look like a deletion and wipe suppression
-				// from the stored manifest.
-				hasRemovals := false
-				for k := range prevIgnored {
-					if _, ok := curIgnored[k]; !ok {
-						hasRemovals = true
-						break
-					}
-				}
-				if exceptionsComplete || !hasRemovals {
-					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					// The stored manifest just changed, so the VEX document describing it is
-					// now stale. Republish it, but only from a known-complete exception set,
-					// the same rule the cache-miss path follows.
-					//
-					// The manifest is persisted on the looser `exceptionsComplete ||
-					// !hasRemovals` condition because a partial set can only under-suppress,
-					// never wrongly un-suppress, so additions are safe to keep. A VEX document
-					// is a published assertion about which CVEs are suppressed, and one built
-					// from a partial set understates that. Leaving the previous document in
-					// place, written when the set was complete, beats replacing it with a
-					// weaker claim, so the two can briefly disagree until a complete scan.
-					if exceptionsComplete {
-						s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
-					}
-				}
-			}
-		}
+		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// submit CVE manifest to platform, only if we have a wlid
@@ -714,57 +630,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			}
 		}
 	} else {
-		// A cached manifest was filtered against the exception set at store time.
-		// Reconstruct the unfiltered manifest so the CURRENT exception set is
-		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-		// un-suppress findings) and SubmitCVE/StoreVEX receive the same
-		// unfiltered data a cache miss would produce.
-		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		if s.storage {
-			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-			if !maps.Equal(prevIgnored, curIgnored) {
-				// Persist additions freely, but never persist removals when the
-				// exception set is incomplete: a transient SecurityException CRD
-				// list failure must not look like a deletion and wipe suppression
-				// from the stored manifest.
-				hasRemovals := false
-				for k := range prevIgnored {
-					if _, ok := curIgnored[k]; !ok {
-						hasRemovals = true
-						break
-					}
-				}
-				if exceptionsComplete || !hasRemovals {
-					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					// The stored manifest just changed, so the VEX document describing it is
-					// now stale. Republish it, but only from a known-complete exception set,
-					// the same rule the cache-miss path follows.
-					//
-					// The manifest is persisted on the looser `exceptionsComplete ||
-					// !hasRemovals` condition because a partial set can only under-suppress,
-					// never wrongly un-suppress, so additions are safe to keep. A VEX document
-					// is a published assertion about which CVEs are suppressed, and one built
-					// from a partial set understates that. Leaving the previous document in
-					// place, written when the set was complete, beats replacing it with a
-					// weaker claim, so the two can briefly disagree until a complete scan.
-					if exceptionsComplete {
-						s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
-					}
-				}
-			}
-		}
+		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// report scan success to platform
@@ -808,6 +674,75 @@ func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest
 		logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
 			helpers.String("imageSlug", imageSlug))
 	}
+}
+
+// reconcileCachedCVE re-evaluates a CVE manifest retrieved from the cache (cve.Content
+// non-nil) against the CURRENT SecurityException set, since it was filtered against
+// whatever set was active when it was originally stored: a deleted exception or an
+// ExpiredOnFix transition since then must still un-suppress findings on a cache hit,
+// the same as it would on a fresh scan.
+//
+// ScanCP, ScanCVE, and ScanRegistry each used to carry their own copy of this
+// sequence, and that duplication is exactly why the same class of bug (#469, #501,
+// #557) kept resurfacing in one flow after being fixed in another — see #638.
+//
+// Returns the input cve with suppressed matches restored (so SubmitCVE/StoreVEX
+// receive the same unfiltered data a cache miss would produce, matching every
+// caller's existing use of the mutated cve.Content after this call), the freshly
+// filtered copy, and whether the exception set used to filter it was known-complete.
+//
+// When storage is enabled and the filtered result's suppressions actually changed,
+// persists the updated manifest and, if publishVEX is true, republishes its VEX
+// document — subject to the removal-safety rule below. publishVEX lets ScanCP opt
+// out: it republishes VEX later itself, once relevancy-filtered results are also
+// available, using the exceptionsComplete this call returns.
+func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool) {
+	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
+	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
+	filteredCve, exceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
+
+	if s.storage {
+		curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+		if !maps.Equal(prevIgnored, curIgnored) {
+			// Persist additions freely, but never persist removals when the
+			// exception set is incomplete: a transient SecurityException CRD
+			// list failure must not look like a deletion and wipe suppression
+			// from the stored manifest.
+			hasRemovals := false
+			for k := range prevIgnored {
+				if _, ok := curIgnored[k]; !ok {
+					hasRemovals = true
+					break
+				}
+			}
+			if exceptionsComplete || !hasRemovals {
+				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
+					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+						helpers.String("imageSlug", imageSlug))
+				}
+				if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+						helpers.String("imageSlug", imageSlug))
+				}
+				// The stored manifest just changed, so the VEX document describing it is
+				// now stale. Republish it, but only from a known-complete exception set,
+				// the same rule the cache-miss path follows.
+				//
+				// The manifest is persisted on the looser `exceptionsComplete ||
+				// !hasRemovals` condition because a partial set can only under-suppress,
+				// never wrongly un-suppress, so additions are safe to keep. A VEX document
+				// is a published assertion about which CVEs are suppressed, and one built
+				// from a partial set understates that. Leaving the previous document in
+				// place, written when the set was complete, beats replacing it with a
+				// weaker claim, so the two can briefly disagree until a complete scan.
+				if publishVEX && exceptionsComplete {
+					s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
+				}
+			}
+		}
+	}
+
+	return cve, filteredCve, exceptionsComplete
 }
 
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
