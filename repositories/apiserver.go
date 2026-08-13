@@ -1198,9 +1198,68 @@ func applyIgnoredMatchAssessment(stmt *v1beta1.Statement, assessment ignoredVEXA
 // to defaultActionStatement.
 func buildActionStatement(v v1beta1.Match) string {
 	if v.Vulnerability.Fix.State == "fixed" && len(v.Vulnerability.Fix.Versions) > 0 {
-		return fmt.Sprintf("Upgrade %s to version %s", v.Artifact.PURL, strings.Join(v.Vulnerability.Fix.Versions, " or "))
+		return upgradeActionStatementPrefix(v.Artifact.PURL) + strings.Join(v.Vulnerability.Fix.Versions, " or ")
 	}
 	return defaultActionStatement
+}
+
+// hasSwappedVulnerabilityFields reports whether a statement carries the CVE in
+// Vulnerability.ID and the data source URL in Name, the mapping used before it was corrected
+// to match createVEX. Both the adoption below and the normalization that follows it key off
+// this, so they cannot disagree about which statements are written the old way round.
+func hasSwappedVulnerabilityFields(v v1beta1.VexVulnerability) bool {
+	return !strings.Contains(v.ID, "://") && (v.Name == "" || strings.Contains(v.Name, "://"))
+}
+
+// vulnerabilityCVEName returns the CVE identifier a statement carries, from whichever field
+// holds it. Statements written before #595 can be affected by both legacy shapes at once, no
+// ID and the swapped mapping, and stamping an ID needs the CVE rather than whatever happens
+// to be in Name.
+func vulnerabilityCVEName(v v1beta1.VexVulnerability) string {
+	if hasSwappedVulnerabilityFields(v) {
+		return v.ID
+	}
+	return v.Name
+}
+
+// upgradeActionStatementPrefix is the fixed part of the action statement
+// buildActionStatement writes when the fix versions are known. It is shared with
+// isOwnActionStatement so the two cannot drift on what our own wording looks like.
+func upgradeActionStatementPrefix(purl string) string {
+	return fmt.Sprintf("Upgrade %s to version ", purl)
+}
+
+// isOwnActionStatement reports whether an action statement is one kubevuln writes itself.
+//
+// markRelevantVulnerabilitiesAsAffectedInVex blanks the impact statement on a statement it
+// marks affected and fills this in instead, so on those this is the only wording of ours
+// left to recognise. Action statements arrived in #404, ten days before the IDs in #595, so
+// a statement written in between has one of these and no ID.
+//
+// The parameterised form is matched against the statement's own subcomponent rather than as
+// a loose prefix, so a feed's text that happens to open the same way does not qualify.
+func isOwnActionStatement(actionStatement, purl string) bool {
+	if actionStatement == defaultActionStatement {
+		return true
+	}
+	return purl != "" && strings.HasPrefix(actionStatement, upgradeActionStatementPrefix(purl))
+}
+
+// localStatementID is the ID kubevuln stamps on statements it authors.
+func localStatementID(cveName, purl string) string {
+	return fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(cveName), url.PathEscape(purl))
+}
+
+// isOwnImpactStatement reports whether an impact statement is one kubevuln writes itself.
+// It is the only thing left on a statement we stored before #595 that marks it as ours,
+// those having been written without an ID, and the wording is our own rather than anything
+// a feed would produce.
+func isOwnImpactStatement(impactStatement string) bool {
+	switch impactStatement {
+	case defaultLocalImpactStatement, securityExceptionImpactStatement:
+		return true
+	}
+	return false
 }
 
 func isLocalStatement(id string) bool {
@@ -1359,6 +1418,31 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	originalVEX := *vexContainer.Spec.DeepCopy()
 	vexDoc := *vexContainer.Spec.DeepCopy()
 
+	// Statements we stored before #595 have no ID, that being the change which started
+	// setting one. #664 stopped reading an empty ID as ours so that a feed's ID-less
+	// statement is not overwritten, which is right, but it also left every statement we
+	// wrote before #595 looking like another author's: passed over by the reset loop and by
+	// every marking step, and passed over by the dedup too, so a second statement gets
+	// appended beside it for the same finding. Stamp the ID we would write today onto the
+	// ones carrying wording of ours, which brings them back under management and leaves
+	// anything else alone. Both fields are checked: a statement last written while affected
+	// had its impact statement blanked and an action statement put in its place, so that is
+	// the only wording left on it.
+	for i := range vexDoc.Statements {
+		s := &vexDoc.Statements[i]
+		if s.ID != "" {
+			continue
+		}
+		if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
+			continue
+		}
+		purl := s.Products[0].Subcomponents[0].ID
+		if !isOwnImpactStatement(s.ImpactStatement) && !isOwnActionStatement(s.ActionStatement, purl) {
+			continue
+		}
+		s.ID = localStatementID(vulnerabilityCVEName(s.Vulnerability), purl)
+	}
+
 	// Statements written before the ID/Name mapping was corrected to match createVEX
 	// carry the CVE identifier in ID and the data source URL in Name. Normalize them in
 	// place so the dedup below (which now keys on Name) also finds these older entries,
@@ -1367,7 +1451,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		if !isLocalStatement(s.ID) {
 			continue
 		}
-		if !strings.Contains(s.Vulnerability.ID, "://") && (s.Vulnerability.Name == "" || strings.Contains(s.Vulnerability.Name, "://")) {
+		if hasSwappedVulnerabilityFields(s.Vulnerability) {
 			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
 		}
 	}
