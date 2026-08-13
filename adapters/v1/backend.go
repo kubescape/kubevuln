@@ -620,18 +620,35 @@ func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map
 	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
 }
 
+// relevancyIdentity is what makes two vulnerability records the same finding: the CVE, and
+// the package it was found on. The package needs its version as well as its name, because a
+// name is not unique within an image. Two versions of one library can sit side by side, which
+// is ordinary in Java and Node images, and DomainToArmo emits a record per (vulnerability,
+// artifact) pair, so both versions produce a record carrying the same name.
+type relevancyIdentity struct {
+	cve            string
+	packageName    string
+	packageVersion string
+}
+
+func identifyForRelevancy(v cs.CommonContainerVulnerabilityResult) relevancyIdentity {
+	return relevancyIdentity{cve: v.Name, packageName: v.RelatedPackageName, packageVersion: v.PackageVersion}
+}
+
 // markRelevantVulnerabilities annotates each vulnerability with IsRelevant=true iff the same
-// (CVE, package) pair also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would
-// mark a CVE relevant on every package it affects even when only one of those packages was
-// executed; the pair is the record identity (see RelatedPackageName in DomainToArmo and the
-// uniqueness assertion in backend_test.go).
+// finding also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would mark a CVE
+// relevant on every package it affects even when only one of those packages was executed, and
+// keying by CVE and package name alone does the same thing one level down, marking an
+// unloaded version of a library relevant because another version of it was loaded. Both
+// manifests are built from the same artifacts, the filtered one from a subset of the same
+// SBOM, so the versions on either side are the same strings.
 func markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities []cs.CommonContainerVulnerabilityResult) {
-	cvepIndices := make(map[string]struct{}, len(relevantVulnerabilities))
+	cvepIndices := make(map[relevancyIdentity]struct{}, len(relevantVulnerabilities))
 	for _, v := range relevantVulnerabilities {
-		cvepIndices[v.Name+"+"+v.RelatedPackageName] = struct{}{}
+		cvepIndices[identifyForRelevancy(v)] = struct{}{}
 	}
 	for i, v := range vulnerabilities {
-		_, isRelevant := cvepIndices[v.Name+"+"+v.RelatedPackageName]
+		_, isRelevant := cvepIndices[identifyForRelevancy(v)]
 		vulnerabilities[i].IsRelevant = &isRelevant
 	}
 }
