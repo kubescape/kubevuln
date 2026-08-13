@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -409,17 +410,7 @@ func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
 	if err := json.Unmarshal(b, &syftDoc); err != nil {
 		return nil
 	}
-	for i := range syftDoc.Artifacts {
-		for j := range doc.Artifacts {
-			if syftDoc.Artifacts[i].ID == doc.Artifacts[j].ID {
-				syftDoc.Artifacts[i].MetadataType = doc.Artifacts[j].MetadataType
-				if b, err := json.Marshal(doc.Artifacts[j].Metadata); err == nil {
-					syftDoc.Artifacts[i].Metadata = b
-				}
-				break
-			}
-		}
-	}
+	syftmeta.Reattach(syftDoc.Artifacts, doc.Artifacts)
 
 	return syftDoc
 }
