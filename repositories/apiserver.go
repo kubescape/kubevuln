@@ -1112,14 +1112,9 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 		assessment.impactStatement = ""
 		assessment.actionStatement = securityExceptionAcceptedRiskAction
 		assessment.statusNotes = ignoredMatchStatusNotes(rule)
-	case "", string(sev1beta1.VulnerabilityStatusNotAffected):
-		if j := strings.TrimSpace(rule.Justification); j != "" {
-			assessment.justification = v1beta1.Justification(j)
-		}
-		if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
-			assessment.impactStatement = impact
-		}
 	default:
+		// Any unrecognized status (including "" and NotAffected) falls back to the safe
+		// not_affected-shaped assessment.
 		if j := strings.TrimSpace(rule.Justification); j != "" {
 			assessment.justification = v1beta1.Justification(j)
 		}
@@ -1342,7 +1337,6 @@ func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifes
 				for _, p := range s.Products {
 					for _, sc := range p.Subcomponents {
 						if sc.ID == v.Artifact.PURL {
-							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
 							applyIgnoredMatchAssessment(&vexDoc.Statements[i], ignoredMatchAssessment(v))
 							foundProduct = true
 						}
