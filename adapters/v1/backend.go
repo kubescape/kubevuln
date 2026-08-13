@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,10 +157,46 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 			if !shouldRetryReport(resp) {
 				return nil, backoff.Permanent(retryErr)
 			}
+			if wait, ok := parseRetryAfter(resp); ok {
+				if wait > 0 {
+					wait = wait.Round(time.Second)
+					if wait == 0 {
+						wait = time.Second
+					}
+				}
+				return nil, backoff.RetryAfter(int(wait.Seconds()))
+			}
 			return nil, retryErr
 		}
 		return resp, nil
 	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
+}
+
+// parseRetryAfter reads the standard Retry-After header from resp, in either of its two
+// legitimate forms (RFC 9110 10.2.3): a plain non-negative number of seconds, or an
+// HTTP-date. Returns ok=false if the header is absent, empty, negative, or in neither
+// recognized form. A parsed date that has already passed is treated as "no wait" (zero
+// duration), not a negative one.
+func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(v, 10, 64); err == nil {
+		const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+		if seconds < 0 || seconds > maxRetryAfterSeconds {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		wait := time.Until(t)
+		if wait < 0 {
+			wait = 0
+		}
+		return wait, true
+	}
+	return 0, false
 }
 
 // shouldRetryReport is derived from the unexported defaultShouldRetry in armosec/utils-go, but

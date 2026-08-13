@@ -28,8 +28,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
-	"github.com/kubescape/go-logger"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -1437,4 +1437,66 @@ func TestBackendAdapter_PostResults_429RateLimitLogging(t *testing.T) {
 	assert.Contains(t, err.Error(), "429")
 	assert.Contains(t, err.Error(), "quota exceeded")
 	assert.Contains(t, logOutput, "failed sending vulnerabilities report due to rate limiting (429 Too Many Requests)")
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	tests := []struct {
+		name      string
+		header    string
+		wantOK    bool
+		wantAbout time.Duration
+	}{
+		{"absent header", "", false, 0},
+		{"valid seconds", "120", true, 120 * time.Second},
+		{"zero seconds", "0", true, 0},
+		{"negative seconds rejected", "-5", false, 0},
+		{"overflowing seconds rejected", "9223372037", false, 0},
+		{"garbage value rejected", "not-a-valid-value", false, 0},
+		{"valid future HTTP-date", time.Now().Add(2 * time.Hour).UTC().Format(http.TimeFormat), true, 2 * time.Hour},
+		{"past HTTP-date clamped to zero, not negative", time.Now().Add(-2 * time.Hour).UTC().Format(http.TimeFormat), true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{Header: http.Header{}}
+			if tt.header != "" {
+				resp.Header.Set("Retry-After", tt.header)
+			}
+			wait, ok := parseRetryAfter(resp)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.InDelta(t, tt.wantAbout.Seconds(), wait.Seconds(), 5,
+					"parsed wait should be close to the expected duration")
+			}
+		})
+	}
+}
+
+// TestHttpPostWithContext_HonorsRetryAfter is the real end-to-end proof: a server that
+// responds 429 with an explicit Retry-After, then 200 on the next attempt. The elapsed
+// time should be close to the server's requested wait, not the default exponential
+// backoff's much shorter initial interval (~500ms), proving the header is actually read
+// and honored rather than ignored.
+func TestHttpPostWithContext_HonorsRetryAfter(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	start := time.Now()
+	resp, err := httpPostWithContext(context.Background(), server.Client(), server.URL, nil, nil, 10*time.Second)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond,
+		"should have waited close to the requested 1s, not the default ~500ms backoff interval")
+	assert.Less(t, elapsed, 5*time.Second, "should not have waited far longer than requested")
 }
