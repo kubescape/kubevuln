@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 )
 
@@ -559,9 +559,8 @@ func Test_summarize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _ := Summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy, tt.args.imageManifest)
-			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
-				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
-			})
+			// No sorting here on purpose: Summarize orders the severity stats itself now, and
+			// this asserting on the order directly is what keeps it that way.
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -858,4 +857,53 @@ func TestGetCVEExceptionMatch_ExpiredOnFixSkipsWholePolicy(t *testing.T) {
 	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", true))
 	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "GHSA-jfh8", true))
 	assert.Len(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", false), 1)
+}
+
+// Summarize collected its severity stats in a map and emitted them in iteration order, which
+// Go randomises, so the summary posted to the backend came out ordered differently on every
+// scan of the same image. The existing table test used to sort the result before comparing,
+// which hid it.
+func TestSummarize_SeverityStatsOrderIsStable(t *testing.T) {
+	report := v1.ScanResultReport{Designators: identifiers.PortalDesignator{Attributes: map[string]string{}}}
+	workload := domain.ScanCommand{Wlid: "wlid://cluster-x/namespace-y/deployment-z"}
+
+	// One vulnerability per severity, half of them suppressed, so both the reported and the
+	// excluded stats end up with several entries to order.
+	severities := []string{"Critical", "High", "Medium", "Low", "Negligible"}
+	var vulnerabilities []containerscan.CommonContainerVulnerabilityResult
+	for i, severity := range severities {
+		v := containerscan.CommonContainerVulnerabilityResult{
+			Vulnerability: containerscan.Vulnerability{Name: "CVE-0000-" + severity, Severity: severity},
+		}
+		if i%2 == 0 {
+			v.ExceptionApplied = []armotypes.VulnerabilityExceptionPolicy{
+				{Actions: []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore}},
+			}
+		}
+		vulnerabilities = append(vulnerabilities, v)
+	}
+
+	order := func(stats []containerscan.SeverityStats) []string {
+		out := make([]string, 0, len(stats))
+		for _, s := range stats {
+			out = append(out, s.Severity)
+		}
+		return out
+	}
+
+	// Repeated because a single run could land in the right order by chance.
+	var firstReported, firstExcluded []string
+	for i := 0; i < 20; i++ {
+		got, _ := Summarize(report, append([]containerscan.CommonContainerVulnerabilityResult(nil), vulnerabilities...), workload, false, nil)
+		require.NotEmpty(t, got.SeveritiesStats)
+		require.NotEmpty(t, got.ExcludedSeveritiesStats)
+		if i == 0 {
+			firstReported, firstExcluded = order(got.SeveritiesStats), order(got.ExcludedSeveritiesStats)
+			assert.IsIncreasing(t, firstReported, "reported severity stats must be ordered")
+			assert.IsIncreasing(t, firstExcluded, "excluded severity stats must be ordered")
+			continue
+		}
+		assert.Equal(t, firstReported, order(got.SeveritiesStats), "same findings must give the same order every time")
+		assert.Equal(t, firstExcluded, order(got.ExcludedSeveritiesStats))
+	}
 }
