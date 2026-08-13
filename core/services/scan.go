@@ -1351,8 +1351,10 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 			return domain.SBOM{}, &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
 		}
 
-		// create SBOM
-		sbom, err := s.sbomCreator.CreateSBOM(workerCtx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, opts)
+		// create SBOM, retrying on 429 rate-limit errors before activating the circuit-breaker.
+		sbom, err := tools.RetryWithBackoff(workerCtx, "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(ctx context.Context) (domain.SBOM, error) {
+			return s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, opts)
+		})
 		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
 		if err != nil {
 			reason := classifySBOMError(err)

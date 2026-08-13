@@ -211,14 +211,16 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}
 	}()
 
-	// Download image from registry
+	// Download image from registry, retrying on 429 rate-limit errors with exponential backoff.
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
-		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
-		return syft.GetSource(ctxWithSize, ref,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
-	}, imageID, imageTag, registryOptions)
+	src, err := tools.RetryWithBackoff(ctx, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(rCtx context.Context) (source.Source, error) {
+		return resolveSource(rCtx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+			// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
+			ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+			return syft.GetSource(ctxWithSize, ref,
+				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+		}, imageID, imageTag, registryOptions)
+	})
 
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
