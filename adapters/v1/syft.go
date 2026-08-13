@@ -269,9 +269,17 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	generated := make(chan *sbom.SBOM, 1)
 	// ensure no parallel pulls
 	s.pullMutex.Lock()
-	defer s.pullMutex.Unlock()
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
+		// Unlock here, not via a defer at the top of CreateSBOM: this closure can outlive
+		// CreateSBOM's own return (see the comment below), so unlocking when CreateSBOM
+		// returns would let a subsequent CreateSBOM call start pulling/cataloging while this
+		// one is still running against disk, defeating the "ensure no parallel pulls" purpose
+		// of pullMutex on exactly the timeout path most likely to correlate with disk
+		// pressure. Unlocking only once this closure actually finishes - promptly on success
+		// or failure, late if the deadline fired first - is what makes pullMutex serialize the
+		// disk-touching work itself, not just the synchronous portion of the call.
+		defer s.pullMutex.Unlock()
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
