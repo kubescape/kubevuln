@@ -2916,6 +2916,15 @@ func (p *failureRecordingPlatform) ReportScanFailure(ctx context.Context, failur
 // each carries a distinct JobID/workload identity the backend/dashboard needs to know that
 // specific scan failed.
 func TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter(t *testing.T) {
+	// Pin the scheduler to one P so the goroutines started below cannot run concurrently with
+	// each other or with this goroutine. Under a single P, a goroutine only yields the
+	// processor by blocking (or explicitly calling runtime.Gosched); none of the code between a
+	// waiter's start and its blocking receive on the singleflight result channel does either, so
+	// each waiter runs start-to-block in one uninterrupted turn. That makes startWg.Wait below a
+	// hard guarantee that every waiter has already joined the shared singleflight.DoChan call by
+	// the time it returns, rather than a timing-based approximation of it.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
@@ -2966,18 +2975,12 @@ func TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter(t *testing.T) {
 		}()
 	}
 
-	startWg.Wait() // ensure all goroutines are running before unblocking the singleflight worker
-	<-started      // wait for the singleflight worker to enter CreateSBOM
-
-	// startWg only proves each goroutine began running, not that it has reached its
-	// singleflight.DoChan call yet -- give the scheduler a generous window to actually get
-	// every waiter registered on the same key before the leader's CreateSBOM is allowed to
-	// return, otherwise a slow-to-schedule waiter can miss the shared call entirely and
-	// trigger its own (spurious) second CreateSBOM execution.
-	for i := 0; i < 1000; i++ {
-		runtime.Gosched()
-	}
-	time.Sleep(50 * time.Millisecond)
+	// With GOMAXPROCS(1) above, this Wait returning already proves every waiter has joined the
+	// shared singleflight.DoChan call: the last one to call startWg.Done can only yield the
+	// processor by blocking on the result channel, so it -- and by the same argument every
+	// waiter before it -- is already parked on <-ch by the time this goroutine runs again.
+	startWg.Wait()
+	<-started // wait for the singleflight worker to enter CreateSBOM
 
 	close(release) // let CreateSBOM return its error
 	wg.Wait()
