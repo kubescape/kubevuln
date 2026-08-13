@@ -1149,6 +1149,39 @@ func ignoredMatchStatusNotes(rule v1beta1.IgnoreRule) string {
 	return strings.Join(parts, "; ")
 }
 
+// newLocalStatement builds the VEX statement kubevuln writes for a match, in the baseline
+// not_affected shape. createVEX and updateVEX each build one for a match and one for an
+// ignored match, and all four spelled it out; this is the one place that shape is defined,
+// so a field added to it cannot reach three sites and miss the fourth.
+//
+// A caller recording a suppression overwrites the baseline with applyIgnoredMatchAssessment,
+// which sets every one of the five fields it touches.
+func newLocalStatement(m v1beta1.Match, imagePullable string) (v1beta1.Statement, error) {
+	product, err := createProductStructForImageAndPackage(imagePullable, m.Artifact.PURL)
+	if err != nil {
+		return v1beta1.Statement{}, err
+	}
+
+	var aliases []string
+	for _, alias := range m.RelatedVulnerabilities {
+		aliases = append(aliases, alias.ID)
+	}
+
+	return v1beta1.Statement{
+		ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(m.Vulnerability.ID), url.PathEscape(m.Artifact.PURL)),
+		Vulnerability: v1beta1.VexVulnerability{
+			ID:          m.Vulnerability.DataSource,
+			Name:        m.Vulnerability.ID,
+			Description: m.Vulnerability.Description,
+			Aliases:     aliases,
+		},
+		Products:        []v1beta1.Product{*product},
+		Status:          v1beta1.Status(vex.StatusNotAffected),
+		Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+		ImpactStatement: defaultLocalImpactStatement,
+	}, nil
+}
+
 func applyIgnoredMatchAssessment(stmt *v1beta1.Statement, assessment ignoredVEXAssessment) {
 	stmt.Status = assessment.status
 	stmt.Justification = assessment.justification
@@ -1234,60 +1267,17 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Both loops read cve.Content, so both are guarded by the same nil check.
 	if cve.Content != nil {
 		for _, v := range cve.Content.Matches {
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
+			stmt, err := newLocalStatement(v, imagePullable)
 			if err != nil {
 				return err
 			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: defaultLocalImpactStatement,
-			})
+			vexDoc.Statements = append(vexDoc.Statements, stmt)
 		}
 
 		for _, v := range cve.Content.IgnoredMatches {
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
+			stmt, err := newLocalStatement(v.Match, imagePullable)
 			if err != nil {
 				return err
-			}
-
-			stmt := v1beta1.Statement{
-				ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
 			}
 			applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
 			vexDoc.Statements = append(vexDoc.Statements, stmt)
@@ -1401,33 +1391,11 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 			}
 			if !found {
 				// Add the vulnerability to the VEX document
-				var aliases []string
-				for _, alias := range v.RelatedVulnerabilities {
-					aliases = append(aliases, alias.ID)
-				}
-
-				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				stmt, err := newLocalStatement(v, imagePullable)
 				if err != nil {
 					return err
 				}
-
-				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-					ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
-					Vulnerability: v1beta1.VexVulnerability{
-						ID:          v.Vulnerability.DataSource,
-						Name:        v.Vulnerability.ID,
-						Description: v.Vulnerability.Description,
-						Aliases:     aliases,
-					},
-
-					Products: []v1beta1.Product{
-						*product,
-					},
-
-					Status:          v1beta1.Status(vex.StatusNotAffected),
-					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-					ImpactStatement: defaultLocalImpactStatement,
-				})
+				vexDoc.Statements = append(vexDoc.Statements, stmt)
 			}
 		}
 
@@ -1451,28 +1419,9 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				}
 			}
 			if !found {
-				var aliases []string
-				for _, alias := range v.RelatedVulnerabilities {
-					aliases = append(aliases, alias.ID)
-				}
-
-				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				stmt, err := newLocalStatement(v.Match, imagePullable)
 				if err != nil {
 					return err
-				}
-
-				stmt := v1beta1.Statement{
-					ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(v.Vulnerability.ID), url.PathEscape(v.Artifact.PURL)),
-					Vulnerability: v1beta1.VexVulnerability{
-						ID:          v.Vulnerability.DataSource,
-						Name:        v.Vulnerability.ID,
-						Description: v.Vulnerability.Description,
-						Aliases:     aliases,
-					},
-
-					Products: []v1beta1.Product{
-						*product,
-					},
 				}
 				applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
 				vexDoc.Statements = append(vexDoc.Statements, stmt)

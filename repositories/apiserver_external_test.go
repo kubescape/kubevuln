@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -216,4 +217,46 @@ func TestAPIServerStore_updateVEX_externalStatementDoesNotSuppressLocalOne(t *te
 	}
 	assert.True(t, foundExternal, "the external statement must survive")
 	assert.True(t, foundLocal, "kubescape must still record its own assessment alongside the external one")
+}
+
+// newLocalStatement is the one place the shape of a statement kubevuln writes is defined,
+// so it is worth pinning: createVEX and updateVEX each build one for a match and one for an
+// ignored match, and all four used to spell it out.
+func TestNewLocalStatement(t *testing.T) {
+	m := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:          "CVE-2024-0001",
+				DataSource:  "https://security-tracker.debian.org/tracker/CVE-2024-0001",
+				Description: "a description",
+			},
+		},
+		RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{{ID: "GHSA-aaaa"}, {ID: "EUVD-1"}},
+		Artifact:               v1beta1.GrypePackage{PURL: "pkg:deb/debian/tar@1.29"},
+	}
+
+	stmt, err := newLocalStatement(m, "docker.io/library/nginx@sha256:abc")
+	require.NoError(t, err)
+
+	assert.True(t, isLocalStatement(stmt.ID), "the statement must be recognised as ours: %s", stmt.ID)
+	assert.Contains(t, stmt.ID, url.PathEscape("CVE-2024-0001"))
+	assert.Contains(t, stmt.ID, url.PathEscape("pkg:deb/debian/tar@1.29"))
+
+	// The CVE goes in Name and the data source in ID, which is the mapping updateVEX's
+	// normalization exists to repair on documents written the other way round.
+	assert.Equal(t, "CVE-2024-0001", stmt.Vulnerability.Name)
+	assert.Equal(t, "https://security-tracker.debian.org/tracker/CVE-2024-0001", stmt.Vulnerability.ID)
+	assert.Equal(t, "a description", stmt.Vulnerability.Description)
+	assert.Equal(t, []string{"GHSA-aaaa", "EUVD-1"}, stmt.Vulnerability.Aliases)
+
+	require.Len(t, stmt.Products, 1)
+	require.Len(t, stmt.Products[0].Subcomponents, 1)
+	assert.Equal(t, "pkg:deb/debian/tar@1.29", stmt.Products[0].Subcomponents[0].ID)
+
+	// The baseline every caller starts from; a suppression overwrites it wholesale.
+	assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
+	assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
+	assert.Equal(t, defaultLocalImpactStatement, stmt.ImpactStatement)
+	assert.Empty(t, stmt.ActionStatement)
+	assert.Empty(t, stmt.StatusNotes)
 }
