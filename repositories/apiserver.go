@@ -1171,38 +1171,54 @@ func isLocalStatement(id string) bool {
 	return strings.HasPrefix(id, "https://kubescape.io/vex/statement/")
 }
 
-func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
+// vexStatementKey identifies a locally generated VEX statement by the vulnerability it
+// covers and the package it applies to. Statements produced by createProductStructForImageAndPackage
+// always carry exactly one product with exactly one subcomponent, so this pair uniquely
+// locates a statement without rescanning the whole slice.
+type vexStatementKey struct {
+	name string
+	purl string
+}
+
+// buildLocalVexStatementIndex indexes the local (scanner-generated) statements in
+// statements by vulnerability name and package PURL, once, so callers can replace
+// repeated O(n) scans over vexDoc.Statements with O(1) lookups. External statements
+// (Red Hat CSAF, Chainguard OpenVEX, ...) are never targeted by the dedup/mark logic
+// that consumes this index, so they are skipped. Every product/subcomponent of a local
+// statement is indexed, not just the first: locally generated statements normally carry
+// exactly one, but nothing prevents one from being expanded to carry more (e.g. a
+// statement edited or merged out of band), and statementHasPURL/anyPURLMatches already
+// treat that as a valid shape to match against.
+func buildLocalVexStatementIndex(statements []v1beta1.Statement) map[vexStatementKey]int {
+	idx := make(map[vexStatementKey]int, len(statements))
+	for i, s := range statements {
+		if !isLocalStatement(s.ID) {
+			continue
+		}
+		for _, p := range s.Products {
+			for _, sc := range p.Subcomponents {
+				idx[vexStatementKey{name: s.Vulnerability.Name, purl: sc.ID}] = i
+			}
+		}
+	}
+	return idx
+}
+
+func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest, idx map[vexStatementKey]int) error {
 	if cvep == nil || cvep.Content == nil {
 		return nil
 	}
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
-		for i, s := range vexDoc.Statements {
-			if !isLocalStatement(s.ID) {
-				continue
-			}
-			if s.Vulnerability.Name == v.Vulnerability.ID {
-				foundProduct := false
-				for _, p := range s.Products {
-					for _, sc := range p.Subcomponents {
-						if sc.ID == v.Artifact.PURL {
-							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
-							vexDoc.Statements[i].Justification = ""
-							vexDoc.Statements[i].ImpactStatement = ""
-							vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
-							vexDoc.Statements[i].StatusNotes = ""
-							foundProduct = true
-						}
-						if foundProduct {
-							break
-						}
-					}
-					if foundProduct {
-						break
-					}
-				}
-			}
+		i, ok := idx[vexStatementKey{name: v.Vulnerability.ID, purl: v.Artifact.PURL}]
+		if !ok {
+			continue
 		}
+		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusAffected)
+		vexDoc.Statements[i].Justification = ""
+		vexDoc.Statements[i].ImpactStatement = ""
+		vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
+		vexDoc.Statements[i].StatusNotes = ""
 	}
 	return nil
 }
@@ -1295,13 +1311,14 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// Now change the status of the filtered vulnerabilities to "Affected"
-	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	markIdx := buildLocalVexStatementIndex(vexDoc.Statements)
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep, markIdx)
 	if err != nil {
 		return err
 	}
 
-	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
-	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve, markIdx)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep, markIdx)
 
 	calculatedId, err := calculateVexCanonicalHash(vexDoc)
 	if err != nil {
@@ -1325,33 +1342,16 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	return err
 }
 
-func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifest) error {
+func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifest, idx map[vexStatementKey]int) error {
 	if cve == nil || cve.Content == nil {
 		return nil
 	}
 	for _, v := range cve.Content.IgnoredMatches {
-		for i, s := range vexDoc.Statements {
-			if !isLocalStatement(s.ID) {
-				continue
-			}
-			if s.Vulnerability.Name == v.Vulnerability.ID {
-				foundProduct := false
-				for _, p := range s.Products {
-					for _, sc := range p.Subcomponents {
-						if sc.ID == v.Artifact.PURL {
-							applyIgnoredMatchAssessment(&vexDoc.Statements[i], ignoredMatchAssessment(v))
-							foundProduct = true
-						}
-						if foundProduct {
-							break
-						}
-					}
-					if foundProduct {
-						break
-					}
-				}
-			}
+		i, ok := idx[vexStatementKey{name: v.Vulnerability.ID, purl: v.Artifact.PURL}]
+		if !ok {
+			continue
 		}
+		applyIgnoredMatchAssessment(&vexDoc.Statements[i], ignoredMatchAssessment(v))
 	}
 	return nil
 }
@@ -1379,27 +1379,16 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
+	// statementIdx tracks local statements by (vulnerability, package), built once and kept
+	// up to date as statements are appended below. It drives the Matches/IgnoredMatches dedup
+	// checks and, once the document is fully assembled, the mark-affected/mark-ignored passes,
+	// replacing what used to be repeated O(n) scans over vexDoc.Statements with O(1) lookups.
+	statementIdx := buildLocalVexStatementIndex(vexDoc.Statements)
+
 	if cve.Content != nil {
 		for _, v := range cve.Content.Matches {
-			found := false
-			for _, s := range vexDoc.Statements {
-				// Only our own statements count as already present. An external one is
-				// another author's assessment, and every step below that maintains a
-				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
-				// so treating it as ours would drop kubescape's assessment of this
-				// vulnerability from the document instead of recording it alongside theirs.
-				if !isLocalStatement(s.ID) {
-					continue
-				}
-				if s.Vulnerability.Name != v.Vulnerability.ID {
-					continue
-				}
-				if statementHasPURL(s.Products, v.Artifact.PURL) {
-					found = true
-					break
-				}
-			}
-			if !found {
+			key := vexStatementKey{name: v.Vulnerability.ID, purl: v.Artifact.PURL}
+			if _, found := statementIdx[key]; !found {
 				// Add the vulnerability to the VEX document
 				var aliases []string
 				for _, alias := range v.RelatedVulnerabilities {
@@ -1428,29 +1417,13 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
 					ImpactStatement: defaultLocalImpactStatement,
 				})
+				statementIdx[key] = len(vexDoc.Statements) - 1
 			}
 		}
 
 		for _, v := range cve.Content.IgnoredMatches {
-			found := false
-			for _, s := range vexDoc.Statements {
-				// Only our own statements count as already present. An external one is
-				// another author's assessment, and every step below that maintains a
-				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
-				// so treating it as ours would drop kubescape's assessment of this
-				// vulnerability from the document instead of recording it alongside theirs.
-				if !isLocalStatement(s.ID) {
-					continue
-				}
-				if s.Vulnerability.Name != v.Vulnerability.ID {
-					continue
-				}
-				if statementHasPURL(s.Products, v.Artifact.PURL) {
-					found = true
-					break
-				}
-			}
-			if !found {
+			key := vexStatementKey{name: v.Vulnerability.ID, purl: v.Artifact.PURL}
+			if _, found := statementIdx[key]; !found {
 				var aliases []string
 				for _, alias := range v.RelatedVulnerabilities {
 					aliases = append(aliases, alias.ID)
@@ -1476,6 +1449,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				}
 				applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
 				vexDoc.Statements = append(vexDoc.Statements, stmt)
+				statementIdx[key] = len(vexDoc.Statements) - 1
 			}
 		}
 	}
@@ -1518,14 +1492,16 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		}
 	}
 
-	// Now change the status of the filtered vulnerabilities to "Affected"
-	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep)
+	// Now change the status of the filtered vulnerabilities to "Affected". statementIdx is
+	// still valid here: the reset loop above only rewrites fields on existing statements, it
+	// never appends or reorders them.
+	err := markRelevantVulnerabilitiesAsAffectedInVex(&vexDoc, &cvep, statementIdx)
 	if err != nil {
 		return err
 	}
 
-	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
-	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve, statementIdx)
+	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep, statementIdx)
 
 	mergedAnnotations := mergeMaps(maps.Clone(vexContainer.Annotations), cvep.Annotations)
 	mergedLabels := mergeMaps(maps.Clone(vexContainer.Labels), cvep.Labels)

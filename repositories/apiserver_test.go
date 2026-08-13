@@ -3148,3 +3148,59 @@ func TestAPIServerStore_StoreCVESummary_MixedNilContentDoesNotPanic(t *testing.T
 	assert.Equal(t, int64(1), summary.Spec.Severities.Critical.All, "the real cve manifest's match must still be counted")
 	assert.Equal(t, int64(0), summary.Spec.Severities.Critical.Relevant, "cvep.Content is nil, so no relevant count should be recorded")
 }
+
+// buildLargeCVEManifest synthesizes a CVEManifest with numMatches distinct vulnerability/package
+// pairs, used to benchmark updateVEX/createVEX at a scale comparable to a large real-world image.
+func buildLargeCVEManifest(numMatches int) domain.CVEManifest {
+	matches := make([]v1beta1.Match, 0, numMatches)
+	for i := 0; i < numMatches; i++ {
+		matches = append(matches, v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         fmt.Sprintf("CVE-BENCH-%d", i),
+					DataSource: fmt.Sprintf("GHSA-BENCH-%d", i),
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    fmt.Sprintf("package-%d", i),
+				Version: "1.0",
+				PURL:    fmt.Sprintf("pkg:golang/package-%d@1.0", i),
+			},
+		})
+	}
+	return domain.CVEManifest{
+		Name: name,
+		Content: &v1beta1.GrypeDocument{
+			Matches: matches,
+		},
+	}
+}
+
+// BenchmarkAPIServerStore_StoreVEX_LargeManifest measures StoreVEX cost on a large manifest
+// across the create path (first call) and the update path (second call, which rescans
+// existing statements for dedup, reset-to-baseline, and mark-affected/mark-ignored). Run with:
+//
+//	go test ./repositories/... -run '^$' -bench BenchmarkAPIServerStore_StoreVEX_LargeManifest -benchmem
+func BenchmarkAPIServerStore_StoreVEX_LargeManifest(b *testing.B) {
+	const numMatches = 5000
+	cveManifest := buildLargeCVEManifest(numMatches)
+	// Filter to half the matches as "relevant", exercising markRelevantVulnerabilitiesAsAffectedInVex.
+	filtered := cveManifest
+	filteredContent := *cveManifest.Content
+	filteredContent.Matches = append([]v1beta1.Match(nil), cveManifest.Content.Matches[:numMatches/2]...)
+	filtered.Content = &filteredContent
+
+	ctx := context.TODO()
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := NewFakeAPIServerStorage("kubescape")
+		if err := a.StoreVEX(ctx, cveManifest, filtered, false); err != nil {
+			b.Fatal(err)
+		}
+		// Second call exercises updateVEX against the already-populated statement set.
+		if err := a.StoreVEX(ctx, cveManifest, filtered, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
