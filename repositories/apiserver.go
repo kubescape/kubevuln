@@ -1091,7 +1091,6 @@ func defaultIgnoredVEXAssessment() ignoredVEXAssessment {
 	return ignoredVEXAssessment{
 		status:          v1beta1.Status(vex.StatusNotAffected),
 		justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-		impactStatement: securityExceptionImpactStatement,
 	}
 }
 
@@ -1099,8 +1098,11 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 	assessment := defaultIgnoredVEXAssessment()
 	rule, ok := securityExceptionIgnoreRule(m)
 	if !ok {
+		assessment.impactStatement = "Vulnerability was ignored by scanner configuration or external VEX"
 		return assessment
 	}
+
+	assessment.impactStatement = securityExceptionImpactStatement
 
 	switch strings.TrimSpace(rule.FixState) {
 	case string(sev1beta1.VulnerabilityStatusFixed):

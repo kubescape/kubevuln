@@ -506,7 +506,7 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 	restored := doc.DeepCopy()
 	var kept []v1beta1.IgnoredMatch
 	for _, im := range restored.IgnoredMatches {
-		if isExceptionSourcedIgnore(im) {
+		if IsExceptionSourcedIgnore(im) {
 			restored.Matches = append(restored.Matches, im.Match)
 		} else {
 			kept = append(kept, im)
@@ -519,7 +519,7 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
 // signature ApplySecurityExceptions writes: exactly one rule with no package set, and either
 // exception provenance (source/justification/impact) or an empty FixState.
-func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
+func IsExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) != 1 {
 		return false
 	}

@@ -439,13 +439,13 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 			foundIgnored1 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
 		}
 		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST-2" {
 			foundIgnored2 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
 		}
 	}
 	assert.True(t, foundIgnored1, "First IgnoredMatch should be preserved in the VEX document during update")
@@ -2789,7 +2789,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
 			assert.Empty(t, stmt.ActionStatement, "ActionStatement should be cleared on transition to not_affected")
 		}
 	}
@@ -2928,7 +2928,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches_multiProductStatement(t *testing
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status,
 				"statement should transition to not_affected even though its real product is second, not first")
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement,
+			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement,
 				"ignore lookup should find the package regardless of product position")
 		}
 	}
