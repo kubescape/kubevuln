@@ -9,6 +9,15 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
+// defaultScanStatusTTL bounds how long a terminal (succeeded/failed/abandoned) record
+// is retained after it finished, and defaultScanStatusMaxEntries caps the total number
+// of records regardless of age. Without both, scanStatusStore.items would grow without
+// bound over the lifetime of a long-running kubevuln pod.
+const (
+	defaultScanStatusTTL        = time.Hour
+	defaultScanStatusMaxEntries = 10000
+)
+
 type scanStatusStore struct {
 	mu         sync.RWMutex
 	items      map[string]domain.ScanStatus

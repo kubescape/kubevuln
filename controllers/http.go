@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -27,11 +28,12 @@ import (
 // HTTPController maps ScanService ports to gin handlers that can be mapped to paths and methods
 // this mapping is usually done in main()
 type HTTPController struct {
-	scanService ports.ScanService
-	workerPool  *workerpool.WorkerPool
-	metrics     *metrics.Metrics
-	diagnostics func(ctx context.Context) domain.Diagnostics
-	statuses    *scanStatusStore
+	scanService  ports.ScanService
+	workerPool   *workerpool.WorkerPool
+	metrics      *metrics.Metrics
+	diagnostics  func(ctx context.Context) domain.Diagnostics
+	statuses     *scanStatusStore
+	statusesOnce sync.Once
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -74,10 +76,19 @@ func (h *HTTPController) WithDiagnostics(f func(ctx context.Context) domain.Diag
 }
 
 func (h *HTTPController) ensureStatuses() *scanStatusStore {
-	if h.statuses == nil {
-		h.statuses = newScanStatusStore()
-	}
+	h.statusesOnce.Do(func() {
+		if h.statuses == nil {
+			h.statuses = newScanStatusStore()
+		}
+	})
 	return h.statuses
+}
+
+func (h *HTTPController) claimTrackedJob(jobID string) bool {
+	if jobID == "" {
+		return true
+	}
+	return h.ensureStatuses().markRunning(jobID)
 }
 
 // recordScan records the outcome and duration of a background scan job for the given endpoint.
@@ -167,7 +178,7 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		if !h.ensureStatuses().markRunning(newScan.JobID) {
+		if !h.claimTrackedJob(newScan.JobID) {
 			return
 		}
 		start := time.Now()
@@ -263,7 +274,7 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		if !h.ensureStatuses().markRunning(newScan.JobID) {
+		if !h.claimTrackedJob(newScan.JobID) {
 			return
 		}
 		start := time.Now()
@@ -325,7 +336,7 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		if !h.ensureStatuses().markRunning(newScan.JobID) {
+		if !h.claimTrackedJob(newScan.JobID) {
 			return
 		}
 		start := time.Now()
@@ -423,7 +434,7 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
-		if !h.ensureStatuses().markRunning(newScan.JobID) {
+		if !h.claimTrackedJob(newScan.JobID) {
 			return
 		}
 		start := time.Now()

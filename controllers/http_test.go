@@ -525,6 +525,36 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 	}
 }
 
+func TestHTTPController_GenerateSBOM_EmptyJobIDStillRuns(t *testing.T) {
+	spy := &contextSpyScanService{
+		generateSBOMCh: make(chan struct{}),
+	}
+
+	c := HTTPController{
+		scanService: spy,
+		workerPool:  workerpool.New(1),
+	}
+	defer c.Shutdown(5 * time.Second)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{
+		"imageTag": "k8s.gcr.io/kube-proxy:v1.24.3",
+		"imageHash": "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case <-spy.generateSBOMCh:
+		assert.NoError(t, spy.lastGenerateSBOMCtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("GenerateSBOM worker was not executed in time")
+	}
+}
+
 func TestValidationStatusCode(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, validationStatusCode(domain.ErrTooManyRequests))
 	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMissingCpInfo))
@@ -567,7 +597,11 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 }
 
 func TestHTTPController_MetricsEndpoint(t *testing.T) {
-	c := NewHTTPController(services.NewMockScanService(true), 1)
+	startedC := make(chan struct{}, 1)
+	c := NewHTTPController(scanErrorService{
+		MockScanService: services.NewMockScanService(true),
+		startedC:        startedC,
+	}, 1)
 	m, err := metrics.New()
 	require.NoError(t, err)
 	_, err = c.WithMetrics(m)
@@ -583,6 +617,11 @@ func TestHTTPController_MetricsEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	select {
+	case <-startedC:
+	case <-time.After(1 * time.Second):
+		t.Fatal("scan worker was not executed in time")
+	}
 
 	c.Shutdown(5 * time.Second)
 
@@ -701,12 +740,34 @@ func TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection(t 
 // metrics (see #540).
 type scanErrorService struct {
 	*services.MockScanService
-	err error
+	err      error
+	startedC chan<- struct{}
 }
 
-func (s scanErrorService) GenerateSBOM(context.Context) error { return s.err }
-func (s scanErrorService) ScanCVE(context.Context) error      { return s.err }
-func (s scanErrorService) ScanRegistry(context.Context) error { return s.err }
+func (s scanErrorService) signalStarted() {
+	if s.startedC == nil {
+		return
+	}
+	select {
+	case s.startedC <- struct{}{}:
+	default:
+	}
+}
+
+func (s scanErrorService) GenerateSBOM(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
+
+func (s scanErrorService) ScanCVE(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
+
+func (s scanErrorService) ScanRegistry(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
 
 func (s scanErrorService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	return ctx, nil
@@ -771,9 +832,14 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			if tt.unclassified {
 				scanErr = errors.New("boom")
 			}
+			startedC := make(chan struct{}, 1)
 			c := &HTTPController{
-				scanService: scanErrorService{MockScanService: services.NewMockScanService(true), err: scanErr},
-				workerPool:  workerpool.New(1),
+				scanService: scanErrorService{
+					MockScanService: services.NewMockScanService(true),
+					err:             scanErr,
+					startedC:        startedC,
+				},
+				workerPool: workerpool.New(1),
 			}
 			m, err := metrics.New()
 			require.NoError(t, err)
@@ -790,6 +856,11 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			select {
+			case <-startedC:
+			case <-time.After(1 * time.Second):
+				t.Fatal("scan worker was not executed in time")
+			}
 
 			c.Shutdown(5 * time.Second)
 
