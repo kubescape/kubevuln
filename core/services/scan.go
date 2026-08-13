@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -155,30 +153,9 @@ func (s *ScanService) checkCreateSBOM(err error, key string) {
 }
 
 // isRegistryRateLimitedErr reports whether err indicates the image pull was rate limited.
-// It recognizes three shapes:
-//   - domain.ErrTooManyRequests: the sentinel SidecarSBOMAdapter.CreateSBOM wraps its
-//     returned error with once the sidecar scanner reports a 429 (see adapters/v1/sidecar.go).
-//   - *transport.Error with StatusCode 429: what the in-process syft adapter would return
-//     if the error reached here unwrapped.
-//   - the rendered error text: stereoscope's registry provider formats the
-//     go-containerregistry pull error with %+v, not %w, which severs the errors.As chain
-//     for *transport.Error before it ever reaches here (mirrors
-//     pkg/sbomscanner/v1.isRegistryRateLimited, which has the same problem on the sidecar
-//     side of the same pull path).
+// It delegates to tools.IsRateLimitError.
 func isRegistryRateLimitedErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, domain.ErrTooManyRequests) {
-		return true
-	}
-	var transportError *transport.Error
-	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
-		strings.Contains(errStr, "429 Too Many Requests")
+	return tools.IsRateLimitError(err)
 }
 
 // GenerateSBOM implements the "Generate SBOM flow"

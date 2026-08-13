@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +167,42 @@ func TestRetryWithBackoff_MetricsRecording(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 2, calls)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_op",outcome="attempt"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_op",outcome="success"} 1`), body)
+}
+
+func TestRetryWithBackoff_MetricsRecordingExhausted(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	defer func() { _ = m.Shutdown(context.Background()) }()
+
+	config := RetryConfig{
+		MaxAttempts: 2,
+		InitialWait: 5 * time.Millisecond,
+		MaxWait:     20 * time.Millisecond,
+		Backoff:     2.0,
+	}
+
+	rateErr := &transport.Error{StatusCode: http.StatusTooManyRequests}
+	_, err = RetryWithBackoff(context.Background(), "test_exhausted_op", config, IsRateLimitError, func(ctx context.Context) (string, error) {
+		return "", rateErr
+	})
+
+	assert.Equal(t, rateErr, err)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_exhausted_op",outcome="attempt"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_exhausted_op",outcome="exhausted"} 1`), body)
 }
