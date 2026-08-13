@@ -23,6 +23,7 @@ func TestNewAndHandler(t *testing.T) {
 	RecordScanFallback(context.Background(), ComponentInProcess, FallbackCategoryRegistryAuth, FallbackStrategyAnonymous, FallbackOutcomeSucceeded)
 	RecordSourceResolution(context.Background(), ComponentInProcess, true, true)
 	RecordRegistryAuthCache(context.Background(), FallbackStrategyECR, RegistryAuthCacheHit)
+	RecordTempDirSweep(context.Background(), ComponentInProcess, 3)
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -37,6 +38,44 @@ func TestNewAndHandler(t *testing.T) {
 	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="registry_auth",component="in_process",outcome="succeeded",strategy="anonymous"} 1`), body)
 	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="in_process",outcome="fallback_assisted_success"} 1`), body)
 	assert.True(t, strings.Contains(body, `kubevuln_registry_auth_cache_total{result="hit",strategy="ecr"} 1`), body)
+	assert.True(t, strings.Contains(body, `kubevuln_temp_dir_sweep_removed_total{component="in_process"} 3`), body)
+}
+
+func TestRecordTempDirSweep_ZeroOrNegativeRemovedIsANoOp(t *testing.T) {
+	m, err := New()
+	require.NoError(t, err)
+
+	// A sweep that removed nothing is the steady-state, common case; asserting it emits no
+	// series keeps the metric's presence itself meaningful (any series at all means the sweep
+	// has reclaimed something at least once), and avoids emitting a zero-valued series on
+	// every tick, forever, from both cmd/http and cmd/sbom-scanner.
+	RecordTempDirSweep(context.Background(), ComponentInProcess, 0)
+	RecordTempDirSweep(context.Background(), ComponentInProcess, -1)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+
+	assert.False(t, strings.Contains(w.Body.String(), "kubevuln_temp_dir_sweep_removed_total"), w.Body.String())
+}
+
+func TestRecordTempDirSweep_BeforeNewIsANoOp(t *testing.T) {
+	// Mirrors the existing package-level-var pattern (RecordScanFallback et al.): the sidecar
+	// binary (cmd/sbom-scanner) never calls metrics.New(), so RecordTempDirSweep must not panic
+	// when called against a nil counter.
+	recorderMu.Lock()
+	previous := tempDirSweepCounter
+	tempDirSweepCounter = nil
+	recorderMu.Unlock()
+	defer func() {
+		recorderMu.Lock()
+		tempDirSweepCounter = previous
+		recorderMu.Unlock()
+	}()
+
+	assert.NotPanics(t, func() {
+		RecordTempDirSweep(context.Background(), ComponentSidecar, 5)
+	})
 }
 
 func TestMeterRegistersObservableGauge(t *testing.T) {

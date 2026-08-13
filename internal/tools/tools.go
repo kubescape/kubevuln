@@ -160,6 +160,40 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 	return removed, allErrs
 }
 
+// StartPeriodicTempDirSweep runs CleanupStaleTempDirs immediately and then again on every
+// tick of interval, until stop is closed (or the process's shutdown signal fires, for a
+// context.Context's Done() channel). A single sweep at process startup only reclaims dirs
+// orphaned by a *previous* process invocation (e.g. one killed by SIGKILL before its
+// defer-based cleanup could run); it does nothing for dirs leaked by the *current*, still-running
+// process, e.g. a registry pull that fails after stereoscope creates its image temp dir but
+// before an image.Image exists to Cleanup() it (auth failures, transient registry errors,
+// platform mismatches - none of which are crashes). Since kubevuln processes stay up for the
+// life of a long-running pod rather than restarting per scan, those leaks would otherwise
+// accumulate for the pod's entire uptime. onSweep, if non-nil, is invoked after every sweep
+// (including the immediate one) with its outcome, so callers can log/record metrics without
+// this function taking a dependency on either.
+func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderThan, interval time.Duration, onSweep func(removed int, err error)) {
+	sweep := func() {
+		removed, err := CleanupStaleTempDirs(dir, prefix, olderThan)
+		if onSweep != nil {
+			onSweep(removed, err)
+		}
+	}
+	sweep()
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				sweep()
+			}
+		}
+	}()
+}
+
 func NormalizeReference(ref string) string {
 	n, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {

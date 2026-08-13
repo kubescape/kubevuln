@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/signal"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"google.golang.org/grpc"
@@ -29,6 +32,14 @@ import (
 // shutdownTimeout default so both processes give a comparable grace period before a
 // terminationGracePeriodSeconds-driven SIGKILL would otherwise cut them off mid-shutdown.
 const shutdownTimeout = 20 * time.Second
+
+// tempDirSweepInterval bounds how long a stereoscope temp dir leaked by this process (e.g. a
+// registry pull that fails after the image temp dir is created but before there's an
+// image.Image to Cleanup() it -- see internal/tools.StartPeriodicTempDirSweep) can sit on disk
+// before being reclaimed. This process has no config file of its own (unlike cmd/http, which
+// derives the same cadence from ScanTimeout), so it uses the same 5-minute value CreateSBOM
+// already falls back to when a request carries no TimeoutSeconds (pkg/sbomscanner/v1/server.go).
+const tempDirSweepInterval = 5 * time.Minute
 
 // gracefulStopWithTimeout waits up to timeout for srv's in-flight RPCs to finish via
 // GracefulStop, then force-closes the server with Stop if the timeout elapses first.
@@ -79,12 +90,26 @@ func main() {
 	)
 	pb.RegisterSBOMScannerServer(srv, sbomscanner.NewScannerServer())
 
+	// See tempDirSweepInterval: this process (unlike cmd/http) previously had no temp-dir
+	// sweep at all, startup or periodic, despite being the one that performs pod-less
+	// registry pulls (registry rescans, periodic CRD-based rescans).
+	stopSweep := make(chan struct{})
+	tools.StartPeriodicTempDirSweep(stopSweep, os.TempDir(), "stereoscope-", tempDirSweepInterval, tempDirSweepInterval, func(removed int, err error) {
+		if err != nil {
+			logger.L().Warning("temp dir sweep error", helpers.Error(err), helpers.Int("removed", removed))
+		} else if removed > 0 {
+			logger.L().Info("temp dir sweep complete", helpers.Int("removed", removed))
+		}
+		metrics.RecordTempDirSweep(context.Background(), metrics.ComponentSidecar, removed)
+	})
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
 		sig := <-sigCh
 		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
+		close(stopSweep)
 		gracefulStopWithTimeout(srv, shutdownTimeout)
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
 			logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))

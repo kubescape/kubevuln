@@ -181,20 +181,30 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("metrics registration error", helpers.Error(err))
 	}
 
-	// Best-effort startup sweep: reclaim stereoscope temp dirs orphaned by previous process
-	// invocations killed by SIGKILL (OOM kill, or terminationGracePeriodSeconds exceeded)
-	// before their defer-based cleanup could run. The threshold is ScanTimeout: the main
-	// process and the SBOM-scanner sidecar run in the same Pod on the same machine (same
-	// kernel clock), so no clock-skew margin is needed, and a dir idle longer than
-	// ScanTimeout can only belong to a dead or already-timed-out scan.
-	if removed, err := tools.CleanupStaleTempDirs(os.TempDir(), "stereoscope-", c.ScanTimeout); err != nil {
-		logger.L().Ctx(ctx).Warning("startup temp dir sweep error",
-			helpers.Error(err),
-			helpers.Int("removed", removed))
-	} else if removed > 0 {
-		logger.L().Ctx(ctx).Info("startup temp dir sweep complete",
-			helpers.Int("removed", removed))
-	}
+	// Best-effort periodic sweep: reclaim stereoscope temp dirs left behind either by a
+	// previous process invocation killed by SIGKILL (OOM kill, or terminationGracePeriodSeconds
+	// exceeded) before its defer-based cleanup could run, or by an ordinary (non-crash) registry
+	// pull failure in *this* process — stereoscope creates the image temp dir before it has
+	// anything to Cleanup() it, so auth failures, transient registry errors, and platform
+	// mismatches can all leak one. This process runs for the life of a long-lived pod rather
+	// than restarting per scan, so a single startup-only sweep would never reclaim leaks from
+	// its own uptime; run it on a recurring interval instead. The threshold is ScanTimeout: the
+	// main process and the SBOM-scanner sidecar run in the same Pod on the same machine (same
+	// kernel clock), so no clock-skew margin is needed, and a dir idle longer than ScanTimeout
+	// can only belong to a dead or already-timed-out scan. ScanTimeout also doubles as the sweep
+	// interval, keeping worst-case accumulation bounded to roughly one ScanTimeout's worth of
+	// leaks at a time.
+	tools.StartPeriodicTempDirSweep(ctx.Done(), os.TempDir(), "stereoscope-", c.ScanTimeout, c.ScanTimeout, func(removed int, err error) {
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("temp dir sweep error",
+				helpers.Error(err),
+				helpers.Int("removed", removed))
+		} else if removed > 0 {
+			logger.L().Ctx(ctx).Info("temp dir sweep complete",
+				helpers.Int("removed", removed))
+		}
+		metrics.RecordTempDirSweep(ctx, metrics.ComponentInProcess, removed)
+	})
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

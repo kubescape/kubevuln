@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/DmitriyVTitov/size"
-	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging"
@@ -178,16 +177,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	if err != nil {
 		return domainSBOM, err
 	}
-
-	// prepare temporary directory for image download
-	t := file.NewTempDirGenerator("stereoscope")
-	defer func(t *file.TempDirGenerator) {
-		err := t.Cleanup()
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to cleanup temp dir", helpers.Error(err),
-				helpers.String("imageID", imageID))
-		}
-	}(t)
 
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
