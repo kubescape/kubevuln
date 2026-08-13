@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -20,37 +19,21 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
-//
-// The typed check alone is not enough: stereoscope's registry provider formats the
-// go-containerregistry pull error with %+v, not %w (see
-// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
-// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
-// registry error code emitted when the response carries a JSON error body (e.g. Docker
-// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
-// Error() text when the response body was empty.
+// It delegates to tools.IsRateLimitError.
 func isRegistryRateLimited(err error) bool {
-	if err == nil {
-		return false
-	}
-	var transportErr *transport.Error
-	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
-		strings.Contains(errStr, "429 Too Many Requests")
+	return tools.IsRateLimitError(err)
 }
 
 // isPlatformMismatch reports whether err is (or wraps) stereoscope's
@@ -228,14 +211,17 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}
 	}()
 
-	// Download image from registry
+	// Download image from registry, retrying on 429 rate-limit errors with exponential backoff.
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
-		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
-		return syft.GetSource(ctxWithSize, ref,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
-	}, imageID, imageTag, registryOptions)
+	src, err := tools.RetryWithBackoff(ctx, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(rCtx context.Context) (source.Source, error) {
+		return resolveSource(rCtx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+			// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
+			//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
+			ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+			return syft.GetSource(ctxWithSize, ref,
+				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+		}, imageID, imageTag, registryOptions)
+	})
 
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):

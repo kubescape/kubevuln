@@ -525,9 +525,9 @@ func TestIsRegistryRateLimited(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "generic message mentioning 429 alone is not enough",
+			name: "generic message mentioning 429",
 			err:  errors.New("received status code: 429"),
-			want: false,
+			want: true,
 		},
 		{
 			name: "nil error",

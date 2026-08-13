@@ -53,6 +53,10 @@ const (
 	// RegistryAuthCacheCoalesced is recorded by a caller that missed the cache but was served
 	// by another caller's in-flight fetch, so it cost no upstream request.
 	RegistryAuthCacheCoalesced = "coalesced"
+
+	RetryOutcomeAttempt   = "attempt"
+	RetryOutcomeSuccess   = "success"
+	RetryOutcomeExhausted = "exhausted"
 )
 
 var recorderMu sync.RWMutex
@@ -60,6 +64,7 @@ var fallbackCounter metric.Int64Counter
 var sourceResolutionCounter metric.Int64Counter
 var registryAuthCacheCounter metric.Int64Counter
 var singleflightHitsCounter metric.Int64Counter
+var retryAttemptsCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -78,6 +83,7 @@ type Metrics struct {
 	ScanFallbackCounter       metric.Int64Counter
 	SourceResolutionCounter   metric.Int64Counter
 	SingleflightHitsCounter   metric.Int64Counter
+	RetryAttemptsCounter      metric.Int64Counter
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -195,11 +201,20 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	retryAttemptsMetric, err := meter.Int64Counter(
+		"kubevuln_retry_attempts_total",
+		metric.WithDescription("Total number of retry attempts executed during transient error backoff, by operation and outcome"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	recorderMu.Lock()
 	fallbackCounter = scanFallbackCounter
 	sourceResolutionCounter = sourceResolutionMetric
 	registryAuthCacheCounter = registryAuthCacheMetric
 	singleflightHitsCounter = singleflightHitsMetric
+	retryAttemptsCounter = retryAttemptsMetric
 	recorderMu.Unlock()
 
 	return &Metrics{
@@ -215,6 +230,7 @@ func New() (*Metrics, error) {
 		ScanFallbackCounter:       scanFallbackCounter,
 		SourceResolutionCounter:   sourceResolutionMetric,
 		SingleflightHitsCounter:   singleflightHitsMetric,
+		RetryAttemptsCounter:      retryAttemptsMetric,
 	}, nil
 }
 
@@ -297,5 +313,18 @@ func RecordSingleflightHit(ctx context.Context, target string) {
 	}
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("target", target),
+	))
+}
+
+func RecordRetryAttempt(ctx context.Context, operation, outcome string) {
+	recorderMu.RLock()
+	counter := retryAttemptsCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("operation", operation),
+		attribute.String("outcome", outcome),
 	))
 }

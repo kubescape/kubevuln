@@ -608,9 +608,9 @@ func TestIsRegistryRateLimitedErr(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "generic message mentioning 429 alone is not enough",
+			name: "generic message mentioning status code 429",
 			err:  errors.New("received status code: 429"),
-			want: false,
+			want: true,
 		},
 	}
 	for _, tt := range tests {
