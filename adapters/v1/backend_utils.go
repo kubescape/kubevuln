@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -319,8 +320,22 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	for sever := range exculdedSeveritiesStats {
 		summary.ExcludedSeveritiesStats = append(summary.ExcludedSeveritiesStats, exculdedSeveritiesStats[sever])
 	}
+	// Both were collected in a map, whose iteration order Go randomises, so without this the
+	// same findings produce a differently ordered summary on every scan. That summary is the
+	// payload posted to the backend, so a consumer diffing two reports for the same image
+	// sees the severity stats move around when nothing about the image changed.
+	sortBySeverity(summary.SeveritiesStats)
+	sortBySeverity(summary.ExcludedSeveritiesStats)
 
 	return &summary, vulnerabilities
+}
+
+// sortBySeverity orders severity stats by severity name, so a summary built from the same
+// findings is byte for byte the same each time.
+func sortBySeverity(stats []containerscan.SeverityStats) {
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].Severity < stats[j].Severity
+	})
 }
 
 func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {

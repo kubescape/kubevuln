@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,10 +157,46 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 			if !shouldRetryReport(resp) {
 				return nil, backoff.Permanent(retryErr)
 			}
+			if wait, ok := parseRetryAfter(resp); ok {
+				if wait > 0 {
+					wait = wait.Round(time.Second)
+					if wait == 0 {
+						wait = time.Second
+					}
+				}
+				return nil, backoff.RetryAfter(int(wait.Seconds()))
+			}
 			return nil, retryErr
 		}
 		return resp, nil
 	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
+}
+
+// parseRetryAfter reads the standard Retry-After header from resp, in either of its two
+// legitimate forms (RFC 9110 10.2.3): a plain non-negative number of seconds, or an
+// HTTP-date. Returns ok=false if the header is absent, empty, negative, or in neither
+// recognized form. A parsed date that has already passed is treated as "no wait" (zero
+// duration), not a negative one.
+func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(v, 10, 64); err == nil {
+		const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+		if seconds < 0 || seconds > maxRetryAfterSeconds {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		wait := time.Until(t)
+		if wait < 0 {
+			wait = 0
+		}
+		return wait, true
+	}
+	return 0, false
 }
 
 // shouldRetryReport is derived from the unexported defaultShouldRetry in armosec/utils-go, but
@@ -583,18 +620,35 @@ func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map
 	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
 }
 
+// relevancyIdentity is what makes two vulnerability records the same finding: the CVE, and
+// the package it was found on. The package needs its version as well as its name, because a
+// name is not unique within an image. Two versions of one library can sit side by side, which
+// is ordinary in Java and Node images, and DomainToArmo emits a record per (vulnerability,
+// artifact) pair, so both versions produce a record carrying the same name.
+type relevancyIdentity struct {
+	cve            string
+	packageName    string
+	packageVersion string
+}
+
+func identifyForRelevancy(v cs.CommonContainerVulnerabilityResult) relevancyIdentity {
+	return relevancyIdentity{cve: v.Name, packageName: v.RelatedPackageName, packageVersion: v.PackageVersion}
+}
+
 // markRelevantVulnerabilities annotates each vulnerability with IsRelevant=true iff the same
-// (CVE, package) pair also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would
-// mark a CVE relevant on every package it affects even when only one of those packages was
-// executed; the pair is the record identity (see RelatedPackageName in DomainToArmo and the
-// uniqueness assertion in backend_test.go).
+// finding also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would mark a CVE
+// relevant on every package it affects even when only one of those packages was executed, and
+// keying by CVE and package name alone does the same thing one level down, marking an
+// unloaded version of a library relevant because another version of it was loaded. Both
+// manifests are built from the same artifacts, the filtered one from a subset of the same
+// SBOM, so the versions on either side are the same strings.
 func markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities []cs.CommonContainerVulnerabilityResult) {
-	cvepIndices := make(map[string]struct{}, len(relevantVulnerabilities))
+	cvepIndices := make(map[relevancyIdentity]struct{}, len(relevantVulnerabilities))
 	for _, v := range relevantVulnerabilities {
-		cvepIndices[v.Name+"+"+v.RelatedPackageName] = struct{}{}
+		cvepIndices[identifyForRelevancy(v)] = struct{}{}
 	}
 	for i, v := range vulnerabilities {
-		_, isRelevant := cvepIndices[v.Name+"+"+v.RelatedPackageName]
+		_, isRelevant := cvepIndices[identifyForRelevancy(v)]
 		vulnerabilities[i].IsRelevant = &isRelevant
 	}
 }

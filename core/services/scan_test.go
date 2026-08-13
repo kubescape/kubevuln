@@ -225,6 +225,98 @@ func TestScanService_getOrCreateSBOM_SameTagDifferentDigestsAreNotShared(t *test
 	assert.Equal(t, int32(2), atomic.LoadInt32(&creator.calls), "two digests are two images, not one")
 }
 
+// sizeCappedSBOMCreator mirrors the TooLarge path in adapters/v1/syft.go, which returns
+// before Content is ever assigned: the SBOM carries a status and the annotations getSBOM
+// re-checks against the current limits, but no document. NewMockSBOMAdapter cannot stand in
+// here, as it always fills Content.
+type sizeCappedSBOMCreator struct {
+	calls int
+	// status is what the adapter settled on, TooLarge or Incomplete. Both come back with no
+	// document; only TooLarge carries the limit annotations getSBOM re-checks.
+	status string
+}
+
+func (c *sizeCappedSBOMCreator) CreateSBOM(_ context.Context, name, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	c.calls++
+	sbom := domain.SBOM{
+		Name:               name,
+		SBOMCreatorVersion: c.Version(),
+		Status:             c.status,
+	}
+	if c.status == helpersv1.TooLarge {
+		sbom.Annotations = map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonImageTooLarge,
+			domain.MaxImageSizeAnnotationKey: "512",
+		}
+	}
+	return sbom, nil
+}
+
+func (c *sizeCappedSBOMCreator) Version() string        { return "Mock SBOM 1.0" }
+func (c *sizeCappedSBOMCreator) GetMaxImageSize() int64 { return 512 }
+func (c *sizeCappedSBOMCreator) GetMaxSBOMSize() int    { return 0 }
+func (c *sizeCappedSBOMCreator) GetMemoryLimit() string { return "" }
+
+func generateSBOMContext(t *testing.T, s *ScanService) context.Context {
+	t.Helper()
+	ctx, err := s.ValidateGenerateSBOM(context.TODO(), domain.ScanCommand{
+		ImageSlug: "imageSlug",
+		ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+	})
+	require.NoError(t, err)
+	return ctx
+}
+
+// A TooLarge or Incomplete SBOM has no Content, so gating the store on Content meant the
+// verdict was never written and every later scan of that image pulled it again to reach the
+// same answer. StoreSBOM persists it as a status-only marker precisely so it can be reused.
+func TestScanService_GenerateSBOM_RemembersTooLargeVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.TooLarge}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	require.Equal(t, 1, storage.SBOMStores(), "the verdict must be persisted")
+	require.Equal(t, 1, creator.calls)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM, "still a failure")
+	assert.Equal(t, 1, creator.calls, "the stored verdict must be reused, not recomputed")
+	assert.Equal(t, 1, storage.SBOMStores(), "and not written again on the way through")
+}
+
+// Incomplete is the other status that comes back without a document, but it means the scan
+// timed out, and getSBOM has no staleness rule for it. Stored, it would read back as a
+// cache hit at the same scanner version forever and no retry would ever happen.
+func TestScanService_GenerateSBOM_DoesNotPersistIncompleteVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.Incomplete}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 0, storage.SBOMStores(), "a timeout must not be persisted")
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 2, creator.calls, "and must be retried on the next scan")
+}
+
+// getOrCreateSBOM stores what it creates, so storing again in the flow wrote the same
+// document to the apiserver twice.
+func TestScanService_GenerateSBOM_StoresCreatedSBOMOnce(t *testing.T) {
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "a newly created SBOM must be stored once")
+
+	// the second call is served from storage, and StoreSBOM is a Create that falls back to
+	// Get plus a full Update of the spec, so writing it back is not free
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "an SBOM read back from storage must not be stored again")
+}
+
 func TestScanService_ScanCP(t *testing.T) {
 	tests := []struct {
 		createSBOMError bool
@@ -2144,6 +2236,70 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 // order). This constructs a 3-level containment chain - file F is owned by pkg-A, pkg-A is
 // contained in pkg-B, pkg-B is contained in pkg-C - with the relationships listed
 // outermost-first (C->B, B->A, A->F), the ordering that reproduced the bug.
+// RelevantFiles carries two kinds of placeholder. DynamicIdentifier ("⋯") is one segment,
+// so those paths keep their segment count and the #448 bucket is right for them.
+// WildcardIdentifier ("*") is zero or more segments, and the detector produces it by
+// collapsing runs of "⋯", so "/a/⋯/⋯/b" reaches us as "/a/*/b". Those were not
+// picked up as dynamic at all, so the file, its package and everything above it were dropped
+// and the relevancy scan called a loaded package not relevant.
+func TestFilterSBOM_WildcardRelevantPaths(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	d := dynamicpathdetector.DynamicIdentifier
+	w := dynamicpathdetector.WildcardIdentifier
+
+	tests := []struct {
+		name    string
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"one segment placeholder", "/usr/lib/" + d + "/mod.so", "/usr/lib/python3/mod.so", true},
+		{"one segment placeholder cannot span two", "/usr/lib/" + d + "/mod.so", "/usr/lib/a/b/mod.so", false},
+		{"wildcard spanning several segments", "/usr/lib/" + w + "/mod.so", "/usr/lib/a/b/mod.so", true},
+		{"wildcard spanning none", "/usr/lib/" + w + "/mod.so", "/usr/lib/mod.so", true},
+		{"trailing wildcard", "/usr/lib/" + w, "/usr/lib/a/b/c", true},
+		{"both placeholders together", "/usr/lib/" + d + "/" + w + "/mod.so", "/usr/lib/a/b/c/mod.so", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sbom := domain.SBOM{
+				Content: &v1beta1.SyftDocument{
+					Files: []v1beta1.SyftFile{
+						{ID: "file-F", Location: v1beta1.Coordinates{RealPath: tt.path}},
+					},
+					Artifacts: []v1beta1.SyftPackage{
+						{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A", Name: "A"}},
+					},
+					ArtifactRelationships: []v1beta1.SyftRelationship{
+						{Parent: "pkg-A", Child: "file-F", Type: "contains"},
+					},
+				},
+			}
+
+			relevantFiles := mapset.NewSet[string]()
+			relevantFiles.Add(tt.pattern)
+
+			filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+			require.NoError(t, err)
+
+			if !tt.want {
+				assert.Empty(t, filtered.Content.Files, "%q must not match %q", tt.pattern, tt.path)
+				assert.Empty(t, filtered.Content.Artifacts)
+				return
+			}
+			require.Len(t, filtered.Content.Files, 1, "the file matched by %q must survive the filter", tt.pattern)
+			assert.Equal(t, tt.path, filtered.Content.Files[0].Location.RealPath)
+			require.Len(t, filtered.Content.Artifacts, 1, "and so must the package that owns it")
+			assert.Equal(t, "pkg-A", filtered.Content.Artifacts[0].ID)
+		})
+	}
+}
+
 func TestFilterSBOM_TransitiveClosure(t *testing.T) {
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",

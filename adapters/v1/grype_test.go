@@ -313,3 +313,42 @@ func Test_grypeAdapter_Ready_singleFlightUnderConcurrency(t *testing.T) {
 	waitForNotUpdating(t, g)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent Ready() calls must not launch more than one background load")
 }
+
+// Grype's distro types are lowercase slugs compared verbatim, so a configured vendor was
+// only trusted when written exactly that way. "Wolfi", or a slug with the whitespace a JSON
+// list easily carries, went into the set as a key nothing matches, and adaptive mode quietly
+// kept CPE matching on for a vendor the operator had asked it to trust.
+func TestBuildTrustedVendorSet_NormalizesSlugs(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		trusted    bool
+	}{
+		{"canonical", "wolfi", true},
+		{"capitalised", "Wolfi", true},
+		{"upper case", "WOLFI", true},
+		{"leading space", " wolfi", true},
+		{"trailing space", "wolfi ", true},
+		{"a different vendor", "chainguard", false},
+		{"not a distro at all", "not-a-distro", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &GrypeAdapter{
+				matchingMode:   config.CVEMatchingAdaptive,
+				trustedVendors: buildTrustedVendorSet([]string{tt.configured}),
+			}
+			// useDefaultMatchers is true exactly when the distro is trusted, which is what
+			// turns the CPE matchers off for it.
+			assert.Equal(t, tt.trusted, g.resolveUseDefaultMatchers(&distro.Distro{Type: distro.Wolfi}),
+				"vendor %q against a wolfi image", tt.configured)
+		})
+	}
+}
+
+// An empty entry is dropped rather than becoming a key that matches a distro with no type.
+func TestBuildTrustedVendorSet_SkipsEmpty(t *testing.T) {
+	set := buildTrustedVendorSet([]string{"", "   ", "wolfi"})
+	assert.Equal(t, map[distro.Type]bool{distro.Wolfi: true}, set)
+}

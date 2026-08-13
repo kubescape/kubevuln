@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_domainToArmo(t *testing.T) {
@@ -365,6 +366,57 @@ func Test_linkToVuln(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, linkToVuln(tt.id))
+		})
+	}
+}
+
+// threeLayerSource describes an image with three layers, so a package can be placed in one
+// that is not the base.
+const threeLayerSource = `{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"sha256:l1","size":0},{"mediaType":"","digest":"sha256:l2","size":0},{"mediaType":"","digest":"sha256:l3","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`
+
+func layeredDocument(fileSystemIDs ...string) v1beta1.GrypeDocument {
+	locations := make([]v1beta1.SyftCoordinates, 0, len(fileSystemIDs))
+	for _, id := range fileSystemIDs {
+		locations = append(locations, v1beta1.SyftCoordinates{FileSystemID: id})
+	}
+	return v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
+		Matches: []v1beta1.Match{{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-21300"},
+			},
+			Artifact: v1beta1.GrypePackage{Name: "pkg", Locations: locations},
+		}},
+	}
+}
+
+// IntroducedInLayer is the earliest layer a package appears in. It used to be resolved by
+// walking the parent chain from "", which only ever completed for a package present in the
+// image's first layer: nothing could start the chain for one added later, so every package
+// outside the base layer reported no introducing layer at all.
+func Test_domainToArmo_introducedInLayer(t *testing.T) {
+	tests := []struct {
+		name      string
+		locations []string
+		want      string
+	}{
+		{"base layer", []string{"sha256:l1"}, "sha256:l1"},
+		{"middle layer", []string{"sha256:l2"}, "sha256:l2"},
+		{"top layer", []string{"sha256:l3"}, "sha256:l3"},
+		{"several layers, earliest wins", []string{"sha256:l3", "sha256:l2"}, "sha256:l2"},
+		{"several layers, already ordered", []string{"sha256:l2", "sha256:l3"}, "sha256:l2"},
+		{"layer not in the image", []string{"sha256:unknown"}, "sha256:unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{ImageHash: "h", ImageTagNormalized: "t"})
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+			ctx = context.WithValue(ctx, domain.ScanIDKey{}, "scan-1")
+
+			got, err := DomainToArmo(ctx, layeredDocument(tt.locations...), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.want, got[0].IntroducedInLayer)
 		})
 	}
 }

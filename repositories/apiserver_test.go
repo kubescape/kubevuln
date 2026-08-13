@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
@@ -505,6 +506,58 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 		assert.Empty(t, stmt.ActionStatement, "not_affected statement %q must not carry an action_statement", stmt.Vulnerability.Name)
 	}
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
+}
+
+func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
+
+	clientset := newFakeStorageClientset()
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	initial, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	initialVersion := initial.Spec.Version
+	initialID := initial.Spec.ID
+	initialLastUpdated := initial.Spec.LastUpdated
+
+	updateCalls := 0
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return false, nil, nil
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	unchanged, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, updateCalls, "no-op rescans must not issue a storage update")
+	assert.Equal(t, initialVersion, unchanged.Spec.Version, "no-op rescans must not bump the VEX version")
+	assert.Equal(t, initialID, unchanged.Spec.ID, "no-op rescans must preserve the canonical VEX ID")
+	assert.Equal(t, initialLastUpdated, unchanged.Spec.LastUpdated, "no-op rescans must preserve LastUpdated")
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered2, false))
+
+	changed, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, initialVersion+1, changed.Spec.Version, "changed rescans must still bump the VEX version")
+	assert.NotEqual(t, initialID, changed.Spec.ID, "changed rescans must still recalculate the canonical VEX ID")
 }
 
 // TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement guards against a regression
@@ -1549,7 +1602,11 @@ func TestAPIServerStore_StoreVEX_retryExhausted_transientError(t *testing.T) {
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
 	})
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
-	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"kubescape.io/test": "updated"},
+		Content:     &v1beta1.GrypeDocument{},
+	}
 	err := a.StoreVEX(context.TODO(), cve, cve, false)
 	require.True(t, apierrors.IsConflict(err))
 	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
@@ -1582,9 +1639,7 @@ func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, vexContainer)
-	// updateVEX bumps Metadata.Version on every successful update, so a version > 0
-	// confirms the fallback actually went through updateVEX rather than a no-op.
-	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+	require.Equal(t, name, vexContainer.Name)
 }
 
 // TestAPIServerStore_StoreVEX_recoversFromTransientConflict guards against a regression
@@ -1614,7 +1669,11 @@ func TestAPIServerStore_StoreVEX_recoversFromTransientConflict(t *testing.T) {
 		return false, nil, nil // fall through to the tracker's default update handling
 	})
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
-	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"kubescape.io/test": "updated"},
+		Content:     &v1beta1.GrypeDocument{},
+	}
 	require.NoError(t, a.StoreVEX(context.TODO(), cve, cve, false))
 	require.Equal(t, 2, updateCalls)
 
@@ -2052,6 +2111,39 @@ func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testin
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
+func TestAPIServerStore_InvalidateSecurityExceptionCacheForObject(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+	a.securityExceptionListCache.Set("se/ns-a", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set("se/ns-b", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, []sev1beta1.ClusterSecurityException{{}}, time.Minute)
+
+	a.invalidateSecurityExceptionCacheForObject(&unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"namespace": "ns-a",
+		},
+	}})
+
+	_, ok := a.securityExceptionListCache.Get("se/ns-a")
+	assert.False(t, ok, "the changed namespace must be evicted immediately")
+	_, ok = a.securityExceptionListCache.Get("se/ns-b")
+	assert.True(t, ok, "other namespaces must stay cached")
+	_, ok = a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey)
+	assert.True(t, ok, "cluster-scoped exceptions must not be evicted by a namespaced change")
+}
+
+func TestAPIServerStore_InvalidateClusterSecurityExceptionCache(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+	a.securityExceptionListCache.Set("se/ns-a", []sev1beta1.SecurityException{{}}, time.Minute)
+	a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, []sev1beta1.ClusterSecurityException{{}}, time.Minute)
+
+	a.invalidateClusterSecurityExceptionCache()
+
+	_, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey)
+	assert.False(t, ok, "cluster-scoped cache must be evicted immediately")
+	_, ok = a.securityExceptionListCache.Get("se/ns-a")
+	assert.True(t, ok, "namespaced exceptions must stay cached")
+}
+
 // ctxCapturingResource wraps a dynamic.ResourceInterface, invoking a hook synchronously with
 // the ctx passed into List/Get, before delegating to the real call. The hook lets a test cancel
 // the caller's ctx *while the K8s API call is in flight* and assert the effect on the ctx the
@@ -2265,7 +2357,9 @@ func TestAPIServerStore_StoreVEX_RetryConflict_ctxPropagated(t *testing.T) {
 
 	// Second store with canary context (triggers conflict retry)
 	canary := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
-	require.NoError(t, a.StoreVEX(canary, cve, cve, false))
+	updated := cve
+	updated.Annotations = map[string]string{"kubescape.io/test": "updated"}
+	require.NoError(t, a.StoreVEX(canary, updated, updated, false))
 
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].updateCtx)
@@ -2584,6 +2678,240 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 		}
 	}
 	assert.True(t, foundTransitioned, "Transitioned match should be updated to not_affected with SecurityException impact statement")
+}
+
+// TestStatementHasPURL_MatchesAcrossMultipleProducts is a regression test for #665:
+// the dedup/ignore matching in createVEX/updateVEX used to only check
+// Products[0].Subcomponents[0], silently missing a match if the target package
+// was listed under any other product. Local statements never trigger this today
+// (createProductStructForImageAndPackage always builds exactly one product/
+// subcomponent), but external VEX statements (Red Hat CSAF, Chainguard OpenVEX)
+// can legitimately list several. This constructs a statement with the target
+// package as the second subcomponent of the second product, proving the match
+// is found regardless of position.
+func TestStatementHasPURL_MatchesAcrossMultipleProducts(t *testing.T) {
+	products := []v1beta1.Product{
+		{
+			Component: v1beta1.Component{ID: "pkg:oci/image-one"},
+			Subcomponents: []v1beta1.Subcomponent{
+				{Component: v1beta1.Component{ID: "pkg:deb/debian/openssl@1.0"}},
+			},
+		},
+		{
+			Component: v1beta1.Component{ID: "pkg:oci/image-two"},
+			Subcomponents: []v1beta1.Subcomponent{
+				{Component: v1beta1.Component{ID: "pkg:deb/debian/nginx@1.0"}},
+				{Component: v1beta1.Component{ID: "pkg:deb/debian/curl@7.68"}},
+			},
+		},
+	}
+
+	assert.True(t, statementHasPURL(products, "pkg:deb/debian/curl@7.68"),
+		"should find a package even when it is not the first subcomponent of the first product")
+	assert.True(t, statementHasPURL(products, "pkg:deb/debian/openssl@1.0"),
+		"should still find the first product package")
+	assert.False(t, statementHasPURL(products, "pkg:deb/debian/not-present@1.0"),
+		"should not match a package that is not present anywhere")
+	assert.False(t, statementHasPURL(nil, "pkg:deb/debian/curl@7.68"),
+		"should not panic or match on nil products")
+}
+
+// TestAPIServerStore_storeVEX_ignoredMatches_multiProductStatement is a regression
+// test for #665: the ignored-vulnerability lookup in updateVEX used to only check
+// Products[0].Subcomponents[0], so a statement whose target package sits under a
+// later product/subcomponent would never be recognized as ignored. This manually
+// expands an existing statement to carry an extra leading product before the real
+// one, then runs it through the real StoreVEX/updateVEX path (not just the isolated
+// helper) and asserts the ignore transition still happens correctly.
+func TestAPIServerStore_storeVEX_ignoredMatches_multiProductStatement(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	testMatch := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:         "CVE-MULTI-PRODUCT-TEST",
+				DataSource: "GHSA-MULTI-PRODUCT-TEST",
+			},
+			Fix: v1beta1.Fix{
+				State:    "fixed",
+				Versions: []string{"2.0"},
+			},
+		},
+		Artifact: v1beta1.GrypePackage{
+			Name:    "multi-product-package",
+			Version: "1.0",
+			PURL:    "pkg:deb/debian/multi-product-package@1.0",
+		},
+	}
+
+	cveManifest.Content.Matches = append(cveManifest.Content.Matches, testMatch)
+	cveManifestFiltered.Content.Matches = append(cveManifestFiltered.Content.Matches, testMatch)
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First StoreVEX call creates the statement as affected, single-product
+	// (this is how production code always creates it today).
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	// Manually expand the statement to carry an extra leading product before the
+	// real one, simulating what a multi-product external-style statement looks like.
+	// This proves the fix works through the real storage round-trip, not just
+	// against a hand-built struct in memory.
+	for i := range vexContainer.Spec.Statements {
+		if vexContainer.Spec.Statements[i].Vulnerability.Name == "CVE-MULTI-PRODUCT-TEST" {
+			realProduct := vexContainer.Spec.Statements[i].Products[0]
+			decoyProduct := v1beta1.Product{
+				Component: v1beta1.Component{ID: "pkg:oci/decoy-image"},
+				Subcomponents: []v1beta1.Subcomponent{
+					{Component: v1beta1.Component{ID: "pkg:deb/debian/decoy-package@1.0"}},
+				},
+			}
+			vexContainer.Spec.Statements[i].Products = []v1beta1.Product{decoyProduct, realProduct}
+		}
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	// Now move testMatch to IgnoredMatches, simulating a SecurityException rule applied.
+	var filteredMatches []v1beta1.Match
+	for _, m := range cveManifestFiltered.Content.Matches {
+		if m.Vulnerability.ID != "CVE-MULTI-PRODUCT-TEST" {
+			filteredMatches = append(filteredMatches, m)
+		}
+	}
+	cveManifestFiltered.Content.Matches = filteredMatches
+	cveManifestFiltered.Content.IgnoredMatches = append(cveManifestFiltered.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+	cveManifest.Content.IgnoredMatches = append(cveManifest.Content.IgnoredMatches, v1beta1.IgnoredMatch{Match: testMatch})
+
+	// Second StoreVEX call: the real updateVEX ignored-lookup must find the real
+	// product even though it now sits second, not first.
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var foundTransitioned bool
+	for _, stmt := range vexContainerUpdated.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-MULTI-PRODUCT-TEST" {
+			foundTransitioned = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status,
+				"statement should transition to not_affected even though its real product is second, not first")
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement,
+				"ignore lookup should find the package regardless of product position")
+		}
+	}
+	assert.True(t, foundTransitioned, "multi-product statement should still be found and transitioned")
+}
+
+// TestAPIServerStore_storeVEX_dedup_multiProductStatement is a regression test for
+// #665: the dedup check in updateVEX (deciding whether a vulnerability is already
+// recorded) used to only check Products[0].Subcomponents[0]. This manually expands
+// an existing statement to carry an extra leading product before the real one, then
+// runs the same match through StoreVEX again and asserts no duplicate statement is
+// appended - proving the dedup check finds the existing entry through the real
+// updateVEX path, not just the isolated helper.
+func TestAPIServerStore_storeVEX_dedup_multiProductStatement(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	testMatch := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:         "CVE-DEDUP-MULTI-PRODUCT-TEST",
+				DataSource: "GHSA-DEDUP-MULTI-PRODUCT-TEST",
+			},
+			Fix: v1beta1.Fix{
+				State:    "fixed",
+				Versions: []string{"2.0"},
+			},
+		},
+		Artifact: v1beta1.GrypePackage{
+			Name:    "dedup-multi-product-package",
+			Version: "1.0",
+			PURL:    "pkg:deb/debian/dedup-multi-product-package@1.0",
+		},
+	}
+
+	cveManifest.Content.Matches = append(cveManifest.Content.Matches, testMatch)
+	cveManifestFiltered.Content.Matches = append(cveManifestFiltered.Content.Matches, testMatch)
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First StoreVEX call creates the statement, single-product (as production code
+	// always does today).
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	// Manually expand the statement to carry an extra leading decoy product before
+	// the real one, simulating a genuine multi-product external-style statement.
+	for i := range vexContainer.Spec.Statements {
+		if vexContainer.Spec.Statements[i].Vulnerability.Name == "CVE-DEDUP-MULTI-PRODUCT-TEST" {
+			realProduct := vexContainer.Spec.Statements[i].Products[0]
+			decoyProduct := v1beta1.Product{
+				Component: v1beta1.Component{ID: "pkg:oci/dedup-decoy-image"},
+				Subcomponents: []v1beta1.Subcomponent{
+					{Component: v1beta1.Component{ID: "pkg:deb/debian/dedup-decoy-package@1.0"}},
+				},
+			}
+			vexContainer.Spec.Statements[i].Products = []v1beta1.Product{decoyProduct, realProduct}
+		}
+	}
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	countBefore := 0
+	for _, s := range vexContainer.Spec.Statements {
+		if s.Vulnerability.Name == "CVE-DEDUP-MULTI-PRODUCT-TEST" {
+			countBefore++
+		}
+	}
+	require.Equal(t, 1, countBefore, "sanity check: exactly one statement before the second StoreVEX call")
+
+	// Second StoreVEX call: same match, still present (not ignored). The dedup check
+	// must recognize the real product even though it now sits second, not first, and
+	// must NOT append a duplicate statement.
+	err = a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	vexContainerUpdated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	countAfter := 0
+	for _, s := range vexContainerUpdated.Spec.Statements {
+		if s.Vulnerability.Name == "CVE-DEDUP-MULTI-PRODUCT-TEST" {
+			countAfter++
+		}
+	}
+	assert.Equal(t, 1, countAfter, "dedup check should recognize the existing multi-product statement and not append a duplicate")
 }
 
 // TestAPIServerStore_StoreVEX_NilContentDoesNotPanic is a regression test for #518:

@@ -116,6 +116,32 @@ func LoadConfig(path string) (Config, error) {
 
 	v.AutomaticEnv()
 
+	// AutomaticEnv on its own does not make a key reachable by Unmarshal. viper can only
+	// unmarshal keys it knows about, from the config file, a default, or an explicit
+	// binding, and it cannot enumerate the environment, so a key that appears in none of
+	// those is silently dropped. Everything with a SetDefault above is already covered;
+	// these are the remaining fields, which clusterData.json does not always carry. Without
+	// this, STORAGE=true on a config file that has no "storage" key reads back as false and
+	// kubevuln runs with storage off while looking correctly configured. Same gap #593 fixed
+	// for trustedVendors and proxyRegistryMap by reading through viper's getters.
+	//
+	// cveMatchingMode and useDefaultMatchers are deliberately left out: they are resolved
+	// through IsSet below, which already handles the env case.
+	for _, key := range []string{
+		"accountID",
+		"clusterName",
+		"keepLocal",
+		"nodeSbomGeneration",
+		"partialRelevancy",
+		"riskAcceptance",
+		"storage",
+		"storeFilteredSbom",
+	} {
+		if err := v.BindEnv(key); err != nil {
+			return Config{}, fmt.Errorf("binding %s to the environment: %w", key, err)
+		}
+	}
+
 	err := v.ReadInConfig()
 	if err != nil {
 		return Config{}, err

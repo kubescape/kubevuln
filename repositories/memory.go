@@ -32,6 +32,7 @@ type MemoryStore struct {
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
 	summaryStubs []string // statuses passed to StoreCVESummaryStub, recorded for tests
+	sbomStores   int      // number of StoreSBOM calls, recorded for tests
 	getError     bool
 	storeError   bool
 }
@@ -41,6 +42,12 @@ var _ ports.ContainerProfileRepository = (*MemoryStore)(nil)
 var _ ports.CVERepository = (*MemoryStore)(nil)
 
 var _ ports.SBOMRepository = (*MemoryStore)(nil)
+
+// SBOMStores reports how many times StoreSBOM was called, so a test can tell an SBOM that
+// was written from one that was only read back.
+func (m *MemoryStore) SBOMStores() int {
+	return m.sbomStores
+}
 
 // NewMemoryStorage initializes the MemoryStore struct and its maps
 func NewMemoryStorage(getError, storeError bool) *MemoryStore {
@@ -196,6 +203,13 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 		SBOMCreatorVersion: SBOMCreatorVersion,
 	}
 	if value, ok := m.sboms[id]; ok {
+		if value.Content == nil {
+			// APIServerStore always reads back a document (Content: &manifest.Spec.Syft),
+			// including for a status-only marker stored with no content, and callers treat a
+			// nil Content as "not in storage". Without this, a stored TooLarge marker would
+			// look absent here but present in production.
+			value.Content = &v1beta1.SyftDocument{}
+		}
 		return value, nil
 	}
 	return domain.SBOM{}, nil
@@ -205,6 +219,8 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
+
+	m.sbomStores++
 
 	if m.storeError {
 		return domain.ErrMockError
