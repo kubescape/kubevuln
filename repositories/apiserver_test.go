@@ -512,7 +512,8 @@ func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
 	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
 	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
 
-	a := NewFakeAPIServerStorage("kubescape")
+	clientset := newFakeStorageClientset()
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 
 	ctx := context.TODO()
 	workload := domain.ScanCommand{
@@ -533,11 +534,18 @@ func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
 	initialID := initial.Spec.ID
 	initialLastUpdated := initial.Spec.LastUpdated
 
+	updateCalls := 0
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return false, nil, nil
+	})
+
 	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
 
 	unchanged, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
+	assert.Equal(t, 0, updateCalls, "no-op rescans must not issue a storage update")
 	assert.Equal(t, initialVersion, unchanged.Spec.Version, "no-op rescans must not bump the VEX version")
 	assert.Equal(t, initialID, unchanged.Spec.ID, "no-op rescans must preserve the canonical VEX ID")
 	assert.Equal(t, initialLastUpdated, unchanged.Spec.LastUpdated, "no-op rescans must preserve LastUpdated")
