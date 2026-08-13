@@ -439,13 +439,13 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 			foundIgnored1 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 		}
 		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST-2" {
 			foundIgnored2 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 		}
 	}
 	assert.True(t, foundIgnored1, "First IgnoredMatch should be preserved in the VEX document during update")
@@ -2789,7 +2789,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 			assert.Empty(t, stmt.ActionStatement, "ActionStatement should be cleared on transition to not_affected")
 		}
 	}
@@ -2928,7 +2928,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches_multiProductStatement(t *testing
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status,
 				"statement should transition to not_affected even though its real product is second, not first")
-			assert.Equal(t, "Vulnerability was ignored by scanner configuration or external VEX", stmt.ImpactStatement,
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement,
 				"ignore lookup should find the package regardless of product position")
 		}
 	}
@@ -3147,4 +3147,62 @@ func TestAPIServerStore_StoreCVESummary_MixedNilContentDoesNotPanic(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), summary.Spec.Severities.Critical.All, "the real cve manifest's match must still be counted")
 	assert.Equal(t, int64(0), summary.Spec.Severities.Critical.Relevant, "cvep.Content is nil, so no relevant count should be recorded")
+}
+
+func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
+	ctx := context.Background()
+	namespace := "default"
+	store := NewFakeAPIServerStorage(namespace)
+
+	// Simulate a CVE manifest with two ignored matches:
+	// 1. Grype suppressed a finding natively (no SecurityException)
+	// 2. Suppressed by a genuine SecurityException
+	cveManifest := domain.CVEManifest{
+		Name: "deployment-my-app",
+		Content: &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-1234"},
+						},
+						Artifact: v1beta1.GrypePackage{PURL: "pkg:apk/alpine/curl@8.1.2-r0"},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2023-1234"}},
+				},
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-5678"},
+						},
+						Artifact: v1beta1.GrypePackage{PURL: "pkg:apk/alpine/wget@1.2.3"},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						Vulnerability: "CVE-2023-5678",
+						SourceKind:    "SecurityException",
+					}},
+				},
+			},
+		},
+		Annotations: map[string]string{"kubescape.io/image-id": "docker://alpine@sha256:abcd"},
+	}
+
+	err := store.StoreVEX(ctx, cveManifest, cveManifest, false)
+	require.NoError(t, err)
+
+	vexContainer, err := store.StorageClient.OpenVulnerabilityExchangeContainers(namespace).Get(ctx, cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var foundExternal, foundCRD bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-2023-1234" {
+			foundExternal = true
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
+		} else if stmt.Vulnerability.Name == "CVE-2023-5678" {
+			foundCRD = true
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundExternal, "Should have found external VEX statement")
+	assert.True(t, foundCRD, "Should have found CRD SecurityException statement")
 }
