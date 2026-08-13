@@ -34,6 +34,15 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifestFull.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
+	var target v1beta1.Statement
+	for _, s := range vexContainer.Spec.Statements {
+		if isLocalStatement(s.ID) && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+			target = s
+			break
+		}
+	}
+	require.NotEmpty(t, target.Vulnerability.Name)
+
 	// Inject a purely external statement
 	externalStmt := v1beta1.Statement{
 		ID: "https://chainguard.dev/vex/statement/CVE-EXTERNAL-1234",
@@ -54,18 +63,25 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 		ImpactStatement: "External feed explicitly marked this as false positive",
 	}
 
-	// Inject a local legacy statement (empty ID)
-	legacyStmt := v1beta1.Statement{
-		ID: "",
+	// Inject an external statement without ID using a real vulnerability from the manifest
+	externalStmtNoID := *target.DeepCopy()
+	externalStmtNoID.ID = ""
+	externalStmtNoID.Status = v1beta1.Status(vex.StatusAffected)
+	externalStmtNoID.Justification = ""
+	externalStmtNoID.ImpactStatement = "External feed assessed this one (no ID)"
+
+	// Inject a true local kubescape statement
+	localStmt := v1beta1.Statement{
+		ID: "https://kubescape.io/vex/statement/CVE-LOCAL-1234/pkg%3Adeb%2Fdebian%2Flocal-pkg%401.0",
 		Vulnerability: v1beta1.VexVulnerability{
-			ID:   "CVE-LEGACY-1234",
-			Name: "CVE-LEGACY-1234",
+			ID:   "CVE-LOCAL-1234",
+			Name: "CVE-LOCAL-1234",
 		},
 		Products: []v1beta1.Product{
 			{
 				Component: v1beta1.Component{ID: "pkg:oci/some-image"},
 				Subcomponents: []v1beta1.Subcomponent{
-					{Component: v1beta1.Component{ID: "pkg:deb/debian/legacy-pkg@1.0"}},
+					{Component: v1beta1.Component{ID: "pkg:deb/debian/local-pkg@1.0"}},
 				},
 			},
 		},
@@ -74,7 +90,13 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 		ImpactStatement: "",
 	}
 
-	vexContainer.Spec.Statements = append(vexContainer.Spec.Statements, externalStmt, legacyStmt)
+	kept := make([]v1beta1.Statement, 0, len(vexContainer.Spec.Statements))
+	for _, s := range vexContainer.Spec.Statements {
+		if s.ID != target.ID {
+			kept = append(kept, s)
+		}
+	}
+	vexContainer.Spec.Statements = append(kept, externalStmt, externalStmtNoID, localStmt)
 	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
 	require.NoError(t, err)
 
@@ -94,15 +116,32 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 		}
 	}
 	assert.True(t, foundExternal, "External statement should remain in the document and be completely unmodified")
-	foundLegacy := false
+	foundExternalNoID := false
+	foundLocalForTarget := false
 	for _, s := range vexContainerUpdated.Spec.Statements {
-		if s.Vulnerability.Name == "CVE-LEGACY-1234" {
-			foundLegacy = true
-			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), s.Status, "Legacy statement should be reset by the reset loop")
-			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), s.Justification, "Legacy statement should be reset by the reset loop")
+		if s.Vulnerability.Name == target.Vulnerability.Name {
+			if s.ID == "" {
+				foundExternalNoID = true
+				assert.Equal(t, v1beta1.Status(vex.StatusAffected), s.Status, "External statement without ID should be left untouched by the reset loop")
+				assert.Equal(t, v1beta1.Justification(""), s.Justification, "External statement without ID should be left untouched by the reset loop")
+				assert.Equal(t, "External feed assessed this one (no ID)", s.ImpactStatement, "ImpactStatement should remain unchanged")
+			} else if isLocalStatement(s.ID) {
+				foundLocalForTarget = true
+			}
 		}
 	}
-	assert.True(t, foundLegacy, "Legacy statement should remain in the document")
+	assert.True(t, foundExternalNoID, "External statement without ID should remain in the document")
+	assert.True(t, foundLocalForTarget, "A new local statement should have been generated alongside the ID-less external statement")
+
+	foundLocal := false
+	for _, s := range vexContainerUpdated.Spec.Statements {
+		if s.Vulnerability.Name == "CVE-LOCAL-1234" {
+			foundLocal = true
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), s.Status, "True local statement should be reset by the reset loop")
+			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), s.Justification, "True local statement should be reset by the reset loop")
+		}
+	}
+	assert.True(t, foundLocal, "True local statement should remain in the document")
 }
 
 // #595 made updateVEX leave external statements alone, but the dedup that decides whether

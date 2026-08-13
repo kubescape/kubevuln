@@ -1168,7 +1168,7 @@ func buildActionStatement(v v1beta1.Match) string {
 }
 
 func isLocalStatement(id string) bool {
-	return id == "" || strings.HasPrefix(id, "https://kubescape.io/vex/statement/")
+	return strings.HasPrefix(id, "https://kubescape.io/vex/statement/")
 }
 
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
