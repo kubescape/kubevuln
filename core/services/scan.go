@@ -1382,6 +1382,13 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 
 	select {
 	case res := <-ch:
+		if !ran {
+			// Counted before the error is handled: a caller that waited on a shared creation
+			// was spared the work whether or not that creation succeeded, and a failing
+			// image is the one a burst of scans keeps arriving for, so leaving those out
+			// hides the deduplication where there is most of it.
+			metrics.RecordSingleflightHit(ctx, "sbom_generation")
+		}
 		if res.Err != nil {
 			// The leader already reported this failure with its own workload identity
 			// from inside the closure. Every other caller sharing the same result would
@@ -1392,9 +1399,6 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 				s.reportWaiterSBOMFailure(workerCtx, res.Err)
 			}
 			return domain.SBOM{}, nil, res.Err
-		}
-		if !ran {
-			metrics.RecordSingleflightHit(ctx, "sbom_generation")
 		}
 		created := res.Val.(sbomCreation)
 		return created.sbom, created.storeErr, nil
