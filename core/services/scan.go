@@ -181,8 +181,9 @@ func isRegistryRateLimitedErr(err error) bool {
 		strings.Contains(errStr, "429 Too Many Requests")
 }
 
-// GenerateSBOM implements the "Generate SBOM flow"
-// FIXME check if we still use this method
+// GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
+// POST v1/generateSBOM here, through ValidateGenerateSBOM and the same rejection and scan
+// metrics as the other flows.
 func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
@@ -195,27 +196,28 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 		return domain.ErrCastingWorkload
 	}
 
-	sbom, created, err := s.getOrCreateSBOM(ctx, workload)
+	sbom, storeErr, err := s.getOrCreateSBOM(ctx, workload)
 	if err != nil {
 		return err
 	}
 
 	// do not treat a timed out or too-large SBOM as a successful scan — mirrors the same
-	// check in ScanCP/ScanCVE/ScanRegistry, which this flow had lost track of (see #540)
+	// check in ScanCP/ScanCVE/ScanRegistry, which this flow had lost track of (see #540).
+	// Ahead of storeErr so the size verdict stays the reported reason, as it did when the
+	// store lived below this check.
 	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 		reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
 		return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 	}
 
-	// store SBOM if newly created
-	if s.storage && created {
-		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-		if err != nil {
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-				scanfailure.ReasonSBOMStorageFailed, err)
-			return &domain.ScanError{Reason: scanfailure.ReasonSBOMStorageFailed, Err: err}
-		}
+	// getOrCreateSBOM already stored what it created, so there is nothing to write here.
+	// Storing is the whole point of this endpoint though, so unlike the scan flows, which
+	// carry on with an SBOM they could not persist, a failure there is reported as one.
+	if storeErr != nil {
+		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
+			scanfailure.ReasonSBOMStorageFailed, storeErr)
+		return &domain.ScanError{Reason: scanfailure.ReasonSBOMStorageFailed, Err: storeErr}
 	}
 
 	return nil
@@ -1340,9 +1342,20 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 
 // getOrCreateSBOM retrieves an existing SBOM from storage, or creates and stores one via singleflight
 // deduplication if multiple goroutines race to build an SBOM for the same image.
-func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, bool, error) {
+// sbomCreation is what the singleflight worker hands back: the SBOM, plus whether storing
+// it failed. Every caller racing a key gets the same one, so a waiter learns the outcome of
+// the shared store rather than repeating it.
+type sbomCreation struct {
+	sbom     domain.SBOM
+	storeErr error
+}
+
+// getOrCreateSBOM returns the SBOM for workload and the error from storing it, if it was
+// created and stored here. A non-nil store error is not fatal on its own: the SBOM is still
+// usable, and only GenerateSBOM, which exists to store it, treats it as a failure.
+func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, error, error) {
 	if !s.sbomGeneration {
-		return domain.SBOM{}, false, nil
+		return domain.SBOM{}, nil, nil
 	}
 
 	opts := optionsFromWorkload(ctx, workload)
@@ -1362,7 +1375,7 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 		// Re-check storage inside singleflight worker in case another worker stored it while we waited
 		if s.storage {
 			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && sbom.Content != nil {
-				return sbom, nil
+				return sbomCreation{sbom: sbom}, nil
 			}
 		}
 
@@ -1393,27 +1406,40 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 			return domain.SBOM{}, &domain.ScanError{Reason: reason, Err: err}
 		}
 
-		// store SBOM in storage before completing so all waiting callers share the stored result
-		if s.storage && sbom.Content != nil {
-			if storeErr := s.sbomRepository.StoreSBOM(workerCtx, sbom, false); storeErr != nil {
+		// store SBOM in storage before completing so all waiting callers share the stored
+		// result.
+		//
+		// TooLarge is stored despite having no document. StoreSBOM keeps it as a status-only
+		// marker, and getSBOM re-checks that marker against the current maxImageSize and
+		// maxSBOMSize, so it stops applying once the limits are raised. Persisting it is what
+		// saves pulling a known-oversized image again to reach the answer already on record.
+		//
+		// Incomplete is deliberately not stored. It means the scan timed out, which is
+		// transient, and getSBOM has no staleness rule for it, so a stored one would read
+		// back as a cache hit forever and block regeneration until the object was deleted by
+		// hand or the scanner version moved.
+		var storeErr error
+		if s.storage && (sbom.Content != nil || sbom.Status == helpersv1.TooLarge) {
+			if storeErr = s.sbomRepository.StoreSBOM(workerCtx, sbom, false); storeErr != nil {
 				logger.L().Ctx(workerCtx).Warning("storing singleflight deduplicated SBOM", helpers.Error(storeErr),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
 		}
 
-		return sbom, nil
+		return sbomCreation{sbom: sbom, storeErr: storeErr}, nil
 	})
 
 	select {
 	case res := <-ch:
 		if res.Err != nil {
-			return domain.SBOM{}, false, res.Err
+			return domain.SBOM{}, nil, res.Err
 		}
 		if !ran {
 			metrics.RecordSingleflightHit(ctx, "sbom_generation")
 		}
-		return res.Val.(domain.SBOM), !res.Shared, nil
+		created := res.Val.(sbomCreation)
+		return created.sbom, created.storeErr, nil
 	case <-ctx.Done():
-		return domain.SBOM{}, false, ctx.Err()
+		return domain.SBOM{}, nil, ctx.Err()
 	}
 }
