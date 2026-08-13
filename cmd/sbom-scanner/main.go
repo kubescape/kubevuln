@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,6 +41,11 @@ const shutdownTimeout = 20 * time.Second
 // derives the same cadence from ScanTimeout), so it uses the same 5-minute value CreateSBOM
 // already falls back to when a request carries no TimeoutSeconds (pkg/sbomscanner/v1/server.go).
 const tempDirSweepInterval = 5 * time.Minute
+
+// defaultMetricsAddr is the listen address for the Prometheus /metrics endpoint, used when
+// METRICS_ADDR is unset. Overridable per-deployment via METRICS_ADDR, mirroring SOCKET_PATH
+// below.
+const defaultMetricsAddr = ":8080"
 
 // gracefulStopWithTimeout waits up to timeout for srv's in-flight RPCs to finish via
 // GracefulStop, then force-closes the server with Stop if the timeout elapses first.
@@ -84,6 +90,24 @@ func main() {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
 
+	// Without this, RecordTempDirSweep below (and any other metrics.Record* called from the
+	// sidecar's own code paths, e.g. adapters that run in-process here) reads a nil counter and
+	// is a no-op: the component="sidecar" series would never be emitted, silently.
+	m, err := metrics.New()
+	if err != nil {
+		logger.L().Fatal("metrics initialization error", helpers.Error(err))
+	}
+	metricsAddr := os.Getenv("METRICS_ADDR")
+	if metricsAddr == "" {
+		metricsAddr = defaultMetricsAddr
+	}
+	metricsServer := &http.Server{Addr: metricsAddr, Handler: m.Handler()}
+	go func() {
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.L().Warning("metrics server stopped unexpectedly", helpers.Error(err))
+		}
+	}()
+
 	srv := grpc.NewServer(
 		grpc.MaxRecvMsgSize(sbomscanner.MaxgRPCMessageSize),
 		grpc.MaxSendMsgSize(sbomscanner.MaxgRPCMessageSize),
@@ -111,6 +135,11 @@ func main() {
 		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
 		close(stopSweep)
 		gracefulStopWithTimeout(srv, shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			logger.L().Warning("metrics server shutdown error", helpers.Error(err))
+		}
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
 			logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
 		}

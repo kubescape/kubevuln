@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -124,6 +126,29 @@ func DeleteContents(dir string) error {
 	return nil
 }
 
+// activeTempDirUsers counts in-flight callers that are actively reading from or writing to a
+// stereoscope temp dir, so StartPeriodicTempDirSweep's periodic pass can tell a busy directory
+// from an abandoned one. Both cmd/http (in-process SyftAdapter) and cmd/sbom-scanner share a
+// single stereoscope temp-dir root process-wide (stereoscope's rootTempDirGenerator is a package
+// singleton), so this is deliberately a single process-wide counter rather than something keyed
+// per-directory: while any pull/catalog is in flight, none of the shared root's contents are
+// safe to remove.
+var activeTempDirUsers atomic.Int64
+
+// BeginActiveTempDirUse records that the caller is about to read from or write to a stereoscope
+// temp dir. Call the returned func exactly once when finished, however that happens: normal
+// completion, error, or an abandoned goroutine that outlives its own caller's deadline (e.g.
+// Syft cataloguing after a scan timeout — see adapters/v1/syft.go and
+// pkg/sbomscanner/v1/server.go). While any caller is registered, StartPeriodicTempDirSweep skips
+// its sweep entirely rather than risk deleting a directory still in use.
+func BeginActiveTempDirUse() (end func()) {
+	activeTempDirUsers.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() { activeTempDirUsers.Add(-1) })
+	}
+}
+
 // CleanupStaleTempDirs removes directories under dir whose names start with prefix and whose
 // mtime is older than olderThan. It is a best-effort startup sweep to reclaim disk space left
 // by processes killed before their defer-based cleanup could run (e.g. SIGKILL from OOM or
@@ -174,6 +199,12 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 // this function taking a dependency on either.
 func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderThan, interval time.Duration, onSweep func(removed int, err error)) {
 	sweep := func() {
+		if activeTempDirUsers.Load() > 0 {
+			// A pull or a cataloguing pass that outlived its own timeout is still using the
+			// shared temp dir root; removing anything now could delete files out from under it.
+			// Skip this pass entirely and let the next tick re-check.
+			return
+		}
 		removed, err := CleanupStaleTempDirs(dir, prefix, olderThan)
 		if onSweep != nil {
 			onSweep(removed, err)

@@ -221,7 +221,12 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Buffered so the abandoned goroutine below can always publish and exit, even when
 	// nobody is left to receive.
 	generated := make(chan *sbom.SBOM, 1)
+	// Registered here rather than deferred at the handler's own top level: this closure can
+	// outlive the handler's return (see the comment below), so the periodic temp-dir sweep
+	// must stay blind to this closure's completion, not the handler's.
+	endActiveTempDirUse := tools.BeginActiveTempDirUse()
 	err = dl.Run(func(stopper <-chan struct{}) error {
+		defer endActiveTempDirUse()
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
 				logger.L().Warning("failed to close source", helpers.Error(err),

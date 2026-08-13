@@ -405,6 +405,43 @@ func TestStartPeriodicTempDirSweep_StopsTickingOnceStopIsClosed(t *testing.T) {
 	assert.Equal(t, observedAtStop, calls, "no sweep should run after stop is closed")
 }
 
+func TestStartPeriodicTempDirSweep_SkipsWhileACallerIsActive(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	stale := path.Join(dir, "stereoscope-old")
+	require.NoError(t, os.Mkdir(stale, 0o755))
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	end := BeginActiveTempDirUse()
+	defer end()
+
+	removedCh := make(chan int, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, func(removed int, err error) {
+		require.NoError(t, err)
+		removedCh <- removed
+	})
+
+	select {
+	case removed := <-removedCh:
+		t.Fatalf("expected the sweep to be skipped while a caller is active, but onSweep was called with removed=%d", removed)
+	case <-time.After(50 * time.Millisecond):
+		// no sweep happened, as expected
+	}
+	_, statErr := os.Stat(stale)
+	assert.NoError(t, statErr, "the stale dir should survive a sweep skipped due to an active caller")
+}
+
+func TestBeginActiveTempDirUse_EndIsIdempotent(t *testing.T) {
+	before := activeTempDirUsers.Load()
+	end := BeginActiveTempDirUse()
+	assert.Equal(t, before+1, activeTempDirUsers.Load())
+	end()
+	end()
+	assert.Equal(t, before, activeTempDirUsers.Load(), "calling end twice must not double-decrement")
+}
+
 func TestStartPeriodicTempDirSweep_NilOnSweepDoesNotPanic(t *testing.T) {
 	dir := t.TempDir()
 	stop := make(chan struct{})

@@ -301,8 +301,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// or failure, late if the deadline fired first - is what makes pullMutex serialize the
 	// disk-touching work itself, not just the synchronous portion of the call.
 	dl := deadline.New(s.scanTimeout)
+	// Registered here, not deferred at CreateSBOM's own top level: this closure can outlive
+	// CreateSBOM's return (see the comment below), so the periodic temp-dir sweep must stay
+	// blind to this closure's completion, not to CreateSBOM's.
+	endActiveTempDirUse := tools.BeginActiveTempDirUse()
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer unlockPullMutex()
+		defer endActiveTempDirUse()
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
