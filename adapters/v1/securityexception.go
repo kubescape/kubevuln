@@ -227,6 +227,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		"sourceKind": src.kind,
 		"ruleId":     suppressionRuleID(src),
 	}
+	if status := strings.TrimSpace(string(vuln.Status)); status != "" {
+		attrs["status"] = status
+	}
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
 	}
@@ -378,6 +381,14 @@ func buildIgnoreRule(m v1beta1.Match, matched []armotypes.VulnerabilityException
 	if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
 		rule.SourceNamespace = ns
 	}
+	if status, ok := p.Attributes["status"].(string); ok {
+		// FixState is repurposed here to carry the SecurityException's status vocabulary
+		// (not_affected/fixed/affected) rather than Grype's native fix-state vocabulary.
+		// This is safe because every reader of FixState gates on SourceKind being a
+		// SecurityException/ClusterSecurityException first — native Grype ignore rules
+		// never set SourceKind, so they're unaffected.
+		rule.FixState = status
+	}
 	if just, ok := p.Attributes["justification"].(string); ok {
 		rule.Justification = just
 	}
@@ -506,14 +517,20 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 }
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
-// signature ApplySecurityExceptions writes: exactly one rule whose only field is the
-// vulnerability ID.
+// signature ApplySecurityExceptions writes: exactly one rule with no package set, and either
+// exception provenance (source/justification/impact) or an empty FixState.
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) != 1 {
 		return false
 	}
 	r := im.AppliedIgnoreRules[0]
-	return r.FixState == "" && r.Package == nil
+	if r.Package != nil {
+		return false
+	}
+	if r.SourceKind != "" || r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
+		return true
+	}
+	return r.FixState == ""
 }
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.

@@ -107,6 +107,7 @@ func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
 	assert.Equal(t, "allow-log4shell", nsPolicy.Name)
 	assert.Equal(t, "SecurityException", nsPolicy.Attributes["sourceKind"])
 	assert.Equal(t, "SecurityException/prod/allow-log4shell", nsPolicy.Attributes["ruleId"])
+	assert.Equal(t, "not_affected", nsPolicy.Attributes["status"])
 	assert.Equal(t, "prod", nsPolicy.Attributes["sourceNamespace"])
 	assert.Equal(t, "vulnerable code path is unreachable", nsPolicy.Attributes["justification"])
 	assert.Equal(t, "no network exposure", nsPolicy.Attributes["impactStatement"])
@@ -298,6 +299,7 @@ func TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance(t *testing.T) {
 					"sourceKind":      "SecurityException",
 					"ruleId":          "SecurityException/production/allow-log4shell",
 					"sourceNamespace": "production",
+					"status":          "not_affected",
 					"justification":   "vulnerable_code_not_present",
 					"impactStatement": "Vulnerable component is not loaded into the memory",
 				},
@@ -319,6 +321,7 @@ func TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance(t *testing.T) {
 	assert.Equal(t, "SecurityException/production/allow-log4shell", rule.SourceName,
 		"SourceName carries the structured ruleId form, not the bare object name, so it stays unambiguous for cluster-scoped exceptions too")
 	assert.Equal(t, "production", rule.SourceNamespace)
+	assert.Equal(t, "not_affected", rule.FixState)
 	assert.Equal(t, "vulnerable_code_not_present", rule.Justification)
 	assert.Equal(t, "Vulnerable component is not loaded into the memory", rule.ImpactStatement)
 }
