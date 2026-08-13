@@ -291,3 +291,49 @@ func TestLoadConfigProxyRegistryMapEnv_Invalid(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "proxyRegistryMap")
 }
+
+// TestLoadConfigEnvOnlyFieldsWithoutDefaults verifies that a field carried only by the
+// environment reaches the struct. AutomaticEnv does not achieve that on its own: viper
+// unmarshals the keys it knows about, and it cannot enumerate the environment, so a key
+// with no default and no entry in clusterData.json was dropped. STORAGE is the one that
+// matters most, since kubevuln would then run with storage off while looking configured
+// for it.
+func TestLoadConfigEnvOnlyFieldsWithoutDefaults(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   string
+		value string
+		got   func(Config) bool
+	}{
+		{"storage", "STORAGE", "true", func(c Config) bool { return c.Storage }},
+		{"keepLocal", "KEEPLOCAL", "true", func(c Config) bool { return c.KeepLocal }},
+		{"riskAcceptance", "RISKACCEPTANCE", "true", func(c Config) bool { return c.RiskAcceptance }},
+		{"storeFilteredSbom", "STOREFILTEREDSBOM", "true", func(c Config) bool { return c.StoreFilteredSbom }},
+		{"nodeSbomGeneration", "NODESBOMGENERATION", "true", func(c Config) bool { return c.NodeSbomGeneration }},
+		{"partialRelevancy", "PARTIALRELEVANCY", "true", func(c Config) bool { return c.PartialRelevancy }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv(tt.env, tt.value)
+			c, err := LoadConfig("testdata")
+			require.NoError(t, err)
+			assert.True(t, tt.got(c), "%s set in the environment must reach the config", tt.env)
+		})
+	}
+}
+
+// Binding those keys to the environment must not change where a value comes from when the
+// environment is silent, nor the usual precedence when it is not.
+func TestLoadConfigEnvBindingKeepsFilePrecedence(t *testing.T) {
+	viper.Reset()
+	c, err := LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Equal(t, "12345", c.AccountID, "the file value must still be used when the environment is silent")
+
+	viper.Reset()
+	t.Setenv("ACCOUNTID", "from-env")
+	c, err = LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", c.AccountID, "the environment must still win over the file")
+}
