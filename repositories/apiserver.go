@@ -953,6 +953,29 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+// anyPURLMatches reports whether fn returns true for any subcomponent PURL across any
+// product in products. This is the shared traversal used by both statementHasPURL and
+// the ignored-vulnerability lookup in updateVEX, so both stay correct together if the
+// traversal logic ever needs to change.
+func anyPURLMatches(products []v1beta1.Product, fn func(purl string) bool) bool {
+	for _, p := range products {
+		for _, sc := range p.Subcomponents {
+			if fn(sc.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// statementHasPURL reports whether any subcomponent across any product in products
+// matches purl. External VEX statements (Red Hat CSAF, Chainguard OpenVEX) can list
+// multiple products/subcomponents per statement, so callers must not assume the match
+// is always at Products[0].Subcomponents[0].
+func statementHasPURL(products []v1beta1.Product, purl string) bool {
+	return anyPURLMatches(products, func(p string) bool { return p == purl })
+}
+
 // defaultActionStatement is used when a match does not carry enough fix data to build a
 // more specific remediation string.
 const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
@@ -1197,10 +1220,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}
-				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-					continue
-				}
-				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				if statementHasPURL(s.Products, v.Artifact.PURL) {
 					found = true
 					break
 				}
@@ -1251,10 +1271,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}
-				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-					continue
-				}
-				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				if statementHasPURL(s.Products, v.Artifact.PURL) {
 					found = true
 					break
 				}
@@ -1313,12 +1330,9 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
 		vexDoc.Statements[i].ActionStatement = ""
 
-		isIgnored := false
-		if len(vexDoc.Statements[i].Products) > 0 && len(vexDoc.Statements[i].Products[0].Subcomponents) > 0 {
-			if ignoredMap[vexDoc.Statements[i].Vulnerability.Name+vexDoc.Statements[i].Products[0].Subcomponents[0].ID] {
-				isIgnored = true
-			}
-		}
+		isIgnored := anyPURLMatches(vexDoc.Statements[i].Products, func(purl string) bool {
+			return ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]
+		})
 
 		if isIgnored {
 			vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
