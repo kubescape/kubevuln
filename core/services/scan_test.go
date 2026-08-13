@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2757,15 +2758,20 @@ type blockingSBOMCreator struct {
 	ports.SBOMCreator
 	calls   int
 	onStart func()
+	failErr error
 	mu      sync.Mutex
 }
 
 func (b *blockingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error) {
 	b.mu.Lock()
 	b.calls++
+	failErr := b.failErr
 	b.mu.Unlock()
 	if b.onStart != nil {
 		b.onStart()
+	}
+	if failErr != nil {
+		return domain.SBOM{}, failErr
 	}
 	return b.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
 }
@@ -2882,4 +2888,109 @@ func TestScanService_SingleflightSBOMDeduplication(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, 1, blockingCreator.calls, "CreateSBOM should be called exactly once for concurrent identical requests")
+}
+
+// failureRecordingPlatform is a minimal, concurrency-safe ports.Platform double that records
+// every ReportScanFailure call's JobID (read from the ctx WorkloadKey each caller passes in),
+// so a test can assert which distinct callers actually had their failure reported.
+type failureRecordingPlatform struct {
+	adapters.MockPlatform
+	mu      sync.Mutex
+	jobIDs  []string
+	reports int
+}
+
+func (p *failureRecordingPlatform) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error {
+	workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	p.mu.Lock()
+	p.reports++
+	p.jobIDs = append(p.jobIDs, workload.JobID)
+	p.mu.Unlock()
+	return p.MockPlatform.ReportScanFailure(ctx, failureCase, reason, scanErr)
+}
+
+// TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter is a regression test for #642:
+// when N concurrent callers for the same image are deduplicated onto one singleflight
+// execution and that execution fails, every one of the N callers -- not just the "leader"
+// whose closure singleflight actually ran -- must get its own ReportScanFailure call, since
+// each carries a distinct JobID/workload identity the backend/dashboard needs to know that
+// specific scan failed.
+func TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter(t *testing.T) {
+	// Pin the scheduler to one P so the goroutines started below cannot run concurrently with
+	// each other or with this goroutine. Under a single P, a goroutine only yields the
+	// processor by blocking (or explicitly calling runtime.Gosched); none of the code between a
+	// waiter's start and its blocking receive on the singleflight result channel does either, so
+	// each waiter runs start-to-block in one uninterrupted turn. That makes startWg.Wait below a
+	// hard guarantee that every waiter has already joined the shared singleflight.DoChan call by
+	// the time it returns, rather than a timing-based approximation of it.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	wantErr := errors.New("registry pull failed")
+	blockingCreator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		failErr:     wantErr,
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	platform := &failureRecordingPlatform{}
+	service := NewScanService(
+		blockingCreator,
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockCVEAdapter(),
+		repositories.NewMemoryStorage(false, false),
+		platform,
+		adapters.NewMockRelevancyAdapter(),
+		true, false, true, false, false,
+	)
+
+	const numGoroutines = 5
+	wantJobIDs := make([]string, numGoroutines)
+	var startWg, wg sync.WaitGroup
+	startWg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		jobID := fmt.Sprintf("job-%d", i)
+		wantJobIDs[i] = jobID
+		workload := domain.ScanCommand{
+			JobID:              jobID,
+			ImageSlug:          "library/alpine:latest",
+			ImageTagNormalized: "library/alpine:latest",
+			ImageHash:          "sha256:1234567890",
+		}
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := service.getOrCreateSBOM(ctx, workload)
+			assert.ErrorIs(t, err, wantErr)
+		}()
+	}
+
+	// With GOMAXPROCS(1) above, this Wait returning already proves every waiter has joined the
+	// shared singleflight.DoChan call: the last one to call startWg.Done can only yield the
+	// processor by blocking on the result channel, so it -- and by the same argument every
+	// waiter before it -- is already parked on <-ch by the time this goroutine runs again.
+	startWg.Wait()
+	<-started // wait for the singleflight worker to enter CreateSBOM
+
+	close(release) // let CreateSBOM return its error
+	wg.Wait()
+
+	assert.Equal(t, 1, blockingCreator.calls, "CreateSBOM should still be called exactly once")
+
+	platform.mu.Lock()
+	defer platform.mu.Unlock()
+	assert.Equal(t, numGoroutines, platform.reports,
+		"every caller sharing the failed singleflight result must get its own ReportScanFailure call")
+	assert.ElementsMatch(t, wantJobIDs, platform.jobIDs,
+		"each ReportScanFailure call must carry the reporting caller's own JobID, not just the leader's")
 }
