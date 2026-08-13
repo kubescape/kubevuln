@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -524,6 +525,36 @@ func TestHTTPController_ContextCancellationIsDetached(t *testing.T) {
 	}
 }
 
+func TestHTTPController_GenerateSBOM_EmptyJobIDStillRuns(t *testing.T) {
+	spy := &contextSpyScanService{
+		generateSBOMCh: make(chan struct{}),
+	}
+
+	c := HTTPController{
+		scanService: spy,
+		workerPool:  workerpool.New(1),
+	}
+	defer c.Shutdown(5 * time.Second)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{
+		"imageTag": "k8s.gcr.io/kube-proxy:v1.24.3",
+		"imageHash": "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case <-spy.generateSBOMCh:
+		assert.NoError(t, spy.lastGenerateSBOMCtx.Err())
+	case <-time.After(1 * time.Second):
+		t.Fatal("GenerateSBOM worker was not executed in time")
+	}
+}
+
 func TestValidationStatusCode(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, validationStatusCode(domain.ErrTooManyRequests))
 	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMissingCpInfo))
@@ -566,7 +597,11 @@ func TestHTTPController_GenerateSBOM_TooManyRequests(t *testing.T) {
 }
 
 func TestHTTPController_MetricsEndpoint(t *testing.T) {
-	c := NewHTTPController(services.NewMockScanService(true), 1)
+	startedC := make(chan struct{}, 1)
+	c := NewHTTPController(scanErrorService{
+		MockScanService: services.NewMockScanService(true),
+		startedC:        startedC,
+	}, 1)
 	m, err := metrics.New()
 	require.NoError(t, err)
 	_, err = c.WithMetrics(m)
@@ -582,6 +617,11 @@ func TestHTTPController_MetricsEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	select {
+	case <-startedC:
+	case <-time.After(1 * time.Second):
+		t.Fatal("scan worker was not executed in time")
+	}
 
 	c.Shutdown(5 * time.Second)
 
@@ -700,12 +740,34 @@ func TestHTTPController_MetricsEndpoint_InvalidRequestDoesNotCountAsRejection(t 
 // metrics (see #540).
 type scanErrorService struct {
 	*services.MockScanService
-	err error
+	err      error
+	startedC chan<- struct{}
 }
 
-func (s scanErrorService) GenerateSBOM(context.Context) error { return s.err }
-func (s scanErrorService) ScanCVE(context.Context) error      { return s.err }
-func (s scanErrorService) ScanRegistry(context.Context) error { return s.err }
+func (s scanErrorService) signalStarted() {
+	if s.startedC == nil {
+		return
+	}
+	select {
+	case s.startedC <- struct{}{}:
+	default:
+	}
+}
+
+func (s scanErrorService) GenerateSBOM(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
+
+func (s scanErrorService) ScanCVE(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
+
+func (s scanErrorService) ScanRegistry(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
 
 func (s scanErrorService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	return ctx, nil
@@ -770,9 +832,14 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			if tt.unclassified {
 				scanErr = errors.New("boom")
 			}
+			startedC := make(chan struct{}, 1)
 			c := &HTTPController{
-				scanService: scanErrorService{MockScanService: services.NewMockScanService(true), err: scanErr},
-				workerPool:  workerpool.New(1),
+				scanService: scanErrorService{
+					MockScanService: services.NewMockScanService(true),
+					err:             scanErr,
+					startedC:        startedC,
+				},
+				workerPool: workerpool.New(1),
 			}
 			m, err := metrics.New()
 			require.NoError(t, err)
@@ -789,6 +856,11 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			select {
+			case <-startedC:
+			case <-time.After(1 * time.Second):
+				t.Fatal("scan worker was not executed in time")
+			}
 
 			c.Shutdown(5 * time.Second)
 
@@ -803,5 +875,179 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			wantDurationSeries := `kubevuln_scan_duration_seconds_count{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
 			assert.True(t, strings.Contains(body, wantDurationSeries), body)
 		})
+	}
+}
+
+type statusFlowScanService struct {
+	*services.MockScanService
+	err       error
+	blockCh   <-chan struct{}
+	startedCh chan<- struct{}
+	phase     string
+}
+
+func (s statusFlowScanService) GenerateSBOM(ctx context.Context) error {
+	if s.phase != "" {
+		domain.UpdateScanPhase(ctx, s.phase)
+	}
+	if s.startedCh != nil {
+		select {
+		case s.startedCh <- struct{}{}:
+		default:
+		}
+	}
+	if s.blockCh != nil {
+		<-s.blockCh
+	}
+	return s.err
+}
+
+func (s statusFlowScanService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
+	return ctx, nil
+}
+
+func TestHTTPController_ScanStatus_Succeeded(t *testing.T) {
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		phase:           "result_upload",
+	}, 1)
+	t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:1","jobID":"job-success"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ = http.NewRequest("GET", "/v1/scanStatus/job-success", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateSucceeded
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, "generateSBOM", status.Endpoint)
+	assert.Equal(t, "completed", status.Phase)
+	require.NotNil(t, status.StartedAt)
+	require.NotNil(t, status.FinishedAt)
+	assert.True(t, status.AcceptedAt.Before(*status.FinishedAt) || status.AcceptedAt.Equal(*status.FinishedAt))
+	assert.False(t, status.StartedAt.IsZero())
+	assert.False(t, status.FinishedAt.IsZero())
+	assert.Empty(t, status.Reason)
+}
+
+func TestHTTPController_ScanStatus_Failed(t *testing.T) {
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		err:             &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: errors.New("boom")},
+	}, 1)
+	t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:2","jobID":"job-failed"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ = http.NewRequest("GET", "/v1/scanStatus/job-failed", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason)
+	assert.Equal(t, "completed", status.Phase)
+	require.NotNil(t, status.FinishedAt)
+	assert.False(t, status.FinishedAt.IsZero())
+}
+
+func TestHTTPController_ScanStatus_AbandonedOnShutdown(t *testing.T) {
+	blocked := make(chan struct{})
+	started := make(chan struct{}, 1)
+	release := func() {
+		select {
+		case <-blocked:
+		default:
+			close(blocked)
+		}
+	}
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		blockCh:         blocked,
+		startedCh:       started,
+	}, 1)
+	t.Cleanup(release)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	firstReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:3","jobID":"job-running"}`))
+	firstW := httptest.NewRecorder()
+	router.ServeHTTP(firstW, firstReq)
+	require.Equal(t, http.StatusOK, firstW.Code, firstW.Body.String())
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first job did not start in time")
+	}
+
+	secondReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:4","jobID":"job-abandoned"}`))
+	secondW := httptest.NewRecorder()
+	router.ServeHTTP(secondW, secondReq)
+	require.Equal(t, http.StatusOK, secondW.Code, secondW.Body.String())
+
+	done := make(chan struct{})
+	go func() {
+		c.Shutdown(20 * time.Millisecond)
+		close(done)
+	}()
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ := http.NewRequest("GET", "/v1/scanStatus/job-abandoned", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateAbandoned
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, domain.ScanReasonShutdownAbandoned, status.Reason)
+	assert.Equal(t, string(domain.ScanStateAbandoned), status.Phase)
+	require.NotNil(t, status.FinishedAt)
+	assert.False(t, status.FinishedAt.IsZero())
+
+	release()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish in time")
 	}
 }

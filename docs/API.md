@@ -168,6 +168,53 @@ curl http://localhost:8080/metrics
 
 All scan endpoints accept a JSON payload and return immediately with a `200 OK` status. The actual scanning is performed asynchronously in a worker pool.
 
+### Get Scan Status
+
+Look up the current lifecycle state for a previously submitted `jobID`.
+
+```http
+GET /v1/scanStatus/:jobID
+```
+
+#### Response Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jobID` | string | Submitted job identifier |
+| `endpoint` | string | Async scan endpoint handling this job |
+| `state` | string | One of `queued`, `running`, `succeeded`, `failed`, or `abandoned` |
+| `phase` | string | Current service phase. Reported values include `queued`, `running`, `relevancy_lookup`, `cve_lookup`, `sbom_generation`, `sbom_storage`, `cve_matching`, `result_storage`, `result_upload`, `completed`, and `abandoned` |
+| `reason` | string | Machine readable terminal reason for `failed` or `abandoned` jobs |
+| `acceptedAt` | string | RFC3339 timestamp when the request was accepted |
+| `startedAt` | string | RFC3339 timestamp when execution began. Omitted while the job is still queued |
+| `finishedAt` | string | RFC3339 timestamp when the job reached a terminal state. Omitted until the job succeeds, fails, or is abandoned |
+| `updatedAt` | string | RFC3339 timestamp of the latest lifecycle transition |
+
+#### Response
+
+| Status | Description |
+|--------|-------------|
+| `200 OK` | Job status found |
+| `404 Not Found` | Unknown `jobID` |
+
+#### Example
+
+```bash
+curl http://localhost:8080/v1/scanStatus/sbom-gen-001
+```
+
+```json
+{
+  "jobID": "sbom-gen-001",
+  "endpoint": "generateSBOM",
+  "state": "running",
+  "phase": "sbom_generation",
+  "acceptedAt": "2026-08-12T12:00:00Z",
+  "startedAt": "2026-08-12T12:00:01Z",
+  "updatedAt": "2026-08-12T12:00:01Z"
+}
+```
+
 ### Generate SBOM
 
 Generate a Software Bill of Materials (SBOM) for a container image.
