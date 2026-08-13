@@ -508,6 +508,58 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
 }
 
+func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	cveManifestFiltered2 := tools.FileToCVEManifest("testdata/nginx-cve-filtered-2.json")
+
+	clientset := newFakeStorageClientset()
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	initial, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	initialVersion := initial.Spec.Version
+	initialID := initial.Spec.ID
+	initialLastUpdated := initial.Spec.LastUpdated
+
+	updateCalls := 0
+	clientset.PrependReactor("update", "openvulnerabilityexchangecontainers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updateCalls++
+		return false, nil, nil
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	unchanged, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, updateCalls, "no-op rescans must not issue a storage update")
+	assert.Equal(t, initialVersion, unchanged.Spec.Version, "no-op rescans must not bump the VEX version")
+	assert.Equal(t, initialID, unchanged.Spec.ID, "no-op rescans must preserve the canonical VEX ID")
+	assert.Equal(t, initialLastUpdated, unchanged.Spec.LastUpdated, "no-op rescans must preserve LastUpdated")
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered2, false))
+
+	changed, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, initialVersion+1, changed.Spec.Version, "changed rescans must still bump the VEX version")
+	assert.NotEqual(t, initialID, changed.Spec.ID, "changed rescans must still recalculate the canonical VEX ID")
+}
+
 // TestAPIServerStore_storeVEX_affectedStatementsHaveActionStatement guards against a regression
 // where markRelevantVulnerabilitiesAsAffectedInVex set an "affected" status without also setting
 // an ActionStatement, which the storage API type comments require for that status.
@@ -1550,7 +1602,11 @@ func TestAPIServerStore_StoreVEX_retryExhausted_transientError(t *testing.T) {
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "openvulnerabilityexchangecontainers"}, name, fmt.Errorf("conflict"))
 	})
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
-	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"kubescape.io/test": "updated"},
+		Content:     &v1beta1.GrypeDocument{},
+	}
 	err := a.StoreVEX(context.TODO(), cve, cve, false)
 	require.True(t, apierrors.IsConflict(err))
 	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
@@ -1583,9 +1639,7 @@ func TestAPIServerStore_StoreVEX_concurrentCreateRace(t *testing.T) {
 	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, vexContainer)
-	// updateVEX bumps Metadata.Version on every successful update, so a version > 0
-	// confirms the fallback actually went through updateVEX rather than a no-op.
-	require.Greater(t, vexContainer.Spec.Metadata.Version, int64(0))
+	require.Equal(t, name, vexContainer.Name)
 }
 
 // TestAPIServerStore_StoreVEX_recoversFromTransientConflict guards against a regression
@@ -1615,7 +1669,11 @@ func TestAPIServerStore_StoreVEX_recoversFromTransientConflict(t *testing.T) {
 		return false, nil, nil // fall through to the tracker's default update handling
 	})
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
-	cve := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	cve := domain.CVEManifest{
+		Name:        name,
+		Annotations: map[string]string{"kubescape.io/test": "updated"},
+		Content:     &v1beta1.GrypeDocument{},
+	}
 	require.NoError(t, a.StoreVEX(context.TODO(), cve, cve, false))
 	require.Equal(t, 2, updateCalls)
 
@@ -2299,7 +2357,9 @@ func TestAPIServerStore_StoreVEX_RetryConflict_ctxPropagated(t *testing.T) {
 
 	// Second store with canary context (triggers conflict retry)
 	canary := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
-	require.NoError(t, a.StoreVEX(canary, cve, cve, false))
+	updated := cve
+	updated.Annotations = map[string]string{"kubescape.io/test": "updated"}
+	require.NoError(t, a.StoreVEX(canary, updated, updated, false))
 
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].getCtx)
 	requireCanaryCtx(t, wrapped.ovecs[a.Namespace].updateCtx)

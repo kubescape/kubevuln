@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -1281,7 +1283,8 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	imagePullable := cve.Annotations[helpersv1.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
-	vexDoc := vexContainer.Spec
+	originalVEX := *vexContainer.Spec.DeepCopy()
+	vexDoc := *vexContainer.Spec.DeepCopy()
 
 	// Statements written before the ID/Name mapping was corrected to match createVEX
 	// carry the CVE identifier in ID and the data source URL in Name. Normalize them in
@@ -1441,6 +1444,14 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
 	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
 
+	mergedAnnotations := mergeMaps(maps.Clone(vexContainer.Annotations), cvep.Annotations)
+	mergedLabels := mergeMaps(maps.Clone(vexContainer.Labels), cvep.Labels)
+	if vexDocumentsEqualIgnoringUpdateMetadata(originalVEX, vexDoc) &&
+		maps.Equal(vexContainer.Annotations, mergedAnnotations) &&
+		maps.Equal(vexContainer.Labels, mergedLabels) {
+		return nil
+	}
+
 	// Update the VEX document metadata
 	vexDoc.Metadata.LastUpdated = time.Now().Format(time.RFC3339)
 	vexDoc.Metadata.Version += 1
@@ -1453,12 +1464,23 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	vexDoc.Metadata.ID = calculatedId
 
 	// Update the VEX container
-	vexContainer.Annotations = mergeMaps(vexContainer.Annotations, cvep.Annotations)
-	vexContainer.Labels = mergeMaps(vexContainer.Labels, cvep.Labels)
+	vexContainer.Annotations = mergedAnnotations
+	vexContainer.Labels = mergedLabels
 	vexContainer.Spec = vexDoc
 	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
 
 	return err
+}
+
+func vexDocumentsEqualIgnoringUpdateMetadata(existing, updated v1beta1.VEX) bool {
+	existing.LastUpdated = ""
+	existing.Version = 0
+	existing.ID = ""
+	updated.LastUpdated = ""
+	updated.Version = 0
+	updated.ID = ""
+
+	return reflect.DeepEqual(existing, updated)
 }
 
 func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
