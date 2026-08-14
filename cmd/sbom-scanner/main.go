@@ -105,7 +105,14 @@ func main() {
 	if metricsAddr == "" {
 		metricsAddr = defaultMetricsAddr
 	}
-	metricsServer := &http.Server{Addr: metricsAddr, Handler: m.Handler()}
+	metricsServer := &http.Server{
+		Addr:              metricsAddr,
+		Handler:           m.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	go func() {
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.L().Warning("metrics server stopped unexpectedly", helpers.Error(err))
