@@ -197,6 +197,13 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 // accumulate for the pod's entire uptime. onSweep, if non-nil, is invoked after every sweep
 // (including the immediate one) with its outcome, so callers can log/record metrics without
 // this function taking a dependency on either.
+//
+// Because activeTempDirUsers is a single process-wide counter (see its doc comment), a sweep is
+// skipped in full whenever any pull or catalog is in flight anywhere in the process. On
+// cmd/sbom-scanner, which intentionally allows concurrent CreateSBOM RPCs, sustained concurrent
+// traffic can keep the counter above zero indefinitely, deferring sweeps beyond one interval.
+// This only widens the reclaim window under continuous load; it never leaves a leaked dir
+// unreclaimed forever, since the sweep still runs as soon as the process has an idle gap.
 func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderThan, interval time.Duration, onSweep func(removed int, err error)) {
 	sweep := func() {
 		if activeTempDirUsers.Load() > 0 {

@@ -44,8 +44,12 @@ const tempDirSweepInterval = 5 * time.Minute
 
 // defaultMetricsAddr is the listen address for the Prometheus /metrics endpoint, used when
 // METRICS_ADDR is unset. Overridable per-deployment via METRICS_ADDR, mirroring SOCKET_PATH
-// below.
-const defaultMetricsAddr = ":8080"
+// below. Deliberately not :8080: this process runs as a sidecar container in the same Pod as
+// cmd/http, which binds :8080 for its own server (also serving /metrics there). Containers in
+// a Pod share one network namespace, so both processes defaulting to :8080 would collide --
+// this one would fail to bind and its component="sidecar" metrics, including
+// kubevuln_temp_dir_sweep_removed_total, would silently never be served.
+const defaultMetricsAddr = ":8081"
 
 // gracefulStopWithTimeout waits up to timeout for srv's in-flight RPCs to finish via
 // GracefulStop, then force-closes the server with Stop if the timeout elapses first.
