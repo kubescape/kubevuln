@@ -834,17 +834,25 @@ func TestRestoreSuppressedMatches(t *testing.T) {
 					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-NATIVE"}}},
 					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-NATIVE", FixState: "not-fixed"}},
 				},
+				{
+					Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-CUSTOM"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{
+						{Vulnerability: "CVE-CUSTOM", SourceKind: "CustomIgnore"},
+						{Vulnerability: "CVE-CUSTOM", SourceKind: "CustomIgnore"},
+					},
+				},
 			},
 		}
 
 		restored := RestoreSuppressedMatches(doc)
 
 		require.NotNil(t, restored)
-		// only the exception-shaped entry is restored; the other is preserved
+		// only the exception-shaped entry is restored; non-exception rules (including multi-rule CustomIgnore) are preserved
 		assert.Len(t, restored.Matches, 1)
 		assert.Equal(t, "CVE-A", restored.Matches[0].Vulnerability.ID)
-		require.Len(t, restored.IgnoredMatches, 1)
+		require.Len(t, restored.IgnoredMatches, 2)
 		assert.Equal(t, "CVE-NATIVE", restored.IgnoredMatches[0].Match.Vulnerability.ID)
+		assert.Equal(t, "CVE-CUSTOM", restored.IgnoredMatches[1].Match.Vulnerability.ID)
 	})
 }
 

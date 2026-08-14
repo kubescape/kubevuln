@@ -523,7 +523,8 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
 // signature ApplySecurityExceptions writes: non-empty AppliedIgnoreRules where every rule has no
-// package set, and either exception provenance (source/justification/impact) or an empty FixState.
+// package set and its SourceKind is a known exception source ("SecurityException" or
+// "ClusterSecurityException"), or matches the empty legacy-rule fallback.
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) == 0 {
 		return false
@@ -532,12 +533,13 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 		if r.Package != nil {
 			return false
 		}
-		if r.SourceKind != "" || r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
+		if r.SourceKind == "SecurityException" || r.SourceKind == "ClusterSecurityException" {
 			continue
 		}
-		if r.FixState != "" {
-			return false
+		if r.SourceKind == "" && r.SourceName == "" && r.SourceNamespace == "" && r.Justification == "" && r.ImpactStatement == "" && r.FixState == "" {
+			continue
 		}
+		return false
 	}
 	return true
 }
