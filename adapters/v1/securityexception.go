@@ -327,10 +327,14 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 		return matchedBySource
 	}
 
+	// Built once per scan and reused for every match below, instead of re-walking the full
+	// exception list per match.
+	exceptionIndex := buildCVEExceptionIndex(exceptions)
+
 	var remaining []v1beta1.Match
 	for _, m := range doc.Matches {
 		isFixed, _ := hasKnownFix(m)
-		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		matched := exceptionIndex.lookup(m.Vulnerability.ID, isFixed)
 		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
