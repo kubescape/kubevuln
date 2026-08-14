@@ -208,19 +208,29 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// call that already timed out (#687).
 	// Ownership of the unlock transfers to the dl.Run closure below once source resolution
 	// succeeds; every early-return branch between here and there must unlock for itself.
-	pullMutexUnlockOnce := sync.Once{}
-	unlockPullMutex := func() { pullMutexUnlockOnce.Do(s.pullMutex.Unlock) }
-
-	lockWaitStart := time.Now()
-	// Arm a warning timer before acquiring Lock so the log line fires while still blocked if another call holds pullMutex longer than scanTimeout.
+	// The warning below is armed *before* Lock() and fired by its own timer, not checked after
+	// Lock() returns: sync.Mutex.Lock never returns until the prior holder releases it, so a
+	// post-acquisition check can only ever report a wait that already ended - it would stay
+	// silent for the exact case it exists to catch, a previous cataloguing goroutine hung
+	// indefinitely (createSBOMFn/Syft's cataloguers do not observe cancellation - see the
+	// dl.Run comment below). That's an accepted tradeoff, not a bug: there is no watchdog that
+	// force-releases the mutex, so a sufficiently pathological image (corrupt archive,
+	// cataloguer bug, stalled local FS) can keep it held indefinitely. This log line is the
+	// operator-visible signal for that case, since neither the liveness nor readiness probe
+	// currently reflects it.
+	var longWaitWarning *time.Timer
 	if s.scanTimeout > 0 {
-		timer := time.AfterFunc(s.scanTimeout, func() {
-			logger.L().Ctx(ctx).Warning("waited unusually long to acquire pullMutex; a previous scan may be stuck",
-				helpers.String("waited", time.Since(lockWaitStart).String()), helpers.String("imageID", imageID))
+		longWaitWarning = time.AfterFunc(s.scanTimeout, func() {
+			logger.L().Ctx(ctx).Warning("waiting unusually long to acquire pullMutex; a previous scan may be stuck",
+				helpers.String("imageID", imageID))
 		})
-		defer timer.Stop()
 	}
 	s.pullMutex.Lock()
+	if longWaitWarning != nil {
+		longWaitWarning.Stop()
+	}
+	pullMutexUnlockOnce := sync.Once{}
+	unlockPullMutex := func() { pullMutexUnlockOnce.Do(s.pullMutex.Unlock) }
 
 	// The MANIFEST_UNKNOWN and 401 fallback ladder lives in internal/registryauth, shared
 	// with the sidecar scanner, which ran a copy of it. The pull keeps its own context,
