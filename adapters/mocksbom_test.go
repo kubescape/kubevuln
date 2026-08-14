@@ -32,3 +32,18 @@ func TestMockSBOMAdapter_Version(t *testing.T) {
 	m := NewMockSBOMAdapter(false, false, false)
 	assert.Equal(t, "Mock SBOM 1.0", m.Version())
 }
+
+func TestMockSBOMAdapter_GetMaxImageSize(t *testing.T) {
+	m := NewMockSBOMAdapter(false, false, false)
+	assert.Equal(t, int64(0), m.GetMaxImageSize())
+}
+
+func TestMockSBOMAdapter_GetMaxSBOMSize(t *testing.T) {
+	m := NewMockSBOMAdapter(false, false, false)
+	assert.Equal(t, 0, m.GetMaxSBOMSize())
+}
+
+func TestMockSBOMAdapter_GetMemoryLimit(t *testing.T) {
+	m := NewMockSBOMAdapter(false, false, false)
+	assert.Equal(t, "", m.GetMemoryLimit())
+}
