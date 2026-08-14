@@ -1079,8 +1079,18 @@ func statementHasPURL(products []v1beta1.Product, purl string) bool {
 const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
 
 const (
-	defaultLocalImpactStatement         = "Vulnerable component is not loaded into the memory"
-	securityExceptionImpactStatement    = "Vulnerability was ignored by a SecurityException"
+	defaultLocalImpactStatement      = "Vulnerable component is not loaded into the memory"
+	securityExceptionImpactStatement = "Vulnerability was ignored by a SecurityException"
+	// cloudExceptionImpactStatement covers a suppression from an exception policy that did
+	// not come from a CRD, which today means one delivered by the backend. Those reach
+	// ApplySecurityExceptions like any other policy but never go through buildPolicy, so
+	// they carry no sourceKind and their ignore rule carries no SourceKind either.
+	cloudExceptionImpactStatement = "Vulnerability was ignored by an exception policy"
+	// externalIgnoreImpactStatement covers an ignore that did not come from our exception
+	// machinery at all. Nothing produces one today, ApplySecurityExceptions being the only
+	// writer of IgnoredMatches and Grype being given no VEX documents or ignore rules, but
+	// consuming external VEX feeds (#387) is what would.
+	externalIgnoreImpactStatement       = "Vulnerability was ignored by an external VEX document or scanner configuration"
 	securityExceptionAcceptedRiskAction = "A SecurityException accepted this vulnerability as an affected finding"
 )
 
@@ -1100,7 +1110,14 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 
 	rule, ok := securityExceptionIgnoreRule(m)
 	if !ok {
-		assessment.impactStatement = "Vulnerability was ignored by an external VEX document or scanner configuration"
+		// No CRD provenance does not make it someone else's. A backend-delivered exception
+		// policy suppresses through the same path and leaves a rule with only the
+		// vulnerability id on it, so calling that an external VEX document would describe
+		// most suppressions wrongly on any cluster using cloud exceptions.
+		assessment.impactStatement = externalIgnoreImpactStatement
+		if isOwnIgnoreRule(m) {
+			assessment.impactStatement = cloudExceptionImpactStatement
+		}
 		return assessment
 	}
 
@@ -1136,6 +1153,17 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 // This is distinct from the adapter's isExceptionSourcedIgnore because it strictly
 // matches the SourceKind rather than inferring provenance from rule shape, ensuring
 // that only explicit CRD-driven rules receive the SecurityException impact statement.
+// isOwnIgnoreRule reports whether an ignored match was suppressed by our own exception
+// machinery. buildIgnoreRule writes exactly one rule per suppression and never sets Package,
+// while Grype expresses its own ignore rules in terms of a package, so one carrying a package
+// did not come from us.
+func isOwnIgnoreRule(m v1beta1.IgnoredMatch) bool {
+	if len(m.AppliedIgnoreRules) != 1 {
+		return false
+	}
+	return m.AppliedIgnoreRules[0].Package == nil
+}
+
 func securityExceptionIgnoreRule(m v1beta1.IgnoredMatch) (v1beta1.IgnoreRule, bool) {
 	for _, rule := range m.AppliedIgnoreRules {
 		switch rule.SourceKind {
