@@ -186,8 +186,8 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 	}
 }
 
-func incrementCounter(counter *int64, isGlobal, isIgnored bool) {
-	if isGlobal && isIgnored {
+func incrementCounter(counter *int64, isIgnored bool) {
+	if isIgnored {
 		return
 	}
 
@@ -252,15 +252,15 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 		isFixed := containerscan.CalculateFixed(vulnerabilities[i].Fixes) > 0
 		if isFixed {
 			vulnSeverityStats.FixAvailableOfTotalCount++
-			incrementCounter(&summary.FixAvailableOfTotalCount, true, isIgnored)
+			incrementCounter(&summary.FixAvailableOfTotalCount, isIgnored)
 		}
 		isRCE := vulnerabilities[i].IsRCE()
 		if isRCE {
 			vulnSeverityStats.RCECount++
-			incrementCounter(&summary.RCECount, true, isIgnored)
+			incrementCounter(&summary.RCECount, isIgnored)
 			if isFixed {
 				vulnSeverityStats.RCEFixCount++
-				incrementCounter(&summary.RCEFixCount, true, isIgnored)
+				incrementCounter(&summary.RCEFixCount, isIgnored)
 			}
 		}
 
@@ -270,10 +270,10 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 				// vulnerability is relevant
 				vulnerabilities[i].SetRelevantLabel(containerscan.RelevantLabelYes)
 				vulnSeverityStats.RelevantCount++
-				incrementCounter(&summary.RelevantCount, true, isIgnored)
+				incrementCounter(&summary.RelevantCount, isIgnored)
 				if isFixed {
 					vulnSeverityStats.RelevantFixCount++
-					incrementCounter(&summary.RelevantFixCount, true, isIgnored)
+					incrementCounter(&summary.RelevantFixCount, isIgnored)
 				}
 			} else {
 				// vulnerability is not relevant
