@@ -786,11 +786,52 @@ func TestIgnoredMatchKeys(t *testing.T) {
 			},
 		}
 
-		assert.Equal(t, map[string]struct{}{"CVE-A\x00\x00": {}}, IgnoredMatchKeys(doc))
+		assert.Equal(t, map[string]struct{}{
+			"CVE-A\x00\x00": {},
+			"\x01\x00":      {},
+		}, IgnoredMatchKeys(doc))
 	})
 
 	t.Run("nil document returns an empty set", func(t *testing.T) {
 		assert.Empty(t, IgnoredMatchKeys(nil))
+	})
+
+	t.Run("a suppression-state change limited to an ID-less match is still detected", func(t *testing.T) {
+		// Regression test for the cache-diff blind spot: reconcileCachedCVE (core/services/scan.go)
+		// diffs IgnoredMatchKeys across cache hits via maps.Equal to decide whether to republish
+		// VEX. A match with no known CVE ID must still change the key set when it starts/stops
+		// being suppressed, or that republish is silently skipped.
+		before := &v1beta1.GrypeDocument{}
+		after := &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{Match: v1beta1.Match{
+					Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: ""}},
+					Artifact:      v1beta1.GrypePackage{Name: "unknown-pkg", Version: "1.0.0"},
+				}},
+			},
+		}
+
+		assert.NotEqual(t, IgnoredMatchKeys(before), IgnoredMatchKeys(after))
+	})
+
+	t.Run("ID-less matches from distinct packages get distinct keys", func(t *testing.T) {
+		doc := &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{Match: v1beta1.Match{
+					Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: ""}},
+					Artifact:      v1beta1.GrypePackage{Name: "pkg-a", Version: "1.0.0"},
+				}},
+				{Match: v1beta1.Match{
+					Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: ""}},
+					Artifact:      v1beta1.GrypePackage{Name: "pkg-b", Version: "1.0.0"},
+				}},
+			},
+		}
+
+		assert.Equal(t, map[string]struct{}{
+			"\x01pkg-a\x001.0.0": {},
+			"\x01pkg-b\x001.0.0": {},
+		}, IgnoredMatchKeys(doc))
 	})
 }
 
