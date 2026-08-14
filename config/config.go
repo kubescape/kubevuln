@@ -282,7 +282,7 @@ func normalizeServiceURL(input string) string {
 
 func loadBackendServicesFromClusterData(configDir string) (schema.IBackendServices, error) {
 	filePath := filepath.Join(configDir, "clusterData.json")
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, err
 	}

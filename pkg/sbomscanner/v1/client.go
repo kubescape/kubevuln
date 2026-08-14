@@ -80,7 +80,9 @@ func NewSBOMScannerClient(ctx context.Context, socketPath string, readinessTimeo
 	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(readinessTimeout))
 	if err != nil {
 		logger.L().Error("SBOM scanner sidecar health check failed after retries", helpers.Error(err))
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			logger.L().Debug("failed to close scanner connection", helpers.Error(err))
+		}
 		return nil, err
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -83,7 +84,10 @@ func LabelsFromImageID(imageID string) map[string]string {
 }
 
 func FileContent(path string) []byte {
-	b, _ := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil
+	}
 	return b
 }
 
@@ -95,7 +99,7 @@ func FileToSBOM(path string) *v1beta1.SyftDocument {
 
 func FileToCVEManifest(path string) domain.CVEManifest {
 	var cve domain.CVEManifest
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		panic(err)
 	}

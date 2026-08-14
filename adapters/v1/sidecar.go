@@ -40,13 +40,16 @@ const (
 //
 // Clamp instead, so the limit is at worst the largest the protocol can express.
 func sbomSizeLimitForWire(maxSBOMSize int) int32 {
+	if maxSBOMSize < 0 {
+		return 0
+	}
 	if maxSBOMSize > math.MaxInt32 {
 		logger.L().Warning("configured maxSBOMSize exceeds the scanner protocol limit, clamping",
 			helpers.Int("maxSBOMSize", maxSBOMSize),
 			helpers.Int("clamped", math.MaxInt32))
 		return math.MaxInt32
 	}
-	return int32(maxSBOMSize)
+	return int32(maxSBOMSize) // #nosec G115 -- clamped to [0, math.MaxInt32] above
 }
 
 // crashRetry tracks a per-image crash-retry count and when it was last touched, so stale

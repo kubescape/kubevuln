@@ -41,7 +41,7 @@ const (
 	FallbackOutcomeFailed     = "failed"
 	FallbackOutcomeSucceeded  = "succeeded"
 
-	SourceResolutionFirstPassSuccess        = "first_pass_success"
+	SourceResolutionFirstPassSuccess        = "first_pass_success" // #nosec G101 -- metric label string, not a credential
 	SourceResolutionFallbackAssistedSuccess = "fallback_assisted_success"
 	SourceResolutionFallbackFailed          = "fallback_failed"
 	SourceResolutionFirstPassFailure        = "first_pass_failure"
