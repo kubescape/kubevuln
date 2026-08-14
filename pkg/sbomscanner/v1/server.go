@@ -31,12 +31,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-// isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
-// It delegates to tools.IsRateLimitError.
-func isRegistryRateLimited(err error) bool {
-	return tools.IsRateLimitError(err)
-}
-
 // isPlatformMismatch reports whether err is (or wraps) stereoscope's
 // *image.ErrPlatformMismatch, returned once a provider has positively resolved the image but
 // its OS/architecture doesn't match the platform that was requested.
@@ -161,17 +155,16 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}
 	}()
 
-	// Download image from registry, retrying on 429 rate-limit errors with exponential backoff.
+	// Download image from registry
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := tools.RetryWithBackoff(ctx, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(rCtx context.Context) (source.Source, error) {
-		return resolveSource(rCtx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-			// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
-			//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
-			ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
+		return tools.RetryWithBackoff(context.Background(), "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
+			ctxWithSize := context.WithValue(retryCtx, image.MaxImageSize, req.MaxImageSize) //nolint:staticcheck // stereoscope requires string context key
 			return syft.GetSource(ctxWithSize, ref,
 				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
-		}, imageID, imageTag, registryOptions)
-	})
+		})
+	}, imageID, imageTag, registryOptions)
 
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
@@ -203,7 +196,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			ErrorMessage: err.Error(),
 			StatusReason: domain.ReasonPlatformNotFound,
 		}, nil
-	case err != nil && isRegistryRateLimited(err):
+	case err != nil && tools.IsRateLimitError(err):
 		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
 		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
 		// ScanService.checkCreateSBOM's errors.As(...) check working the same way it does
@@ -263,7 +256,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		// Because this goroutine outlives the timeout, it must not touch any variable
 		// the handler reads. It keeps its result local and publishes it on a channel,
 		// which the handler only receives from once dl.Run has reported success.
-		created, createErr := createSBOMFn(context.Background(), src, cfg)
+		created, createErr := tools.RetryWithBackoff(context.Background(), "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (*sbom.SBOM, error) {
+			return createSBOMFn(retryCtx, src, cfg)
+		})
 		if createErr != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", createErr)
 		}
@@ -277,6 +272,12 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		logger.L().Warning("Syft timed out", helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
 			Status:           helpersv1.Incomplete,
+			ResolvedPlatform: resolvedPlatform,
+		}, nil
+	case err != nil && tools.IsRateLimitError(err):
+		return &pb.CreateSBOMResponse{
+			ErrorMessage:     err.Error(),
+			StatusReason:     domain.ReasonTooManyRequests,
 			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	case err == nil:

@@ -147,15 +147,9 @@ func sbomSingleflightKey(workload domain.ScanCommand, opts domain.RegistryOption
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
 func (s *ScanService) checkCreateSBOM(err error, key string) {
-	if isRegistryRateLimitedErr(err) {
+	if tools.IsRateLimitError(err) {
 		s.tooManyRequests.Set(key, true, ttl)
 	}
-}
-
-// isRegistryRateLimitedErr reports whether err indicates the image pull was rate limited.
-// It delegates to tools.IsRateLimitError.
-func isRegistryRateLimitedErr(err error) bool {
-	return tools.IsRateLimitError(err)
 }
 
 // GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
