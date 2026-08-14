@@ -216,6 +216,16 @@ func TestConvertSkipsExpired(t *testing.T) {
 		"one expired namespaced and one expired cluster-scoped exception should each be counted once")
 }
 
+func TestIsExpiredBoundary(t *testing.T) {
+	now := time.Now()
+	exact := metav1.NewTime(now)
+
+	assert.False(t, isExpired(&exact, now), "expiresAt equal to now must not be treated as expired")
+	assert.True(t, isExpired(&metav1.Time{Time: now.Add(time.Nanosecond)}, now.Add(2*time.Nanosecond)),
+		"expiresAt strictly before now must be treated as expired")
+	assert.False(t, isExpired(nil, now), "a nil expiresAt must never be treated as expired")
+}
+
 func TestConvertMatchResources(t *testing.T) {
 	exceptions := []sev1beta1.SecurityException{
 		{

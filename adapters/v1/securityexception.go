@@ -102,6 +102,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 	return policies, stats
 }
 
+// isExpired reports whether expiresAt has passed relative to now. The boundary is
+// exclusive: an expiresAt exactly equal to now is not yet expired, so the suppression
+// it governs remains active through that exact instant and only expires strictly after it.
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
 	return expiresAt != nil && expiresAt.Time.Before(now)
 }
