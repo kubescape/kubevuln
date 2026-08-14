@@ -365,12 +365,17 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 
 	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil)
 
+	type createSBOMResult struct {
+		domainSBOM domain.SBOM
+		err        error
+	}
+
 	firstReturned := make(chan struct{})
+	firstResult := make(chan createSBOMResult, 1)
 	go func() {
 		defer close(firstReturned)
 		domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
-		require.NoError(t, err)
-		assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status)
+		firstResult <- createSBOMResult{domainSBOM, err}
 	}()
 
 	select {
@@ -383,13 +388,18 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 	case <-time.After(5 * time.Second):
 		t.Fatal("first CreateSBOM call never returned once its deadline elapsed")
 	}
+	firstRes := <-firstResult
+	require.NoError(t, firstRes.err)
+	assert.Equal(t, helpersv1.Incomplete, firstRes.domainSBOM.Status)
 	// CreateSBOM has returned Incomplete, but its abandoned goroutine is still blocked in
 	// createSBOMFn, holding pullMutex.
 
 	secondReturned := make(chan struct{})
+	secondResult := make(chan createSBOMResult, 1)
 	go func() {
 		defer close(secondReturned)
-		_, _ = adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+		domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+		secondResult <- createSBOMResult{domainSBOM, err}
 	}()
 
 	select {
@@ -416,6 +426,8 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 	case <-time.After(5 * time.Second):
 		t.Fatal("second CreateSBOM call never returned")
 	}
+	secondRes := <-secondResult
+	require.NoError(t, secondRes.err)
 }
 
 // archRegistryVariant is one platform-specific manifest+config+layer served by
