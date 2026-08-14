@@ -21,6 +21,8 @@ import (
 	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -68,10 +70,10 @@ func toSyftModel(doc model.Document) *sbom.SBOM {
 }
 
 func warnConversionErrors[T any](converted []T, errors []error) []T {
-	//errorMessages := deduplicateErrors(errors)
-	//for _, msg := range errorMessages {
-	//	log.Warn(msg)
-	//}
+	errorMessages := deduplicateErrors(errors)
+	for _, msg := range errorMessages {
+		logger.L().Warning("SBOM conversion error", helpers.String("error", msg))
+	}
 	return converted
 }
 
@@ -101,7 +103,7 @@ func toSyftFiles(files []model.File) sbom.Artifacts {
 		if f.Metadata != nil {
 			fm, err := safeFileModeConvert(f.Metadata.Mode)
 			if err != nil {
-				//log.Warnf("invalid mode found in file catalog @ location=%+v mode=%q: %+v", coord, f.Metadata.Mode, err)
+				logger.L().Warning("invalid mode found in file catalog", helpers.String("location", fmt.Sprintf("%+v", coord)), helpers.Int("mode", f.Metadata.Mode), helpers.Error(err))
 				fm = 0
 			}
 
@@ -303,7 +305,7 @@ func toSyftRelationship(idMap map[string]interface{}, relationship model.Relatio
 			return nil, fmt.Errorf("unknown relationship type: %s", string(typ))
 		}
 		// lets try to stay as compatible as possible with similar relationship types without dropping the relationship
-		//log.Warnf("assuming %q for relationship type %q", artifact.DependencyOfRelationship, typ)
+		logger.L().Warning("assuming relationship type", helpers.String("assumed", string(artifact.DependencyOfRelationship)), helpers.String("original", string(typ)))
 		typ = artifact.DependencyOfRelationship
 	}
 	return &artifact.Relationship{
@@ -344,7 +346,7 @@ func toSyftPackage(p model.Package, idAliases map[string]string) pkg.Package {
 	for _, c := range p.CPEs {
 		value, err := cpe.New(c.Value, cpe.Source(c.Source))
 		if err != nil {
-			//log.Warnf("excluding invalid Attributes %q: %v", c, err)
+			logger.L().Warning("excluding invalid Attributes", helpers.String("cpe", c.Value), helpers.Error(err))
 			continue
 		}
 

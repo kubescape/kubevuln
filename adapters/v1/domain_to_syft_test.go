@@ -86,3 +86,53 @@ func Test_domainJSONToSyft(t *testing.T) {
 		})
 	}
 }
+
+func Test_domainJSONToSyft_DropsErrors(t *testing.T) {
+	// A simple SBOM with an unknown relationship type and a bad CPE.
+	// We just want to ensure it parses without panic, and show that errors are swallowed.
+	sbomData := []byte(`{
+  "artifacts": [
+    {
+      "id": "pkg1",
+      "name": "bad-cpe-pkg",
+      "cpes": [
+        {
+          "value": "invalid-cpe-format",
+          "source": "test"
+        }
+      ]
+    },
+    {
+      "id": "pkg2",
+      "name": "child-pkg"
+    }
+  ],
+  "artifactRelationships": [
+    {
+      "parent": "pkg1",
+      "child": "pkg2",
+      "type": "unknown-completely-invalid-relationship"
+    }
+  ],
+  "source": {
+    "id": "source1",
+    "name": "test-source"
+  }
+}`)
+
+	got, err := domainJSONToSyft(sbomData)
+	assert.NoError(t, err)
+	
+	// The bad package is kept but its invalid CPE is silently dropped
+	assert.Equal(t, 2, got.Artifacts.Packages.PackageCount())
+	pkgCountWithCPEs := 0
+	for _, p := range got.Artifacts.Packages.Sorted() {
+		if len(p.CPEs) > 0 {
+			pkgCountWithCPEs++
+		}
+	}
+	assert.Equal(t, 0, pkgCountWithCPEs, "expected CPEs to be dropped silently")
+
+	// The unknown relationship is silently dropped
+	assert.Equal(t, 0, len(got.Relationships), "expected relationship to be dropped silently")
+}
