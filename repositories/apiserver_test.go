@@ -1111,38 +1111,116 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 				ContainerName: "anyJobContName",
 			},
 		},
+		{
+			k8sResourceType:      "",
+			k8sResourceGroup:     "",
+			k8sResourceVersion:   "",
+			k8sResourceName:      "",
+			k8sResourceNamespace: "",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:          "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				ImageTag:           "registry.k8s.io/coredns/coredns:v1.10.1",
+				ImageTagNormalized: "registry.k8s.io/coredns/coredns:v1.10.1",
+				ImageSlug:          "registry-k8s-io-coredns-coredns-v1-10-1",
+				Wlid:               "",
+				ContainerName:      "contNameRegistryScan",
+			},
+		},
 	}
 
 	for i := range tests {
 		ctx = context.WithValue(ctx, domain.WorkloadKey{}, tests[i].workload)
 		enrichedLabels, err := enrichSummaryManifestObjectLabels(ctx, tests[i].labels, true)
-		assert.Equal(t, err, nil)
+		assert.NoError(t, err)
 
-		val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].k8sResourceGroup)
+		if tests[i].workload.Wlid != "" {
+			val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+			assert.True(t, exist)
+			assert.Equal(t, tests[i].k8sResourceGroup, val)
 
-		val, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].k8sResourceVersion)
+			val, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
+			assert.True(t, exist)
+			assert.Equal(t, tests[i].k8sResourceVersion, val)
 
-		val, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].k8sResourceType)
+			val, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
+			assert.True(t, exist)
+			assert.Equal(t, tests[i].k8sResourceType, val)
 
-		val, exist = enrichedLabels[helpersv1.RelatedNameMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].k8sResourceName)
+			val, exist = enrichedLabels[helpersv1.RelatedNameMetadataKey]
+			assert.True(t, exist)
+			assert.Equal(t, tests[i].k8sResourceName, val)
 
-		val, exist = enrichedLabels[helpersv1.RelatedNamespaceMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].k8sResourceNamespace)
+			val, exist = enrichedLabels[helpersv1.RelatedNamespaceMetadataKey]
+			assert.True(t, exist)
+			assert.Equal(t, tests[i].k8sResourceNamespace, val)
+		} else {
+			_, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+			assert.False(t, exist)
+			_, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
+			assert.False(t, exist)
+			_, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
+			assert.False(t, exist)
+			_, exist = enrichedLabels[helpersv1.RelatedNameMetadataKey]
+			assert.False(t, exist)
+			_, exist = enrichedLabels[helpersv1.RelatedNamespaceMetadataKey]
+			assert.False(t, exist)
+		}
 
-		val, exist = enrichedLabels[helpersv1.ContainerNameMetadataKey]
-		assert.Equal(t, exist, true)
-		assert.Equal(t, val, tests[i].workload.ContainerName)
+		val, exist := enrichedLabels[helpersv1.ContainerNameMetadataKey]
+		assert.True(t, exist)
+		assert.Equal(t, tests[i].workload.ContainerName, val)
 	}
 
+}
+
+func TestAPIServerStore_StoreCVESummary_EmptyWlid(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	workload := domain.ScanCommand{
+		ImageTag:           "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageTagNormalized: "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageSlug:          "registry-k8s-io-coredns-coredns-v1-10-1",
+		Wlid:               "",
+		ContainerName:      "coredns",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	cve := domain.CVEManifest{
+		Name: "registry-k8s-io-coredns-coredns-v1-10-1",
+	}
+
+	err := a.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+	require.NoError(t, err)
+
+	got, err := a.StorageClient.VulnerabilityManifestSummaries("kubescape").Get(context.Background(), cve.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, cve.Name, got.Name)
+	assert.Equal(t, helpersv1.ContextMetadataKeyNonFiltered, got.Labels[helpersv1.ContextMetadataKey])
+	assert.Equal(t, "coredns", got.Labels[helpersv1.ContainerNameMetadataKey])
+	assert.NotContains(t, got.Labels, helpersv1.ApiGroupMetadataKey)
+}
+
+func TestAPIServerStore_StoreCVESummaryStub_EmptyWlid(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	workload := domain.ScanCommand{
+		ImageTag:           "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageTagNormalized: "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageSlug:          "registry-k8s-io-coredns-coredns-v1-10-1",
+		Wlid:               "",
+		ContainerName:      "coredns",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	err := a.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema)
+	require.NoError(t, err)
+
+	got, err := a.StorageClient.VulnerabilityManifestSummaries("kubescape").Get(context.Background(), "registry-k8s-io-coredns-coredns-v1-10-1", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, helpersv1.UnsupportedSchema, got.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, "coredns", got.Labels[helpersv1.ContainerNameMetadataKey])
+	assert.NotContains(t, got.Labels, helpersv1.ApiGroupMetadataKey)
 }
 
 func TestAPIServerStore_enrichSummaryManifestObjectAnnotations(t *testing.T) {

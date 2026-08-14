@@ -729,17 +729,21 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 	}
 
 	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
-	groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind)
-	if err != nil {
-		return nil, err
-	}
+	if workloadKind != "" {
+		groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind)
+		if err != nil {
+			return nil, err
+		}
 
-	enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
-	enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
-	enrichedLabels[helpersv1.RelatedKindMetadataKey] = strings.ToLower(workloadKind)
-	enrichedLabels[helpersv1.RelatedNameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
-	enrichedLabels[helpersv1.RelatedNamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
-	enrichedLabels[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
+		enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
+		enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
+		enrichedLabels[helpersv1.RelatedKindMetadataKey] = strings.ToLower(workloadKind)
+		enrichedLabels[helpersv1.RelatedNameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
+		enrichedLabels[helpersv1.RelatedNamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
+	}
+	if workload.ContainerName != "" {
+		enrichedLabels[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
+	}
 
 	return enrichedLabels, nil
 }
@@ -757,8 +761,16 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 	name := strings.ToLower(wlid.GetNameFromWlid(workload.Wlid))
 	contName := strings.ToLower(workload.ContainerName)
 
-	if kind == "" && name == "" && contName == "" && cveName != "" {
-		return cveName, nil
+	if kind == "" && name == "" {
+		if cveName != "" {
+			return cveName, nil
+		}
+		if workload.ImageSlug != "" {
+			return workload.ImageSlug, nil
+		}
+		if contName != "" {
+			return contName, nil
+		}
 	}
 
 	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
