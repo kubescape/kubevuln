@@ -92,6 +92,10 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		return vulnerabilityResults, domain.ErrCastingWorkload
 	}
 
+	// Built once per scan and reused for every match below, instead of re-walking the full
+	// exception list per match.
+	exceptionIndex := buildCVEExceptionIndex(vulnerabilityExceptionPolicyList)
+
 	if grypeDocument.Source != nil {
 		// generate a map of child to parent
 		parentLayerHash := ""
@@ -158,7 +162,7 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						},
 					},
 					PackageType:      string(m.Artifact.Type),
-					ExceptionApplied: scopedToSubcomponent(getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, m.Vulnerability.ID, isFixed == 1), m.Artifact.PURL),
+					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookup(m.Vulnerability.ID, isFixed == 1), m.Artifact.PURL),
 					IsRelevant:       nil, // TODO add relevancy here?
 					Coordinates:      syftCoordinatesToCoordinates(m.Artifact.Locations),
 				},

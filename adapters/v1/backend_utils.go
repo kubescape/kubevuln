@@ -363,3 +363,62 @@ func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExc
 	}
 	return nil
 }
+
+// cveExceptionIndex maps a lower-cased CVE/alias name to the indices, into the exception
+// list it was built from, of every exception that declares a VulnerabilityPolicy with that
+// name. It lets a scan with many matches look up candidate exceptions in roughly constant
+// time per match instead of re-walking every exception (and every policy within it) for
+// each one, which is what getCVEExceptionMatchCVENameFromList does on its own.
+type cveExceptionIndex struct {
+	srcCVEList []armotypes.VulnerabilityExceptionPolicy
+	byName     map[string][]int
+}
+
+// buildCVEExceptionIndex builds a cveExceptionIndex over srcCVEList in a single pass. Build
+// it once per scan (the exception list does not change across matches within a scan) and
+// reuse it via lookup for every match.
+func buildCVEExceptionIndex(srcCVEList []armotypes.VulnerabilityExceptionPolicy) *cveExceptionIndex {
+	idx := &cveExceptionIndex{
+		srcCVEList: srcCVEList,
+		byName:     make(map[string][]int, len(srcCVEList)),
+	}
+	for i := range srcCVEList {
+		seen := make(map[string]struct{})
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			name := strings.ToLower(srcCVEList[i].VulnerabilityPolicies[j].Name)
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			idx.byName[name] = append(idx.byName[name], i)
+		}
+	}
+	return idx
+}
+
+// lookup returns the same result getCVEExceptionMatchCVENameFromList(idx.srcCVEList, CVEName,
+// filterFixed) would return, but only inspects the exceptions that actually declare a policy
+// named CVEName rather than the full exception list.
+func (idx *cveExceptionIndex) lookup(CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
+	if idx == nil {
+		return nil
+	}
+	indices := idx.byName[strings.ToLower(CVEName)]
+	if len(indices) == 0 {
+		return nil
+	}
+
+	var l []armotypes.VulnerabilityExceptionPolicy
+	for _, i := range indices {
+		exc := idx.srcCVEList[i]
+		if filterFixed && exc.ExpiredOnFix != nil && *exc.ExpiredOnFix {
+			continue
+		}
+		l = append(l, exc)
+	}
+
+	if len(l) > 0 {
+		return l
+	}
+	return nil
+}
