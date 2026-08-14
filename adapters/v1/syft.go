@@ -201,57 +201,16 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 
 	//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
 	ctxWithSize := context.WithValue(ctxWithTimeout, image.MaxImageSize, s.maxImageSize)
-	pullRef := rewriteImageRef(imageID, s.proxyRegistryMap)
-	usedFallback := false
-	src, err := syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
-
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
-		usedFallback = true
-		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
-			helpers.String("imageID", imageID))
-		pullRef = rewriteImageRef(imageTag, s.proxyRegistryMap)
-		src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
-	}
-
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		usedFallback = true
-		unauthorizedErr := err
-		if provider, ok := registryauth.For(pullRef); ok {
-			if creds, credErr := provider.Credentials(ctxWithTimeout, pullRef); credErr != nil || creds == nil {
-				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), metrics.FallbackOutcomeFailed)
-				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
-					helpers.Error(credErr),
-					helpers.String("imageID", imageID))
-			} else {
-				registryOptions.Credentials = []image.RegistryCredentials{*creds}
-				src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
-				outcome := metrics.FallbackOutcomeFailed
-				if err == nil {
-					outcome = metrics.FallbackOutcomeSucceeded
-				}
-				metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), outcome)
-			}
-		}
-		// If no provider matched, its credentials were unavailable, or it succeeded in auth
-		// but still got 401, fall back to anonymous access. err/src retain the last attempt.
-		if err != nil {
-			logger.L().Debug("retrying without credentials",
-				helpers.String("imageID", imageID))
-			registryOptions.Credentials = nil
-			src, err = syft.GetSource(ctxWithSize, pullRef, syftGetSourceConfig(&registryOptions, imgPlatform))
-			outcome := metrics.FallbackOutcomeFailed
-			if err == nil {
-				outcome = metrics.FallbackOutcomeSucceeded
-			}
-			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
-			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
-				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
-			}
-		}
-	}
-
-	metrics.RecordSourceResolution(ctx, metrics.ComponentInProcess, usedFallback, err == nil)
+	// The MANIFEST_UNKNOWN and 401 fallback ladder lives in internal/registryauth, shared
+	// with the sidecar scanner, which ran a copy of it. The pull keeps its own context,
+	// carrying the size limit; ctxWithTimeout is what bounds the credential lookup.
+	src, err := registryauth.ResolveSource(ctxWithTimeout, metrics.ComponentInProcess,
+		func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+			return syft.GetSource(ctxWithSize, ref, syftGetSourceConfig(opts, imgPlatform))
+		},
+		rewriteImageRef(imageID, s.proxyRegistryMap),
+		rewriteImageRef(imageTag, s.proxyRegistryMap),
+		registryOptions)
 
 	switch {
 	// Note: stereoscope/oci-registry wraps deadline errors in a custom error type that does not implement Unwrap(),

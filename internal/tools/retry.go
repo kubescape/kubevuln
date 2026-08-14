@@ -21,15 +21,32 @@ type RetryConfig struct {
 	InitialWait time.Duration
 	MaxWait     time.Duration
 	Backoff     float64
+	// MaxRetryAfter bounds a delay taken from a registry's Retry-After. That number is
+	// chosen by the registry rather than by us, and nothing else on this path stops the
+	// clock: the scan context is built with context.WithoutCancel, so it carries no
+	// deadline, and the sidecar's own scanTimeout only wraps SBOM generation, which comes
+	// after this. A ceiling well under the scan timeout keeps the header useful without
+	// letting one response decide how long a worker is held. Non-positive falls back to
+	// MaxWait.
+	MaxRetryAfter time.Duration
 }
 
 func Default429RetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts: 3,
-		InitialWait: 500 * time.Millisecond,
-		MaxWait:     2 * time.Second,
-		Backoff:     2.0,
+		MaxAttempts:   3,
+		InitialWait:   500 * time.Millisecond,
+		MaxWait:       2 * time.Second,
+		Backoff:       2.0,
+		MaxRetryAfter: 30 * time.Second,
 	}
+}
+
+// retryAfterCeiling is the largest delay a Retry-After is allowed to ask for.
+func (c RetryConfig) retryAfterCeiling() time.Duration {
+	if c.MaxRetryAfter > 0 {
+		return c.MaxRetryAfter
+	}
+	return c.MaxWait
 }
 
 func IsRateLimitError(err error) bool {
@@ -108,6 +125,12 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 		delay := wait
 		if retryAfter, ok := ParseRetryAfter(err); ok {
 			delay = retryAfter
+			if ceiling := config.retryAfterCeiling(); delay > ceiling {
+				logger.L().Ctx(ctx).Debug("capping Retry-After to the configured ceiling",
+					helpers.String("requested", retryAfter.String()),
+					helpers.String("ceiling", ceiling.String()))
+				delay = ceiling
+			}
 		} else {
 			if delay > 0 {
 				jitter := time.Duration(rand.Float64() * 0.25 * float64(delay))

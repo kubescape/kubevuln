@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -72,59 +73,8 @@ type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOpti
 // 401/provider/anonymous fallbacks in order. It mirrors the retry chain in
 // adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
 func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
-	pullRef := imageID
-	usedFallback := false
-	src, err := get(ctx, pullRef, &opts)
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
-		usedFallback = true
-		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
-			helpers.String("imageID", imageID))
-		pullRef = imageTag
-		src, err = get(ctx, pullRef, &opts)
-	}
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		usedFallback = true
-		unauthorizedErr := err
-		for _, provider := range registryauth.Providers {
-			if !provider.Matches(pullRef) {
-				continue
-			}
-			if creds, credErr := provider.Credentials(ctx, pullRef); credErr != nil || creds == nil {
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), metrics.FallbackOutcomeFailed)
-				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
-					helpers.Error(credErr),
-					helpers.String("imageID", imageID))
-			} else {
-				opts.Credentials = []image.RegistryCredentials{*creds}
-				src, err = get(ctx, pullRef, &opts)
-				outcome := metrics.FallbackOutcomeFailed
-				if err == nil {
-					outcome = metrics.FallbackOutcomeSucceeded
-				}
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, provider.Strategy(), outcome)
-			}
-			break
-		}
-		// If no provider matched, its credentials were unavailable, or it succeeded
-		// in auth but still got 401, fall back to anonymous access.
-		if err != nil {
-			logger.L().Debug("retrying without credentials",
-				helpers.String("imageID", imageID))
-			opts.Credentials = nil
-			src, err = get(ctx, pullRef, &opts)
-			outcome := metrics.FallbackOutcomeFailed
-			if err == nil {
-				outcome = metrics.FallbackOutcomeSucceeded
-			}
-			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
-			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
-				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
-			}
-		}
-	}
-	metrics.RecordSourceResolution(ctx, metrics.ComponentSidecar, usedFallback, err == nil)
-	return src, err
+	return registryauth.ResolveSource(ctx, metrics.ComponentSidecar,
+		registryauth.Getter[source.Source](get), imageID, imageTag, opts)
 }
 
 type scannerServer struct {
@@ -409,17 +359,7 @@ func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
 	if err := json.Unmarshal(b, &syftDoc); err != nil {
 		return nil
 	}
-	for i := range syftDoc.Artifacts {
-		for j := range doc.Artifacts {
-			if syftDoc.Artifacts[i].ID == doc.Artifacts[j].ID {
-				syftDoc.Artifacts[i].MetadataType = doc.Artifacts[j].MetadataType
-				if b, err := json.Marshal(doc.Artifacts[j].Metadata); err == nil {
-					syftDoc.Artifacts[i].Metadata = b
-				}
-				break
-			}
-		}
-	}
+	syftmeta.Reattach(syftDoc.Artifacts, doc.Artifacts)
 
 	return syftDoc
 }

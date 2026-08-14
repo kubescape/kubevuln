@@ -327,10 +327,14 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 		return matchedBySource
 	}
 
+	// Built once per scan and reused for every match below, instead of re-walking the full
+	// exception list per match.
+	exceptionIndex := buildCVEExceptionIndex(exceptions)
+
 	var remaining []v1beta1.Match
 	for _, m := range doc.Matches {
 		isFixed, _ := hasKnownFix(m)
-		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		matched := exceptionIndex.lookup(m.Vulnerability.ID, isFixed)
 		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
@@ -539,6 +543,10 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 // fix (hasKnownFix, via getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
 // have different suppression states. The manifest content is fixed across a cache hit, so these
 // keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
+//
+// Matches with no known CVE ID still get a key, prefixed with \x01 to keep them out of the
+// ID-keyed namespace, so that a suppression-state change limited to ID-less matches is still
+// visible to callers (like reconcileCachedCVE) diffing this set across cache hits.
 func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
 	keys := map[string]struct{}{}
 	if doc == nil {
@@ -548,6 +556,8 @@ func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
 		m := im.Match
 		if m.Vulnerability.ID != "" {
 			keys[m.Vulnerability.ID+"\x00"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
+		} else {
+			keys["\x01"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
 		}
 	}
 	return keys

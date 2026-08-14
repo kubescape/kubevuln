@@ -439,13 +439,13 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 			foundIgnored1 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 		}
 		if stmt.Vulnerability.Name == "CVE-IGNORE-TEST-2" {
 			foundIgnored2 = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 		}
 	}
 	assert.True(t, foundIgnored1, "First IgnoredMatch should be preserved in the VEX document during update")
@@ -622,6 +622,72 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 		assert.Empty(t, stmt.ActionStatement, "not_affected statement %q must not carry an action_statement", stmt.Vulnerability.Name)
 	}
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
+}
+
+// TestAPIServerStore_storeVEX_duplicateLocalStatementsBothUpdated guards against a regression
+// where buildLocalVexStatementIndex's map[vexStatementKey]int kept only the last statement
+// index for a (vulnerability, PURL) key, so mark-affected/mark-ignored only touched one of two
+// duplicate local statements sharing that key. Such duplicates predate the ID/Name-swap
+// normalization above and can still exist in already-persisted VEX documents.
+func TestAPIServerStore_storeVEX_duplicateLocalStatementsBothUpdated(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFiltered.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, domain.CVEManifest{Name: cveManifest.Name}, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, vexContainer.Spec.Statements)
+
+	// Simulate a pre-existing document with a duplicate local statement for the same
+	// (vulnerability, PURL) key as the first statement.
+	dup := *vexContainer.Spec.Statements[0].DeepCopy()
+	vexContainer.Spec.Statements = append(vexContainer.Spec.Statements, dup)
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	targetName := dup.Vulnerability.Name
+	targetPURL := dup.Products[0].Subcomponents[0].ID
+
+	filtered := domain.CVEManifest{
+		Name: cveManifest.Name,
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{},
+		},
+	}
+	for _, m := range cveManifest.Content.Matches {
+		if m.Vulnerability.ID == targetName && m.Artifact.PURL == targetPURL {
+			filtered.Content.Matches = append(filtered.Content.Matches, m)
+		}
+	}
+	require.NotEmpty(t, filtered.Content.Matches, "expected to find the duplicated match in the source manifest")
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, filtered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	affectedCount := 0
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		if s.Vulnerability.Name == targetName && statementHasPURL(s.Products, targetPURL) {
+			if s.Status == v1beta1.Status(vex.StatusAffected) {
+				affectedCount++
+			}
+		}
+	}
+	assert.Equal(t, 2, affectedCount, "both duplicate local statements sharing the key must be promoted to affected")
 }
 
 func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
@@ -2789,7 +2855,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches(t *testing.T) {
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status)
 			assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), stmt.Justification)
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
 			assert.Empty(t, stmt.ActionStatement, "ActionStatement should be cleared on transition to not_affected")
 		}
 	}
@@ -2928,7 +2994,7 @@ func TestAPIServerStore_storeVEX_ignoredMatches_multiProductStatement(t *testing
 			foundTransitioned = true
 			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), stmt.Status,
 				"statement should transition to not_affected even though its real product is second, not first")
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement,
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement,
 				"ignore lookup should find the package regardless of product position")
 		}
 	}
@@ -3203,4 +3269,62 @@ func BenchmarkAPIServerStore_StoreVEX_LargeManifest(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
+	ctx := context.Background()
+	namespace := "default"
+	store := NewFakeAPIServerStorage(namespace)
+
+	// Simulate a CVE manifest with two ignored matches:
+	// 1. Grype suppressed a finding natively (no SecurityException)
+	// 2. Suppressed by a genuine SecurityException
+	cveManifest := domain.CVEManifest{
+		Name: "deployment-my-app",
+		Content: &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-1234"},
+						},
+						Artifact: v1beta1.GrypePackage{PURL: "pkg:apk/alpine/curl@8.1.2-r0"},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2023-1234"}},
+				},
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-5678"},
+						},
+						Artifact: v1beta1.GrypePackage{PURL: "pkg:apk/alpine/wget@1.2.3"},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						Vulnerability: "CVE-2023-5678",
+						SourceKind:    "SecurityException",
+					}},
+				},
+			},
+		},
+		Annotations: map[string]string{"kubescape.io/image-id": "docker://alpine@sha256:abcd"},
+	}
+
+	err := store.StoreVEX(ctx, cveManifest, cveManifest, false)
+	require.NoError(t, err)
+
+	vexContainer, err := store.StorageClient.OpenVulnerabilityExchangeContainers(namespace).Get(ctx, cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var foundExternal, foundCRD bool
+	for _, stmt := range vexContainer.Spec.Statements {
+		if stmt.Vulnerability.Name == "CVE-2023-1234" {
+			foundExternal = true
+			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
+		} else if stmt.Vulnerability.Name == "CVE-2023-5678" {
+			foundCRD = true
+			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+		}
+	}
+	assert.True(t, foundExternal, "Should have found external VEX statement")
+	assert.True(t, foundCRD, "Should have found CRD SecurityException statement")
 }

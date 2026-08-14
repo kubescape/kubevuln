@@ -206,3 +206,76 @@ func TestRetryWithBackoff_MetricsRecordingExhausted(t *testing.T) {
 	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_exhausted_op",outcome="attempt"} 1`), body)
 	assert.True(t, strings.Contains(body, `kubevuln_retry_attempts_total{operation="test_exhausted_op",outcome="exhausted"} 1`), body)
 }
+
+// A Retry-After is chosen by the registry, and nothing else on this path bounds the wait:
+// the scan context is built with context.WithoutCancel so it has no deadline, and the
+// sidecar's scanTimeout only wraps SBOM generation, which happens after source resolution.
+// Left uncapped, one 429 response decides how long a worker is held.
+func TestRetryWithBackoff_CapsRetryAfter(t *testing.T) {
+	cfg := RetryConfig{
+		MaxAttempts:   3,
+		InitialWait:   time.Millisecond,
+		MaxWait:       2 * time.Millisecond,
+		Backoff:       2.0,
+		MaxRetryAfter: 20 * time.Millisecond,
+	}
+	// Two orders of magnitude above the ceiling, standing in for a registry asking for hours.
+	rateLimited := errors.New("429 Too Many Requests, Retry-After: 2")
+
+	attempts := 0
+	start := time.Now()
+	_, err := RetryWithBackoff(context.Background(), "source_resolution", cfg, IsRateLimitError,
+		func(context.Context) (int, error) {
+			attempts++
+			return 0, rateLimited
+		})
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Equal(t, cfg.MaxAttempts, attempts)
+	// Two waits at the 20ms ceiling, not two at the 2s the header asked for.
+	assert.Less(t, elapsed, 500*time.Millisecond,
+		"Retry-After must be capped at MaxRetryAfter, took %s", elapsed)
+}
+
+// The cap must not turn the header off: a Retry-After under the ceiling is still waited out,
+// which is the whole point of reading it.
+func TestRetryWithBackoff_HonoursRetryAfterUnderTheCeiling(t *testing.T) {
+	cfg := RetryConfig{
+		MaxAttempts:   2,
+		InitialWait:   time.Microsecond,
+		MaxWait:       time.Microsecond,
+		Backoff:       2.0,
+		MaxRetryAfter: time.Minute,
+	}
+	// Well above the backoff this config would otherwise produce, so the wait can only have
+	// come from the header.
+	rateLimited := errors.New("429 Too Many Requests, Retry-After: 1")
+
+	start := time.Now()
+	_, err := RetryWithBackoff(context.Background(), "source_resolution", cfg, IsRateLimitError,
+		func(context.Context) (int, error) { return 0, rateLimited })
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.GreaterOrEqual(t, elapsed, time.Second, "a Retry-After below the ceiling must still be honoured")
+}
+
+// A config that never sets MaxRetryAfter still gets a bound rather than an open-ended wait.
+func TestRetryWithBackoff_UnsetCeilingFallsBackToMaxWait(t *testing.T) {
+	cfg := RetryConfig{
+		MaxAttempts: 2,
+		InitialWait: time.Millisecond,
+		MaxWait:     10 * time.Millisecond,
+		Backoff:     2.0,
+	}
+	rateLimited := errors.New("429 Too Many Requests, Retry-After: 2")
+
+	start := time.Now()
+	_, err := RetryWithBackoff(context.Background(), "source_resolution", cfg, IsRateLimitError,
+		func(context.Context) (int, error) { return 0, rateLimited })
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, 500*time.Millisecond, "took %s", elapsed)
+}

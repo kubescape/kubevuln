@@ -2836,6 +2836,62 @@ func TestScanService_SingleflightHitsCountOnlyDeduplicatedCallers(t *testing.T) 
 		"the caller that did the work is not one of the callers it spared")
 }
 
+// A caller that waited on a shared SBOM creation was spared the work whether or not that
+// creation succeeded, so it is deduplicated either way. The error path returned before the
+// hit was recorded, so every waiter on a failing image went uncounted, and a failing image
+// is exactly the one a burst of scans keeps retrying.
+func TestScanService_SingleflightHitsCountedWhenCreationFails(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	creator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(true, false, false), // CreateSBOM fails
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	store := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library-alpine-latest-1234567890ab",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890ab",
+	}
+
+	const callers = 5
+	var startWg, wg sync.WaitGroup
+	startWg.Add(callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := s.getOrCreateSBOM(context.TODO(), workload)
+			assert.Error(t, err, "every caller must see the shared failure")
+		}()
+	}
+	startWg.Wait()
+	<-started
+	close(release)
+	wg.Wait()
+
+	creator.mu.Lock()
+	ranTheWork := creator.calls
+	creator.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	assert.Contains(t, w.Body.String(),
+		fmt.Sprintf(`kubevuln_singleflight_hits_total{target="sbom_generation"} %d`, callers-ranTheWork),
+		"a waiter is deduplicated whether the shared creation succeeded or failed")
+}
+
 func TestScanService_SingleflightSBOMDeduplication(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

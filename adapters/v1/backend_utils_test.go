@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -207,8 +208,79 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName, tc.isFixed)
 			assert.Equal(t, tc.expected, actual)
+
+			indexed := buildCVEExceptionIndex(tc.srcCVEList).lookup(tc.CVEName, tc.isFixed)
+			assert.Equal(t, tc.expected, indexed)
 		})
 	}
+}
+
+// buildCVEExceptionIndex+lookup must return exactly what getCVEExceptionMatchCVENameFromList
+// returns for the same inputs, since callers switched from the linear scan to the index to
+// avoid re-walking the full exception list per match.
+func TestCVEExceptionIndex_MatchesLinearScan(t *testing.T) {
+	expiredOnFix := true
+	srcCVEList := []armotypes.VulnerabilityExceptionPolicy{
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-1"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-1234"}},
+		},
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-2"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-5678"}, {Name: "CVE-2021-1234"}},
+		},
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-3"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-1234"}},
+			ExpiredOnFix:          &expiredOnFix,
+		},
+	}
+	index := buildCVEExceptionIndex(srcCVEList)
+
+	for _, cve := range []string{"CVE-2021-1234", "cve-2021-1234", "CVE-2021-5678", "CVE-9999-0000"} {
+		for _, filterFixed := range []bool{false, true} {
+			want := getCVEExceptionMatchCVENameFromList(srcCVEList, cve, filterFixed)
+			got := index.lookup(cve, filterFixed)
+			assert.Equal(t, want, got, "cve=%s filterFixed=%v", cve, filterFixed)
+		}
+	}
+}
+
+func BenchmarkGetCVEExceptionMatch(b *testing.B) {
+	const numExceptions = 200
+	const policiesPerException = 5
+	const numMatches = 5000
+
+	srcCVEList := make([]armotypes.VulnerabilityExceptionPolicy, numExceptions)
+	for i := range srcCVEList {
+		policies := make([]armotypes.VulnerabilityPolicy, policiesPerException)
+		for j := range policies {
+			policies[j] = armotypes.VulnerabilityPolicy{Name: fmt.Sprintf("CVE-2024-%05d", i*policiesPerException+j)}
+		}
+		srcCVEList[i] = armotypes.VulnerabilityExceptionPolicy{VulnerabilityPolicies: policies}
+	}
+
+	cveNames := make([]string, numMatches)
+	for i := range cveNames {
+		cveNames[i] = fmt.Sprintf("CVE-2024-%05d", i%(numExceptions*policiesPerException))
+	}
+
+	b.Run("LinearScanPerMatch", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for _, cve := range cveNames {
+				getCVEExceptionMatchCVENameFromList(srcCVEList, cve, false)
+			}
+		}
+	})
+
+	b.Run("IndexBuiltOncePerScan", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			index := buildCVEExceptionIndex(srcCVEList)
+			for _, cve := range cveNames {
+				index.lookup(cve, false)
+			}
+		}
+	})
 }
 
 //go:embed testdata/nginx-image-manifest.json
