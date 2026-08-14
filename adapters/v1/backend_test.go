@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	beClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -142,7 +144,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 			if tt.workload {
 				ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 			}
-			got, err := a.GetCVEExceptions(ctx)
+			got, _, err := a.GetCVEExceptions(ctx)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetCVEExceptions() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -164,12 +166,12 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 		ContainerName: "container",
 	})
 
-	got1, err := a.GetCVEExceptions(ctx)
+	got1, _, err := a.GetCVEExceptions(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, got1, 1)
 	assert.Equal(t, 1, calls, "first call should hit the backend")
 
-	got2, err := a.GetCVEExceptions(ctx)
+	got2, _, err := a.GetCVEExceptions(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, got1, got2)
 	assert.Equal(t, 1, calls, "second call for the same workload should be served from cache")
@@ -179,9 +181,75 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 		Wlid:          "wlid://cluster-c/namespace-ns2/deployment-d2",
 		ContainerName: "container2",
 	})
-	_, err = a.GetCVEExceptions(otherCtx)
+	_, _, err = a.GetCVEExceptions(otherCtx)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
+}
+
+// TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry is a regression test:
+// ConvertToVulnerabilityExceptionPolicies only checks an exception's expiresAt on a cache
+// miss, so a cache entry that outlives the CRD exception it was built from would keep
+// suppressing CVEs past that exception's own expiry until the fixed exceptionsCacheTTL
+// elapsed. The cache entry's TTL must instead be bounded to the earliest expiresAt among
+// its policies (see cacheTTLFor), so expiry forces a re-evaluation instead of a stale hit.
+func TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry(t *testing.T) {
+	expiresAt := metav1.NewTime(time.Now().Add(50 * time.Millisecond))
+	crdCalls := 0
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			crdCalls++
+			return []sev1beta1.SecurityException{{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "ns"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					ExpiresAt: &expiresAt,
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-SOON-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					},
+				},
+			}}, nil, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		return nil, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	exceptions, _, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, exceptions, 1, "the not-yet-expired exception should suppress on the first call")
+	assert.Equal(t, 1, crdCalls)
+
+	time.Sleep(75 * time.Millisecond) // past expiresAt, well within exceptionsCacheTTL
+
+	exceptions, _, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Empty(t, exceptions, "an exception that expired mid-TTL must not keep being served from a stale cache entry")
+	assert.Equal(t, 2, crdCalls, "expiry must force re-evaluation instead of a cache hit")
+}
+
+// TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy is a regression test:
+// cacheTTLFor returns 0 (not negative) for a policy whose ExpirationDate has already passed
+// by the time it's about to be cached (e.g. a cloud-sourced policy the backend API returned
+// with a past expirationDate). akyoto/cache only reaps entries on its cleaning-interval
+// sweep, not the instant a 0-second TTL elapses, so writing it at all would let it keep
+// being served as a cache hit until that sweep ran. The write must be skipped outright.
+func TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy(t *testing.T) {
+	calls := 0
+	past := time.Now().Add(-1 * time.Hour)
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		calls++
+		return []armotypes.VulnerabilityExceptionPolicy{{ExpirationDate: &past}}, nil
+	}
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	_, _, err := a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, calls)
+
+	_, _, err = a.GetCVEExceptions(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, calls, "an already-expired policy must not be cached, forcing a re-fetch on the next call")
 }
 
 func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheEntries(t *testing.T) {
@@ -204,11 +272,11 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 		return nil, nil
 	}
 
-	nginx, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
+	nginx, _, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
 	assert.NoError(t, err)
 	assert.Len(t, nginx, 1)
 
-	redis, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
+	redis, _, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/redis:7"))
 	assert.NoError(t, err)
 	assert.Empty(t, redis, "different images for the same workload must not share cached exception results")
 }
@@ -233,11 +301,11 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 		return nil, nil
 	}
 
-	nginx, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
+	nginx, _, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
 	assert.NoError(t, err)
 	assert.Len(t, nginx, 1)
 
-	redis, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
+	redis, _, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/redis:7"))
 	assert.NoError(t, err)
 	assert.Empty(t, redis, "registry scans for different images must not share cached exception results")
 }
@@ -255,9 +323,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "degraded CRD merges must be reported as incomplete")
 	assert.Equal(t, 2, calls, "degraded CRD merges should not be cached")
 }
@@ -286,9 +354,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *tes
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
 	assert.Equal(t, 2, calls, "a real CRD list failure must disable caching, not just a faked one")
 }
@@ -320,9 +388,9 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
-	_, err := a.GetCVEExceptions(ctx)
+	_, _, err := a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
-	_, err = a.GetCVEExceptions(ctx)
+	_, _, err = a.GetCVEExceptions(ctx)
 	assert.ErrorIs(t, err, domain.ErrExceptionsDegraded, "selector-based degradation must be reported as incomplete")
 	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
@@ -607,6 +675,48 @@ func TestMarkRelevantVulnerabilities(t *testing.T) {
 				assert.Equal(t, want, *v.IsRelevant, "IsRelevant mismatch for %s", id)
 			}
 		})
+	}
+}
+
+// A package name is not unique within an image: two versions of one library sitting side by
+// side is ordinary in Java and Node images, and each produces its own vulnerability record
+// under the same name. Keying relevancy on the CVE and the name alone marked the version that
+// was never loaded relevant because the other one was, which is the opposite of what the
+// relevancy scan is for.
+func TestMarkRelevantVulnerabilities_DistinguishesPackageVersions(t *testing.T) {
+	vuln := func(cve, pkg, version string) containerscan.CommonContainerVulnerabilityResult {
+		return containerscan.CommonContainerVulnerabilityResult{
+			Vulnerability: containerscan.Vulnerability{
+				Name:               cve,
+				RelatedPackageName: pkg,
+				PackageVersion:     version,
+			},
+		}
+	}
+
+	vulnerabilities := []containerscan.CommonContainerVulnerabilityResult{
+		vuln("CVE-2024-0001", "commons-collections", "3.2.1"),
+		vuln("CVE-2024-0001", "commons-collections", "4.4"),
+		vuln("CVE-2024-0002", "log4j-core", "2.14.1"),
+	}
+	// only the 4.4 copy is actually loaded
+	relevant := []containerscan.CommonContainerVulnerabilityResult{
+		vuln("CVE-2024-0001", "commons-collections", "4.4"),
+	}
+
+	markRelevantVulnerabilities(vulnerabilities, relevant)
+
+	want := map[string]bool{
+		"CVE-2024-0001+commons-collections@3.2.1": false,
+		"CVE-2024-0001+commons-collections@4.4":   true,
+		"CVE-2024-0002+log4j-core@2.14.1":         false,
+	}
+	for _, v := range vulnerabilities {
+		id := v.Name + "+" + v.RelatedPackageName + "@" + v.PackageVersion
+		expected, ok := want[id]
+		require.True(t, ok, "unexpected vulnerability %s", id)
+		require.NotNil(t, v.IsRelevant, "IsRelevant should be set for %s", id)
+		assert.Equal(t, expected, *v.IsRelevant, "IsRelevant mismatch for %s", id)
 	}
 }
 
@@ -967,11 +1077,12 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 		Wlid: "wlid://cluster-test/namespace-default/deployment-myapp",
 	})
 
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, stats, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Len(t, exceptions, 2, "should merge cloud + CRD exceptions")
 	assert.Equal(t, "CVE-CLOUD-1", exceptions[0].VulnerabilityPolicies[0].Name)
 	assert.Equal(t, "CVE-CRD-1", exceptions[1].VulnerabilityPolicies[0].Name)
+	assert.Empty(t, stats.ExpiredBySource, "nothing expired in this scenario")
 }
 
 func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
@@ -1003,7 +1114,7 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 		ImageTagNormalized: "docker.io/library/nginx:1.25",
 	})
 
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, _, err := a.GetCVEExceptions(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, exceptions, "redis-scoped exception must not apply to an nginx workload")
 }
@@ -1292,4 +1403,142 @@ func TestBackendAdapter_SendStatusAbortsPromptlyOnCtxCancellation(t *testing.T) 
 	cancel()
 	err := backend.SendStatus(ctx, 0)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// TestHttpPostWithContext_IncludesResponseBodyInError verifies that httpPostWithContext captures non-200 response body snippets up to 512 bytes and truncates beyond that boundary.
+func TestHttpPostWithContext_IncludesResponseBodyInError(t *testing.T) {
+	// Marker 'B' is at byte index 512 (the 513th byte), proving truncation occurs at exactly 512 bytes.
+	longBody := strings.Repeat("A", 512) + "B" + "EXCLUSIVE_TAIL_HEADER"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(longBody))
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "received status code: 429")
+	assert.Contains(t, err.Error(), strings.Repeat("A", 512))
+	assert.NotContains(t, err.Error(), "B")
+	assert.NotContains(t, err.Error(), "EXCLUSIVE_TAIL_HEADER")
+}
+
+// TestHttpPostWithContext_EmptyResponseBody verifies the status-code-only error format when non-200 response body is empty.
+func TestHttpPostWithContext_EmptyResponseBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, "received status code: 500", err.Error())
+}
+
+// TestBackendAdapter_PostResults_429RateLimitLogging verifies that postResults detects 429 rate-limiting errors and logs vendor guidance.
+func TestBackendAdapter_PostResults_429RateLimitLogging(t *testing.T) {
+	backend := &BackendAdapter{
+		httpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+			return nil, fmt.Errorf("received status code: 429, body: quota exceeded")
+		},
+	}
+
+	report := v1.ScanResultReport{
+		Designators: identifiers.PortalDesignator{
+			Attributes: map[string]string{
+				identifiers.AttributeCustomerGUID: "test-guid",
+			},
+		},
+	}
+
+	// Capture logger output to verify the rate-limit guidance log message
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	logger.InitLogger("pretty")
+
+	err := backend.postResults(context.Background(), report, "http://localhost", "nginx:latest", "wlid://cluster-a/namespace-b/deployment-c")
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	logger.InitLogger("pretty")
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	logOutput := buf.String()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "429")
+	assert.Contains(t, err.Error(), "quota exceeded")
+	assert.Contains(t, logOutput, "failed sending vulnerabilities report due to rate limiting (429 Too Many Requests)")
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	tests := []struct {
+		name      string
+		header    string
+		wantOK    bool
+		wantAbout time.Duration
+	}{
+		{"absent header", "", false, 0},
+		{"valid seconds", "120", true, 120 * time.Second},
+		{"zero seconds", "0", true, 0},
+		{"negative seconds rejected", "-5", false, 0},
+		{"overflowing seconds rejected", "9223372037", false, 0},
+		{"garbage value rejected", "not-a-valid-value", false, 0},
+		{"valid future HTTP-date", time.Now().Add(2 * time.Hour).UTC().Format(http.TimeFormat), true, 2 * time.Hour},
+		{"past HTTP-date clamped to zero, not negative", time.Now().Add(-2 * time.Hour).UTC().Format(http.TimeFormat), true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{Header: http.Header{}}
+			if tt.header != "" {
+				resp.Header.Set("Retry-After", tt.header)
+			}
+			wait, ok := parseRetryAfter(resp)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.InDelta(t, tt.wantAbout.Seconds(), wait.Seconds(), 5,
+					"parsed wait should be close to the expected duration")
+			}
+		})
+	}
+}
+
+// TestHttpPostWithContext_HonorsRetryAfter is the real end-to-end proof: a server that
+// responds 429 with an explicit Retry-After, then 200 on the next attempt. The elapsed
+// time should be close to the server's requested wait, not the default exponential
+// backoff's much shorter initial interval (~500ms), proving the header is actually read
+// and honored rather than ignored.
+func TestHttpPostWithContext_HonorsRetryAfter(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	start := time.Now()
+	resp, err := httpPostWithContext(context.Background(), server.Client(), server.URL, nil, nil, 10*time.Second)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond,
+		"should have waited close to the requested 1s, not the default ~500ms backoff interval")
+	assert.Less(t, elapsed, 5*time.Second, "should not have waited far longer than requested")
 }

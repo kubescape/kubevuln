@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -66,6 +67,29 @@ const (
 	exceptionsCacheTTL              = 1 * time.Minute
 )
 
+// cacheTTLFor bounds base by the earliest ExpirationDate among policies, so a cache entry
+// containing a CRD-based exception never outlives that exception's own expiresAt. Without
+// this, ConvertToVulnerabilityExceptionPolicies' expiry check only ever runs on a cache miss:
+// an exception expiring mid-TTL would otherwise keep being served (and keep suppressing
+// matching CVEs) from the stale cache entry until the fixed exceptionsCacheTTL elapsed,
+// regardless of how soon it actually expired.
+func cacheTTLFor(policies []armotypes.VulnerabilityExceptionPolicy, base time.Duration) time.Duration {
+	ttl := base
+	now := time.Now()
+	for _, p := range policies {
+		if p.ExpirationDate == nil {
+			continue
+		}
+		if until := p.ExpirationDate.Sub(now); until < ttl {
+			ttl = until
+		}
+	}
+	if ttl < 0 {
+		ttl = 0
+	}
+	return ttl
+}
+
 func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, accessKey string, seRepo ports.SecurityExceptionRepository) *BackendAdapter {
 	return &BackendAdapter{
 		clusterConfig: pkgcautils.ClusterConfig{
@@ -122,14 +146,57 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 		}
 		if resp.StatusCode != http.StatusOK {
 			defer resp.Body.Close()
-			retryErr := fmt.Errorf("received status code: %d", resp.StatusCode)
+			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			bodyStr := strings.TrimSpace(string(bodyBytes))
+			var retryErr error
+			if bodyStr != "" {
+				retryErr = fmt.Errorf("received status code: %d, body: %s", resp.StatusCode, bodyStr)
+			} else {
+				retryErr = fmt.Errorf("received status code: %d", resp.StatusCode)
+			}
 			if !shouldRetryReport(resp) {
 				return nil, backoff.Permanent(retryErr)
+			}
+			if wait, ok := parseRetryAfter(resp); ok {
+				if wait > 0 {
+					wait = wait.Round(time.Second)
+					if wait == 0 {
+						wait = time.Second
+					}
+				}
+				return nil, backoff.RetryAfter(int(wait.Seconds()))
 			}
 			return nil, retryErr
 		}
 		return resp, nil
 	}, backoff.WithBackOff(bo), backoff.WithMaxElapsedTime(maxElapsedTime))
+}
+
+// parseRetryAfter reads the standard Retry-After header from resp, in either of its two
+// legitimate forms (RFC 9110 10.2.3): a plain non-negative number of seconds, or an
+// HTTP-date. Returns ok=false if the header is absent, empty, negative, or in neither
+// recognized form. A parsed date that has already passed is treated as "no wait" (zero
+// duration), not a negative one.
+func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(v, 10, 64); err == nil {
+		const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
+		if seconds < 0 || seconds > maxRetryAfterSeconds {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		wait := time.Until(t)
+		if wait < 0 {
+			wait = 0
+		}
+		return wait, true
+	}
+	return 0, false
 }
 
 // shouldRetryReport is derived from the unexported defaultShouldRetry in armosec/utils-go, but
@@ -160,14 +227,14 @@ var statuses = []string{
 	sysreport.JobDone,
 }
 
-func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, error) {
+func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "BackendAdapter.GetCVEExceptions")
 	defer span.End()
 
 	// retrieve workload from context
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
-		return nil, domain.ErrCastingWorkload
+		return nil, domain.ExceptionStats{}, domain.ErrCastingWorkload
 	}
 
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
@@ -188,7 +255,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 	if cacheable && a.exceptionsCache != nil {
 		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
-			return cached.(domain.CVEExceptions), nil
+			// A cache hit skips CRD re-evaluation entirely, so there is nothing new to
+			// report this call; the zero value is correct, not a missing measurement.
+			return cached.(domain.CVEExceptions), domain.ExceptionStats{}, nil
 		}
 	}
 
@@ -206,11 +275,12 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
-		return nil, err
+		return nil, domain.ExceptionStats{}, err
 	}
 
 	// Merge CRD-based exceptions
 	degraded := false
+	stats := domain.ExceptionStats{}
 	seList, cseList, crdErr := a.securityExceptionRepo.GetSecurityExceptions(ctx, namespace)
 	if crdErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions", helpers.Error(crdErr))
@@ -222,8 +292,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 	if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
-		crdPolicies := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		crdPolicies, crdStats := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
+		stats = crdStats
 
 		// A selector-based exception whose labels failed to resolve fails closed
 		// (see matchExceptionTarget), which is also a self-healing degradation and
@@ -235,15 +306,20 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		}
 	}
 
-	if cacheable && a.exceptionsCache != nil {
-		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), exceptionsCacheTTL)
+	// A non-positive TTL means a policy has already expired by the time we're about to
+	// cache it (e.g. lost a race with its own expiresAt between conversion and this
+	// point). akyoto/cache only reaps entries on its cleaning-interval sweep, not the
+	// instant their TTL elapses, so a Set with ttl<=0 would still be readable as a cache
+	// hit until the next sweep -- skip the write entirely rather than rely on that.
+	if ttl := cacheTTLFor(vulnExceptionList, exceptionsCacheTTL); cacheable && a.exceptionsCache != nil && ttl > 0 {
+		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), ttl)
 	}
 
 	if degraded {
-		return vulnExceptionList, domain.ErrExceptionsDegraded
+		return vulnExceptionList, stats, domain.ErrExceptionsDegraded
 	}
 
-	return vulnExceptionList, nil
+	return vulnExceptionList, stats, nil
 }
 
 // ReportError reports the given error to the platform
@@ -414,7 +490,7 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	}
 
 	// get exceptions
-	exceptions, err := a.GetCVEExceptions(ctx)
+	exceptions, _, err := a.GetCVEExceptions(ctx)
 	if err != nil && !errors.Is(err, domain.ErrExceptionsDegraded) {
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
@@ -544,18 +620,35 @@ func httpPostDebug(httpClient httputils.IHttpClient, fullURL string, headers map
 	return httputils.HttpPostWithContext(context.Background(), httpClient, fullURL, headers, body, -1, func(resp *http.Response) bool { return true })
 }
 
+// relevancyIdentity is what makes two vulnerability records the same finding: the CVE, and
+// the package it was found on. The package needs its version as well as its name, because a
+// name is not unique within an image. Two versions of one library can sit side by side, which
+// is ordinary in Java and Node images, and DomainToArmo emits a record per (vulnerability,
+// artifact) pair, so both versions produce a record carrying the same name.
+type relevancyIdentity struct {
+	cve            string
+	packageName    string
+	packageVersion string
+}
+
+func identifyForRelevancy(v cs.CommonContainerVulnerabilityResult) relevancyIdentity {
+	return relevancyIdentity{cve: v.Name, packageName: v.RelatedPackageName, packageVersion: v.PackageVersion}
+}
+
 // markRelevantVulnerabilities annotates each vulnerability with IsRelevant=true iff the same
-// (CVE, package) pair also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would
-// mark a CVE relevant on every package it affects even when only one of those packages was
-// executed; the pair is the record identity (see RelatedPackageName in DomainToArmo and the
-// uniqueness assertion in backend_test.go).
+// finding also appeared in the relevancy (CVEp) scan. Keying by CVE id alone would mark a CVE
+// relevant on every package it affects even when only one of those packages was executed, and
+// keying by CVE and package name alone does the same thing one level down, marking an
+// unloaded version of a library relevant because another version of it was loaded. Both
+// manifests are built from the same artifacts, the filtered one from a subset of the same
+// SBOM, so the versions on either side are the same strings.
 func markRelevantVulnerabilities(vulnerabilities, relevantVulnerabilities []cs.CommonContainerVulnerabilityResult) {
-	cvepIndices := make(map[string]struct{}, len(relevantVulnerabilities))
+	cvepIndices := make(map[relevancyIdentity]struct{}, len(relevantVulnerabilities))
 	for _, v := range relevantVulnerabilities {
-		cvepIndices[v.Name+"+"+v.RelatedPackageName] = struct{}{}
+		cvepIndices[identifyForRelevancy(v)] = struct{}{}
 	}
 	for i, v := range vulnerabilities {
-		_, isRelevant := cvepIndices[v.Name+"+"+v.RelatedPackageName]
+		_, isRelevant := cvepIndices[identifyForRelevancy(v)]
 		vulnerabilities[i].IsRelevant = &isRelevant
 	}
 }

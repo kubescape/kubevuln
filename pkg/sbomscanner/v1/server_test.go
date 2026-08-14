@@ -17,12 +17,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/registryauth"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -113,27 +118,6 @@ func TestCreateSBOM_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestIsGCPRegistry(t *testing.T) {
-	tests := []struct {
-		imageID string
-		want    bool
-	}{
-		{"gcr.io/foo/bar", true},
-		{"us.gcr.io/foo/bar", true},
-		{"us-docker.pkg.dev/foo/bar", true},
-		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
-		{"quay.io/foo/bar", false},
-		{"quay.io/foo/bar-docker.pkg.dev/x", false},
-		{"index.docker.io/library/alpine", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.imageID, func(t *testing.T) {
-			assert.Equal(t, tt.want, isGCPRegistry(tt.imageID))
-		})
-	}
-}
-
 func TestResolveSource(t *testing.T) {
 	err401 := errors.New("401 Unauthorized")
 	err403 := errors.New("403 Forbidden")
@@ -212,13 +196,14 @@ func TestResolveSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orig := gcpCredsFn
-			defer func() { gcpCredsFn = orig }()
-			gcpCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
+			orig := registryauth.GCPCredsFn
+			defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+			registryauth.ResetCaches()
+			registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
 				if tt.adcErr != nil {
-					return nil, tt.adcErr
+					return nil, time.Time{}, tt.adcErr
 				}
-				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 			}
 
 			var calls [][]image.RegistryCredentials
@@ -260,10 +245,11 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	m, err := metrics.New()
 	require.NoError(t, err)
 
-	orig := gcpCredsFn
-	defer func() { gcpCredsFn = orig }()
-	gcpCredsFn = func(ctx context.Context) (*image.RegistryCredentials, error) {
-		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, nil
+	orig := registryauth.GCPCredsFn
+	defer func() { registryauth.GCPCredsFn = orig; registryauth.ResetCaches() }()
+	registryauth.ResetCaches()
+	registryauth.GCPCredsFn = func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "token"}, time.Now().Add(time.Hour), nil
 	}
 
 	callCount := 0
@@ -287,8 +273,8 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="sidecar",outcome="fallback_assisted_success"} 1`), body)
 }
 
-// fakeAuthProvider is a scripted registryAuthProvider used to prove
-// resolveSource consults registryAuthProviders generically, not just GCP.
+// fakeAuthProvider is a scripted registryauth.Provider used to prove
+// resolveSource consults registryauth.Providers generically, not just GCP.
 type fakeAuthProvider struct {
 	matchHost string
 	creds     *image.RegistryCredentials
@@ -300,14 +286,16 @@ func (p fakeAuthProvider) Matches(imageID string) bool {
 	return host == p.matchHost
 }
 
-func (p fakeAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
+func (p fakeAuthProvider) Credentials(ctx context.Context, _ string) (*image.RegistryCredentials, error) {
 	return p.creds, p.err
 }
 
+func (p fakeAuthProvider) Strategy() string { return "fake" }
+
 func TestResolveSource_CustomProvider(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{
 			matchHost: "my-registry.example.com",
 			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},
@@ -333,9 +321,9 @@ func TestResolveSource_CustomProvider(t *testing.T) {
 }
 
 func TestResolveSource_ProviderNilCredentialsFallsBackAnonymous(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{matchHost: "my-registry.example.com"},
 	}
 
@@ -361,9 +349,9 @@ func TestResolveSource_ProviderNilCredentialsFallsBackAnonymous(t *testing.T) {
 }
 
 func TestResolveSource_ProviderMatchesUsesPullRef(t *testing.T) {
-	orig := registryAuthProviders
-	defer func() { registryAuthProviders = orig }()
-	registryAuthProviders = []registryAuthProvider{
+	orig := registryauth.Providers
+	defer func() { registryauth.Providers = orig }()
+	registryauth.Providers = []registryauth.Provider{
 		fakeAuthProvider{
 			matchHost: "gcr.io",
 			creds:     &image.RegistryCredentials{Username: "custom", Password: "token"},
@@ -537,9 +525,9 @@ func TestIsRegistryRateLimited(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "generic message mentioning 429 alone is not enough",
+			name: "generic message mentioning 429",
 			err:  errors.New("received status code: 429"),
-			want: false,
+			want: true,
 		},
 		{
 			name: "nil error",
@@ -567,4 +555,200 @@ func TestIsRegistryRateLimited(t *testing.T) {
 			assert.Equal(t, tt.want, isRegistryRateLimited(tt.err))
 		})
 	}
+}
+
+func TestIsPlatformMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "typed platform mismatch",
+			err:  &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"},
+			want: true,
+		},
+		{
+			name: "wrapped typed platform mismatch",
+			err:  fmt.Errorf("resolving source: %w", &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"}),
+			want: true,
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("mismatched platform mentioned but not the typed error"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPlatformMismatch(tt.err))
+		})
+	}
+}
+
+func TestFormatResolvedPlatform(t *testing.T) {
+	tests := []struct {
+		name    string
+		os      string
+		arch    string
+		variant string
+		want    string
+	}{
+		{name: "os and arch", os: "linux", arch: "amd64", want: "linux/amd64"},
+		{name: "os, arch and variant", os: "linux", arch: "arm", variant: "v7", want: "linux/arm/v7"},
+		{name: "neither known", want: ""},
+		{name: "arch known, os unknown", arch: "amd64", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatResolvedPlatform(tt.os, tt.arch, tt.variant))
+		})
+	}
+}
+
+// TestCreateSBOM_PlatformMismatch_LocalRegistry is a regression test for #512: requesting a
+// platform absent from the image's manifest must surface a distinct "platform not found"
+// reason instead of falling into the generic error path.
+func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(100)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {
+					"mediaType": "application/vnd.docker.container.image.v1+json",
+					"size": %d,
+					"digest": "sha256:%s"
+				},
+				"layers": [
+					{
+						"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+						"size": %d,
+						"digest": "sha256:%s"
+					}
+				]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash):
+			w.Write(configBytes)
+		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash):
+			w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/arm64",
+		MaxImageSize:    1 << 30,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Contains(t, resp.ErrorMessage, "mismatched platform")
+	assert.Equal(t, domain.ReasonPlatformNotFound, resp.StatusReason)
+	assert.Empty(t, resp.Status)
+}
+
+// TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft covers the deadline path: deadline.Run
+// does not (and documents that it cannot) stop the work function, and Syft's cataloguers do
+// not observe cancellation, so on timeout the Syft goroutine keeps running and finishes after
+// the handler has already returned Incomplete.
+//
+// The work function must therefore share nothing with the handler. Run under -race, this test
+// fails if the goroutine writes a variable the handler reads.
+func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash):
+			_, _ = w.Write(configBytes)
+		case fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash):
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Stand in for Syft: outlive the deadline, then return a result exactly as the real
+	// cataloguer would once it finishes naturally.
+	finished := make(chan struct{})
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		time.Sleep(1500 * time.Millisecond)
+		defer close(finished)
+		return &sbom.SBOM{}, nil
+	}
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image",
+		ImageTag:        u.Host + "/test-image:latest",
+		Platform:        "linux/amd64",
+		MaxImageSize:    1 << 30,
+		MaxSbomSize:     1 << 30,
+		TimeoutSeconds:  1,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the deadline must surface as Incomplete")
+
+	// Let the abandoned goroutine finish while the handler's result is being read, which is
+	// the window the race lived in.
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stand-in Syft never finished")
+	}
+	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the late write must not affect the response")
 }

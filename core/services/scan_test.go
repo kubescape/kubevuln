@@ -2,12 +2,18 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
@@ -22,6 +28,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -151,6 +158,164 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			}
 		})
 	}
+}
+
+// perImageSBOMCreator names each SBOM after the slug it was asked for, and holds every
+// caller inside CreateSBOM until all of them have arrived, so the callers provably contend
+// rather than finishing one after another.
+type perImageSBOMCreator struct {
+	calls   int32
+	arrived int32
+	total   int32
+	all     chan struct{}
+}
+
+func (c *perImageSBOMCreator) CreateSBOM(_ context.Context, name, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	atomic.AddInt32(&c.calls, 1)
+	if atomic.AddInt32(&c.arrived, 1) == c.total {
+		close(c.all)
+	}
+	// Bounded, because the point of the test is that both callers get here. If they are
+	// merged onto one key only one ever does, and an unbounded wait would hang instead of
+	// failing on the assertion below.
+	select {
+	case <-c.all:
+	case <-time.After(2 * time.Second):
+	}
+	return domain.SBOM{Name: name, SBOMCreatorVersion: c.Version(), Content: &v1beta1.SyftDocument{}}, nil
+}
+
+func (c *perImageSBOMCreator) Version() string        { return "Mock SBOM 1.0" }
+func (c *perImageSBOMCreator) GetMaxImageSize() int64 { return 0 }
+func (c *perImageSBOMCreator) GetMaxSBOMSize() int    { return 0 }
+func (c *perImageSBOMCreator) GetMemoryLimit() string { return "" }
+
+// A mutable tag can point at two digests at once, mid-rollout or after a repush. Those are
+// different images, stored under different slugs, so they must not be deduplicated into one
+// another: the loser would be handed an SBOM for an image it is not scanning, and since the
+// CVE manifest takes its name from the SBOM, its findings would be filed under the other
+// image's slug.
+func TestScanService_getOrCreateSBOM_SameTagDifferentDigestsAreNotShared(t *testing.T) {
+	creator := &perImageSBOMCreator{total: 2, all: make(chan struct{})}
+	store := repositories.NewMemoryStorage(false, false)
+	// storage off: this is about which callers share a key, and MemoryStore's maps are
+	// unguarded, so two workers storing at once race the double rather than the code.
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workloads := []domain.ScanCommand{
+		{ImageTagNormalized: "repo/app:latest", ImageHash: "sha256:aaaaaaaaaaaa", ImageSlug: "repo-app-latest-aaaaaaaaaaaa"},
+		{ImageTagNormalized: "repo/app:latest", ImageHash: "sha256:bbbbbbbbbbbb", ImageSlug: "repo-app-latest-bbbbbbbbbbbb"},
+	}
+
+	names := make([]string, len(workloads))
+	var wg sync.WaitGroup
+	for i := range workloads {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sbom, _, err := s.getOrCreateSBOM(context.TODO(), workloads[i])
+			assert.NoError(t, err)
+			names[i] = sbom.Name
+		}(i)
+	}
+	wg.Wait()
+
+	for i, w := range workloads {
+		assert.Equal(t, w.ImageSlug, names[i], "each workload must get the SBOM for its own image")
+	}
+	assert.Equal(t, int32(2), atomic.LoadInt32(&creator.calls), "two digests are two images, not one")
+}
+
+// sizeCappedSBOMCreator mirrors the TooLarge path in adapters/v1/syft.go, which returns
+// before Content is ever assigned: the SBOM carries a status and the annotations getSBOM
+// re-checks against the current limits, but no document. NewMockSBOMAdapter cannot stand in
+// here, as it always fills Content.
+type sizeCappedSBOMCreator struct {
+	calls int
+	// status is what the adapter settled on, TooLarge or Incomplete. Both come back with no
+	// document; only TooLarge carries the limit annotations getSBOM re-checks.
+	status string
+}
+
+func (c *sizeCappedSBOMCreator) CreateSBOM(_ context.Context, name, _, _ string, _ domain.RegistryOptions) (domain.SBOM, error) {
+	c.calls++
+	sbom := domain.SBOM{
+		Name:               name,
+		SBOMCreatorVersion: c.Version(),
+		Status:             c.status,
+	}
+	if c.status == helpersv1.TooLarge {
+		sbom.Annotations = map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonImageTooLarge,
+			domain.MaxImageSizeAnnotationKey: "512",
+		}
+	}
+	return sbom, nil
+}
+
+func (c *sizeCappedSBOMCreator) Version() string        { return "Mock SBOM 1.0" }
+func (c *sizeCappedSBOMCreator) GetMaxImageSize() int64 { return 512 }
+func (c *sizeCappedSBOMCreator) GetMaxSBOMSize() int    { return 0 }
+func (c *sizeCappedSBOMCreator) GetMemoryLimit() string { return "" }
+
+func generateSBOMContext(t *testing.T, s *ScanService) context.Context {
+	t.Helper()
+	ctx, err := s.ValidateGenerateSBOM(context.TODO(), domain.ScanCommand{
+		ImageSlug: "imageSlug",
+		ImageHash: "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+	})
+	require.NoError(t, err)
+	return ctx
+}
+
+// A TooLarge or Incomplete SBOM has no Content, so gating the store on Content meant the
+// verdict was never written and every later scan of that image pulled it again to reach the
+// same answer. StoreSBOM persists it as a status-only marker precisely so it can be reused.
+func TestScanService_GenerateSBOM_RemembersTooLargeVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.TooLarge}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	require.Equal(t, 1, storage.SBOMStores(), "the verdict must be persisted")
+	require.Equal(t, 1, creator.calls)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM, "still a failure")
+	assert.Equal(t, 1, creator.calls, "the stored verdict must be reused, not recomputed")
+	assert.Equal(t, 1, storage.SBOMStores(), "and not written again on the way through")
+}
+
+// Incomplete is the other status that comes back without a document, but it means the scan
+// timed out, and getSBOM has no staleness rule for it. Stored, it would read back as a
+// cache hit at the same scanner version forever and no retry would ever happen.
+func TestScanService_GenerateSBOM_DoesNotPersistIncompleteVerdict(t *testing.T) {
+	creator := &sizeCappedSBOMCreator{status: helpersv1.Incomplete}
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 0, storage.SBOMStores(), "a timeout must not be persisted")
+
+	assert.ErrorIs(t, s.GenerateSBOM(ctx), domain.ErrIncompleteSBOM)
+	assert.Equal(t, 2, creator.calls, "and must be retried on the next scan")
+}
+
+// getOrCreateSBOM stores what it creates, so storing again in the flow wrote the same
+// document to the apiserver twice.
+func TestScanService_GenerateSBOM_StoresCreatedSBOMOnce(t *testing.T) {
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	ctx := generateSBOMContext(t, s)
+
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "a newly created SBOM must be stored once")
+
+	// the second call is served from storage, and StoreSBOM is a Create that falls back to
+	// Get plus a full Update of the spec, so writing it back is not free
+	require.NoError(t, s.GenerateSBOM(ctx))
+	assert.Equal(t, 1, storage.SBOMStores(), "an SBOM read back from storage must not be stored again")
 }
 
 func TestScanService_ScanCP(t *testing.T) {
@@ -444,9 +609,9 @@ func TestIsRegistryRateLimitedErr(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "generic message mentioning 429 alone is not enough",
+			name: "generic message mentioning status code 429",
 			err:  errors.New("received status code: 429"),
-			want: false,
+			want: true,
 		},
 	}
 	for _, tt := range tests {
@@ -1206,9 +1371,16 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 			Username:      "armosec+testrobot2",
 			Password:      "dummyPassword111",
 		},
+		{
+			// Mirrors a .dockerconfigjson entry produced by reusing an existing
+			// `docker login` (kubectl create secret generic --from-file=.dockerconfigjson=...):
+			// only Auth is set, Username/Password are empty. See #611.
+			ServerAddress: "registry.example.com",
+			Auth:          base64.StdEncoding.EncodeToString([]byte("registryuser:registrypass")),
+		},
 	}
 	registryCredentials := registryCredentialsFromCredentialsList(creds)
-	assert.Equal(t, 3, len(registryCredentials))
+	assert.Equal(t, 4, len(registryCredentials))
 	assert.Equal(t, "quay.io", registryCredentials[0].Authority)
 	assert.Equal(t, "armosec+testrobot1", registryCredentials[0].Username)
 	assert.Equal(t, "dummyPassword", registryCredentials[0].Password)
@@ -1218,6 +1390,50 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 	assert.Equal(t, "quay.io", registryCredentials[2].Authority)
 	assert.Equal(t, "armosec+testrobot2", registryCredentials[2].Username)
 	assert.Equal(t, "dummyPassword111", registryCredentials[2].Password)
+	assert.Equal(t, "registry.example.com", registryCredentials[3].Authority)
+	assert.Equal(t, "registryuser", registryCredentials[3].Username)
+	assert.Equal(t, "registrypass", registryCredentials[3].Password)
+}
+
+func Test_credentialsFromAuth(t *testing.T) {
+	tests := []struct {
+		name         string
+		auth         string
+		wantUsername string
+		wantPassword string
+	}{
+		{
+			name:         "valid base64 user:pass",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass")),
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "password containing a colon is preserved",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass:word")),
+			wantUsername: "user",
+			wantPassword: "pass:word",
+		},
+		{
+			name: "empty auth",
+			auth: "",
+		},
+		{
+			name: "not valid base64",
+			auth: "not-base64!!!",
+		},
+		{
+			name: "decodes but has no colon separator",
+			auth: base64.StdEncoding.EncodeToString([]byte("userpass")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			username, password := credentialsFromAuth(tt.auth)
+			assert.Equal(t, tt.wantUsername, username)
+			assert.Equal(t, tt.wantPassword, password)
+		})
+	}
 }
 
 func Test_parseAuthorityFromServerAddress(t *testing.T) {
@@ -1416,7 +1632,34 @@ func TestOptionsFromWorkload(t *testing.T) {
 		args                map[string]interface{}
 		wantInsecureUseHTTP bool
 		wantInsecureSkipTLS bool
+		wantPlatform        string
 	}{
+		{
+			name: "platform string is applied",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: "linux/arm64",
+			},
+			wantPlatform: "linux/arm64",
+		},
+		{
+			name: "bare arch platform string is passed through as-is",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: "arm64",
+			},
+			wantPlatform: "arm64",
+		},
+		{
+			name: "non-string platform value is ignored without panic",
+			args: map[string]interface{}{
+				domain.ArgsPlatform: float64(1),
+			},
+			wantPlatform: "",
+		},
+		{
+			name:         "missing platform key defaults to empty (pod-less scans resolve whatever the manifest provides)",
+			args:         map[string]interface{}{},
+			wantPlatform: "",
+		},
 		{
 			name: "bool true values are applied",
 			args: map[string]interface{}{
@@ -1490,6 +1733,8 @@ func TestOptionsFromWorkload(t *testing.T) {
 				"InsecureUseHTTP mismatch for args: %v", tt.args)
 			assert.Equal(t, tt.wantInsecureSkipTLS, got.InsecureSkipTLSVerify,
 				"InsecureSkipTLSVerify mismatch for args: %v", tt.args)
+			assert.Equal(t, tt.wantPlatform, got.Platform,
+				"Platform mismatch for args: %v", tt.args)
 		})
 	}
 }
@@ -1592,8 +1837,8 @@ type recordingPlatform struct {
 
 var _ ports.Platform = (*recordingPlatform)(nil)
 
-func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, error) {
-	return p.exceptions, p.getExceptionsErr
+func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExceptions, domain.ExceptionStats, error) {
+	return p.exceptions, domain.ExceptionStats{}, p.getExceptionsErr
 }
 
 func (p *recordingPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
@@ -1663,11 +1908,15 @@ func exceptionPolicyForTest(id string) domain.CVEExceptions {
 // and CVE repository/scanner, returning the service, the version strings needed to seed/read a
 // CVE manifest, and a validated context.
 func newScanCVETestService(t *testing.T, platform ports.Platform, cveRepo ports.CVERepository, cveScanner ports.CVEScanner) (*ScanService, string, string, string, context.Context) {
+	return newScanCVETestServiceVEX(t, platform, cveRepo, cveScanner, false)
+}
+
+func newScanCVETestServiceVEX(t *testing.T, platform ports.Platform, cveRepo ports.CVERepository, cveScanner ports.CVEScanner, vexGeneration bool) (*ScanService, string, string, string, context.Context) {
 	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
 	if cveScanner == nil {
 		cveScanner = adapters.NewMockCVEAdapter()
 	}
-	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveScanner, cveRepo, platform, adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveScanner, cveRepo, platform, adapters.NewMockRelevancyAdapter(), true, vexGeneration, true, false, false)
 	ctx := context.TODO()
 	s.Ready(ctx)
 	workload := domain.ScanCommand{
@@ -1988,6 +2237,70 @@ func TestScanService_ScanCP_CacheHit_DeletedExceptionRestoresSuppressedMatch(t *
 // order). This constructs a 3-level containment chain - file F is owned by pkg-A, pkg-A is
 // contained in pkg-B, pkg-B is contained in pkg-C - with the relationships listed
 // outermost-first (C->B, B->A, A->F), the ordering that reproduced the bug.
+// RelevantFiles carries two kinds of placeholder. DynamicIdentifier ("⋯") is one segment,
+// so those paths keep their segment count and the #448 bucket is right for them.
+// WildcardIdentifier ("*") is zero or more segments, and the detector produces it by
+// collapsing runs of "⋯", so "/a/⋯/⋯/b" reaches us as "/a/*/b". Those were not
+// picked up as dynamic at all, so the file, its package and everything above it were dropped
+// and the relevancy scan called a loaded package not relevant.
+func TestFilterSBOM_WildcardRelevantPaths(t *testing.T) {
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
+	)
+	require.NoError(t, err)
+
+	d := dynamicpathdetector.DynamicIdentifier
+	w := dynamicpathdetector.WildcardIdentifier
+
+	tests := []struct {
+		name    string
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"one segment placeholder", "/usr/lib/" + d + "/mod.so", "/usr/lib/python3/mod.so", true},
+		{"one segment placeholder cannot span two", "/usr/lib/" + d + "/mod.so", "/usr/lib/a/b/mod.so", false},
+		{"wildcard spanning several segments", "/usr/lib/" + w + "/mod.so", "/usr/lib/a/b/mod.so", true},
+		{"wildcard spanning none", "/usr/lib/" + w + "/mod.so", "/usr/lib/mod.so", true},
+		{"trailing wildcard", "/usr/lib/" + w, "/usr/lib/a/b/c", true},
+		{"both placeholders together", "/usr/lib/" + d + "/" + w + "/mod.so", "/usr/lib/a/b/c/mod.so", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sbom := domain.SBOM{
+				Content: &v1beta1.SyftDocument{
+					Files: []v1beta1.SyftFile{
+						{ID: "file-F", Location: v1beta1.Coordinates{RealPath: tt.path}},
+					},
+					Artifacts: []v1beta1.SyftPackage{
+						{PackageBasicData: v1beta1.PackageBasicData{ID: "pkg-A", Name: "A"}},
+					},
+					ArtifactRelationships: []v1beta1.SyftRelationship{
+						{Parent: "pkg-A", Child: "file-F", Type: "contains"},
+					},
+				},
+			}
+
+			relevantFiles := mapset.NewSet[string]()
+			relevantFiles.Add(tt.pattern)
+
+			filtered, err := filterSBOM(sbom, instanceID, "wlid://x", relevantFiles, map[string]string{}, helpersv1.Full)
+			require.NoError(t, err)
+
+			if !tt.want {
+				assert.Empty(t, filtered.Content.Files, "%q must not match %q", tt.pattern, tt.path)
+				assert.Empty(t, filtered.Content.Artifacts)
+				return
+			}
+			require.Len(t, filtered.Content.Files, 1, "the file matched by %q must survive the filter", tt.pattern)
+			assert.Equal(t, tt.path, filtered.Content.Files[0].Location.RealPath)
+			require.Len(t, filtered.Content.Artifacts, 1, "and so must the package that owns it")
+			assert.Equal(t, "pkg-A", filtered.Content.Artifacts[0].ID)
+		})
+	}
+}
+
 func TestFilterSBOM_TransitiveClosure(t *testing.T) {
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-probe/containerName-probe",
@@ -2229,4 +2542,511 @@ func TestScanCVE_NoSBOMRegeneration_OnCacheHit(t *testing.T) {
 	require.NoError(t, err, "MemoryStorage returns a nil error on a cache miss")
 	require.Nil(t, generatedSBOM.Content, "The generated SBOM should be nil since we avoided regenerating it wastefully")
 
+}
+
+// vexRecordingCVERepository records StoreVEX calls so a test can assert whether a VEX
+// document was written, which the in-memory repository cannot show on its own: its StoreVEX
+// is a no-op that keeps nothing.
+type vexRecordingCVERepository struct {
+	ports.CVERepository
+	vexCalls []domain.CVEManifest
+}
+
+func (v *vexRecordingCVERepository) StoreVEX(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	v.vexCalls = append(v.vexCalls, cve)
+	return v.CVERepository.StoreVEX(ctx, cve, cvep, withRelevancy)
+}
+
+// TestScanService_ScanCVE_CacheMiss_GeneratesVEX is the core regression test for #557: ScanCVE
+// had no StoreVEX call anywhere in its body, so an operator running with vexGeneration enabled
+// got no VEX document from the plain per-container scan route at all.
+func TestScanService_ScanCVE_CacheMiss_GeneratesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, true)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a fresh ScanCVE must generate a VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1,
+		"the VEX document must be built from the exception-filtered manifest")
+}
+
+func TestScanService_ScanCVE_CacheMiss_NoVEXWhenDisabled(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, false)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "vexGeneration is off, so nothing should be written")
+}
+
+// A degraded exception fetch means the set is incomplete, so the document would assert fewer
+// suppressions than the user configured. ScanCP already declines to publish in that case.
+func TestScanService_ScanCVE_CacheMiss_DegradedFetchSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, _, _, _, ctx := newScanCVETestServiceVEX(t, platform, repo, fakeCVEScanner{}, true)
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "an incomplete exception set must not produce a VEX document")
+}
+
+// On a cache hit that re-evaluates exceptions, the stored manifest changes, so the VEX document
+// describing it has to change with it or the two disagree until the next cache miss.
+func TestScanService_ScanCVE_CacheHit_ExceptionChangeUpdatesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a changed ignored-match set must update the VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
+}
+
+func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+		IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Empty(t, repo.vexCalls, "nothing changed, so the stored VEX document is still accurate")
+}
+
+// TestScanService_ScanRegistry_CacheHit_ExceptionChangeUpdatesVEX covers the second half of
+// #557: ScanRegistry's cache-miss branch stored VEX but its cache-hit branch did not, even
+// though the comment directly above that branch says StoreVEX runs there.
+func TestScanService_ScanRegistry_CacheHit_ExceptionChangeUpdatesVEX(t *testing.T) {
+	platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-A")}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveAdapter, repo,
+		platform, adapters.NewMockRelevancyAdapter(), true, true, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+		JobID:              "job-123",
+	}
+	ctx, err := s.ValidateScanRegistry(ctx, workload)
+	require.NoError(t, err)
+
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx), ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	require.Len(t, repo.vexCalls, 1, "a ScanRegistry cache hit that changes the ignored set must update the VEX document")
+	require.NotNil(t, repo.vexCalls[0].Content)
+	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
+}
+
+// A degraded exception fetch must not publish a VEX document from a partial set on the
+// registry cache-miss path either, matching how ScanCVE and ScanCP gate their own calls.
+func TestScanService_ScanRegistry_CacheMiss_DegradedFetchSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	s := NewScanService(sbomAdapter, repositories.NewMemoryStorage(false, false), cveAdapter, repo,
+		platform, adapters.NewMockRelevancyAdapter(), true, true, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	ctx, err := s.ValidateScanRegistry(ctx, domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/test-registry-image:latest",
+		JobID:              "job-123",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	assert.Empty(t, repo.vexCalls, "an incomplete exception set must not produce a VEX document")
+}
+
+// A degraded exception fetch must not republish VEX on a cache hit either, even when the
+// change is purely additive and the manifest itself is persisted. The manifest can safely
+// take additions from a partial set; a published VEX document built from one understates
+// which CVEs are suppressed.
+func TestScanService_ScanCVE_CacheHit_DegradedAdditiveSkipsVEX(t *testing.T) {
+	platform := &recordingPlatform{
+		exceptions:       exceptionPolicyForTest("CVE-A"),
+		getExceptionsErr: domain.ErrExceptionsDegraded,
+	}
+	repo := &vexRecordingCVERepository{CVERepository: repositories.NewMemoryStorage(false, false)}
+	s, sbomVer, cveVer, cveDBVer, ctx := newScanCVETestServiceVEX(t, platform, repo, nil, true)
+	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-A"), matchForTest("CVE-B")},
+	})
+
+	require.NoError(t, s.ScanCVE(ctx))
+
+	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	require.Len(t, stored.Content.IgnoredMatches, 1, "the additive change is still persisted to the manifest")
+
+	assert.Empty(t, repo.vexCalls, "but no VEX document is published from a partial exception set")
+}
+
+// getSBOM discards an SBOM that was rejected under limits which have since changed, so a
+// rescan can admit an image the operator has just made room for. ScanRegistry called the
+// repository directly and skipped that, so it kept serving a cached TooLarge verdict forever:
+// raising maxImageSize had no effect on the registry path while it worked on every other one.
+func TestScanService_ScanRegistry_StaleTooLargeSBOMIsRescanned(t *testing.T) {
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	repo := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, repo, adapters.NewMockCVEAdapter(), repo,
+		&recordingPlatform{}, v1.NewContainerProfileAdapter(repositories.NewMemoryStorage(false, false)),
+		true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	ctx, err := s.ValidateScanRegistry(ctx, domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "docker.io/library/nginx:latest",
+	})
+	require.NoError(t, err)
+
+	// Stored when the image-size limit was 1 byte. The current limit differs, so this
+	// verdict no longer reflects the configuration and must not be reused.
+	require.NoError(t, repo.StoreSBOM(ctx, domain.SBOM{
+		Name:               "imageSlug",
+		SBOMCreatorVersion: sbomAdapter.Version(),
+		Status:             helpersv1.TooLarge,
+		Content:            &v1beta1.SyftDocument{},
+		Annotations: map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonImageTooLarge,
+			domain.MaxImageSizeAnnotationKey: "1",
+		},
+	}, false))
+	require.NotEqual(t, "1", fmt.Sprintf("%d", sbomAdapter.GetMaxImageSize()),
+		"the test needs the current limit to differ from the stored one")
+
+	require.NoError(t, s.ScanRegistry(ctx))
+
+	stored, err := repo.GetSBOM(ctx, "imageSlug", sbomAdapter.Version())
+	require.NoError(t, err)
+	assert.NotEqual(t, helpersv1.TooLarge, stored.Status,
+		"the stale TooLarge SBOM must be replaced by a fresh scan, not served again")
+}
+
+type blockingSBOMCreator struct {
+	ports.SBOMCreator
+	calls   int
+	onStart func()
+	failErr error
+	mu      sync.Mutex
+}
+
+func (b *blockingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions) (domain.SBOM, error) {
+	b.mu.Lock()
+	b.calls++
+	failErr := b.failErr
+	b.mu.Unlock()
+	if b.onStart != nil {
+		b.onStart()
+	}
+	if failErr != nil {
+		return domain.SBOM{}, failErr
+	}
+	return b.SBOMCreator.CreateSBOM(ctx, name, imageID, imageTag, options)
+}
+
+// kubevuln_singleflight_hits_total is meant to count requests that singleflight spared
+// from doing the work. res.Shared does not identify those: it means the result went to more
+// than one caller, which is true of the leader as well, so a burst of N collapsing to one
+// creation reported N deduplicated requests instead of N-1.
+func TestScanService_SingleflightHitsCountOnlyDeduplicatedCallers(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	creator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	// storage off, so a caller that arrives late and starts its own round reaches CreateSBOM
+	// rather than being served by the worker's storage re-check. That keeps "callers that
+	// ran the work" equal to CreateSBOM calls, which is what the assertion below leans on.
+	store := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library-alpine-latest-1234567890ab",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890ab",
+	}
+
+	const callers = 5
+	var startWg, wg sync.WaitGroup
+	startWg.Add(callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := s.getOrCreateSBOM(context.TODO(), workload)
+			assert.NoError(t, err)
+		}()
+	}
+	startWg.Wait()
+	<-started
+	close(release)
+	wg.Wait()
+
+	// Every caller either did the work or was spared it, so the two must add up, whether or
+	// not one of them was late enough to start a round of its own.
+	creator.mu.Lock()
+	ranTheWork := creator.calls
+	creator.mu.Unlock()
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	assert.Contains(t, w.Body.String(),
+		fmt.Sprintf(`kubevuln_singleflight_hits_total{target="sbom_generation"} %d`, callers-ranTheWork),
+		"the caller that did the work is not one of the callers it spared")
+}
+
+// A caller that waited on a shared SBOM creation was spared the work whether or not that
+// creation succeeded, so it is deduplicated either way. The error path returned before the
+// hit was recorded, so every waiter on a failing image went uncounted, and a failing image
+// is exactly the one a burst of scans keeps retrying.
+func TestScanService_SingleflightHitsCountedWhenCreationFails(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	creator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(true, false, false), // CreateSBOM fails
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	store := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(creator, store, adapters.NewMockCVEAdapter(), store, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library-alpine-latest-1234567890ab",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890ab",
+	}
+
+	const callers = 5
+	var startWg, wg sync.WaitGroup
+	startWg.Add(callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := s.getOrCreateSBOM(context.TODO(), workload)
+			assert.Error(t, err, "every caller must see the shared failure")
+		}()
+	}
+	startWg.Wait()
+	<-started
+	close(release)
+	wg.Wait()
+
+	creator.mu.Lock()
+	ranTheWork := creator.calls
+	creator.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	assert.Contains(t, w.Body.String(),
+		fmt.Sprintf(`kubevuln_singleflight_hits_total{target="sbom_generation"} %d`, callers-ranTheWork),
+		"a waiter is deduplicated whether the shared creation succeeded or failed")
+}
+
+func TestScanService_SingleflightSBOMDeduplication(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	blockingCreator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		onStart: func() {
+			once.Do(func() {
+				close(started)
+			})
+			<-release
+		},
+	}
+
+	service := NewScanService(
+		blockingCreator,
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockCVEAdapter(),
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockPlatform(false, nil),
+		adapters.NewMockRelevancyAdapter(),
+		true, false, true, false, false,
+	)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "library/alpine:latest",
+		ImageTagNormalized: "library/alpine:latest",
+		ImageHash:          "sha256:1234567890",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+	const numGoroutines = 5
+	var startWg sync.WaitGroup
+	var wg sync.WaitGroup
+	startWg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_ = service.GenerateSBOM(ctx)
+		}()
+	}
+
+	startWg.Wait() // ensure all 5 goroutines are running before unblocking singleflight worker
+	<-started      // wait for singleflight worker to enter CreateSBOM
+	close(release) // allow singleflight worker to finish
+	wg.Wait()
+
+	assert.Equal(t, 1, blockingCreator.calls, "CreateSBOM should be called exactly once for concurrent identical requests")
+}
+
+// failureRecordingPlatform is a minimal, concurrency-safe ports.Platform double that records
+// every ReportScanFailure call's JobID (read from the ctx WorkloadKey each caller passes in),
+// so a test can assert which distinct callers actually had their failure reported.
+type failureRecordingPlatform struct {
+	adapters.MockPlatform
+	mu      sync.Mutex
+	jobIDs  []string
+	reports int
+}
+
+func (p *failureRecordingPlatform) ReportScanFailure(ctx context.Context, failureCase scanfailure.ScanFailureCase, reason string, scanErr error) error {
+	workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	p.mu.Lock()
+	p.reports++
+	p.jobIDs = append(p.jobIDs, workload.JobID)
+	p.mu.Unlock()
+	return p.MockPlatform.ReportScanFailure(ctx, failureCase, reason, scanErr)
+}
+
+// TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter is a regression test for #642:
+// when N concurrent callers for the same image are deduplicated onto one singleflight
+// execution and that execution fails, every one of the N callers -- not just the "leader"
+// whose closure singleflight actually ran -- must get its own ReportScanFailure call, since
+// each carries a distinct JobID/workload identity the backend/dashboard needs to know that
+// specific scan failed.
+func TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter(t *testing.T) {
+	// Pin the scheduler to one P so the goroutines started below cannot run concurrently with
+	// each other or with this goroutine. Under a single P, a goroutine only yields the
+	// processor by blocking (or explicitly calling runtime.Gosched); none of the code between a
+	// waiter's start and its blocking receive on the singleflight result channel does either, so
+	// each waiter runs start-to-block in one uninterrupted turn. That makes startWg.Wait below a
+	// hard guarantee that every waiter has already joined the shared singleflight.DoChan call by
+	// the time it returns, rather than a timing-based approximation of it.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	wantErr := errors.New("registry pull failed")
+	blockingCreator := &blockingSBOMCreator{
+		SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false),
+		failErr:     wantErr,
+		onStart: func() {
+			once.Do(func() { close(started) })
+			<-release
+		},
+	}
+
+	platform := &failureRecordingPlatform{}
+	service := NewScanService(
+		blockingCreator,
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockCVEAdapter(),
+		repositories.NewMemoryStorage(false, false),
+		platform,
+		adapters.NewMockRelevancyAdapter(),
+		true, false, true, false, false,
+	)
+
+	const numGoroutines = 5
+	wantJobIDs := make([]string, numGoroutines)
+	var startWg, wg sync.WaitGroup
+	startWg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		jobID := fmt.Sprintf("job-%d", i)
+		wantJobIDs[i] = jobID
+		workload := domain.ScanCommand{
+			JobID:              jobID,
+			ImageSlug:          "library/alpine:latest",
+			ImageTagNormalized: "library/alpine:latest",
+			ImageHash:          "sha256:1234567890",
+		}
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startWg.Done()
+			_, _, err := service.getOrCreateSBOM(ctx, workload)
+			assert.ErrorIs(t, err, wantErr)
+		}()
+	}
+
+	// With GOMAXPROCS(1) above, this Wait returning already proves every waiter has joined the
+	// shared singleflight.DoChan call: the last one to call startWg.Done can only yield the
+	// processor by blocking on the result channel, so it -- and by the same argument every
+	// waiter before it -- is already parked on <-ch by the time this goroutine runs again.
+	startWg.Wait()
+	<-started // wait for the singleflight worker to enter CreateSBOM
+
+	close(release) // let CreateSBOM return its error
+	wg.Wait()
+
+	assert.Equal(t, 1, blockingCreator.calls, "CreateSBOM should still be called exactly once")
+
+	platform.mu.Lock()
+	defer platform.mu.Unlock()
+	assert.Equal(t, numGoroutines, platform.reports,
+		"every caller sharing the failed singleflight result must get its own ReportScanFailure call")
+	assert.ElementsMatch(t, wantJobIDs, platform.jobIDs,
+		"each ReportScanFailure call must carry the reporting caller's own JobID, not just the leader's")
 }

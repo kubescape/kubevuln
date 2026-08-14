@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -133,20 +133,25 @@ func (a *BackendAdapter) postResults(
 
 	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
-			helpers.String("image", imagetag),
-			helpers.String("wlid", wlid))
+		errStr := err.Error()
+		if strings.Contains(errStr, "429") || strings.Contains(errStr, "Too Many Requests") {
+			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report due to rate limiting (429 Too Many Requests). Please ask your vendor for support",
+				helpers.Error(err),
+				helpers.String("image", imagetag),
+				helpers.String("wlid", wlid))
+		} else {
+			logger.L().Ctx(ctx).Error("failed posting to event", helpers.Error(err),
+				helpers.String("image", imagetag),
+				helpers.String("wlid", wlid))
+		}
 		return err
 	}
 	defer resp.Body.Close()
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
-		if resp.StatusCode == http.StatusTooManyRequests {
-			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report due to rate limiting (429 Too Many Requests). Please ask your vendor for support", helpers.Error(err), helpers.String("body", body))
-		} else {
-			logger.L().Ctx(ctx).Error("failed sending vulnerabilities report", helpers.Error(err), helpers.String("body", body))
-		}
-
+		logger.L().Ctx(ctx).Error("failed reading response body from event receiver", helpers.Error(err),
+			helpers.String("image", imagetag),
+			helpers.String("wlid", wlid))
 		return err
 	}
 	logger.L().Debug(fmt.Sprintf("posting to event receiver image %s wlid %s finished successfully response body: %s", imagetag, wlid, body)) // systest dependent
@@ -227,9 +232,13 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	vulnsList := make([]containerscan.ShortVulnerabilityResult, 0)
 
 	for i := range vulnerabilities {
-		isIgnored := len(vulnerabilities[i].ExceptionApplied) > 0 &&
-			len(vulnerabilities[i].ExceptionApplied[0].Actions) > 0 &&
-			vulnerabilities[i].ExceptionApplied[0].Actions[0] == armotypes.Ignore
+		// Same predicate ApplySecurityExceptions uses to decide suppression for the stored
+		// manifest. Reading only ExceptionApplied[0].Actions[0] would answer a narrower
+		// question: getCVEExceptionMatchCVENameFromList appends every policy matching the
+		// CVE name without filtering on actions, so the first one is not necessarily the
+		// one carrying Ignore, and the two surfaces would then disagree about whether the
+		// finding is suppressed.
+		isIgnored := hasIgnoreAction(vulnerabilities[i].ExceptionApplied)
 
 		severitiesStats := exculdedSeveritiesStats
 		if !isIgnored {
@@ -311,22 +320,101 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	for sever := range exculdedSeveritiesStats {
 		summary.ExcludedSeveritiesStats = append(summary.ExcludedSeveritiesStats, exculdedSeveritiesStats[sever])
 	}
+	// Both were collected in a map, whose iteration order Go randomises, so without this the
+	// same findings produce a differently ordered summary on every scan. That summary is the
+	// payload posted to the backend, so a consumer diffing two reports for the same image
+	// sees the severity stats move around when nothing about the image changed.
+	sortBySeverity(summary.SeveritiesStats)
+	sortBySeverity(summary.ExcludedSeveritiesStats)
 
 	return &summary, vulnerabilities
+}
+
+// sortBySeverity orders severity stats by severity name, so a summary built from the same
+// findings is byte for byte the same each time.
+func sortBySeverity(stats []containerscan.SeverityStats) {
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].Severity < stats[j].Severity
+	})
 }
 
 func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
 	var l []armotypes.VulnerabilityExceptionPolicy
 
 	for i := range srcCVEList {
+		if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
+			continue
+		}
 		for j := range srcCVEList[i].VulnerabilityPolicies {
 			if strings.EqualFold(srcCVEList[i].VulnerabilityPolicies[j].Name, CVEName) {
-				if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
-					continue
-				}
+				// A policy contributes at most once. buildPolicy expands a vulnerability
+				// entry into one VulnerabilityPolicy per id and alias, so an exception
+				// listing an alias equal to its id, or the same alias twice, would
+				// otherwise return the same policy several times, and every consumer
+				// counts it that many times.
 				l = append(l, srcCVEList[i])
+				break
 			}
 		}
+	}
+
+	if len(l) > 0 {
+		return l
+	}
+	return nil
+}
+
+// cveExceptionIndex maps a lower-cased CVE/alias name to the indices, into the exception
+// list it was built from, of every exception that declares a VulnerabilityPolicy with that
+// name. It lets a scan with many matches look up candidate exceptions in roughly constant
+// time per match instead of re-walking every exception (and every policy within it) for
+// each one, which is what getCVEExceptionMatchCVENameFromList does on its own.
+type cveExceptionIndex struct {
+	srcCVEList []armotypes.VulnerabilityExceptionPolicy
+	byName     map[string][]int
+}
+
+// buildCVEExceptionIndex builds a cveExceptionIndex over srcCVEList in a single pass. Build
+// it once per scan (the exception list does not change across matches within a scan) and
+// reuse it via lookup for every match.
+func buildCVEExceptionIndex(srcCVEList []armotypes.VulnerabilityExceptionPolicy) *cveExceptionIndex {
+	idx := &cveExceptionIndex{
+		srcCVEList: srcCVEList,
+		byName:     make(map[string][]int, len(srcCVEList)),
+	}
+	for i := range srcCVEList {
+		seen := make(map[string]struct{})
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			name := strings.ToLower(srcCVEList[i].VulnerabilityPolicies[j].Name)
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			idx.byName[name] = append(idx.byName[name], i)
+		}
+	}
+	return idx
+}
+
+// lookup returns the same result getCVEExceptionMatchCVENameFromList(idx.srcCVEList, CVEName,
+// filterFixed) would return, but only inspects the exceptions that actually declare a policy
+// named CVEName rather than the full exception list.
+func (idx *cveExceptionIndex) lookup(CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
+	if idx == nil {
+		return nil
+	}
+	indices := idx.byName[strings.ToLower(CVEName)]
+	if len(indices) == 0 {
+		return nil
+	}
+
+	var l []armotypes.VulnerabilityExceptionPolicy
+	for _, i := range indices {
+		exc := idx.srcCVEList[i]
+		if filterFixed && exc.ExpiredOnFix != nil && *exc.ExpiredOnFix {
+			continue
+		}
+		l = append(l, exc)
 	}
 
 	if len(l) > 0 {

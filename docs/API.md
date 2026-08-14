@@ -139,6 +139,15 @@ GET /metrics
 | `kubevuln_scan_duration_seconds` | histogram | `endpoint`, `outcome`, `reason` | Duration of a scan job, measured from when it starts running (not from when it was queued) |
 | `kubevuln_scan_rejections_total` | counter | `endpoint`, `reason` (`too_many_requests`/`invalid_request`) | Requests rejected at validation time, before being queued |
 | `kubevuln_worker_pool_queue_depth` | gauge | - | Number of scan jobs currently waiting in the worker pool |
+| `kubevuln_exceptions_degraded_total` | counter | - | Total number of times CVE exception fetching degraded (partially failed) during a scan |
+| `kubevuln_exceptions_matched_total` | counter | `sourceKind` (`SecurityException`/`ClusterSecurityException`) | Total number of CVE findings suppressed by a SecurityException/ClusterSecurityException |
+| `kubevuln_exceptions_expired_total` | counter | `sourceKind` | Total number of SecurityException/ClusterSecurityException CRDs skipped because their `expiresAt` has passed |
+| `kubevuln_exceptions_active` | gauge | - | Number of CVE exception policies (cloud + CRD-based) in force for the most recently evaluated scan |
+| `kubevuln_scan_fallbacks_total` | counter | `component` (`in_process`/`sidecar`), `category` (`registry_auth`/`platform`/`size_classification`), `strategy` (`anonymous`/`ecr`/`gcp_adc`/`image_too_large`/`incomplete`/`platform_mismatch`/`sbom_too_large`), `outcome` (`classified`/`failed`/`succeeded`) | Fallbacks taken while resolving or classifying a scan, such as retrying a 401 with cloud credentials or falling back to anonymous access |
+| `kubevuln_scan_source_resolution_total` | counter | `component`, `outcome` (`first_pass_success`/`fallback_assisted_success`/`fallback_failed`/`first_pass_failure`) | Whether pulling the image succeeded outright or only after a fallback, which is what distinguishes a healthy registry from one that works only by retry |
+| `kubevuln_registry_auth_cache_total` | counter | `strategy` (`ecr`/`gcp_adc`), `result` (`hit`/`miss`/`coalesced`) | Registry auth credential lookups, by what each one cost: `hit` served from cache, `coalesced` served by another concurrent lookup's in-flight fetch, `miss` reached the cloud provider. `miss` is therefore the number of upstream credential fetches |
+| `kubevuln_singleflight_hits_total` | counter | `target` (`sbom_generation`) | Scan requests that arrived while the same work was already in flight and were served by it, so they did not generate an SBOM of their own. Counts the requests spared the work, not the one doing it |
+| `kubevuln_retry_attempts_total` | counter | `operation` (`source_resolution`/`sbom_generation`), `outcome` (`attempt`/`success`/`exhausted`) | Retry attempts executed during transient error backoff, distinguishing individual attempts, successes after retry, and exhausted retries |
 
 `reason` is `"none"` for a `success`/`partial` outcome, and otherwise one of the bounded
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
@@ -159,6 +168,53 @@ curl http://localhost:8080/metrics
 ## Scan Endpoints
 
 All scan endpoints accept a JSON payload and return immediately with a `200 OK` status. The actual scanning is performed asynchronously in a worker pool.
+
+### Get Scan Status
+
+Look up the current lifecycle state for a previously submitted `jobID`.
+
+```http
+GET /v1/scanStatus/:jobID
+```
+
+#### Response Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jobID` | string | Submitted job identifier |
+| `endpoint` | string | Async scan endpoint handling this job |
+| `state` | string | One of `queued`, `running`, `succeeded`, `failed`, or `abandoned` |
+| `phase` | string | Current service phase. Reported values include `queued`, `running`, `relevancy_lookup`, `cve_lookup`, `sbom_generation`, `sbom_storage`, `cve_matching`, `result_storage`, `result_upload`, `completed`, and `abandoned` |
+| `reason` | string | Machine readable terminal reason for `failed` or `abandoned` jobs |
+| `acceptedAt` | string | RFC3339 timestamp when the request was accepted |
+| `startedAt` | string | RFC3339 timestamp when execution began. Omitted while the job is still queued |
+| `finishedAt` | string | RFC3339 timestamp when the job reached a terminal state. Omitted until the job succeeds, fails, or is abandoned |
+| `updatedAt` | string | RFC3339 timestamp of the latest lifecycle transition |
+
+#### Response
+
+| Status | Description |
+|--------|-------------|
+| `200 OK` | Job status found |
+| `404 Not Found` | Unknown `jobID` |
+
+#### Example
+
+```bash
+curl http://localhost:8080/v1/scanStatus/sbom-gen-001
+```
+
+```json
+{
+  "jobID": "sbom-gen-001",
+  "endpoint": "generateSBOM",
+  "state": "running",
+  "phase": "sbom_generation",
+  "acceptedAt": "2026-08-12T12:00:00Z",
+  "startedAt": "2026-08-12T12:00:01Z",
+  "updatedAt": "2026-08-12T12:00:01Z"
+}
+```
 
 ### Generate SBOM
 
@@ -540,6 +596,30 @@ curl -X POST http://localhost:8080/v1/scanRegistryImage \
     }
   }'
 ```
+
+### Requesting a Specific Image Platform
+
+For multi-arch images, request a specific OS/architecture (OCI format `os/arch[/variant]`, or a
+bare arch such as `arm64`) via the `platform` arg. An operator can populate this from the scanned
+Pod's node architecture; left unset, kubevuln resolves whatever platform the image manifest
+provides instead of forcing the host's own architecture:
+
+```bash
+curl -X POST http://localhost:8080/v1/sbomCreation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageTag": "myapp:latest",
+    "jobID": "multi-arch-scan-001",
+    "args": {
+      "platform": "linux/arm64"
+    }
+  }'
+```
+
+The platform actually resolved (which may differ from the request if none was given) is recorded
+on the resulting SBOM's `kubescape.io/resolved-platform` annotation. Requesting a platform absent
+from the image's manifest fails the scan with a distinguishable "platform not found" reason
+instead of a generic error.
 
 ---
 

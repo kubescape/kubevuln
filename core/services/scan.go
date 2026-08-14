@@ -3,10 +3,10 @@ package services
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/docker/docker/api/types/registry"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -33,7 +32,9 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -59,6 +60,7 @@ type ScanService struct {
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
+	sfGroup           singleflight.Group
 }
 
 // SetMetrics attaches an optional Metrics instance to the service. It is not
@@ -97,13 +99,50 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 }
 
 // rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
-// It always uses workload.ImageTagNormalized: ScanCVE/GenerateSBOM/ScanCP payloads populate
-// ImageHash while ScanRegistry payloads never do (registryScanCommandToScanCommand leaves it
-// empty), so a fallback chain that preferred ImageHash resolved to a different key per flow and
-// let a 429 recorded on one flow go unnoticed on the other for the same image. ImageTagNormalized
-// is the one field every flow populates, so it's the only reference guaranteed to line up.
+// It uses workload.ImageTagNormalized along with a hash of any provided credentials.
+// Including the credentials ensures that a 429 encountered by an unauthenticated pull
+// does not cause a cross-tenant denial-of-service for workloads that use valid imagePullSecrets
+// to bypass the rate limit. ImageHash is avoided because ScanRegistry payloads never populate it.
 func rateLimitCacheKey(workload domain.ScanCommand) string {
-	return workload.ImageTagNormalized
+	fingerprint := credentialsFingerprint(workload)
+	if fingerprint == "" {
+		return workload.ImageTagNormalized
+	}
+	return fmt.Sprintf("%s|%s", workload.ImageTagNormalized, fingerprint)
+}
+
+// credentialsFingerprint hashes the workload's credentials, so that keys built from it keep
+// callers holding different credentials apart. Empty when the workload carries none.
+func credentialsFingerprint(workload domain.ScanCommand) string {
+	if len(workload.CredentialsList) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for _, cred := range workload.CredentialsList {
+		// codeql[go/weak-crypto, go/weak-password-hashing]
+		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
+			len(cred.Username), cred.Username,
+			len(cred.Password), cred.Password,
+			len(cred.Auth), cred.Auth,
+			len(cred.IdentityToken), cred.IdentityToken,
+			len(cred.RegistryToken), cred.RegistryToken,
+			len(cred.ServerAddress), cred.ServerAddress)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// sbomSingleflightKey identifies the SBOM a caller is about to produce, so concurrent
+// callers only share work when they are asking for the same one.
+//
+// It keys on ImageSlug rather than the image tag. The slug carries the image digest and is
+// what the SBOM is stored under, so it is the identity of the object being created. The tag
+// is not: a mutable tag can point at two different digests at the same time, during a
+// rollout or after a repush, and those are different images that must not share a result.
+// rateLimitCacheKey leaves the digest out on purpose, because a registry rate limits by
+// repository rather than by digest, which makes it the wrong identity here.
+func sbomSingleflightKey(workload domain.ScanCommand, opts domain.RegistryOptions) string {
+	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t", workload.ImageSlug, credentialsFingerprint(workload),
+		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
@@ -114,34 +153,14 @@ func (s *ScanService) checkCreateSBOM(err error, key string) {
 }
 
 // isRegistryRateLimitedErr reports whether err indicates the image pull was rate limited.
-// It recognizes three shapes:
-//   - domain.ErrTooManyRequests: the sentinel SidecarSBOMAdapter.CreateSBOM wraps its
-//     returned error with once the sidecar scanner reports a 429 (see adapters/v1/sidecar.go).
-//   - *transport.Error with StatusCode 429: what the in-process syft adapter would return
-//     if the error reached here unwrapped.
-//   - the rendered error text: stereoscope's registry provider formats the
-//     go-containerregistry pull error with %+v, not %w, which severs the errors.As chain
-//     for *transport.Error before it ever reaches here (mirrors
-//     pkg/sbomscanner/v1.isRegistryRateLimited, which has the same problem on the sidecar
-//     side of the same pull path).
+// It delegates to tools.IsRateLimitError.
 func isRegistryRateLimitedErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, domain.ErrTooManyRequests) {
-		return true
-	}
-	var transportError *transport.Error
-	if errors.As(err, &transportError) && transportError.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
-		strings.Contains(errStr, "429 Too Many Requests")
+	return tools.IsRateLimitError(err)
 }
 
-// GenerateSBOM implements the "Generate SBOM flow"
-// FIXME check if we still use this method
+// GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
+// POST v1/generateSBOM here, through ValidateGenerateSBOM and the same rejection and scan
+// metrics as the other flows.
 func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	ctx, span := otel.Tracer("").Start(ctx, "ScanService.GenerateSBOM")
 	defer span.End()
@@ -153,54 +172,30 @@ func (s *ScanService) GenerateSBOM(ctx context.Context) error {
 	if !ok {
 		return domain.ErrCastingWorkload
 	}
+	domain.UpdateScanPhase(ctx, "sbom_generation")
 
-	// check if SBOM is already available
-	sbom := domain.SBOM{}
-	var err error
-	if s.storage {
-		sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-				helpers.String("imageSlug", workload.ImageSlug))
-		}
-	}
-
-	// if SBOM is not available, create it
-	if sbom.Content == nil {
-		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-			logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-				helpers.String("imageSlug", workload.ImageSlug))
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-			return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
-		}
-		// create SBOM
-		sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-		if err != nil {
-			reason := classifySBOMError(err)
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-				reason, err)
-			return &domain.ScanError{Reason: reason, Err: err}
-		}
+	sbom, storeErr, err := s.getOrCreateSBOM(ctx, workload)
+	if err != nil {
+		return err
 	}
 
 	// do not treat a timed out or too-large SBOM as a successful scan — mirrors the same
-	// check in ScanCP/ScanCVE/ScanRegistry, which this flow had lost track of (see #540)
+	// check in ScanCP/ScanCVE/ScanRegistry, which this flow had lost track of (see #540).
+	// Ahead of storeErr so the size verdict stays the reported reason, as it did when the
+	// store lived below this check.
 	if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 		reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
 		return &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 	}
 
-	// store SBOM
-	if s.storage {
-		err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-		if err != nil {
-			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
-				scanfailure.ReasonSBOMStorageFailed, err)
-			return &domain.ScanError{Reason: scanfailure.ReasonSBOMStorageFailed, Err: err}
-		}
+	// getOrCreateSBOM already stored what it created, so there is nothing to write here.
+	// Storing is the whole point of this endpoint though, so unlike the scan flows, which
+	// carry on with an SBOM they could not persist, a failure there is reported as one.
+	if storeErr != nil {
+		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
+			scanfailure.ReasonSBOMStorageFailed, storeErr)
+		return &domain.ScanError{Reason: scanfailure.ReasonSBOMStorageFailed, Err: storeErr}
 	}
 
 	return nil
@@ -229,6 +224,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(mainCtx, "relevancy_lookup")
 
 	scans, err := s.relevancyProvider.GetContainerRelevancyScans(mainCtx, namespace, name, s.partialRelevancy)
 	if err != nil {
@@ -278,63 +274,18 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 		// check if we need SBOM
 		if cve.Content == nil || s.storage {
-			// check if SBOM is already available
-			if s.storage {
-				sbom, err = s.getSBOM(ctx, slug, s.sbomCreator.Version())
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-					// no continue, we might create it
-				}
+			domain.UpdateScanPhase(mainCtx, "sbom_generation")
+			var sbomErr error
+			sbom, _, sbomErr = s.getOrCreateSBOM(ctx, subWorkload)
+			if sbomErr != nil {
+				logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(sbomErr),
+					helpers.String("imageSlug", slug))
+				continue // we need the SBOM
 			}
-
-			// if SBOM is not available, create it
-			if sbom.Content == nil {
-				if s.sbomGeneration {
-					// a previous container in this loop (or a previous request) may have
-					// already recorded this exact image as rate limited; skip pulling it
-					// again instead of hammering the registry with another attempt
-					if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(subWorkload)); ok {
-						logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-							helpers.String("imageSlug", slug))
-						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-						continue
-					}
-					// create SBOM
-					sbom, err = s.sbomCreator.CreateSBOM(ctx, subWorkload.ImageSlug, subWorkload.ImageHash, subWorkload.ImageTagNormalized, optionsFromWorkload(ctx, subWorkload))
-					s.checkCreateSBOM(err, rateLimitCacheKey(subWorkload))
-					if err != nil {
-						logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(err),
-							helpers.String("imageSlug", slug))
-						reason := classifySBOMError(err)
-						_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-							reason, err)
-						if s.storage &&
-							subWorkload.Wlid != "" &&
-							subWorkload.ContainerName != "" &&
-							reason == scanfailure.ReasonImageSchemaUnsupported {
-							if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
-								logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
-									helpers.String("imageSlug", slug))
-							}
-						}
-						continue // we need the SBOM
-					}
-					// store SBOM
-					if s.storage {
-						err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-							// no continue, storing the SBOM is not critical
-						}
-					}
-				} else {
-					logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
-						helpers.String("imageSlug", slug))
-					continue // we need the SBOM
-				}
+			if !s.sbomGeneration && sbom.Content == nil {
+				logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
+					helpers.String("imageSlug", slug))
+				continue // we need the SBOM
 			}
 
 			// check SBOM status
@@ -351,6 +302,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		var cveExceptionsComplete bool
 		// if CVE manifest is not available, create it
 		if cve.Content == nil {
+			domain.UpdateScanPhase(mainCtx, "cve_matching")
 			// scan for CVE
 			cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 			if err != nil {
@@ -366,6 +318,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 			// store filtered CVE
 			if s.storage {
+				domain.UpdateScanPhase(mainCtx, "result_storage")
 				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -380,43 +333,9 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				}
 			}
 		} else {
-			// A cached manifest was filtered against the exception set at store time.
-			// Reconstruct the unfiltered manifest so the CURRENT exception set is
-			// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-			// un-suppress findings) and SubmitCVE/StoreVEX receive the same
-			// unfiltered data a cache miss would produce.
-			prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-			cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
-
-			if s.storage {
-				curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-				if !maps.Equal(prevIgnored, curIgnored) {
-					// Persist additions freely, but never persist removals when the
-					// exception set is incomplete: a transient SecurityException CRD
-					// list failure must not look like a deletion and wipe suppression
-					// from the stored manifest.
-					hasRemovals := false
-					for k := range prevIgnored {
-						if _, ok := curIgnored[k]; !ok {
-							hasRemovals = true
-							break
-						}
-					}
-					if cveExceptionsComplete || !hasRemovals {
-						err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-						}
-						err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-						if err != nil {
-							logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-								helpers.String("imageSlug", slug))
-						}
-					}
-				}
-			}
+			// VEX is not published here: ScanCP republishes it later, once
+			// filteredCvep is also available, gated on both exceptionsComplete flags.
+			cve, filteredCve, cveExceptionsComplete = s.reconcileCachedCVE(ctx, cve, slug, false)
 		}
 
 		// generate SBOM' from SBOM and relevant files
@@ -469,17 +388,13 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						helpers.String("imageSlug", slug))
 					// no continue, storing the CVE summary is not critical
 				}
-				if s.vexGeneration && cveExceptionsComplete && cvepExceptionsComplete {
-					err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCvep, true)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
-							helpers.String("imageSlug", slug))
-						// no continue, storing the VEX is not critical
-					}
+				if cveExceptionsComplete && cvepExceptionsComplete {
+					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
 				}
 			}
 		}
 		// submit CVE manifest to platform
+		domain.UpdateScanPhase(mainCtx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, cvep)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),
@@ -512,6 +427,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	logger.L().Info("scan started",
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(ctx, "cve_lookup")
 
 	// check if CVE manifest is already available
 	var err error
@@ -527,59 +443,21 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	sbom := domain.SBOM{}
 	// check if we need SBOM
 	if cve.Content == nil {
-		// check if SBOM is already available
-		if s.storage {
-			sbom, err = s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
+		domain.UpdateScanPhase(ctx, "sbom_generation")
+		var sbomErr error
+		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
+		if sbomErr != nil {
+			var scanErr *domain.ScanError
+			if errors.As(sbomErr, &scanErr) {
+				return &domain.ScanError{Reason: scanErr.Reason, Err: fmt.Errorf("creating SBOM: %w", scanErr.Err)}
 			}
+			reason := classifySBOMError(sbomErr)
+			return &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", sbomErr)}
 		}
-
-		// if SBOM is not available, create it
-		if sbom.Content == nil {
-			if s.sbomGeneration {
-				if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-					logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-						helpers.String("imageSlug", workload.ImageSlug))
-					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-					return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
-				}
-				// create SBOM
-				sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-				s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-				if err != nil {
-					reason := classifySBOMError(err)
-					_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-						reason, err)
-					// surface a per-workload record for schema-unsupported images so UIs
-					// do not show the workload as silently unscanned; skip image-only
-					// scans where there is no workload to attach the stub to
-					if s.storage &&
-						workload.Wlid != "" &&
-						workload.ContainerName != "" &&
-						reason == scanfailure.ReasonImageSchemaUnsupported {
-						if stubErr := s.cveRepository.StoreCVESummaryStub(ctx, helpersv1.UnsupportedSchema); stubErr != nil {
-							logger.L().Ctx(ctx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
-								helpers.String("imageSlug", workload.ImageSlug))
-						}
-					}
-					return &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", err)}
-				}
-				// store SBOM
-				if s.storage {
-					err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-				}
-			} else {
-				logger.L().Ctx(ctx).Warning("missing SBOM",
-					helpers.String("imageSlug", workload.ImageSlug))
-				return domain.ErrMissingSBOM
-			}
+		if !s.sbomGeneration && sbom.Content == nil {
+			logger.L().Ctx(ctx).Warning("missing SBOM",
+				helpers.String("imageSlug", workload.ImageSlug))
+			return domain.ErrMissingSBOM
 		}
 
 		// do not process timed out SBOM
@@ -592,6 +470,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
+		domain.UpdateScanPhase(ctx, "cve_matching")
 		// scan for CVE
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
@@ -601,10 +480,11 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
 		// store filtered CVE
 		if s.storage {
+			domain.UpdateScanPhase(ctx, "result_storage")
 			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -615,49 +495,20 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-		}
-	} else {
-		// A cached manifest was filtered against the exception set at store time.
-		// Reconstruct the unfiltered manifest so the CURRENT exception set is
-		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-		// un-suppress findings) and SubmitCVE receives the same unfiltered data a
-		// cache miss would produce.
-		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		if s.storage {
-			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-			if !maps.Equal(prevIgnored, curIgnored) {
-				// Persist additions freely, but never persist removals when the
-				// exception set is incomplete: a transient SecurityException CRD
-				// list failure must not look like a deletion and wipe suppression
-				// from the stored manifest.
-				hasRemovals := false
-				for k := range prevIgnored {
-					if _, ok := curIgnored[k]; !ok {
-						hasRemovals = true
-						break
-					}
-				}
-				if exceptionsComplete || !hasRemovals {
-					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-				}
+			// Only publish VEX built from a known-complete exception set, matching how
+			// ScanCP gates its own call: a degraded fetch would otherwise emit a document
+			// asserting fewer suppressions than the user actually configured.
+			if exceptionsComplete {
+				s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
 			}
 		}
+	} else {
+		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// submit CVE manifest to platform, only if we have a wlid
 	if workload.Wlid != "" {
+		domain.UpdateScanPhase(ctx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
@@ -688,6 +539,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	logger.L().Info("registry scan started",
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
+	domain.UpdateScanPhase(ctx, "scan_started")
 
 	// report to platform
 	err := s.platform.SendStatus(ctx, domain.Started)
@@ -699,6 +551,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	// check if CVE manifest is already available
 	cve := domain.CVEManifest{}
 	if s.storage {
+		domain.UpdateScanPhase(ctx, "cve_lookup")
 		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
@@ -708,44 +561,21 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 	sbom := domain.SBOM{}
 	if cve.Content == nil {
-		if s.storage {
-			sbom, err = s.sbomRepository.GetSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("getting SBOM", helpers.Error(err),
+		domain.UpdateScanPhase(ctx, "sbom_generation")
+		var sbomErr error
+		sbom, _, sbomErr = s.getOrCreateSBOM(ctx, workload)
+		if sbomErr != nil {
+			repErr := s.platform.ReportError(ctx, sbomErr)
+			if repErr != nil {
+				logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-		}
-
-		if sbom.Content == nil {
-			if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
-				logger.L().Ctx(ctx).Warning("skipping SBOM creation, image pull previously rate limited",
-					helpers.String("imageSlug", workload.ImageSlug))
-				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-				return &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
+			var scanErr *domain.ScanError
+			if errors.As(sbomErr, &scanErr) {
+				return scanErr
 			}
-			// create SBOM
-			sbom, err = s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, optionsFromWorkload(ctx, workload))
-			s.checkCreateSBOM(err, rateLimitCacheKey(workload))
-			if err != nil {
-				repErr := s.platform.ReportError(ctx, err)
-				if repErr != nil {
-					logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(repErr),
-						helpers.String("imageSlug", workload.ImageSlug))
-				}
-				reason := classifySBOMError(err)
-				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					reason, err)
-				return &domain.ScanError{Reason: reason, Err: err}
-			}
-
-			if s.storage {
-				err = s.sbomRepository.StoreSBOM(ctx, sbom, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing SBOM", helpers.Error(err),
-						helpers.String("imageSlug", workload.ImageSlug))
-				}
-			}
+			reason := classifySBOMError(sbomErr)
+			return &domain.ScanError{Reason: reason, Err: sbomErr}
 		}
 
 		// do not process timed out SBOM
@@ -756,6 +586,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		// scan for CVE
+		domain.UpdateScanPhase(ctx, "cve_matching")
 		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
 		if err != nil {
 			repErr := s.platform.ReportError(ctx, err)
@@ -769,10 +600,11 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 
 		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve, _ := s.applyExceptionsToManifest(ctx, cve)
+		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 
 		// store filtered CVE
 		if s.storage {
+			domain.UpdateScanPhase(ctx, "result_storage")
 			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
@@ -783,55 +615,19 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 					helpers.String("imageSlug", workload.ImageSlug))
 			}
-			if s.vexGeneration {
-				err = s.cveRepository.StoreVEX(ctx, filteredCve, filteredCve, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
-						helpers.String("imageSlug", workload.ImageSlug))
-				}
+			// Only publish VEX built from a known-complete exception set, matching how
+			// ScanCVE and ScanCP gate their own calls: a degraded fetch would otherwise
+			// emit a document asserting fewer suppressions than the user configured.
+			if exceptionsComplete {
+				s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
 			}
 		}
 	} else {
-		// A cached manifest was filtered against the exception set at store time.
-		// Reconstruct the unfiltered manifest so the CURRENT exception set is
-		// re-evaluated (deleted exceptions and ExpiredOnFix transitions
-		// un-suppress findings) and SubmitCVE/StoreVEX receive the same
-		// unfiltered data a cache miss would produce.
-		prevIgnored := v1.IgnoredMatchKeys(cve.Content)
-		cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		if s.storage {
-			curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-			if !maps.Equal(prevIgnored, curIgnored) {
-				// Persist additions freely, but never persist removals when the
-				// exception set is incomplete: a transient SecurityException CRD
-				// list failure must not look like a deletion and wipe suppression
-				// from the stored manifest.
-				hasRemovals := false
-				for k := range prevIgnored {
-					if _, ok := curIgnored[k]; !ok {
-						hasRemovals = true
-						break
-					}
-				}
-				if exceptionsComplete || !hasRemovals {
-					err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-					err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-					if err != nil {
-						logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-							helpers.String("imageSlug", workload.ImageSlug))
-					}
-				}
-			}
-		}
+		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// report scan success to platform
+	domain.UpdateScanPhase(ctx, "result_upload")
 	err = s.platform.SendStatus(ctx, domain.Success)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
@@ -857,6 +653,92 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 	return nil
 }
 
+// storeVEX writes the VEX document for a scanned image when VEX generation is enabled,
+// and is a no-op otherwise. Every CVE-scan flow stores VEX the same way, so they share
+// this rather than each carrying its own copy: the reason ScanCVE ended up with none at
+// all was that the call had to be ported to each flow by hand.
+//
+// A failure is logged rather than returned. The CVE manifest is already stored at every
+// call site, so the scan result stands without the VEX document.
+func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool, imageSlug string) {
+	if !s.vexGeneration {
+		return
+	}
+	if err := s.cveRepository.StoreVEX(ctx, cve, cvep, withRelevancy); err != nil {
+		logger.L().Ctx(ctx).Warning("storing VEX", helpers.Error(err),
+			helpers.String("imageSlug", imageSlug))
+	}
+}
+
+// reconcileCachedCVE re-evaluates a CVE manifest retrieved from the cache (cve.Content
+// non-nil) against the CURRENT SecurityException set, since it was filtered against
+// whatever set was active when it was originally stored: a deleted exception or an
+// ExpiredOnFix transition since then must still un-suppress findings on a cache hit,
+// the same as it would on a fresh scan.
+//
+// ScanCP, ScanCVE, and ScanRegistry each used to carry their own copy of this
+// sequence, and that duplication is exactly why the same class of bug (#469, #501,
+// #557) kept resurfacing in one flow after being fixed in another — see #638.
+//
+// Returns the input cve with suppressed matches restored (so SubmitCVE/StoreVEX
+// receive the same unfiltered data a cache miss would produce, matching every
+// caller's existing use of the mutated cve.Content after this call), the freshly
+// filtered copy, and whether the exception set used to filter it was known-complete.
+//
+// When storage is enabled and the filtered result's suppressions actually changed,
+// persists the updated manifest and, if publishVEX is true, republishes its VEX
+// document — subject to the removal-safety rule below. publishVEX lets ScanCP opt
+// out: it republishes VEX later itself, once relevancy-filtered results are also
+// available, using the exceptionsComplete this call returns.
+func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool) {
+	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
+	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
+	filteredCve, exceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
+
+	if s.storage {
+		curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+		if !maps.Equal(prevIgnored, curIgnored) {
+			// Persist additions freely, but never persist removals when the
+			// exception set is incomplete: a transient SecurityException CRD
+			// list failure must not look like a deletion and wipe suppression
+			// from the stored manifest.
+			hasRemovals := false
+			for k := range prevIgnored {
+				if _, ok := curIgnored[k]; !ok {
+					hasRemovals = true
+					break
+				}
+			}
+			if exceptionsComplete || !hasRemovals {
+				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
+					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
+						helpers.String("imageSlug", imageSlug))
+				}
+				if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
+						helpers.String("imageSlug", imageSlug))
+				}
+				// The stored manifest just changed, so the VEX document describing it is
+				// now stale. Republish it, but only from a known-complete exception set,
+				// the same rule the cache-miss path follows.
+				//
+				// The manifest is persisted on the looser `exceptionsComplete ||
+				// !hasRemovals` condition because a partial set can only under-suppress,
+				// never wrongly un-suppress, so additions are safe to keep. A VEX document
+				// is a published assertion about which CVEs are suppressed, and one built
+				// from a partial set understates that. Leaving the previous document in
+				// place, written when the set was complete, beats replacing it with a
+				// weaker claim, so the two can briefly disagree until a complete scan.
+				if publishVEX && exceptionsComplete {
+					s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
+				}
+			}
+		}
+	}
+
+	return cve, filteredCve, exceptionsComplete
+}
+
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
 // SecurityException policies applied. The original manifest is not mutated,
 // so callers can still use it for SubmitCVE (cloud reporting). The returned
@@ -869,14 +751,18 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	if cve.Content == nil {
 		return cve, false
 	}
-	exceptions, err := s.platform.GetCVEExceptions(ctx)
+	exceptions, stats, err := s.platform.GetCVEExceptions(ctx)
 	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
 	if degraded && s.metrics != nil {
 		s.metrics.ExceptionsDegradedCounter.Add(ctx, 1)
 	}
+	s.recordExceptionsExpired(ctx, stats)
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
 		return cve, false
+	}
+	if s.metrics != nil {
+		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
 	}
 	if len(exceptions) == 0 {
 		return cve, !degraded
@@ -889,9 +775,43 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 		filtered.Annotations = maps.Clone(cve.Annotations)
 	}
 	docCopy := cve.Content.DeepCopy()
-	v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
+	matchedBySource := v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
+	s.recordExceptionsMatched(ctx, matchedBySource)
 	filtered.Content = docCopy
 	return filtered, !degraded
+}
+
+// recordExceptionsExpired reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many exceptions applyExceptionsToManifest's GetCVEExceptions call skipped this scan
+// because their expiresAt had passed (see domain.ExceptionStats). No-op when metrics aren't
+// configured or nothing expired this call.
+func (s *ScanService) recordExceptionsExpired(ctx context.Context, stats domain.ExceptionStats) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range stats.ExpiredBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsExpiredCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
+}
+
+// recordExceptionsMatched reports, per SecurityException/ClusterSecurityException sourceKind,
+// how many CVE matches ApplySecurityExceptions suppressed this scan. No-op when metrics
+// aren't configured or nothing was suppressed this call.
+func (s *ScanService) recordExceptionsMatched(ctx context.Context, matchedBySource map[string]int) {
+	if s.metrics == nil {
+		return
+	}
+	for source, count := range matchedBySource {
+		if count == 0 {
+			continue
+		}
+		s.metrics.ExceptionsMatchedCounter.Add(ctx, int64(count),
+			metric.WithAttributes(attribute.String("sourceKind", source)))
+	}
 }
 
 // addTimestamp attaches the current timestamp to the context.
@@ -955,6 +875,16 @@ func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domai
 				helpers.String("imageSlug", workload.ImageSlug))
 		}
 	}
+	if platform, ok := workload.Args[domain.ArgsPlatform]; ok {
+		if p, isString := platform.(string); isString {
+			options.Platform = p
+		} else {
+			logger.L().Ctx(ctx).Warning("ignoring non-string value for registry option",
+				helpers.String("key", domain.ArgsPlatform),
+				helpers.String("type", fmt.Sprintf("%T", platform)),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
+	}
 
 	logger.L().Debug("created registryOptions from workload",
 		helpers.String("imageTagNormalized", workload.ImageTagNormalized),
@@ -983,14 +913,36 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 		if cred.RegistryToken != "" {
 			rc.Token = cred.RegistryToken
 		}
-		if cred.Username != "" && cred.Password != "" {
-			rc.Username = cred.Username
-			rc.Password = cred.Password
+		username, password := cred.Username, cred.Password
+		if username == "" && password == "" && cred.Auth != "" {
+			username, password = credentialsFromAuth(cred.Auth)
+		}
+		if username != "" && password != "" {
+			rc.Username = username
+			rc.Password = password
 		}
 
 		registryCredentials[i] = rc
 	}
 	return registryCredentials
+}
+
+// credentialsFromAuth decodes the standard Docker "auth" field: base64 of "username:password".
+// It's the canonical field in a .dockerconfigjson pull secret; username/password are only
+// supplementary and are often absent. Kubernetes' documented way to reuse an existing docker
+// login (kubectl create secret generic --from-file=.dockerconfigjson=~/.docker/config.json)
+// produces entries where only auth is set, so falling back to it here is required for those
+// credentials to reach the registry pull at all, rather than being silently dropped.
+func credentialsFromAuth(auth string) (username, password string) {
+	decoded, err := base64.StdEncoding.DecodeString(auth)
+	if err != nil {
+		return "", ""
+	}
+	username, password, found := strings.Cut(string(decoded), ":")
+	if !found {
+		return "", ""
+	}
+	return username, password
 }
 
 // parseAuthorityFromServerAddress extracts the authority host:port from a server address.
@@ -1045,11 +997,20 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	addedFileIDs := mapset.NewSet[string]()
 	addedRelationshipIDs := mapset.NewSet[string]()
 
-	// filter relevant files with dynamic paths, indexed by segment count since
-	// CompareDynamic only ever matches paths with the same number of segments
+	// Split the relevant files that carry a placeholder, because the two kinds behave
+	// differently. DynamicIdentifier ("⋯") stands for exactly one segment, so such a path
+	// can only ever match one with the same number of segments and is indexed by that count
+	// (see #448). WildcardIdentifier ("*") stands for zero or more segments: the detector
+	// produces it by collapsing runs of "⋯" (so "/a/⋯/⋯/b" is stored as "/a/*/b"),
+	// and it can match a path with any number of segments, so no bucket holds it and it has
+	// to be compared against every file.
 	dynamicPathsBySegmentCount := make(map[int][]string)
+	var wildcardPaths []string
 	relevantFiles.Each(func(file string) bool {
-		if strings.Contains(file, dynamicpathdetector.DynamicIdentifier) {
+		switch {
+		case strings.Contains(file, dynamicpathdetector.WildcardIdentifier):
+			wildcardPaths = append(wildcardPaths, file)
+		case strings.Contains(file, dynamicpathdetector.DynamicIdentifier):
 			segmentCount := strings.Count(file, "/")
 			dynamicPathsBySegmentCount[segmentCount] = append(dynamicPathsBySegmentCount[segmentCount], file)
 		}
@@ -1066,13 +1027,13 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 				continue
 			}
-			// then try dynamic match (expensive lookup), limited to candidates with a matching segment count
-			for _, dynamicPath := range dynamicPathsBySegmentCount[strings.Count(f.Location.RealPath, "/")] {
-				if dynamicpathdetector.CompareDynamic(dynamicPath, f.Location.RealPath) {
-					addedFileIDs.Add(f.ID)
-					filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
-					break
-				}
+			// then try dynamic match (expensive lookup): the one bucket a fixed-width
+			// placeholder path could be in, plus the wildcard paths, which fit no bucket
+			realPath := f.Location.RealPath
+			if matchesAnyDynamicPath(realPath, dynamicPathsBySegmentCount[strings.Count(realPath, "/")]) ||
+				matchesAnyDynamicPath(realPath, wildcardPaths) {
+				addedFileIDs.Add(f.ID)
+				filteredSBOM.Content.Files = append(filteredSBOM.Content.Files, f)
 			}
 		}
 	}
@@ -1129,6 +1090,17 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 	}
 
 	return filteredSBOM, nil
+}
+
+// matchesAnyDynamicPath reports whether path is matched by any of the placeholder-carrying
+// relevant-file paths in candidates.
+func matchesAnyDynamicPath(path string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if dynamicpathdetector.CompareDynamic(candidate, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // getRelationshipID returns a unique string identifier for a Syft relationship.
@@ -1315,4 +1287,138 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 	}
 
 	return sbom, nil
+}
+
+// getOrCreateSBOM retrieves an existing SBOM from storage, or creates and stores one via singleflight
+// deduplication if multiple goroutines race to build an SBOM for the same image.
+// sbomCreation is what the singleflight worker hands back: the SBOM, plus whether storing
+// it failed. Every caller racing a key gets the same one, so a waiter learns the outcome of
+// the shared store rather than repeating it.
+type sbomCreation struct {
+	sbom     domain.SBOM
+	storeErr error
+}
+
+// getOrCreateSBOM returns the SBOM for workload and the error from storing it, if it was
+// created and stored here. A non-nil store error is not fatal on its own: the SBOM is still
+// usable, and only GenerateSBOM, which exists to store it, treats it as a failure.
+func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, error, error) {
+	if !s.sbomGeneration {
+		return domain.SBOM{}, nil, nil
+	}
+
+	opts := optionsFromWorkload(ctx, workload)
+	key := sbomSingleflightKey(workload, opts)
+
+	// Detach workerCtx from caller cancellation so the singleflight worker job completes for all waiters even if the leader cancels early
+	workerCtx := context.WithoutCancel(ctx)
+
+	// ran reports whether this caller's own closure was the one singleflight executed.
+	// singleflight's res.Shared cannot answer that: it means the result was handed to more
+	// than one caller, so it is true for the leader too, and counting on it would report the
+	// caller that did the work as one of the callers that were spared it. Only read in the
+	// res branch below, where receiving happens-after the closure returns.
+	ran := false
+	ch := s.sfGroup.DoChan(key, func() (interface{}, error) {
+		ran = true
+		// Re-check storage inside singleflight worker in case another worker stored it while we waited
+		if s.storage {
+			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && sbom.Content != nil {
+				return sbomCreation{sbom: sbom}, nil
+			}
+		}
+
+		if _, ok := s.tooManyRequests.Get(rateLimitCacheKey(workload)); ok {
+			logger.L().Ctx(workerCtx).Warning("skipping SBOM creation, image pull previously rate limited",
+				helpers.String("imageSlug", workload.ImageSlug))
+			_ = s.platform.ReportScanFailure(workerCtx, scanfailure.ScanFailureSBOMGeneration,
+				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
+			return domain.SBOM{}, &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
+		}
+
+		// create SBOM, retrying on 429 rate-limit errors before activating the circuit-breaker.
+		sbom, err := tools.RetryWithBackoff(workerCtx, "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(ctx context.Context) (domain.SBOM, error) {
+			return s.sbomCreator.CreateSBOM(ctx, workload.ImageSlug, workload.ImageHash, workload.ImageTagNormalized, opts)
+		})
+		s.checkCreateSBOM(err, rateLimitCacheKey(workload))
+		if err != nil {
+			reason := classifySBOMError(err)
+			_ = s.platform.ReportScanFailure(workerCtx, scanfailure.ScanFailureSBOMGeneration,
+				reason, err)
+			if s.storage &&
+				workload.Wlid != "" &&
+				workload.ContainerName != "" &&
+				reason == scanfailure.ReasonImageSchemaUnsupported {
+				if stubErr := s.cveRepository.StoreCVESummaryStub(workerCtx, helpersv1.UnsupportedSchema); stubErr != nil {
+					logger.L().Ctx(workerCtx).Warning("storing schema-unsupported summary stub", helpers.Error(stubErr),
+						helpers.String("imageSlug", workload.ImageSlug))
+				}
+			}
+			return domain.SBOM{}, &domain.ScanError{Reason: reason, Err: err}
+		}
+
+		// store SBOM in storage before completing so all waiting callers share the stored
+		// result.
+		//
+		// TooLarge is stored despite having no document. StoreSBOM keeps it as a status-only
+		// marker, and getSBOM re-checks that marker against the current maxImageSize and
+		// maxSBOMSize, so it stops applying once the limits are raised. Persisting it is what
+		// saves pulling a known-oversized image again to reach the answer already on record.
+		//
+		// Incomplete is deliberately not stored. It means the scan timed out, which is
+		// transient, and getSBOM has no staleness rule for it, so a stored one would read
+		// back as a cache hit forever and block regeneration until the object was deleted by
+		// hand or the scanner version moved.
+		var storeErr error
+		if s.storage && (sbom.Content != nil || sbom.Status == helpersv1.TooLarge) {
+			if storeErr = s.sbomRepository.StoreSBOM(workerCtx, sbom, false); storeErr != nil {
+				logger.L().Ctx(workerCtx).Warning("storing singleflight deduplicated SBOM", helpers.Error(storeErr),
+					helpers.String("imageSlug", workload.ImageSlug))
+			}
+		}
+
+		return sbomCreation{sbom: sbom, storeErr: storeErr}, nil
+	})
+
+	select {
+	case res := <-ch:
+		if !ran {
+			// Counted before the error is handled: a caller that waited on a shared creation
+			// was spared the work whether or not that creation succeeded, and a failing
+			// image is the one a burst of scans keeps arriving for, so leaving those out
+			// hides the deduplication where there is most of it.
+			metrics.RecordSingleflightHit(ctx, "sbom_generation")
+		}
+		if res.Err != nil {
+			// The leader already reported this failure with its own workload identity
+			// from inside the closure. Every other caller sharing the same result would
+			// otherwise go completely unreported to the backend under its own JobID/Wlid
+			// -- singleflight only executes one closure per key, so this is the only
+			// place a waiter's own failure report can still be sent. See #642.
+			if !ran {
+				s.reportWaiterSBOMFailure(workerCtx, res.Err)
+			}
+			return domain.SBOM{}, nil, res.Err
+		}
+		created := res.Val.(sbomCreation)
+		return created.sbom, created.storeErr, nil
+	case <-ctx.Done():
+		return domain.SBOM{}, nil, ctx.Err()
+	}
+}
+
+// reportWaiterSBOMFailure re-emits ReportScanFailure for a singleflight caller whose own
+// closure never ran (a "waiter"), using the same reason/error the leader already reported
+// with its own workload identity. err is always the *domain.ScanError the closure in
+// getOrCreateSBOM returns on failure; the classifySBOMError fallback only guards against
+// that invariant changing.
+func (s *ScanService) reportWaiterSBOMFailure(ctx context.Context, err error) {
+	reason := classifySBOMError(err)
+	reportErr := err
+	var scanErr *domain.ScanError
+	if errors.As(err, &scanErr) {
+		reason = scanErr.Reason
+		reportErr = scanErr.Err
+	}
+	_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, reportErr)
 }

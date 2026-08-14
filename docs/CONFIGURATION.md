@@ -167,9 +167,9 @@ The main configuration file. All options can be overridden via environment varia
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `maxImageSize` | int | `536870912` | Maximum image size to scan in bytes (default: 512 MB) |
-| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB). Enforced after SBOM generation completes, not during it — Syft doesn't expose an incremental size hook, so an oversized SBOM is rejected only once it has already been built in memory. During generation, actual memory use is bounded by the memory limit of whichever container runs Syft, not by this value: the `sbom-scanner` sidecar container when `SBOM_SCANNER_SOCKET` is configured, or the main kubevuln container otherwise (in-process `SyftAdapter`). |
+| `maxSBOMSize` | int | `20971520` | Maximum SBOM size in bytes (default: 20 MB). Enforced after SBOM generation completes, not during it — Syft doesn't expose an incremental size hook, so an oversized SBOM is rejected only once it has already been built in memory. During generation, actual memory use is bounded by the memory limit of whichever container runs Syft, not by this value: the `sbom-scanner` sidecar container when `SBOM_SCANNER_SOCKET` is configured, or the main kubevuln container otherwise (in-process `SyftAdapter`). The scanner protocol carries this limit as a 32-bit value, so when the sidecar is in use a configured limit above `2147483647` (2 GiB) is clamped to that maximum and a warning is logged. The in-process adapter has no such ceiling. |
 | `scanConcurrency` | int | `1` | Number of concurrent scans |
-| `scanTimeout` | duration | `5m` | Timeout for SBOM generation |
+| `scanTimeout` | duration | `5m` | Timeout for SBOM generation. The scanner protocol carries this as whole seconds, so when the `sbom-scanner` sidecar is in use a sub-second value is rounded up to `1s` and any fractional part is rounded up to the next second. The in-process `SyftAdapter` applies the value exactly. |
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
 | `scannerReadinessTimeout` | duration | `60s` | Maximum time to wait for the SBOM scanner sidecar to become ready at startup. A value of `0` or less does not mean "wait forever": it makes the readiness deadline expire immediately, causing startup to fall back to the built-in Syft scanner right away. |
 
@@ -185,7 +185,7 @@ The main configuration file. All options can be overridden via environment varia
 |--------|------|---------|-------------|
 | `listingURL` | string | `https://grype.anchore.io/databases` | Grype vulnerability database URL |
 | `cveMatchingMode` | string | `adaptive` | CPE matching policy: `off` (Grype defaults everywhere), `on` (aggressive CPE matching everywhere), or `adaptive` (CPE matching everywhere except trusted-vendor images, which fall back to Grype defaults). See [CVE Matching Mode](#cve-matching-mode). |
-| `trustedVendors` | []string | `["echo","chainguard","wolfi","minimos"]` | Distro identifiers (as recognised by Grype's distro detection) treated as trusted vendors in `adaptive` mode. Override to add/remove vendors without a release. |
+| `trustedVendors` | []string | `["echo","chainguard","wolfi","minimos"]` | Distro identifiers (as recognised by Grype's distro detection) treated as trusted vendors in `adaptive` mode. Override to add/remove vendors without a release. Via `TRUSTEDVENDORS` env var, use a comma-separated list, e.g. `TRUSTEDVENDORS=echo,chainguard`. |
 | `useDefaultMatchers` | bool | `false` | **Deprecated**, kept for backward compatibility. Maps to `cveMatchingMode`: `true` -> `off`, `false` -> `on`. An explicit `cveMatchingMode` always wins. |
 
 #### Storage Options
@@ -195,6 +195,7 @@ The main configuration file. All options can be overridden via environment varia
 | `storage` | bool | `false` | Enable Kubernetes storage backend (stores SBOMs/CVEs as CRDs) |
 | `namespace` | string | `kubescape` | Kubernetes namespace for storage |
 | `storeFilteredSbom` | bool | `false` | Store relevancy-filtered SBOMs |
+| `riskAcceptance` | bool | `false` | Enable `SecurityException`/`ClusterSecurityException` CRD integration (exception matching, VEX suppression, suppression Events/metrics) — requires `storage: true` as well. See [security-exception-design.md](security-exception-design.md). If `storage` is enabled but this is left unset, matching CRDs are silently ignored: a warning is logged at startup, but no error or metric flags it, so double-check this is set before relying on `SecurityException`/`ClusterSecurityException` CRDs. |
 
 #### Feature Flags
 
@@ -204,6 +205,7 @@ The main configuration file. All options can be overridden via environment varia
 | `nodeSbomGeneration` | bool | `false` | Enable node-level SBOM generation |
 | `partialRelevancy` | bool | `false` | Enable partial relevancy matching |
 | `vexGeneration` | bool | `false` | Generate VEX (Vulnerability Exploitability eXchange) documents |
+| `proxyRegistryMap` | map[string]string | `{}` | Maps a registry hostname to an internal mirror for image pulls, e.g. `{"docker.io": "my-mirror.example.com"}`. Applied to every SBOM-generation path (in-process and sidecar). Config keys are parsed with a `::` delimiter specifically so hostnames containing `.` are treated as a single map key instead of being split into nested keys (see #359/#361) — no special escaping needed in `docker.io`-style keys. Via `PROXYREGISTRYMAP` env var, pass the whole map as a JSON object string, e.g. `PROXYREGISTRYMAP='{"docker.io":"my-mirror.example.com"}'` (single-quote in shells so the double quotes reach the process unescaped; malformed JSON now fails config loading with an error instead of silently disabling mirroring). |
 
 ### Complete Schema
 
@@ -246,6 +248,15 @@ The main configuration file. All options can be overridden via environment varia
       "default": false
     },
     "partialRelevancy": {
+      "type": "boolean",
+      "default": false
+    },
+    "proxyRegistryMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {}
+    },
+    "riskAcceptance": {
       "type": "boolean",
       "default": false
     },

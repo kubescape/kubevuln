@@ -92,12 +92,19 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 		return vulnerabilityResults, domain.ErrCastingWorkload
 	}
 
+	// Built once per scan and reused for every match below, instead of re-walking the full
+	// exception list per match.
+	exceptionIndex := buildCVEExceptionIndex(vulnerabilityExceptionPolicyList)
+
 	if grypeDocument.Source != nil {
 		// generate a map of child to parent
 		parentLayerHash := ""
 		parentLayer := map[string]string{
 			dummyLayer: parentLayerHash,
 		}
+		// ...and one of layer to its position in the image, so the earliest layer a package
+		// appears in can be picked directly rather than by walking the chain from the root.
+		layerPosition := map[string]int{}
 
 		target, err := NewTargetFromSource(grypeDocument.Source)
 		if err != nil {
@@ -106,9 +113,10 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 		if target.IsImageTarget() {
 			imageMetadata := target.GetImageMetadata()
-			for _, layer := range imageMetadata.Layers {
+			for i, layer := range imageMetadata.Layers {
 				parentLayer[layer.Digest] = parentLayerHash
 				parentLayerHash = layer.Digest
+				layerPosition[layer.Digest] = i
 			}
 		}
 
@@ -154,7 +162,7 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						},
 					},
 					PackageType:      string(m.Artifact.Type),
-					ExceptionApplied: getCVEExceptionMatchCVENameFromList(vulnerabilityExceptionPolicyList, m.Vulnerability.ID, isFixed == 1),
+					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookup(m.Vulnerability.ID, isFixed == 1), m.Artifact.PURL),
 					IsRelevant:       nil, // TODO add relevancy here?
 					Coordinates:      syftCoordinatesToCoordinates(m.Artifact.Locations),
 				},
@@ -202,10 +210,15 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 
 			// fill extra layer information
 			for i, v := range vulnerabilityResults {
+				// The package is introduced by the earliest layer it appears in. This used to
+				// walk the parent chain from "", which meant it only ever resolved for a
+				// package present in the image's first layer: for anything added by a later
+				// layer no element could start the chain, and the result stayed empty.
 				earlyLayer := ""
+				earlyPosition := 0
 				for j, layer := range v.Layers {
-					if layer.ParentLayerHash == earlyLayer {
-						earlyLayer = layer.LayerHash
+					if position, ok := layerPosition[layer.LayerHash]; ok && (earlyLayer == "" || position < earlyPosition) {
+						earlyLayer, earlyPosition = layer.LayerHash, position
 					}
 					if l, ok := data[layer.LayerHash]; ok {
 						if layer.LayerInfo == nil {
@@ -215,6 +228,11 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						vulnerabilityResults[i].Layers[j].CreatedTime = l.CreatedTime
 						vulnerabilityResults[i].Layers[j].LayerOrder = l.LayerOrder
 					}
+				}
+				if earlyLayer == "" && len(v.Layers) > 0 {
+					// No layer of this package is one of the image's own, which is the case
+					// for a match with no locations: it is given the placeholder layer above.
+					earlyLayer = v.Layers[0].LayerHash
 				}
 				vulnerabilityResults[i].IntroducedInLayer = earlyLayer
 			}
@@ -352,13 +370,19 @@ func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.Im
 		Layers:       []containerscan.ESLayer{},
 	}
 
+	// LayerOrder counts real, layer-producing history entries only, matching
+	// parseLayersPayload's indexing (which builds the layerMap DomainToArmo attaches to
+	// each vulnerability). History also contains metadata-only entries (ENV, LABEL, CMD,
+	// etc.) that don't produce a layer; counting those too, as the raw loop index would,
+	// gives every real layer a different LayerOrder here than in the vulnerability report
+	// for the same layer hash, breaking any lookup that correlates the two by LayerOrder.
 	layerIndex := 0
-	for i, historyLayer := range config.History {
+	for _, historyLayer := range config.History {
 		layerInfo := containerscan.ESLayer{
 			LayerInfo: &containerscan.LayerInfo{
 				CreatedBy:   historyLayer.CreatedBy,
 				CreatedTime: &historyLayer.Created.Time,
-				LayerOrder:  i,
+				LayerOrder:  layerIndex,
 			},
 		}
 		if !historyLayer.EmptyLayer && layerIndex < len(rawManifest.Layers) {

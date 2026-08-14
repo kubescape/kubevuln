@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -27,9 +28,12 @@ import (
 // HTTPController maps ScanService ports to gin handlers that can be mapped to paths and methods
 // this mapping is usually done in main()
 type HTTPController struct {
-	scanService ports.ScanService
-	workerPool  *workerpool.WorkerPool
-	metrics     *metrics.Metrics
+	scanService  ports.ScanService
+	workerPool   *workerpool.WorkerPool
+	metrics      *metrics.Metrics
+	diagnostics  func(ctx context.Context) domain.Diagnostics
+	statuses     *scanStatusStore
+	statusesOnce sync.Once
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -37,6 +41,7 @@ func NewHTTPController(scanService ports.ScanService, concurrency int) *HTTPCont
 	return &HTTPController{
 		scanService: scanService,
 		workerPool:  workerpool.New(concurrency),
+		statuses:    newScanStatusStore(),
 	}
 }
 
@@ -58,6 +63,32 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 		return h, err
 	}
 	return h, nil
+}
+
+// WithDiagnostics attaches the callback the Diagnostics handler uses to report the
+// scan mode and backend versions currently in effect. A callback (rather than a
+// fixed value) is required because the CVE DB version changes as the background
+// updater in GrypeAdapter refreshes it (see adapters/v1/grype.go). It is a no-op to
+// call the handler without this having been set, returning the struct's zero value.
+func (h *HTTPController) WithDiagnostics(f func(ctx context.Context) domain.Diagnostics) *HTTPController {
+	h.diagnostics = f
+	return h
+}
+
+func (h *HTTPController) ensureStatuses() *scanStatusStore {
+	h.statusesOnce.Do(func() {
+		if h.statuses == nil {
+			h.statuses = newScanStatusStore()
+		}
+	})
+	return h.statuses
+}
+
+func (h *HTTPController) claimTrackedJob(jobID string) bool {
+	if jobID == "" {
+		return true
+	}
+	return h.ensureStatuses().markRunning(jobID)
 }
 
 // recordScan records the outcome and duration of a background scan job for the given endpoint.
@@ -114,7 +145,7 @@ func (h HTTPController) recordRejection(ctx context.Context, endpoint string, er
 }
 
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
-func (h HTTPController) GenerateSBOM(c *gin.Context) {
+func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var websocketScanCommand wssc.WebsocketScanCommand
@@ -140,10 +171,16 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 		return
 	}
 
+	h.ensureStatuses().recordAccepted(newScan.JobID, "generateSBOM")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
-	bgCtx := context.WithoutCancel(ctx)
+	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
+		h.ensureStatuses().markPhase(newScan.JobID, phase)
+	}))
 	h.workerPool.Submit(func() {
+		if !h.claimTrackedJob(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.GenerateSBOM(bgCtx)
 		outcome := "success"
@@ -151,6 +188,11 @@ func (h HTTPController) GenerateSBOM(c *gin.Context) {
 			outcome = "error"
 		}
 		h.recordScan(bgCtx, "generateSBOM", start, outcome, err)
+		if err != nil {
+			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
+		} else {
+			h.ensureStatuses().markSucceeded(newScan.JobID)
+		}
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
@@ -175,8 +217,29 @@ func (h HTTPController) Ready(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
+// Diagnostics reports the scan mode and backend versions resolved at startup, so
+// operators can query the running configuration directly instead of inferring it
+// from logs. See domain.Diagnostics for the excluded (credential) fields.
+func (h *HTTPController) Diagnostics(c *gin.Context) {
+	if h.diagnostics == nil {
+		c.JSON(http.StatusOK, domain.Diagnostics{})
+		return
+	}
+	c.JSON(http.StatusOK, h.diagnostics(c.Request.Context()))
+}
+
+// ScanStatus reports the current lifecycle state for a previously accepted scan job.
+func (h *HTTPController) ScanStatus(c *gin.Context) {
+	status, ok := h.ensureStatuses().get(c.Param("jobID"))
+	if !ok {
+		_, _ = problem.Of(http.StatusNotFound).Append(problem.Detailf("jobID=%s", c.Param("jobID"))).WriteTo(c.Writer)
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
 // ScanCP unmarshalls the payload and calls scanService.ScanCP
-func (h HTTPController) ScanCP(c *gin.Context) {
+func (h *HTTPController) ScanCP(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var websocketScanCommand wssc.WebsocketScanCommand
@@ -204,21 +267,29 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 		return
 	}
 
+	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCP")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
-	bgCtx := context.WithoutCancel(ctx)
+	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
+		h.ensureStatuses().markPhase(newScan.JobID, phase)
+	}))
 	h.workerPool.Submit(func() {
+		if !h.claimTrackedJob(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanCP(bgCtx)
 		if err != nil {
 			if errors.Is(err, domain.ErrPartialContainerProfile) {
 				h.recordScan(bgCtx, "scanCP", start, "partial", err)
+				h.ensureStatuses().markSucceeded(newScan.JobID)
 				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
 					helpers.String("namespace", namespace))
 			} else {
 				h.recordScan(bgCtx, "scanCP", start, "error", err)
+				h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason("error", err))
 				logger.L().Ctx(bgCtx).Error("service error - ScanCP", helpers.Error(err),
 					helpers.String("wlid", newScan.Wlid),
 					helpers.String("name", name),
@@ -226,12 +297,13 @@ func (h HTTPController) ScanCP(c *gin.Context) {
 			}
 		} else {
 			h.recordScan(bgCtx, "scanCP", start, "success", nil)
+			h.ensureStatuses().markSucceeded(newScan.JobID)
 		}
 	})
 }
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
-func (h HTTPController) ScanCVE(c *gin.Context) {
+func (h *HTTPController) ScanCVE(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var websocketScanCommand wssc.WebsocketScanCommand
@@ -257,10 +329,16 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 		return
 	}
 
+	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCVE")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
-	bgCtx := context.WithoutCancel(ctx)
+	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
+		h.ensureStatuses().markPhase(newScan.JobID, phase)
+	}))
 	h.workerPool.Submit(func() {
+		if !h.claimTrackedJob(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanCVE(bgCtx)
 		outcome := "success"
@@ -268,6 +346,11 @@ func (h HTTPController) ScanCVE(c *gin.Context) {
 			outcome = "error"
 		}
 		h.recordScan(bgCtx, "scanCVE", start, outcome, err)
+		if err != nil {
+			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
+		} else {
+			h.ensureStatuses().markSucceeded(newScan.JobID)
+		}
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
 				helpers.String("wlid", newScan.Wlid),
@@ -318,7 +401,7 @@ func sessionChainToSession(s wssc.SessionChain) domain.Session {
 	}
 }
 
-func (h HTTPController) ScanRegistry(c *gin.Context) {
+func (h *HTTPController) ScanRegistry(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var registryScanCommand wssc.RegistryScanCommand
@@ -344,10 +427,16 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 		return
 	}
 
+	h.ensureStatuses().recordAccepted(newScan.JobID, "scanRegistry")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
-	bgCtx := context.WithoutCancel(ctx)
+	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
+		h.ensureStatuses().markPhase(newScan.JobID, phase)
+	}))
 	h.workerPool.Submit(func() {
+		if !h.claimTrackedJob(newScan.JobID) {
+			return
+		}
 		start := time.Now()
 		err = h.scanService.ScanRegistry(bgCtx)
 		outcome := "success"
@@ -355,6 +444,11 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 			outcome = "error"
 		}
 		h.recordScan(bgCtx, "scanRegistry", start, outcome, err)
+		if err != nil {
+			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
+		} else {
+			h.ensureStatuses().markSucceeded(newScan.JobID)
+		}
 		if err != nil {
 			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
 				helpers.String("imageSlug", newScan.ImageSlug),
@@ -364,17 +458,20 @@ func (h HTTPController) ScanRegistry(c *gin.Context) {
 	})
 }
 
+// registryScanCommandToScanCommand converts a RegistryScanCommand into a domain.ScanCommand, populating normalized image reference, image hash, and image slug.
 func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCommand {
+	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
+		ImageHash:          v1.NormalizeImageID("", c.ImageTag),
 		ImageTag:           c.ImageTag,
-		ImageTagNormalized: tools.NormalizeReference(c.ImageTag),
+		ImageTagNormalized: imageTagNormalized,
 		JobID:              c.JobID,
 		ParentJobID:        c.ParentJobID,
 		Args:               c.Args,
 		Session:            sessionChainToSession(c.Session),
 	}
-	if slug, err := names.ImageInfoToSlug(c.ImageTag, "nohash"); err == nil {
+	if slug, err := names.ImageInfoToSlug(imageTagNormalized, "nohash"); err == nil {
 		command.ImageSlug = slug
 	}
 	return command
@@ -388,10 +485,11 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 // cancellation (see #450) and would otherwise block Stop() indefinitely. timeout should
 // be kept safely under the pod's terminationGracePeriodSeconds so this path has a
 // chance to log before the kubelet SIGKILLs the process.
-func (h HTTPController) Shutdown(timeout time.Duration) {
+func (h *HTTPController) Shutdown(timeout time.Duration) {
 	logger.L().Info("purging SBOM creation queue",
 		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
 		helpers.String("timeout", timeout.String()))
+	h.ensureStatuses().markAbandonedQueued(domain.ScanReasonShutdownAbandoned)
 
 	drained := make(chan struct{})
 	go func() {

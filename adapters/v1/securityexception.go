@@ -37,9 +37,12 @@ type suppressionSource struct {
 //
 // Only exceptions whose spec.match applies to target are converted, so an
 // exception scoped by resources/images/objectSelector/namespaceSelector is not
-// applied to workloads it does not target. Expired exceptions are skipped.
-func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) []armotypes.VulnerabilityExceptionPolicy {
+// applied to workloads it does not target. Expired vulnerability entries (see
+// effectiveExpiresAt) are skipped, and counted in the returned
+// domain.ExceptionStats.ExpiredBySource.
+func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, target ExceptionTarget) ([]armotypes.VulnerabilityExceptionPolicy, domain.ExceptionStats) {
 	var policies []armotypes.VulnerabilityExceptionPolicy
+	stats := domain.ExceptionStats{ExpiredBySource: map[string]int{}}
 
 	now := time.Now()
 
@@ -54,6 +57,11 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(se.Spec, vuln), now) {
+				stats.ExpiredBySource["SecurityException"]++
+
+				logger.L().Debug("security exception suppression expired",
+					helpers.String("name", se.Name),
+					helpers.String("namespace", se.Namespace))
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -76,6 +84,10 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				continue
 			}
 			if isExpired(effectiveExpiresAt(cse.Spec, vuln), now) {
+				stats.ExpiredBySource["ClusterSecurityException"]++
+
+				logger.L().Debug("cluster security exception suppression expired",
+					helpers.String("name", cse.Name))
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{
@@ -87,7 +99,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 		}
 	}
 
-	return policies
+	return policies, stats
 }
 
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
@@ -111,16 +123,57 @@ func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.Vul
 // converted into an ignore policy.
 //
 // The allowlist approach (fail-closed): only the two VEX statuses that
-// definitively resolve a CVE – not_affected and fixed – produce a
-// suppression policy. Every other value, including the empty string,
-// under_investigation, and any future status that is not yet in the
-// enum, leaves the finding visible in the scan results.
+// definitively resolve a CVE, not_affected and fixed, suppress on the status
+// alone. An affected entry suppresses only when it also states that no
+// remediation is coming (see affectedSuppresses). Every other value, including
+// the empty string, under_investigation, and any future status that is not yet
+// in the enum, leaves the finding visible in the scan results.
 func shouldSuppress(vuln sev1beta1.VulnerabilityException) bool {
 	if strings.TrimSpace(vuln.Vulnerability.ID) == "" {
 		return false
 	}
 	switch vuln.Status {
 	case sev1beta1.VulnerabilityStatusNotAffected, sev1beta1.VulnerabilityStatusFixed:
+		return true
+	case sev1beta1.VulnerabilityStatusAffected:
+		return affectedSuppresses(vuln)
+	default:
+		return false
+	}
+}
+
+// affectedSuppresses reports whether an affected entry hides its finding.
+//
+// The status alone never does. affected asserts that the vulnerability is real and applies,
+// which is the opposite of an assertion an author would expect to hide a finding, so two
+// further things are required.
+//
+// First an actionStatement. OpenVEX requires one for every affected statement ("a VEX
+// statement MUST include a statement that SHOULD describe actions to remediate or mitigate
+// the vulnerability"), so an entry without one is not a valid affected statement and does not
+// get to suppress.
+//
+// Then a response saying the finding will not be remediated. can_not_fix and will_not_fix
+// both mean no fix is coming, so the risk has been accepted rather than scheduled. update,
+// rollback and workaround_available mean a remediation is planned or already in place, and
+// the finding stays visible until it is confirmed. Every stated response has to be a
+// non-remediating one: an entry pairing will_not_fix with update is still tracking work, and
+// keeping the finding visible is the fail-closed reading of that combination.
+func affectedSuppresses(vuln sev1beta1.VulnerabilityException) bool {
+	if strings.TrimSpace(vuln.ActionStatement) == "" || len(vuln.Response) == 0 {
+		return false
+	}
+	for _, response := range vuln.Response {
+		if !isNonRemediatingResponse(response) {
+			return false
+		}
+	}
+	return true
+}
+
+func isNonRemediatingResponse(response sev1beta1.VulnerabilityResponse) bool {
+	switch response {
+	case sev1beta1.VulnerabilityResponseCanNotFix, sev1beta1.VulnerabilityResponseWillNotFix:
 		return true
 	default:
 		return false
@@ -174,6 +227,9 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		"sourceKind": src.kind,
 		"ruleId":     suppressionRuleID(src),
 	}
+	if status := strings.TrimSpace(string(vuln.Status)); status != "" {
+		attrs["status"] = status
+	}
 	if src.namespace != "" {
 		attrs["sourceNamespace"] = src.namespace
 	}
@@ -185,6 +241,21 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 	}
 	if s := strings.TrimSpace(vuln.ImpactStatement); s != "" {
 		attrs["impactStatement"] = s
+	}
+	if s := strings.TrimSpace(vuln.ActionStatement); s != "" {
+		attrs["actionStatement"] = s
+	}
+	if len(vuln.Response) > 0 {
+		responses := make([]string, 0, len(vuln.Response))
+		for _, response := range vuln.Response {
+			responses = append(responses, string(response))
+		}
+		attrs["response"] = responses
+	}
+	// Recorded whenever the entry states a scope at all, even if nothing in it survives
+	// normalization: an entry that asked to be scoped must not fall back to product scope.
+	if len(vuln.Subcomponents) > 0 {
+		attrs[attrSubcomponents] = normalizedSubcomponents(vuln.Subcomponents)
 	}
 	if t := normalizedTarget(spec.Match.Resources, namespace); t != "" {
 		attrs["normalizedTarget"] = t
@@ -243,28 +314,92 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 // recorder is optional: when nil, suppression is still logged via logSuppression but no
 // K8s Event is emitted, so callers with no EventRecorder configured (e.g. tests, or
 // deployments without SecurityException CRD integration enabled) are unaffected.
-func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) {
+//
+// The returned map counts each suppressed finding once per distinct sourceKind
+// ("SecurityException"/"ClusterSecurityException") that suppressed it -- not once per
+// suppressing policy, so two policies of the same kind matching one finding (e.g. by ID and
+// by alias) still count as a single match. A policy with no sourceKind attribute (e.g. a
+// cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
+// the CRD-suppression metric.
+func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
+	matchedBySource := map[string]int{}
 	if doc == nil || len(exceptions) == 0 {
-		return
+		return matchedBySource
 	}
+
+	// Built once per scan and reused for every match below, instead of re-walking the full
+	// exception list per match.
+	exceptionIndex := buildCVEExceptionIndex(exceptions)
 
 	var remaining []v1beta1.Match
 	for _, m := range doc.Matches {
 		isFixed, _ := hasKnownFix(m)
-		matched := getCVEExceptionMatchCVENameFromList(exceptions, m.Vulnerability.ID, isFixed)
+		matched := exceptionIndex.lookup(m.Vulnerability.ID, isFixed)
+		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
 				Match: m,
 				AppliedIgnoreRules: []v1beta1.IgnoreRule{
-					{Vulnerability: m.Vulnerability.ID},
+					buildIgnoreRule(m, matched),
 				},
 			})
 			logSuppression(m, matched, recorder)
+			matchedKinds := map[string]struct{}{}
+			for _, p := range suppressingPolicies(matched) {
+				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
+					matchedKinds[kind] = struct{}{}
+				}
+			}
+			for kind := range matchedKinds {
+				matchedBySource[kind]++
+			}
 		} else {
 			remaining = append(remaining, m)
 		}
 	}
 	doc.Matches = remaining
+	return matchedBySource
+}
+
+// buildIgnoreRule constructs the IgnoreRule recorded on the manifest for m, populating
+// provenance fields from the first suppressing policy's Attributes (the same values
+// buildSuppressionAttributes calculates and logSuppression already logs), so this
+// information is durably stored on the manifest itself, not only logged. SourceName here
+// carries suppressionRuleID's structured kind/namespace/name form rather than the bare
+// object name, so it stays unambiguous for both namespaced and cluster-scoped exceptions.
+func buildIgnoreRule(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) v1beta1.IgnoreRule {
+	rule := v1beta1.IgnoreRule{Vulnerability: m.Vulnerability.ID}
+
+	suppressing := suppressingPolicies(matched)
+	if len(suppressing) == 0 {
+		return rule
+	}
+	p := suppressing[0]
+
+	if kind, ok := p.Attributes["sourceKind"].(string); ok {
+		rule.SourceKind = kind
+	}
+	if ruleID, ok := p.Attributes["ruleId"].(string); ok {
+		rule.SourceName = ruleID
+	}
+	if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
+		rule.SourceNamespace = ns
+	}
+	if status, ok := p.Attributes["status"].(string); ok {
+		// FixState is repurposed here to carry the SecurityException's status vocabulary
+		// (not_affected/fixed/affected) rather than Grype's native fix-state vocabulary.
+		// This is safe because every reader of FixState gates on SourceKind being a
+		// SecurityException/ClusterSecurityException first — native Grype ignore rules
+		// never set SourceKind, so they're unaffected.
+		rule.FixState = status
+	}
+	if just, ok := p.Attributes["justification"].(string); ok {
+		rule.Justification = just
+	}
+	if impact, ok := p.Attributes["impactStatement"].(string); ok {
+		rule.ImpactStatement = impact
+	}
+	return rule
 }
 
 // suppressingPolicies filters matched down to the policies that actually cause suppression,
@@ -386,14 +521,20 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 }
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
-// signature ApplySecurityExceptions writes: exactly one rule whose only field is the
-// vulnerability ID.
+// signature ApplySecurityExceptions writes: exactly one rule with no package set, and either
+// exception provenance (source/justification/impact) or an empty FixState.
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) != 1 {
 		return false
 	}
 	r := im.AppliedIgnoreRules[0]
-	return r.FixState == "" && r.Package == nil
+	if r.Package != nil {
+		return false
+	}
+	if r.SourceKind != "" || r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
+		return true
+	}
+	return r.FixState == ""
 }
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
@@ -402,6 +543,10 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 // fix (hasKnownFix, via getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
 // have different suppression states. The manifest content is fixed across a cache hit, so these
 // keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
+//
+// Matches with no known CVE ID still get a key, prefixed with \x01 to keep them out of the
+// ID-keyed namespace, so that a suppression-state change limited to ID-less matches is still
+// visible to callers (like reconcileCachedCVE) diffing this set across cache hits.
 func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
 	keys := map[string]struct{}{}
 	if doc == nil {
@@ -411,6 +556,8 @@ func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
 		m := im.Match
 		if m.Vulnerability.ID != "" {
 			keys[m.Vulnerability.ID+"\x00"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
+		} else {
+			keys["\x01"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
 		}
 	}
 	return keys

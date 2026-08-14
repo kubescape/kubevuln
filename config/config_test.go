@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	v3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -73,6 +77,34 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 		assert.Equal(t, "https://report.armo.cloud", services.GetReportReceiverHttpUrl())
 	})
 
+	t.Run("does not mutate http.DefaultClient when API_URL discovery runs", func(t *testing.T) {
+		dir := t.TempDir()
+		clusterData := `{
+			"backendOpenAPI":"https://api.armosec.io/api",
+			"eventReceiverRestURL":"https://report.armo.cloud"
+		}`
+		err := os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(clusterData), 0o600)
+		require.NoError(t, err)
+
+		originalDefaultClient := http.DefaultClient
+		http.DefaultClient = &http.Client{}
+		t.Cleanup(func() {
+			http.DefaultClient = originalDefaultClient
+		})
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		defaultClient := http.DefaultClient
+		services, err := LoadBackendServicesConfig(dir, server.URL)
+		require.NoError(t, err)
+		assert.Same(t, defaultClient, http.DefaultClient)
+		assert.Zero(t, http.DefaultClient.Timeout)
+		assert.Equal(t, "https://api.armosec.io", services.GetApiServerUrl())
+	})
+
 	t.Run("returns joined error when discovery and fallback fail", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
@@ -84,6 +116,24 @@ func TestLoadBackendServicesConfig_FallbackToClusterData(t *testing.T) {
 		assert.Contains(t, err.Error(), "404")
 		assert.Contains(t, err.Error(), "clusterData.json")
 	})
+}
+
+func TestLoadBackendServicesFromAPI_UsesProvidedTimeoutBoundClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"version":"v3","response":{"api-server":"https://api.armosec.io","event-receiver-http":"https://report.armo.cloud"}}`))
+	}))
+	defer server.Close()
+
+	client, err := v3.NewServiceDiscoveryClientV3(server.URL)
+	require.NoError(t, err)
+
+	start := time.Now()
+	_, err = loadBackendServicesFromAPI(client, &http.Client{Timeout: 20 * time.Millisecond})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestNormalizeServiceURL(t *testing.T) {
@@ -204,4 +254,86 @@ func TestLoadConfigProxyRegistryMap(t *testing.T) {
 		"gcr.io":    "my-mirror.example.com",
 	}
 	assert.Equal(t, expected, config.ProxyRegistryMap)
+}
+
+// TestLoadConfigTrustedVendorsEnv verifies an env-only TRUSTEDVENDORS override is
+// honored instead of being silently dropped and replaced by defaultTrustedVendors
+// (AutomaticEnv values for []string fields are not populated by Unmarshal, so the
+// resolution must read through viper's getters, same as cveMatchingMode).
+func TestLoadConfigTrustedVendorsEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("TRUSTEDVENDORS", "foo, bar")
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"foo", "bar"}, c.TrustedVendors)
+}
+
+// TestLoadConfigProxyRegistryMapEnv verifies an env-only PROXYREGISTRYMAP override
+// (a JSON object string) is honored instead of being silently dropped
+// (AutomaticEnv values for map[string]string fields are not populated by
+// Unmarshal, so the resolution must read through viper's getters).
+func TestLoadConfigProxyRegistryMapEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":"env-mirror.example.com"}`)
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{"docker.io": "env-mirror.example.com"}, c.ProxyRegistryMap)
+}
+
+// TestLoadConfigProxyRegistryMapEnv_Invalid verifies a malformed PROXYREGISTRYMAP
+// env value fails config loading with an error instead of GetStringMapString's
+// default behavior of silently discarding the decode error and returning an
+// empty map, which would disable registry mirroring with no indication why.
+func TestLoadConfigProxyRegistryMapEnv_Invalid(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io":`)
+	_, err := LoadConfig("testdata")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "proxyRegistryMap")
+}
+
+// TestLoadConfigEnvOnlyFieldsWithoutDefaults verifies that a field carried only by the
+// environment reaches the struct. AutomaticEnv does not achieve that on its own: viper
+// unmarshals the keys it knows about, and it cannot enumerate the environment, so a key
+// with no default and no entry in clusterData.json was dropped. STORAGE is the one that
+// matters most, since kubevuln would then run with storage off while looking configured
+// for it.
+func TestLoadConfigEnvOnlyFieldsWithoutDefaults(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   string
+		value string
+		got   func(Config) bool
+	}{
+		{"storage", "STORAGE", "true", func(c Config) bool { return c.Storage }},
+		{"keepLocal", "KEEPLOCAL", "true", func(c Config) bool { return c.KeepLocal }},
+		{"riskAcceptance", "RISKACCEPTANCE", "true", func(c Config) bool { return c.RiskAcceptance }},
+		{"storeFilteredSbom", "STOREFILTEREDSBOM", "true", func(c Config) bool { return c.StoreFilteredSbom }},
+		{"nodeSbomGeneration", "NODESBOMGENERATION", "true", func(c Config) bool { return c.NodeSbomGeneration }},
+		{"partialRelevancy", "PARTIALRELEVANCY", "true", func(c Config) bool { return c.PartialRelevancy }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv(tt.env, tt.value)
+			c, err := LoadConfig("testdata")
+			require.NoError(t, err)
+			assert.True(t, tt.got(c), "%s set in the environment must reach the config", tt.env)
+		})
+	}
+}
+
+// Binding those keys to the environment must not change where a value comes from when the
+// environment is silent, nor the usual precedence when it is not.
+func TestLoadConfigEnvBindingKeepsFilePrecedence(t *testing.T) {
+	viper.Reset()
+	c, err := LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Equal(t, "12345", c.AccountID, "the file value must still be used when the environment is silent")
+
+	viper.Reset()
+	t.Setenv("ACCOUNTID", "from-env")
+	c, err = LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", c.AccountID, "the environment must still win over the file")
 }

@@ -131,11 +131,33 @@ spec:
       justification: "inline_mitigations_already_exist"
       impactStatement: "WAF mitigates HTTP/2 rapid reset"
       expiresAt: "2026-09-15T00:00:00Z"  # expires earlier than spec.expiresAt
+      subcomponents:                      # scope the acceptance to specific packages
+        - "pkg:npm/elliptic"
 
   posture:
     - controlID: "C-0034"
       frameworkName: "NSA"
       action: "alert_only"
+```
+
+#### Namespaced: risk-accepted finding (`affected`)
+
+```yaml
+apiVersion: kubescape.io/v1
+kind: SecurityException
+metadata:
+  name: risk-accepted-log4j
+  namespace: production
+spec:
+  reason: "Accepted risks for Q3 2026 release"
+
+  vulnerabilities:
+    - vulnerability:
+        id: "CVE-2021-44228"
+      status: "affected"
+      actionStatement: "Risk accepted: WAF blocks the exploit vector. Reviewed 2026-07-30 by security lead. Ticket SEC-1234."
+      response:
+        - will_not_fix
 ```
 
 #### Namespaced — apply to all workloads in namespace (no match selector)
@@ -315,9 +337,13 @@ The key insight is that by converting CRD data into existing `armotypes.Vulnerab
 
 ## Identifier Bridging
 
-Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`) and optionally scoped to specific images via `match.images` glob patterns. This covers the common use cases of excepting a known CVE globally or within specific images.
+Vulnerability exceptions are matched by **CVE ID** (`vulnerability.id`), optionally scoped to specific images via `match.images` glob patterns, and optionally narrowed to individual packages via `vulnerabilities[].subcomponents`. This covers excepting a known CVE globally, within specific images, or only where it appears in a named package.
 
-**Future extension — `products` (purl-based package matching)**: A future version may add OpenVEX-style `products` fields using Package URLs (purls) for fine-grained matching at the package level inside an SBOM (e.g., `pkg:deb/debian/openssl@1.1.1`). This is deferred from v1 as CVE ID + image pattern matching is sufficient for most use cases, and purl matching adds significant complexity (purl parsing, SBOM correlation, version range matching).
+**`subcomponents` (purl-based package matching)**: Entries may carry a list of Package URLs, mirroring OpenVEX `statements[].products[].subcomponents[]`. The acceptance then applies only to findings whose package matches one of the listed purls; an unversioned purl (`pkg:npm/elliptic`) matches any version, and a version-qualified purl (`pkg:deb/debian/openssl@1.1.1n`) matches only that version. Qualifiers and subpaths work the same way: every qualifier the entry states must match (`?arch=amd64` does not cover an `arm64` build), and a stated subpath must match exactly (`#lib/a` does not cover `#lib/b`), while anything the entry omits is unconstrained. An entry with no `subcomponents` applies at product scope.
+
+Matching fails closed. A finding whose package has no purl, an entry whose purl cannot be parsed, and an entry whose `subcomponents` list contains nothing usable all leave the finding visible rather than suppressing it, so an entry that asked to be scoped never widens back to product scope. The same scope is applied to the exceptions reported to the backend, so both surfaces agree on which findings an entry covers.
+
+**Future extension, version ranges**: `subcomponents` matches a purl exactly or at any version, with no range expressions (CycloneDX's `affects[].versions[].range`). Ranges can be added later without changing the `subcomponents` shape.
 
 ## Authorization & Validation
 
@@ -344,11 +370,15 @@ Organizations should create dedicated `ClusterRole`/`Role` resources for Securit
 
 The CRD schema should include CEL validation rules to enforce invariants at admission time, without requiring a separate webhook:
 
-- `justification` is required when `status` is `not_affected`
+- `justification` or `impactStatement` is required when `status` is `not_affected`, mirroring the OpenVEX rule that a `not_affected` statement MUST carry one or the other
+- `actionStatement` is required when `status` is `affected`, mirroring the OpenVEX rule that an `affected` statement MUST describe the action taken
 - `expiresAt`, if set, must be a valid RFC3339 timestamp in the future (at creation time)
 - At least one entry must exist in either `vulnerabilities` or `posture`
 - `posture[].action` must be one of `ignore`, `alert_only`
-- `vulnerabilities[].status` must be one of `not_affected`, `fixed`, `under_investigation`
+- `vulnerabilities[].status` must be one of `not_affected`, `affected`, `fixed`, `under_investigation`
+- `vulnerabilities[].response[]` values must be one of `can_not_fix`, `will_not_fix`, `update`, `rollback`, `workaround_available`
+
+The two cross-field rules are enforced at admission, where an invalid document is rejected outright. The scanner additionally treats an `affected` entry with no `actionStatement` as non-suppressing, so a document that predates the rule cannot hide a finding it was never valid to hide.
 
 ## Conflict Resolution & Precedence
 
@@ -400,8 +430,20 @@ The primary audit trail for SecurityException changes is **Git history** when us
 The vulnerability exception entries align with OpenVEX statements:
 
 - `vulnerability.id` → VEX vulnerability ID
-- `status` → VEX status
+- `status` → VEX status (all four values: `not_affected`, `affected`, `fixed`, `under_investigation`)
 - `justification` → VEX justification
 - `impactStatement` → VEX impact statement
+- `actionStatement` → VEX action statement
 
-Note: OpenVEX `products` (purl-based product/subcomponent matching) is deferred to a future version. See "Identifier Bridging" above.
+`response[]` is the one field with no OpenVEX equivalent. It is a typed extension aligned with CycloneDX VEX `analysis.response[]`, and carries what is being done about a vulnerability, which is a separate question from the status of where it stands. When degrading to OpenVEX, its values can be serialized into the `action_statement` free text or dropped; nothing else is lost, since every other field maps one to one.
+
+### Suppression and `affected`
+
+`affected` is the only status whose suppression depends on more than the status. It asserts that the vulnerability is real and applies, so the finding stays visible unless the entry also carries an `actionStatement` and a `response[]` saying no remediation is coming:
+
+- `can_not_fix`, `will_not_fix`: no fix is coming and the risk has been accepted, so the finding may be filtered from default reports.
+- `update`, `rollback`, `workaround_available`: a remediation is planned or in place, so the finding stays visible until it is confirmed.
+
+Every value in `response[]` must be a non-remediating one for the finding to be suppressed. An entry pairing `will_not_fix` with `update` is still tracking work, so the finding stays visible.
+
+Note: subcomponent matching by purl is supported, see "Identifier Bridging" above. What remains deferred is full OpenVEX `products` modelling: an entry scopes to packages via `subcomponents`, but the product itself is still identified by `match.images` rather than by a product purl.

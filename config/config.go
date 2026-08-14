@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,24 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/spf13/viper"
 )
+
+type timeoutBoundServiceDiscoveryGetter struct {
+	schema.IServiceDiscoveryClient
+	httpClient *http.Client
+}
+
+func (g timeoutBoundServiceDiscoveryGetter) Get() (io.Reader, error) {
+	response, err := g.httpClient.Get(g.GetServiceDiscoveryUrl())
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("server (%s) responded: %v", g.GetHost(), response.StatusCode)
+	}
+	return response.Body, nil
+}
 
 // CVEMatchingMode controls how kubevuln configures Grype's CPE-based matching.
 type CVEMatchingMode string
@@ -97,6 +116,32 @@ func LoadConfig(path string) (Config, error) {
 
 	v.AutomaticEnv()
 
+	// AutomaticEnv on its own does not make a key reachable by Unmarshal. viper can only
+	// unmarshal keys it knows about, from the config file, a default, or an explicit
+	// binding, and it cannot enumerate the environment, so a key that appears in none of
+	// those is silently dropped. Everything with a SetDefault above is already covered;
+	// these are the remaining fields, which clusterData.json does not always carry. Without
+	// this, STORAGE=true on a config file that has no "storage" key reads back as false and
+	// kubevuln runs with storage off while looking correctly configured. Same gap #593 fixed
+	// for trustedVendors and proxyRegistryMap by reading through viper's getters.
+	//
+	// cveMatchingMode and useDefaultMatchers are deliberately left out: they are resolved
+	// through IsSet below, which already handles the env case.
+	for _, key := range []string{
+		"accountID",
+		"clusterName",
+		"keepLocal",
+		"nodeSbomGeneration",
+		"partialRelevancy",
+		"riskAcceptance",
+		"storage",
+		"storeFilteredSbom",
+	} {
+		if err := v.BindEnv(key); err != nil {
+			return Config{}, fmt.Errorf("binding %s to the environment: %w", key, err)
+		}
+	}
+
 	err := v.ReadInConfig()
 	if err != nil {
 		return Config{}, err
@@ -137,12 +182,68 @@ func LoadConfig(path string) (Config, error) {
 			config.CVEMatchingMode, CVEMatchingOff, CVEMatchingOn, CVEMatchingAdaptive)
 	}
 
+	// Same AutomaticEnv/Unmarshal gap as cveMatchingMode above, but for slice/map
+	// fields: Unmarshal silently drops env-only values for []string and
+	// map[string]string, so an env-only TRUSTEDVENDORS/PROXYREGISTRYMAP would
+	// otherwise be lost. Read through viper's getters when the field was
+	// actually set (via file or env) rather than trusting the unmarshalled
+	// struct field alone.
+	if v.IsSet("trustedVendors") {
+		config.TrustedVendors = trustedVendorsFromViper(v)
+	}
 	if len(config.TrustedVendors) == 0 {
 		// copy to avoid aliasing the package-level default slice
 		config.TrustedVendors = append([]string{}, defaultTrustedVendors...)
 	}
 
+	if v.IsSet("proxyRegistryMap") {
+		proxyMap, err := proxyRegistryMapFromViper(v)
+		if err != nil {
+			return Config{}, err
+		}
+		config.ProxyRegistryMap = proxyMap
+	}
+
 	return config, nil
+}
+
+// trustedVendorsFromViper resolves trustedVendors regardless of whether it came
+// from the JSON config file (already a []interface{}, handled fine by
+// GetStringSlice) or from a TRUSTEDVENDORS environment variable (a plain string,
+// which GetStringSlice does not split): env values are a comma-separated list,
+// e.g. TRUSTEDVENDORS=echo,chainguard.
+func trustedVendorsFromViper(v *viper.Viper) []string {
+	raw, ok := v.Get("trustedVendors").(string)
+	if !ok {
+		return v.GetStringSlice("trustedVendors")
+	}
+	var vendors []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			vendors = append(vendors, part)
+		}
+	}
+	return vendors
+}
+
+// proxyRegistryMapFromViper resolves proxyRegistryMap regardless of whether it
+// came from the JSON config file (already a map[string]interface{}, handled
+// fine by GetStringMapString) or from a PROXYREGISTRYMAP environment variable
+// (a plain JSON-object string, e.g. PROXYREGISTRYMAP={"docker.io":"mirror"}).
+// GetStringMapString discards JSON decode errors and silently returns an empty
+// map, which would disable registry mirroring on a malformed env value without
+// any indication why, so the env case is parsed explicitly here and any error
+// is surfaced to the caller instead.
+func proxyRegistryMapFromViper(v *viper.Viper) (map[string]string, error) {
+	raw, ok := v.Get("proxyRegistryMap").(string)
+	if !ok {
+		return v.GetStringMapString("proxyRegistryMap"), nil
+	}
+	var proxyMap map[string]string
+	if err := json.Unmarshal([]byte(raw), &proxyMap); err != nil {
+		return nil, fmt.Errorf("invalid proxyRegistryMap: %w", err)
+	}
+	return proxyMap, nil
 }
 
 type clusterDataBackendServicesConfig struct {
@@ -224,9 +325,7 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	if err != nil {
 		return nil, err
 	}
-	// http.DefaultClient has no timeout by default; cap the startup discovery call.
-	http.DefaultClient = &http.Client{Timeout: 30 * time.Second}
-	services, err := servicediscovery.GetServices(client)
+	services, err := loadBackendServicesFromAPI(client, &http.Client{Timeout: 30 * time.Second})
 	if err == nil {
 		return services, nil
 	}
@@ -238,4 +337,11 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 		return fallbackServices, nil
 	}
 	return nil, errors.Join(err, fallbackErr)
+}
+
+func loadBackendServicesFromAPI(client schema.IServiceDiscoveryClient, httpClient *http.Client) (schema.IBackendServices, error) {
+	return servicediscovery.GetServices(timeoutBoundServiceDiscoveryGetter{
+		IServiceDiscoveryClient: client,
+		httpClient:              httpClient,
+	})
 }

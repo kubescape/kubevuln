@@ -97,10 +97,32 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 }
 
 // buildTrustedVendorSet maps configured vendor slugs to Grype distro types.
+//
+// Grype's distro types are lowercase slugs that it compares verbatim, so a configured slug
+// is normalised rather than taken as written: "Wolfi", or one with the whitespace a JSON
+// list easily carries, would otherwise sit in the set as a key no distro ever matches, and
+// the vendor would stay untrusted with nothing to say so. A slug that is not one of Grype's
+// types cannot match either, so it is called out for the same reason: adaptive mode is meant
+// to turn CPE matching off for these vendors, and a typo silently leaves it on.
 func buildTrustedVendorSet(vendors []string) map[distro.Type]bool {
+	known := make(map[distro.Type]bool, len(distro.All))
+	for _, t := range distro.All {
+		known[t] = true
+	}
+
 	set := make(map[distro.Type]bool, len(vendors))
 	for _, v := range vendors {
-		set[distro.Type(v)] = true
+		slug := distro.Type(strings.ToLower(strings.TrimSpace(v)))
+		if slug == "" {
+			continue
+		}
+		if !known[slug] {
+			// Kept in the set regardless: it can never match, and dropping it would be a
+			// second silent behaviour rather than a reported one.
+			logger.L().Warning("trusted vendor is not a distro Grype recognizes, it will never match",
+				helpers.String("vendor", v))
+		}
+		set[slug] = true
 	}
 	return set
 }

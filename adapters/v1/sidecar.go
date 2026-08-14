@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -26,6 +27,27 @@ const (
 	// maxCrashRetries was hit (see #473).
 	retryCountTTL = 1 * time.Hour
 )
+
+// sbomSizeLimitForWire narrows the configured SBOM size limit to the int32 the scanner
+// protocol carries.
+//
+// A plain conversion silently wraps once maxSBOMSize passes math.MaxInt32, and the wrapped
+// value is then compared against a real SBOM size: 2 GiB becomes negative and 4 GiB becomes
+// zero, so every SBOM is classified TooLarge and no image is scanned at all, while 5 GiB
+// becomes 1 GiB and quietly enforces a limit far below the configured one. Raising the limit
+// is exactly when an operator would least expect scans to start failing, and the in-process
+// adapter has no such ceiling, so the same configuration behaves differently on the two paths.
+//
+// Clamp instead, so the limit is at worst the largest the protocol can express.
+func sbomSizeLimitForWire(maxSBOMSize int) int32 {
+	if maxSBOMSize > math.MaxInt32 {
+		logger.L().Warning("configured maxSBOMSize exceeds the scanner protocol limit, clamping",
+			helpers.Int("maxSBOMSize", maxSBOMSize),
+			helpers.Int("clamped", math.MaxInt32))
+		return math.MaxInt32
+	}
+	return int32(maxSBOMSize)
+}
 
 // crashRetry tracks a per-image crash-retry count and when it was last touched, so stale
 // entries (images that crashed once and were never retried) can be evicted.
@@ -108,7 +130,7 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 		ImageTag:            pullImageTag,
 		Options:             options,
 		MaxImageSize:        s.maxImageSize,
-		MaxSBOMSize:         int32(s.maxSBOMSize),
+		MaxSBOMSize:         sbomSizeLimitForWire(s.maxSBOMSize),
 		EnableEmbeddedSBOMs: s.scanEmbeddedSBOMs,
 		Timeout:             s.scanTimeout,
 	}
@@ -124,6 +146,9 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	// Map response status to domain SBOM
 	domainSBOM.Status = result.Status
 	domainSBOM.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", result.SBOMSize)
+	if result.ResolvedPlatform != "" {
+		domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey] = result.ResolvedPlatform
+	}
 
 	if result.Status == helpersv1.TooLarge {
 		if result.StatusReason != "" {

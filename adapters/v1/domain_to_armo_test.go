@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_domainToArmo(t *testing.T) {
@@ -200,6 +201,62 @@ func Test_parseLayersPayload(t *testing.T) {
 	}
 }
 
+// Test_layerOrder_consistentBetweenManifestAndVulnerabilities guards #617: a vulnerability's
+// LayerOrder (via parseLayersPayload, which DomainToArmo attaches to each vulnerability) and
+// the same layer's LayerOrder in ParseImageManifest's output must agree, so a consumer can
+// correlate a vulnerability to its build step. History mixes metadata-only entries (no layer)
+// between real, layer-producing ones, which is what previously made the two disagree.
+func Test_layerOrder_consistentBetweenManifestAndVulnerabilities(t *testing.T) {
+	config := containerRegistryV1.ConfigFile{
+		History: []containerRegistryV1.History{
+			{CreatedBy: "FROM base", EmptyLayer: false},
+			{CreatedBy: "ENV FOO=bar", EmptyLayer: true},
+			{CreatedBy: "LABEL x=y", EmptyLayer: true},
+			{CreatedBy: "COPY app /app", EmptyLayer: false},
+			{CreatedBy: "CMD [\"/app\"]", EmptyLayer: true},
+		},
+		RootFS: containerRegistryV1.RootFS{
+			DiffIDs: []containerRegistryV1.Hash{
+				{Algorithm: "sha256", Hex: "aaaa000000000000000000000000000000000000000000000000000000000000"},
+				{Algorithm: "sha256", Hex: "bbbb000000000000000000000000000000000000000000000000000000000000"},
+			},
+		},
+	}
+	configBytes, err := json.Marshal(config)
+	assert.NoError(t, err)
+
+	imageMetadata := source.ImageMetadata{
+		RawConfig: configBytes,
+		Layers: []source.LayerMetadata{
+			{Digest: "sha256:aaaa000000000000000000000000000000000000000000000000000000000000", Size: 100},
+			{Digest: "sha256:bbbb000000000000000000000000000000000000000000000000000000000000", Size: 200},
+		},
+	}
+	targetBytes, err := json.Marshal(imageMetadata)
+	assert.NoError(t, err)
+
+	layerMap, err := parseLayersPayload(imageMetadata)
+	assert.NoError(t, err)
+
+	imageManifest, err := ParseImageManifest(&v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{Type: "image", Target: targetBytes},
+	})
+	assert.NoError(t, err)
+
+	checked := 0
+	for _, layer := range imageManifest.Layers {
+		if layer.LayerHash == "" {
+			continue
+		}
+		vulnLayer, ok := layerMap[layer.LayerHash]
+		assert.True(t, ok, "layer %s missing from parseLayersPayload's map", layer.LayerHash)
+		assert.Equal(t, vulnLayer.LayerOrder, layer.LayerOrder,
+			"LayerOrder for layer %s disagrees between ParseImageManifest and parseLayersPayload", layer.LayerHash)
+		checked++
+	}
+	assert.Equal(t, 2, checked, "expected to check both real layers")
+}
+
 func Test_suggestedVersion(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -309,6 +366,57 @@ func Test_linkToVuln(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, linkToVuln(tt.id))
+		})
+	}
+}
+
+// threeLayerSource describes an image with three layers, so a package can be placed in one
+// that is not the base.
+const threeLayerSource = `{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"sha256:l1","size":0},{"mediaType":"","digest":"sha256:l2","size":0},{"mediaType":"","digest":"sha256:l3","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`
+
+func layeredDocument(fileSystemIDs ...string) v1beta1.GrypeDocument {
+	locations := make([]v1beta1.SyftCoordinates, 0, len(fileSystemIDs))
+	for _, id := range fileSystemIDs {
+		locations = append(locations, v1beta1.SyftCoordinates{FileSystemID: id})
+	}
+	return v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
+		Matches: []v1beta1.Match{{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-21300"},
+			},
+			Artifact: v1beta1.GrypePackage{Name: "pkg", Locations: locations},
+		}},
+	}
+}
+
+// IntroducedInLayer is the earliest layer a package appears in. It used to be resolved by
+// walking the parent chain from "", which only ever completed for a package present in the
+// image's first layer: nothing could start the chain for one added later, so every package
+// outside the base layer reported no introducing layer at all.
+func Test_domainToArmo_introducedInLayer(t *testing.T) {
+	tests := []struct {
+		name      string
+		locations []string
+		want      string
+	}{
+		{"base layer", []string{"sha256:l1"}, "sha256:l1"},
+		{"middle layer", []string{"sha256:l2"}, "sha256:l2"},
+		{"top layer", []string{"sha256:l3"}, "sha256:l3"},
+		{"several layers, earliest wins", []string{"sha256:l3", "sha256:l2"}, "sha256:l2"},
+		{"several layers, already ordered", []string{"sha256:l2", "sha256:l3"}, "sha256:l2"},
+		{"layer not in the image", []string{"sha256:unknown"}, "sha256:unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{ImageHash: "h", ImageTagNormalized: "t"})
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+			ctx = context.WithValue(ctx, domain.ScanIDKey{}, "scan-1")
+
+			got, err := DomainToArmo(ctx, layeredDocument(tt.locations...), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.want, got[0].IntroducedInLayer)
 		})
 	}
 }

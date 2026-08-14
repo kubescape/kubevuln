@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,20 +31,32 @@ import (
 	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
+	k8scache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 )
 
 const (
 	vulnerabilityManifestSummaryKindPlural string = "vulnerabilitymanifests"
 	vulnSummaryContNameFormat              string = "%s-%s-%s" // "<kind>-<name>-<container-name>"
+
+	// timestampMetadataKey is the scan time, in Unix seconds, stamped on every summary
+	// manifest kubevuln writes. It lives here rather than coming from
+	// k8s-interface/instanceidhandler/v1/helpers, like every other metadata key on these
+	// objects, because that package has no key for it: its nearest neighbour,
+	// ReportTimestampMetadataKey ("kubescape.io/report-timestamp"), is a different key
+	// written by a different component. Changing the string would orphan the annotation on
+	// already-stored manifests, so it stays as it is.
+	timestampMetadataKey string = "kubescape.io/timestamp"
 )
 
 // securityExceptionListCacheCleaningInterval/TTL bound how stale the raw SecurityException/
@@ -68,6 +82,8 @@ type APIServerStore struct {
 	// nil is safe (falls back to always listing, e.g. in tests that construct APIServerStore
 	// literals directly instead of through the constructors below).
 	securityExceptionListCache *cache.Cache
+
+	securityExceptionInformerStop context.CancelFunc
 }
 
 var (
@@ -119,12 +135,14 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &APIServerStore{
+	store := &APIServerStore{
 		StorageClient:              clientset.SpdxV1beta1(),
 		DynamicClient:              dynClient,
 		Namespace:                  namespace,
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
-	}, nil
+	}
+	store.enableSecurityExceptionCacheInvalidation(context.Background())
+	return store, nil
 }
 
 type fakeStorageClientset struct {
@@ -195,6 +213,90 @@ func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APISe
 	return newFakeAPIServerStore(namespace, newFakeStorageClientset(objects...).SpdxV1beta1())
 }
 
+func (a *APIServerStore) enableSecurityExceptionCacheInvalidation(ctx context.Context) {
+	if a == nil || a.DynamicClient == nil || a.securityExceptionListCache == nil || a.securityExceptionInformerStop != nil {
+		return
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(a.DynamicClient, 0, metav1.NamespaceAll, nil)
+
+	if _, err := factory.ForResource(securityExceptionGVR).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+		AddFunc:    a.invalidateSecurityExceptionCacheForObject,
+		UpdateFunc: func(_, newObj interface{}) { a.invalidateSecurityExceptionCacheForObject(newObj) },
+		DeleteFunc: a.invalidateSecurityExceptionCacheForObject,
+	}); err != nil {
+		cancel()
+		logger.L().Warning("failed to register SecurityException cache invalidation handler", helpers.Error(err))
+		return
+	}
+
+	if _, err := factory.ForResource(clusterSecurityExceptionGVR).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+		AddFunc:    func(interface{}) { a.invalidateClusterSecurityExceptionCache() },
+		UpdateFunc: func(interface{}, interface{}) { a.invalidateClusterSecurityExceptionCache() },
+		DeleteFunc: func(interface{}) { a.invalidateClusterSecurityExceptionCache() },
+	}); err != nil {
+		cancel()
+		logger.L().Warning("failed to register ClusterSecurityException cache invalidation handler", helpers.Error(err))
+		return
+	}
+
+	a.securityExceptionInformerStop = cancel
+	go factory.Start(watchCtx.Done())
+}
+
+func (a *APIServerStore) invalidateSecurityExceptionCacheForObject(obj interface{}) {
+	if a == nil || a.securityExceptionListCache == nil {
+		return
+	}
+
+	u := unstructuredFromEvent(obj)
+	if u == nil {
+		a.invalidateAllSecurityExceptionCaches()
+		return
+	}
+	if namespace := u.GetNamespace(); namespace != "" {
+		a.securityExceptionListCache.Delete("se/" + namespace)
+		return
+	}
+	a.invalidateAllSecurityExceptionCaches()
+}
+
+func (a *APIServerStore) invalidateClusterSecurityExceptionCache() {
+	if a == nil || a.securityExceptionListCache == nil {
+		return
+	}
+	a.securityExceptionListCache.Delete(clusterSecurityExceptionListCacheKey)
+}
+
+func (a *APIServerStore) invalidateAllSecurityExceptionCaches() {
+	if a == nil || a.securityExceptionListCache == nil {
+		return
+	}
+	a.securityExceptionListCache.Range(func(key, _ interface{}) bool {
+		if cacheKey, ok := key.(string); ok && strings.HasPrefix(cacheKey, "se/") {
+			a.securityExceptionListCache.Delete(cacheKey)
+		}
+		return true
+	})
+}
+
+func unstructuredFromEvent(obj interface{}) *unstructured.Unstructured {
+	switch typed := obj.(type) {
+	case *unstructured.Unstructured:
+		return typed
+	case k8scache.DeletedFinalStateUnknown:
+		if u, ok := typed.Obj.(*unstructured.Unstructured); ok {
+			return u
+		}
+	case *k8scache.DeletedFinalStateUnknown:
+		if u, ok := typed.Obj.(*unstructured.Unstructured); ok {
+			return u
+		}
+	}
+	return nil
+}
+
 // GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
 // ClusterSecurityExceptions. A List() failure is returned as an error rather than only
 // logged: the caller (BackendAdapter.GetCVEExceptions) relies on a non-nil error here to
@@ -210,9 +312,7 @@ func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APISe
 // never cached, so a transient apiserver hiccup self-heals on the next call instead of being
 // pinned for the TTL.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
-	// Use a detached context with timeout — the scan context may be canceled
-	// before the CRD listing completes due to rate limiting.
-	listCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	var listErrs []error
@@ -313,7 +413,7 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
-	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(gvr).Namespace(namespace).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
@@ -331,7 +431,7 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 	if name == "" {
 		return nil, nil
 	}
-	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
@@ -605,7 +705,7 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 	if !ok {
 		return nil, domain.ErrMissingTimestamp
 	}
-	enrichedAnnotations["kubescape.io/timestamp"] = strconv.FormatInt(timestamp, 10) // TODO: use a constant
+	enrichedAnnotations[timestampMetadataKey] = strconv.FormatInt(timestamp, 10)
 	enrichedAnnotations[helpersv1.WlidMetadataKey] = workload.Wlid
 	enrichedAnnotations[helpersv1.ContainerNameMetadataKey] = workload.ContainerName
 
@@ -946,9 +1046,152 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+// anyPURLMatches reports whether fn returns true for any subcomponent PURL across any
+// product in products. This is the shared traversal used by both statementHasPURL and
+// the ignored-vulnerability lookup in updateVEX, so both stay correct together if the
+// traversal logic ever needs to change.
+func anyPURLMatches(products []v1beta1.Product, fn func(purl string) bool) bool {
+	for _, p := range products {
+		for _, sc := range p.Subcomponents {
+			if fn(sc.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// statementHasPURL reports whether any subcomponent across any product in products
+// matches purl. External VEX statements (Red Hat CSAF, Chainguard OpenVEX) can list
+// multiple products/subcomponents per statement, so callers must not assume the match
+// is always at Products[0].Subcomponents[0].
+func statementHasPURL(products []v1beta1.Product, purl string) bool {
+	return anyPURLMatches(products, func(p string) bool { return p == purl })
+}
+
 // defaultActionStatement is used when a match does not carry enough fix data to build a
 // more specific remediation string.
 const defaultActionStatement = "Upgrade the vulnerable component to a version that is not affected"
+
+const (
+	defaultLocalImpactStatement         = "Vulnerable component is not loaded into the memory"
+	securityExceptionImpactStatement    = "Vulnerability was ignored by a SecurityException"
+	securityExceptionAcceptedRiskAction = "A SecurityException accepted this vulnerability as an affected finding"
+)
+
+type ignoredVEXAssessment struct {
+	status          v1beta1.Status
+	justification   v1beta1.Justification
+	impactStatement string
+	actionStatement string
+	statusNotes     string
+}
+
+func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
+	assessment := ignoredVEXAssessment{
+		status:        v1beta1.Status(vex.StatusNotAffected),
+		justification: v1beta1.Justification(vex.VulnerableCodeNotPresent),
+	}
+
+	rule, ok := securityExceptionIgnoreRule(m)
+	if !ok {
+		assessment.impactStatement = "Vulnerability was ignored by an external VEX document or scanner configuration"
+		return assessment
+	}
+
+	assessment.impactStatement = securityExceptionImpactStatement
+
+	switch strings.TrimSpace(rule.FixState) {
+	case string(sev1beta1.VulnerabilityStatusFixed):
+		assessment.status = v1beta1.Status(sev1beta1.VulnerabilityStatusFixed)
+		assessment.justification = ""
+		assessment.impactStatement = ""
+		assessment.statusNotes = ignoredMatchStatusNotes(rule)
+	case string(sev1beta1.VulnerabilityStatusAffected):
+		assessment.status = v1beta1.Status(vex.StatusAffected)
+		assessment.justification = ""
+		assessment.impactStatement = ""
+		assessment.actionStatement = securityExceptionAcceptedRiskAction
+		assessment.statusNotes = ignoredMatchStatusNotes(rule)
+	default:
+		// Any unrecognized status (including "" and NotAffected) falls back to the safe
+		// not_affected-shaped assessment.
+		if j := strings.TrimSpace(rule.Justification); j != "" {
+			assessment.justification = v1beta1.Justification(j)
+		}
+		if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
+			assessment.impactStatement = impact
+		}
+	}
+
+	return assessment
+}
+
+// securityExceptionIgnoreRule extracts the specific rule generated by a SecurityException.
+// This is distinct from the adapter's isExceptionSourcedIgnore because it strictly
+// matches the SourceKind rather than inferring provenance from rule shape, ensuring
+// that only explicit CRD-driven rules receive the SecurityException impact statement.
+func securityExceptionIgnoreRule(m v1beta1.IgnoredMatch) (v1beta1.IgnoreRule, bool) {
+	for _, rule := range m.AppliedIgnoreRules {
+		switch rule.SourceKind {
+		case "SecurityException", "ClusterSecurityException":
+			return rule, true
+		}
+	}
+	return v1beta1.IgnoreRule{}, false
+}
+
+func ignoredMatchStatusNotes(rule v1beta1.IgnoreRule) string {
+	parts := make([]string, 0, 2)
+	if j := strings.TrimSpace(rule.Justification); j != "" {
+		parts = append(parts, "justification: "+j)
+	}
+	if impact := strings.TrimSpace(rule.ImpactStatement); impact != "" {
+		parts = append(parts, "impact: "+impact)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// newLocalStatement builds the VEX statement kubevuln writes for a match, in the baseline
+// not_affected shape. createVEX and updateVEX each build one for a match and one for an
+// ignored match, and all four spelled it out; this is the one place that shape is defined,
+// so a field added to it cannot reach three sites and miss the fourth.
+//
+// A caller recording a suppression overwrites the baseline with applyIgnoredMatchAssessment,
+// which sets every one of the five fields it touches.
+func newLocalStatement(m v1beta1.Match, imagePullable string) (v1beta1.Statement, error) {
+	product, err := createProductStructForImageAndPackage(imagePullable, m.Artifact.PURL)
+	if err != nil {
+		return v1beta1.Statement{}, err
+	}
+
+	var aliases []string
+	for _, alias := range m.RelatedVulnerabilities {
+		aliases = append(aliases, alias.ID)
+	}
+
+	return v1beta1.Statement{
+		ID: fmt.Sprintf("https://kubescape.io/vex/statement/%s/%s", url.PathEscape(m.Vulnerability.ID), url.PathEscape(m.Artifact.PURL)),
+		Vulnerability: v1beta1.VexVulnerability{
+			ID:          m.Vulnerability.DataSource,
+			Name:        m.Vulnerability.ID,
+			Description: m.Vulnerability.Description,
+			Aliases:     aliases,
+		},
+		Products:        []v1beta1.Product{*product},
+		Status:          v1beta1.Status(vex.StatusNotAffected),
+		Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
+		ImpactStatement: defaultLocalImpactStatement,
+	}, nil
+}
+
+func applyIgnoredMatchAssessment(stmt *v1beta1.Statement, assessment ignoredVEXAssessment) {
+	stmt.Status = assessment.status
+	stmt.Justification = assessment.justification
+	stmt.ImpactStatement = assessment.impactStatement
+	stmt.ActionStatement = assessment.actionStatement
+	stmt.StatusNotes = assessment.statusNotes
+}
 
 // buildActionStatement returns a remediation string for an affected VEX statement. When the
 // match reports a fixed state with known fix versions, it names them; otherwise it falls back
@@ -960,6 +1203,10 @@ func buildActionStatement(v v1beta1.Match) string {
 	return defaultActionStatement
 }
 
+func isLocalStatement(id string) bool {
+	return strings.HasPrefix(id, "https://kubescape.io/vex/statement/")
+}
+
 func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domain.CVEManifest) error {
 	if cvep == nil || cvep.Content == nil {
 		return nil
@@ -967,6 +1214,9 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 	// Now change the status of the filtered vulnerabilities to "Affected"
 	for _, v := range cvep.Content.Matches {
 		for i, s := range vexDoc.Statements {
+			if !isLocalStatement(s.ID) {
+				continue
+			}
 			if s.Vulnerability.Name == v.Vulnerability.ID {
 				foundProduct := false
 				for _, p := range s.Products {
@@ -976,6 +1226,7 @@ func markRelevantVulnerabilitiesAsAffectedInVex(vexDoc *v1beta1.VEX, cvep *domai
 							vexDoc.Statements[i].Justification = ""
 							vexDoc.Statements[i].ImpactStatement = ""
 							vexDoc.Statements[i].ActionStatement = buildActionStatement(v)
+							vexDoc.Statements[i].StatusNotes = ""
 							foundProduct = true
 						}
 						if foundProduct {
@@ -1019,63 +1270,20 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 	// Both loops read cve.Content, so both are guarded by the same nil check.
 	if cve.Content != nil {
 		for _, v := range cve.Content.Matches {
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
+			stmt, err := newLocalStatement(v, imagePullable)
 			if err != nil {
 				return err
 			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerable component is not loaded into the memory",
-			})
+			vexDoc.Statements = append(vexDoc.Statements, stmt)
 		}
 
 		for _, v := range cve.Content.IgnoredMatches {
-			var aliases []string
-			for _, alias := range v.RelatedVulnerabilities {
-				aliases = append(aliases, alias.ID)
-			}
-
-			product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
-
+			stmt, err := newLocalStatement(v.Match, imagePullable)
 			if err != nil {
 				return err
 			}
-
-			vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-				Vulnerability: v1beta1.VexVulnerability{
-					ID:          v.Vulnerability.DataSource,
-					Name:        v.Vulnerability.ID,
-					Description: v.Vulnerability.Description,
-					Aliases:     aliases,
-				},
-
-				Products: []v1beta1.Product{
-					*product,
-				},
-
-				Status:          v1beta1.Status(vex.StatusNotAffected),
-				Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-				ImpactStatement: "Vulnerability was ignored by a SecurityException",
-			})
+			applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
+			vexDoc.Statements = append(vexDoc.Statements, stmt)
 		}
 	}
 
@@ -1116,15 +1324,15 @@ func markIgnoredVulnerabilitiesInVex(vexDoc *v1beta1.VEX, cve *domain.CVEManifes
 	}
 	for _, v := range cve.Content.IgnoredMatches {
 		for i, s := range vexDoc.Statements {
+			if !isLocalStatement(s.ID) {
+				continue
+			}
 			if s.Vulnerability.Name == v.Vulnerability.ID {
 				foundProduct := false
 				for _, p := range s.Products {
 					for _, sc := range p.Subcomponents {
 						if sc.ID == v.Artifact.PURL {
-							vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
-							vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
-							vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
-							vexDoc.Statements[i].ActionStatement = ""
+							applyIgnoredMatchAssessment(&vexDoc.Statements[i], ignoredMatchAssessment(v))
 							foundProduct = true
 						}
 						if foundProduct {
@@ -1148,13 +1356,17 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	imagePullable := cve.Annotations[helpersv1.ImageIDMetadataKey]
 
 	// Extend the VEX document with vulnerability data from full vulnerability manifest
-	vexDoc := vexContainer.Spec
+	originalVEX := *vexContainer.Spec.DeepCopy()
+	vexDoc := *vexContainer.Spec.DeepCopy()
 
 	// Statements written before the ID/Name mapping was corrected to match createVEX
 	// carry the CVE identifier in ID and the data source URL in Name. Normalize them in
 	// place so the dedup below (which now keys on Name) also finds these older entries,
 	// instead of re-appending a duplicate for every one of them.
 	for i, s := range vexDoc.Statements {
+		if !isLocalStatement(s.ID) {
+			continue
+		}
 		if !strings.Contains(s.Vulnerability.ID, "://") && (s.Vulnerability.Name == "" || strings.Contains(s.Vulnerability.Name, "://")) {
 			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
 		}
@@ -1164,120 +1376,97 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 		for _, v := range cve.Content.Matches {
 			found := false
 			for _, s := range vexDoc.Statements {
+				// Only our own statements count as already present. An external one is
+				// another author's assessment, and every step below that maintains a
+				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
+				// so treating it as ours would drop kubescape's assessment of this
+				// vulnerability from the document instead of recording it alongside theirs.
+				if !isLocalStatement(s.ID) {
+					continue
+				}
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}
-				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-					continue
-				}
-				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				if statementHasPURL(s.Products, v.Artifact.PURL) {
 					found = true
 					break
 				}
 			}
 			if !found {
 				// Add the vulnerability to the VEX document
-				var aliases []string
-				for _, alias := range v.RelatedVulnerabilities {
-					aliases = append(aliases, alias.ID)
-				}
-
-				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				stmt, err := newLocalStatement(v, imagePullable)
 				if err != nil {
 					return err
 				}
-
-				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-					Vulnerability: v1beta1.VexVulnerability{
-						ID:          v.Vulnerability.DataSource,
-						Name:        v.Vulnerability.ID,
-						Description: v.Vulnerability.Description,
-						Aliases:     aliases,
-					},
-
-					Products: []v1beta1.Product{
-						*product,
-					},
-
-					Status:          v1beta1.Status(vex.StatusNotAffected),
-					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-					ImpactStatement: "Vulnerable component is not loaded into the memory",
-				})
+				vexDoc.Statements = append(vexDoc.Statements, stmt)
 			}
 		}
 
 		for _, v := range cve.Content.IgnoredMatches {
 			found := false
 			for _, s := range vexDoc.Statements {
+				// Only our own statements count as already present. An external one is
+				// another author's assessment, and every step below that maintains a
+				// statement (mark-affected, mark-ignored, reset-to-baseline) is local-only,
+				// so treating it as ours would drop kubescape's assessment of this
+				// vulnerability from the document instead of recording it alongside theirs.
+				if !isLocalStatement(s.ID) {
+					continue
+				}
 				if s.Vulnerability.Name != v.Vulnerability.ID {
 					continue
 				}
-				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 {
-					continue
-				}
-				if v.Artifact.PURL == s.Products[0].Subcomponents[0].ID {
+				if statementHasPURL(s.Products, v.Artifact.PURL) {
 					found = true
 					break
 				}
 			}
 			if !found {
-				var aliases []string
-				for _, alias := range v.RelatedVulnerabilities {
-					aliases = append(aliases, alias.ID)
-				}
-
-				product, err := createProductStructForImageAndPackage(imagePullable, v.Artifact.PURL)
+				stmt, err := newLocalStatement(v.Match, imagePullable)
 				if err != nil {
 					return err
 				}
-
-				vexDoc.Statements = append(vexDoc.Statements, v1beta1.Statement{
-					Vulnerability: v1beta1.VexVulnerability{
-						ID:          v.Vulnerability.DataSource,
-						Name:        v.Vulnerability.ID,
-						Description: v.Vulnerability.Description,
-						Aliases:     aliases,
-					},
-
-					Products: []v1beta1.Product{
-						*product,
-					},
-
-					Status:          v1beta1.Status(vex.StatusNotAffected),
-					Justification:   v1beta1.Justification(vex.VulnerableCodeNotPresent),
-					ImpactStatement: "Vulnerability was ignored by a SecurityException",
-				})
+				applyIgnoredMatchAssessment(&stmt, ignoredMatchAssessment(v))
+				vexDoc.Statements = append(vexDoc.Statements, stmt)
 			}
 		}
 	}
 
 	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
 	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
-	ignoredMap := make(map[string]bool)
+	ignoredMap := make(map[string]ignoredVEXAssessment)
 	if cve.Content != nil {
 		for _, v := range cve.Content.IgnoredMatches {
-			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = true
+			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = ignoredMatchAssessment(v)
 		}
 	}
 
 	// Reset every statement back to the baseline "not affected" status before
 	// reapplying the current filtered manifest.
 	for i := range vexDoc.Statements {
-		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
-		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
-		vexDoc.Statements[i].ActionStatement = ""
-
-		isIgnored := false
-		if len(vexDoc.Statements[i].Products) > 0 && len(vexDoc.Statements[i].Products[0].Subcomponents) > 0 {
-			if ignoredMap[vexDoc.Statements[i].Vulnerability.Name+vexDoc.Statements[i].Products[0].Subcomponents[0].ID] {
-				isIgnored = true
-			}
+		// Only reset statements generated by the local scanner.
+		// External statements with their own ID are left intact.
+		if !isLocalStatement(vexDoc.Statements[i].ID) {
+			continue
 		}
 
+		vexDoc.Statements[i].Status = v1beta1.Status(vex.StatusNotAffected)
+		vexDoc.Statements[i].Justification = v1beta1.Justification(vex.VulnerableCodeNotPresent)
+		vexDoc.Statements[i].ImpactStatement = defaultLocalImpactStatement
+		vexDoc.Statements[i].ActionStatement = ""
+		vexDoc.Statements[i].StatusNotes = ""
+
+		var assessment ignoredVEXAssessment
+		isIgnored := anyPURLMatches(vexDoc.Statements[i].Products, func(purl string) bool {
+			if ignoredAssessment, ok := ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]; ok {
+				assessment = ignoredAssessment
+				return true
+			}
+			return false
+		})
+
 		if isIgnored {
-			vexDoc.Statements[i].ImpactStatement = "Vulnerability was ignored by a SecurityException"
-		} else {
-			vexDoc.Statements[i].ImpactStatement = "Vulnerable component is not loaded into the memory"
+			applyIgnoredMatchAssessment(&vexDoc.Statements[i], assessment)
 		}
 	}
 
@@ -1289,6 +1478,14 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cve)
 	_ = markIgnoredVulnerabilitiesInVex(&vexDoc, &cvep)
+
+	mergedAnnotations := mergeMaps(maps.Clone(vexContainer.Annotations), cvep.Annotations)
+	mergedLabels := mergeMaps(maps.Clone(vexContainer.Labels), cvep.Labels)
+	if vexDocumentsEqualIgnoringUpdateMetadata(originalVEX, vexDoc) &&
+		maps.Equal(vexContainer.Annotations, mergedAnnotations) &&
+		maps.Equal(vexContainer.Labels, mergedLabels) {
+		return nil
+	}
 
 	// Update the VEX document metadata
 	vexDoc.Metadata.LastUpdated = time.Now().Format(time.RFC3339)
@@ -1302,12 +1499,23 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	vexDoc.Metadata.ID = calculatedId
 
 	// Update the VEX container
-	vexContainer.Annotations = mergeMaps(vexContainer.Annotations, cvep.Annotations)
-	vexContainer.Labels = mergeMaps(vexContainer.Labels, cvep.Labels)
+	vexContainer.Annotations = mergedAnnotations
+	vexContainer.Labels = mergedLabels
 	vexContainer.Spec = vexDoc
 	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
 
 	return err
+}
+
+func vexDocumentsEqualIgnoringUpdateMetadata(existing, updated v1beta1.VEX) bool {
+	existing.LastUpdated = ""
+	existing.Version = 0
+	existing.ID = ""
+	updated.LastUpdated = ""
+	updated.Version = 0
+	updated.ID = ""
+
+	return reflect.DeepEqual(existing, updated)
 }
 
 func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {

@@ -19,6 +19,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/controllers"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
@@ -78,6 +79,7 @@ func main() {
 		}
 	}
 	var sbomAdapter ports.SBOMCreator
+	scanMode := domain.ScanModeInProcess
 	if socketPath := os.Getenv("SBOM_SCANNER_SOCKET"); socketPath != "" {
 		logger.L().Info("connecting to SBOM scanner sidecar", helpers.String("socket", socketPath))
 		scannerClient, err := sbomscanner.NewSBOMScannerClient(ctx, socketPath, c.ScannerReadinessTimeout)
@@ -92,6 +94,7 @@ func main() {
 		} else {
 			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")
 			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit, c.ProxyRegistryMap)
+			scanMode = domain.ScanModeSidecar
 		}
 	} else {
 		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
@@ -101,7 +104,8 @@ func main() {
 	// SecurityException CRD integration requires storage and riskAcceptance RBAC
 	var seRepo ports.SecurityExceptionRepository
 	var eventRecorder record.EventRecorder
-	if storage != nil && c.RiskAcceptance {
+	riskAcceptanceActive := isRiskAcceptanceActive(storage, c.RiskAcceptance)
+	if riskAcceptanceActive {
 		seRepo = storage
 		logger.L().Info("SecurityException CRD integration enabled")
 
@@ -120,6 +124,13 @@ func main() {
 			logger.L().Warning("failed to get k8s config for SecurityException events")
 		}
 	} else {
+		// storage alone means an operator has SecurityException/ClusterSecurityException CRDs
+		// reachable but riskAcceptance unset -- without this log, that combination silently
+		// no-ops (see #562): the NoOpSecurityExceptionRepository below always returns empty
+		// results, indistinguishable at runtime from "no CRDs exist in this cluster".
+		if storage != nil {
+			logger.L().Warning("SecurityException CRD integration disabled: storage is enabled but riskAcceptance is not set; SecurityException/ClusterSecurityException CRDs will not be applied")
+		}
 		seRepo = &repositories.NoOpSecurityExceptionRepository{}
 	}
 
@@ -147,6 +158,18 @@ func main() {
 		service.SetEventRecorder(eventRecorder)
 	}
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
+	controller = controller.WithDiagnostics(func(diagCtx context.Context) domain.Diagnostics {
+		return domain.Diagnostics{
+			ScanMode:                scanMode,
+			SBOMCreatorVersion:      sbomAdapter.Version(),
+			CVEScannerVersion:       cveAdapter.Version(),
+			CVEDBVersion:            cveAdapter.DBVersion(diagCtx),
+			ScanTimeout:             c.ScanTimeout.String(),
+			ScannerReadinessTimeout: c.ScannerReadinessTimeout.String(),
+			StorageEnabled:          c.Storage,
+			RiskAcceptanceEnabled:   riskAcceptanceActive,
+		}
+	})
 
 	m, err := metrics.New()
 	if err != nil {
@@ -179,6 +202,7 @@ func main() {
 
 	router.GET("/v1/liveness", controller.Alive)
 	router.GET("/v1/readiness", controller.Ready)
+	router.GET("/v1/diagnostics", controller.Diagnostics)
 	router.GET("/metrics", gin.WrapH(m.Handler()))
 
 	group := router.Group(apis.VulnerabilityScanCommandVersion)
@@ -188,6 +212,7 @@ func main() {
 		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
 		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
 		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
+		group.GET("/scanStatus/:jobID", controller.ScanStatus)
 	}
 
 	srv := &http.Server{
@@ -233,4 +258,12 @@ func main() {
 	}
 
 	logger.L().Info("kubevuln exiting")
+}
+
+// isRiskAcceptanceActive reports whether SecurityException/ClusterSecurityException
+// CRD integration is actually wired up, as opposed to the raw --risk-acceptance
+// config flag: integration also requires storage to be configured, since without
+// it seRepo falls back to NoOpSecurityExceptionRepository regardless of the flag.
+func isRiskAcceptanceActive(storage *repositories.APIServerStore, riskAcceptance bool) bool {
+	return storage != nil && riskAcceptance
 }

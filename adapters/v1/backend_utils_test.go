@@ -5,10 +5,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +22,7 @@ import (
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 )
 
@@ -207,8 +208,79 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName, tc.isFixed)
 			assert.Equal(t, tc.expected, actual)
+
+			indexed := buildCVEExceptionIndex(tc.srcCVEList).lookup(tc.CVEName, tc.isFixed)
+			assert.Equal(t, tc.expected, indexed)
 		})
 	}
+}
+
+// buildCVEExceptionIndex+lookup must return exactly what getCVEExceptionMatchCVENameFromList
+// returns for the same inputs, since callers switched from the linear scan to the index to
+// avoid re-walking the full exception list per match.
+func TestCVEExceptionIndex_MatchesLinearScan(t *testing.T) {
+	expiredOnFix := true
+	srcCVEList := []armotypes.VulnerabilityExceptionPolicy{
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-1"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-1234"}},
+		},
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-2"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-5678"}, {Name: "CVE-2021-1234"}},
+		},
+		{
+			PortalBase:            armotypes.PortalBase{Name: "exc-3"},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-1234"}},
+			ExpiredOnFix:          &expiredOnFix,
+		},
+	}
+	index := buildCVEExceptionIndex(srcCVEList)
+
+	for _, cve := range []string{"CVE-2021-1234", "cve-2021-1234", "CVE-2021-5678", "CVE-9999-0000"} {
+		for _, filterFixed := range []bool{false, true} {
+			want := getCVEExceptionMatchCVENameFromList(srcCVEList, cve, filterFixed)
+			got := index.lookup(cve, filterFixed)
+			assert.Equal(t, want, got, "cve=%s filterFixed=%v", cve, filterFixed)
+		}
+	}
+}
+
+func BenchmarkGetCVEExceptionMatch(b *testing.B) {
+	const numExceptions = 200
+	const policiesPerException = 5
+	const numMatches = 5000
+
+	srcCVEList := make([]armotypes.VulnerabilityExceptionPolicy, numExceptions)
+	for i := range srcCVEList {
+		policies := make([]armotypes.VulnerabilityPolicy, policiesPerException)
+		for j := range policies {
+			policies[j] = armotypes.VulnerabilityPolicy{Name: fmt.Sprintf("CVE-2024-%05d", i*policiesPerException+j)}
+		}
+		srcCVEList[i] = armotypes.VulnerabilityExceptionPolicy{VulnerabilityPolicies: policies}
+	}
+
+	cveNames := make([]string, numMatches)
+	for i := range cveNames {
+		cveNames[i] = fmt.Sprintf("CVE-2024-%05d", i%(numExceptions*policiesPerException))
+	}
+
+	b.Run("LinearScanPerMatch", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for _, cve := range cveNames {
+				getCVEExceptionMatchCVENameFromList(srcCVEList, cve, false)
+			}
+		}
+	})
+
+	b.Run("IndexBuiltOncePerScan", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			index := buildCVEExceptionIndex(srcCVEList)
+			for _, cve := range cveNames {
+				index.lookup(cve, false)
+			}
+		}
+	})
 }
 
 //go:embed testdata/nginx-image-manifest.json
@@ -559,9 +631,8 @@ func Test_summarize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _ := Summarize(tt.args.report, tt.args.vulnerabilities, tt.args.workload, tt.args.hasRelevancy, tt.args.imageManifest)
-			sort.Slice(got.SeveritiesStats, func(i, j int) bool {
-				return got.SeveritiesStats[i].Severity < got.SeveritiesStats[j].Severity
-			})
+			// No sorting here on purpose: Summarize orders the severity stats itself now, and
+			// this asserting on the order directly is what keeps it that way.
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -703,5 +774,208 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 			assert.Equal(t, tc.expectedNextPartNum, actualNextPartNum)
 			assert.Equal(t, len(tc.expectedPaginationMarks), len(reports))
 		})
+	}
+}
+
+// Summarize and ApplySecurityExceptions must answer "is this CVE suppressed?" the same way.
+// getCVEExceptionMatchCVENameFromList appends every policy whose VulnerabilityPolicies name
+// the CVE, without filtering on actions, so ExceptionApplied[0] is not necessarily the policy
+// carrying Ignore. Reading only the first policy's first action made the stored manifest hide
+// a finding the backend summary still counted as active.
+func TestSummarize_IgnoreMatchesManifestPredicate(t *testing.T) {
+	ignoring := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "ignoring-policy"},
+		Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+	}
+
+	tests := []struct {
+		name            string
+		applied         []armotypes.VulnerabilityExceptionPolicy
+		wantTotalCount  int64
+		wantSuppressedT string
+	}{
+		{
+			name:           "no policies leaves the finding active",
+			applied:        nil,
+			wantTotalCount: 1,
+		},
+		{
+			name:           "a single ignoring policy suppresses",
+			applied:        []armotypes.VulnerabilityExceptionPolicy{ignoring},
+			wantTotalCount: 0,
+		},
+		{
+			name: "ignore carried by a later policy still suppresses",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{PortalBase: armotypes.PortalBase{Name: "no-actions"}},
+				ignoring,
+			},
+			wantTotalCount: 0,
+		},
+		{
+			name: "ignore carried by a later action still suppresses",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					PortalBase: armotypes.PortalBase{Name: "multi-action"},
+					Actions:    []armotypes.VulnerabilityExceptionPolicyActions{"alert_only", armotypes.Ignore},
+				},
+			},
+			wantTotalCount: 0,
+		},
+		{
+			name: "policies without any ignore action leave the finding active",
+			applied: []armotypes.VulnerabilityExceptionPolicy{
+				{PortalBase: armotypes.PortalBase{Name: "alert-only"}, Actions: []armotypes.VulnerabilityExceptionPolicyActions{"alert_only"}},
+			},
+			wantTotalCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vulns := []containerscan.CommonContainerVulnerabilityResult{{
+				Vulnerability: containerscan.Vulnerability{
+					Name:             "CVE-2021-44228",
+					Severity:         "Critical",
+					ExceptionApplied: tt.applied,
+				},
+			}}
+
+			summary, _ := Summarize(v1.ScanResultReport{}, vulns, domain.ScanCommand{}, false, nil)
+
+			assert.Equal(t, tt.wantTotalCount, summary.SeverityStats.TotalCount)
+			// Whatever Summarize decided must match what the manifest path would decide.
+			assert.Equal(t, hasIgnoreAction(tt.applied), summary.SeverityStats.TotalCount == 0,
+				"Summarize and ApplySecurityExceptions must agree on suppression")
+		})
+	}
+}
+
+// buildPolicy expands one vulnerability entry into a VulnerabilityPolicy per id and alias,
+// so an exception listing an alias equal to its id, or repeating an alias, used to make the
+// same policy match several times. Every consumer then counted it that many times: duplicate
+// ExceptionApplied entries sent to the backend, and one suppression log line and Kubernetes
+// Event per duplicate.
+func TestGetCVEExceptionMatch_PolicyMatchesAtMostOnce(t *testing.T) {
+	policy := func(names ...string) armotypes.VulnerabilityExceptionPolicy {
+		vp := make([]armotypes.VulnerabilityPolicy, 0, len(names))
+		for _, n := range names {
+			vp = append(vp, armotypes.VulnerabilityPolicy{Name: n})
+		}
+		return armotypes.VulnerabilityExceptionPolicy{
+			PortalBase:            armotypes.PortalBase{Name: "exception"},
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: vp,
+		}
+	}
+
+	tests := []struct {
+		name    string
+		list    []armotypes.VulnerabilityExceptionPolicy
+		cve     string
+		wantLen int
+	}{
+		{
+			name:    "id repeated as its own alias",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228", "CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 1,
+		},
+		{
+			name:    "the same alias listed twice",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228", "GHSA-jfh8", "GHSA-jfh8")},
+			cve:     "GHSA-jfh8",
+			wantLen: 1,
+		},
+		{
+			name:    "case-insensitive duplicates still collapse",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("cve-2021-44228", "CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 1,
+		},
+		{
+			name:    "distinct policies both still match",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228"), policy("CVE-2021-44228")},
+			cve:     "CVE-2021-44228",
+			wantLen: 2,
+		},
+		{
+			name:    "no match",
+			list:    []armotypes.VulnerabilityExceptionPolicy{policy("CVE-2021-44228")},
+			cve:     "CVE-2023-44487",
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getCVEExceptionMatchCVENameFromList(tt.list, tt.cve, false)
+			assert.Len(t, got, tt.wantLen)
+		})
+	}
+}
+
+// An ExpiredOnFix policy is skipped as a whole when filterFixed is set, regardless of which
+// of its id/alias entries names the CVE.
+func TestGetCVEExceptionMatch_ExpiredOnFixSkipsWholePolicy(t *testing.T) {
+	expiredOnFix := true
+	p := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase:            armotypes.PortalBase{Name: "exception"},
+		Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}, {Name: "GHSA-jfh8"}},
+		ExpiredOnFix:          &expiredOnFix,
+	}
+
+	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", true))
+	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "GHSA-jfh8", true))
+	assert.Len(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", false), 1)
+}
+
+// Summarize collected its severity stats in a map and emitted them in iteration order, which
+// Go randomises, so the summary posted to the backend came out ordered differently on every
+// scan of the same image. The existing table test used to sort the result before comparing,
+// which hid it.
+func TestSummarize_SeverityStatsOrderIsStable(t *testing.T) {
+	report := v1.ScanResultReport{Designators: identifiers.PortalDesignator{Attributes: map[string]string{}}}
+	workload := domain.ScanCommand{Wlid: "wlid://cluster-x/namespace-y/deployment-z"}
+
+	// One vulnerability per severity, half of them suppressed, so both the reported and the
+	// excluded stats end up with several entries to order.
+	severities := []string{"Critical", "High", "Medium", "Low", "Negligible"}
+	var vulnerabilities []containerscan.CommonContainerVulnerabilityResult
+	for i, severity := range severities {
+		v := containerscan.CommonContainerVulnerabilityResult{
+			Vulnerability: containerscan.Vulnerability{Name: "CVE-0000-" + severity, Severity: severity},
+		}
+		if i%2 == 0 {
+			v.ExceptionApplied = []armotypes.VulnerabilityExceptionPolicy{
+				{Actions: []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore}},
+			}
+		}
+		vulnerabilities = append(vulnerabilities, v)
+	}
+
+	order := func(stats []containerscan.SeverityStats) []string {
+		out := make([]string, 0, len(stats))
+		for _, s := range stats {
+			out = append(out, s.Severity)
+		}
+		return out
+	}
+
+	// Repeated because a single run could land in the right order by chance.
+	var firstReported, firstExcluded []string
+	for i := 0; i < 20; i++ {
+		got, _ := Summarize(report, append([]containerscan.CommonContainerVulnerabilityResult(nil), vulnerabilities...), workload, false, nil)
+		require.NotEmpty(t, got.SeveritiesStats)
+		require.NotEmpty(t, got.ExcludedSeveritiesStats)
+		if i == 0 {
+			firstReported, firstExcluded = order(got.SeveritiesStats), order(got.ExcludedSeveritiesStats)
+			assert.IsIncreasing(t, firstReported, "reported severity stats must be ordered")
+			assert.IsIncreasing(t, firstExcluded, "excluded severity stats must be ordered")
+			continue
+		}
+		assert.Equal(t, firstReported, order(got.SeveritiesStats), "same findings must give the same order every time")
+		assert.Equal(t, firstExcluded, order(got.ExcludedSeveritiesStats))
 	}
 }

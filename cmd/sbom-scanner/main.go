@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -21,6 +22,38 @@ import (
 	// registered". See https://github.com/kubescape/kubevuln/issues/378.
 	_ "modernc.org/sqlite"
 )
+
+// shutdownTimeout bounds how long gracefulStopWithTimeout waits for in-flight CreateSBOM RPCs
+// to finish on their own before forcing the connection closed. Matches cmd/http/main.go's
+// shutdownTimeout default so both processes give a comparable grace period before a
+// terminationGracePeriodSeconds-driven SIGKILL would otherwise cut them off mid-shutdown.
+const shutdownTimeout = 20 * time.Second
+
+// gracefulStopWithTimeout waits up to timeout for srv's in-flight RPCs to finish via
+// GracefulStop, then force-closes the server with Stop if the timeout elapses first.
+//
+// GracefulStop alone blocks until every in-flight RPC handler returns on its own. For
+// CreateSBOM that can take as long as the caller-supplied TimeoutSeconds (5 minutes by
+// default, see pkg/sbomscanner/v1/server.go) -- a per-call deadline with no awareness that
+// the process is shutting down. Without this bound, shutdown time is dictated entirely by
+// whatever timeout the in-flight request happened to carry, not by anything under this
+// process's control. See #627.
+func gracefulStopWithTimeout(srv *grpc.Server, timeout time.Duration) {
+	stopped := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		logger.L().Info("gRPC server stopped gracefully")
+	case <-time.After(timeout):
+		logger.L().Warning("graceful shutdown timeout reached, forcing stop",
+			helpers.String("timeout", timeout.String()))
+		srv.Stop()
+	}
+}
 
 func main() {
 	socketPath := os.Getenv("SOCKET_PATH")
@@ -48,7 +81,7 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
-		srv.GracefulStop()
+		gracefulStopWithTimeout(srv, shutdownTimeout)
 		os.Remove(socketPath)
 	}()
 

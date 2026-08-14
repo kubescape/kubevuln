@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -21,89 +19,51 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/eapache/go-resiliency/deadline"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftmeta"
+	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"golang.org/x/oauth2/google"
 )
 
-func isGCPRegistry(imageID string) bool {
-	host, _, _ := strings.Cut(imageID, "/")
-	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
-}
-
 // isRegistryRateLimited reports whether err is (or wraps) a registry 429 response.
-//
-// The typed check alone is not enough: stereoscope's registry provider formats the
-// go-containerregistry pull error with %+v, not %w (see
-// pkg/image/oci/registry_provider.go), which severs the errors.As chain before it ever
-// reaches here. Fall back to matching the rendered text — "TOOMANYREQUESTS" is the stable
-// registry error code emitted when the response carries a JSON error body (e.g. Docker
-// Hub's rate-limit response), and "429 Too Many Requests" is *transport.Error's own
-// Error() text when the response body was empty.
+// It delegates to tools.IsRateLimitError.
 func isRegistryRateLimited(err error) bool {
-	if err == nil {
-		return false
-	}
-	var transportErr *transport.Error
-	if errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "TOOMANYREQUESTS") ||
-		strings.Contains(errStr, "429 Too Many Requests")
+	return tools.IsRateLimitError(err)
 }
 
+// isPlatformMismatch reports whether err is (or wraps) stereoscope's
+// *image.ErrPlatformMismatch, returned once a provider has positively resolved the image but
+// its OS/architecture doesn't match the platform that was requested.
 func isPlatformMismatch(err error) bool {
 	var platformErr *image.ErrPlatformMismatch
 	return errors.As(err, &platformErr)
 }
 
-func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, error) {
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, err
+// formatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
+// fields Syft/stereoscope actually resolved an image against. Returns "" unless both os and
+// architecture are known. Duplicated from adapters/v1/syft.go's helper of the same name since
+// the two packages don't share a dependency either could live in without introducing one
+// (same rationale as syftToDomain's duplication, documented there).
+func formatResolvedPlatform(os, arch, variant string) string {
+	if os == "" || arch == "" {
+		return ""
 	}
-	token, err := creds.TokenSource.Token()
-	if err != nil {
-		return nil, err
+	parts := []string{os, arch}
+	if variant != "" {
+		parts = append(parts, variant)
 	}
-	return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: token.AccessToken}, nil
+	return strings.Join(parts, "/")
 }
 
-// gcpCredsFn is an indirection over gcpCredentials so resolveSource can be
-// unit-tested without a live GCP environment.
-var gcpCredsFn = gcpCredentials
-
-// registryAuthProvider supplies registry credentials for hosts it recognizes, so
-// resolveSource can consult cloud-specific auth fallbacks without hard-coding each
-// one into its retry logic.
-type registryAuthProvider interface {
-	// Matches reports whether this provider handles the given pull reference.
-	Matches(imageID string) bool
-	// Credentials fetches credentials for a host this provider matches.
-	Credentials(ctx context.Context) (*image.RegistryCredentials, error)
-}
-
-// gcpAuthProvider resolves credentials for GCR/Artifact Registry hosts via
-// Application Default Credentials.
-type gcpAuthProvider struct{}
-
-func (gcpAuthProvider) Matches(imageID string) bool { return isGCPRegistry(imageID) }
-
-func (gcpAuthProvider) Credentials(ctx context.Context) (*image.RegistryCredentials, error) {
-	return gcpCredsFn(ctx)
-}
-
-// registryAuthProviders is the ordered list of cloud registry auth fallbacks resolveSource
-// consults on a 401 Unauthorized, before falling back to anonymous access. Add ECR/ACR
-// providers here as they're implemented.
-var registryAuthProviders = []registryAuthProvider{gcpAuthProvider{}}
+// createSBOMFn is an indirection over syft.CreateSBOM so the deadline handling in
+// CreateSBOM can be unit-tested without cataloguing a real image.
+var createSBOMFn = syft.CreateSBOM
 
 // sourceGetter abstracts the syft.GetSource call so the fallback ordering in
 // resolveSource is testable with a scripted implementation.
@@ -113,59 +73,8 @@ type sourceGetter func(ctx context.Context, ref string, opts *image.RegistryOpti
 // 401/provider/anonymous fallbacks in order. It mirrors the retry chain in
 // adapters/v1/syft.go so the sidecar and in-process adapters behave the same.
 func resolveSource(ctx context.Context, get sourceGetter, imageID, imageTag string, opts image.RegistryOptions) (source.Source, error) {
-	pullRef := imageID
-	usedFallback := false
-	src, err := get(ctx, pullRef, &opts)
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
-		usedFallback = true
-		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
-			helpers.String("imageID", imageID))
-		pullRef = imageTag
-		src, err = get(ctx, pullRef, &opts)
-	}
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
-		usedFallback = true
-		unauthorizedErr := err
-		for _, provider := range registryAuthProviders {
-			if !provider.Matches(pullRef) {
-				continue
-			}
-			if creds, credErr := provider.Credentials(ctx); credErr != nil || creds == nil {
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, metrics.FallbackOutcomeFailed)
-				logger.L().Debug("registry auth provider credentials unavailable, falling back to anonymous",
-					helpers.Error(credErr),
-					helpers.String("imageID", imageID))
-			} else {
-				opts.Credentials = []image.RegistryCredentials{*creds}
-				src, err = get(ctx, pullRef, &opts)
-				outcome := metrics.FallbackOutcomeFailed
-				if err == nil {
-					outcome = metrics.FallbackOutcomeSucceeded
-				}
-				metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyGCPADC, outcome)
-			}
-			break
-		}
-		// If no provider matched, its credentials were unavailable, or it succeeded
-		// in auth but still got 401, fall back to anonymous access.
-		if err != nil {
-			logger.L().Debug("retrying without credentials",
-				helpers.String("imageID", imageID))
-			opts.Credentials = nil
-			src, err = get(ctx, pullRef, &opts)
-			outcome := metrics.FallbackOutcomeFailed
-			if err == nil {
-				outcome = metrics.FallbackOutcomeSucceeded
-			}
-			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
-			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
-				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
-			}
-		}
-	}
-	metrics.RecordSourceResolution(ctx, metrics.ComponentSidecar, usedFallback, err == nil)
-	return src, err
+	return registryauth.ResolveSource(ctx, metrics.ComponentSidecar,
+		registryauth.Getter[source.Source](get), imageID, imageTag, opts)
 }
 
 type scannerServer struct {
@@ -207,16 +116,24 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Parse platform for multi-arch image resolution.
 	// The platform specifier uses OCI format: "os/arch[/variant]" (e.g. "linux/amd64").
 	// If only an architecture is provided (e.g. "amd64"), we prepend "linux/".
-	platformStr := req.Platform
-	if platformStr == "" {
-		platformStr = runtime.GOARCH
-	}
-	if !strings.Contains(platformStr, "/") {
-		platformStr = "linux/" + platformStr
-	}
-	imgPlatform, err := image.NewPlatform(platformStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+	//
+	// Only request a specific platform when the caller explicitly asked for one; otherwise
+	// leave imgPlatform nil so Syft resolves whatever platform the image manifest provides.
+	// This mirrors the in-process adapter (adapters/v1/syft.go) and matters for pod-less scan
+	// paths (registry rescans, periodic CRD-based rescans) that have no node context to derive
+	// a platform from: defaulting to runtime.GOARCH here used to force a platform mismatch for
+	// single-arch images that don't happen to match the sidecar container's own arch (see #512).
+	var imgPlatform *image.Platform
+	if req.Platform != "" {
+		platformStr := req.Platform
+		if !strings.Contains(platformStr, "/") {
+			platformStr = "linux/" + platformStr
+		}
+		p, err := image.NewPlatform(platformStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
+		}
+		imgPlatform = p
 	}
 
 	// Build registry credentials
@@ -244,14 +161,17 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}
 	}()
 
-	// Download image from registry
+	// Download image from registry, retrying on 429 rate-limit errors with exponential backoff.
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for gcpCredentials inside resolveSource.
-		ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
-		return syft.GetSource(ctxWithSize, ref,
-			syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
-	}, imageID, imageTag, registryOptions)
+	src, err := tools.RetryWithBackoff(ctx, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(rCtx context.Context) (source.Source, error) {
+		return resolveSource(rCtx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+			// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
+			//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
+			ctxWithSize := context.WithValue(context.Background(), image.MaxImageSize, req.MaxImageSize)
+			return syft.GetSource(ctxWithSize, ref,
+				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+		}, imageID, imageTag, registryOptions)
+	})
 
 	switch {
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
@@ -267,6 +187,21 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
+		}, nil
+	case err != nil && isPlatformMismatch(err):
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
+		// The requested platform doesn't exist in the image's manifest. StatusReason travels
+		// over gRPC as a plain string; the caller's classifySBOMError also recognizes the
+		// "mismatched platform" text in ErrorMessage directly, so this is reported as a
+		// distinct reason rather than falling into the generic SBOM-generation-failed path
+		// (see #512).
+		logger.L().Warning("requested platform not found in image manifest",
+			helpers.String("platform", req.Platform),
+			helpers.String("imageID", imageID),
+			helpers.Error(err))
+		return &pb.CreateSBOMResponse{
+			ErrorMessage: err.Error(),
+			StatusReason: domain.ReasonPlatformNotFound,
 		}, nil
 	case err != nil && isRegistryRateLimited(err):
 		// StatusReason travels over gRPC as a plain string, so the caller (adapters/v1
@@ -286,6 +221,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}, nil
 	}
 
+	// Record the platform actually resolved, whether it was explicitly requested or left for
+	// Syft to pick, so a silently-wrong-arch SBOM is inspectable after the fact (see #512).
+	var resolvedPlatform string
+	if meta, ok := src.Describe().Metadata.(source.ImageMetadata); ok {
+		resolvedPlatform = formatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant)
+	}
+
 	// Generate SBOM with timeout
 	var syftSBOM *sbom.SBOM
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
@@ -293,6 +235,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		timeout = 5 * time.Minute
 	}
 	dl := deadline.New(timeout)
+	// Buffered so the abandoned goroutine below can always publish and exit, even when
+	// nobody is left to receive.
+	generated := make(chan *sbom.SBOM, 1)
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
@@ -312,12 +257,17 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		// NOTE: Syft's cataloguers do not support context cancellation (see
 		// https://github.com/anchore/syft/issues/3705). The deadline.Run wrapper
 		// will return ErrTimedOut, but the Syft goroutine may continue until it
-		// finishes naturally. This is an accepted tradeoff — the sidecar's memory
+		// finishes naturally. This is an accepted tradeoff, the sidecar's memory
 		// limit will OOM-kill the container if resource usage grows unbounded.
-		syftSBOM, err = syft.CreateSBOM(context.Background(), src, cfg)
-		if err != nil {
-			return fmt.Errorf("failed to generate SBOM: %w", err)
+		//
+		// Because this goroutine outlives the timeout, it must not touch any variable
+		// the handler reads. It keeps its result local and publishes it on a channel,
+		// which the handler only receives from once dl.Run has reported success.
+		created, createErr := createSBOMFn(context.Background(), src, cfg)
+		if createErr != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", createErr)
 		}
+		generated <- created
 		return nil
 	})
 
@@ -326,15 +276,19 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("Syft timed out", helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status: helpersv1.Incomplete,
+			Status:           helpersv1.Incomplete,
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	case err == nil:
-		// continue
+		// dl.Run only reports success once the work function returned nil, which it does
+		// after publishing, so this receive cannot block.
+		syftSBOM = <-generated
 	default:
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		return &pb.CreateSBOMResponse{
-			Status:       helpersv1.Incomplete,
-			ErrorMessage: err.Error(),
+			Status:           helpersv1.Incomplete,
+			ErrorMessage:     err.Error(),
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	}
 
@@ -354,9 +308,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.Int("size", sz),
 			helpers.String("imageID", imageID))
 		return &pb.CreateSBOMResponse{
-			Status:       helpersv1.TooLarge,
-			SbomSize:     int64(sz),
-			StatusReason: domain.ReasonSBOMTooLarge,
+			Status:           helpersv1.TooLarge,
+			SbomSize:         int64(sz),
+			StatusReason:     domain.ReasonSBOMTooLarge,
+			ResolvedPlatform: resolvedPlatform,
 		}, nil
 	}
 
@@ -373,9 +328,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		helpers.Int("packages", len(doc.Artifacts)))
 
 	return &pb.CreateSBOMResponse{
-		Status:       helpersv1.Learning,
-		SbomDocument: docBytes,
-		SbomSize:     int64(sz),
+		Status:           helpersv1.Learning,
+		SbomDocument:     docBytes,
+		SbomSize:         int64(sz),
+		ResolvedPlatform: resolvedPlatform,
 	}, nil
 }
 
@@ -403,17 +359,7 @@ func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
 	if err := json.Unmarshal(b, &syftDoc); err != nil {
 		return nil
 	}
-	for i := range syftDoc.Artifacts {
-		for j := range doc.Artifacts {
-			if syftDoc.Artifacts[i].ID == doc.Artifacts[j].ID {
-				syftDoc.Artifacts[i].MetadataType = doc.Artifacts[j].MetadataType
-				if b, err := json.Marshal(doc.Artifacts[j].Metadata); err == nil {
-					syftDoc.Artifacts[i].Metadata = b
-				}
-				break
-			}
-		}
-	}
+	syftmeta.Reattach(syftDoc.Artifacts, doc.Artifacts)
 
 	return syftDoc
 }
