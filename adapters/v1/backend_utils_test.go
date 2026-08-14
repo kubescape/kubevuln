@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +26,30 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 )
+
+// linearExceptionLookup is the straightforward scan the index replaced, kept here so the
+// equivalence test below has something independent to compare against. Production has one
+// implementation now, and an index checked against itself asserts nothing.
+func linearExceptionLookup(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
+	var l []armotypes.VulnerabilityExceptionPolicy
+	for i := range srcCVEList {
+		if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
+			continue
+		}
+		for j := range srcCVEList[i].VulnerabilityPolicies {
+			if strings.EqualFold(srcCVEList[i].VulnerabilityPolicies[j].Name, CVEName) {
+				// an exception contributes at most once however many of its policies carry
+				// the name, matching what the index does with its per-exception seen set
+				l = append(l, srcCVEList[i])
+				break
+			}
+		}
+	}
+	if len(l) > 0 {
+		return l
+	}
+	return nil
+}
 
 func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 	testCases := []struct {
@@ -206,16 +231,13 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := getCVEExceptionMatchCVENameFromList(tc.srcCVEList, tc.CVEName, tc.isFixed)
+			actual := buildCVEExceptionIndex(tc.srcCVEList).lookup(tc.CVEName, tc.isFixed)
 			assert.Equal(t, tc.expected, actual)
-
-			indexed := buildCVEExceptionIndex(tc.srcCVEList).lookup(tc.CVEName, tc.isFixed)
-			assert.Equal(t, tc.expected, indexed)
 		})
 	}
 }
 
-// buildCVEExceptionIndex+lookup must return exactly what getCVEExceptionMatchCVENameFromList
+// buildCVEExceptionIndex+lookup must return exactly what a linear scan of the exception list
 // returns for the same inputs, since callers switched from the linear scan to the index to
 // avoid re-walking the full exception list per match.
 func TestCVEExceptionIndex_MatchesLinearScan(t *testing.T) {
@@ -239,7 +261,7 @@ func TestCVEExceptionIndex_MatchesLinearScan(t *testing.T) {
 
 	for _, cve := range []string{"CVE-2021-1234", "cve-2021-1234", "CVE-2021-5678", "CVE-9999-0000"} {
 		for _, filterFixed := range []bool{false, true} {
-			want := getCVEExceptionMatchCVENameFromList(srcCVEList, cve, filterFixed)
+			want := linearExceptionLookup(srcCVEList, cve, filterFixed)
 			got := index.lookup(cve, filterFixed)
 			assert.Equal(t, want, got, "cve=%s filterFixed=%v", cve, filterFixed)
 		}
@@ -268,7 +290,7 @@ func BenchmarkGetCVEExceptionMatch(b *testing.B) {
 	b.Run("LinearScanPerMatch", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, cve := range cveNames {
-				getCVEExceptionMatchCVENameFromList(srcCVEList, cve, false)
+				linearExceptionLookup(srcCVEList, cve, false)
 			}
 		}
 	})
@@ -778,7 +800,7 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 }
 
 // Summarize and ApplySecurityExceptions must answer "is this CVE suppressed?" the same way.
-// getCVEExceptionMatchCVENameFromList appends every policy whose VulnerabilityPolicies name
+// the exception lookup appends every policy whose VulnerabilityPolicies name
 // the CVE, without filtering on actions, so ExceptionApplied[0] is not necessarily the policy
 // carrying Ignore. Reading only the first policy's first action made the stored manifest hide
 // a finding the backend summary still counted as active.
@@ -909,7 +931,7 @@ func TestGetCVEExceptionMatch_PolicyMatchesAtMostOnce(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getCVEExceptionMatchCVENameFromList(tt.list, tt.cve, false)
+			got := buildCVEExceptionIndex(tt.list).lookup(tt.cve, false)
 			assert.Len(t, got, tt.wantLen)
 		})
 	}
@@ -926,9 +948,9 @@ func TestGetCVEExceptionMatch_ExpiredOnFixSkipsWholePolicy(t *testing.T) {
 		ExpiredOnFix:          &expiredOnFix,
 	}
 
-	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", true))
-	assert.Empty(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "GHSA-jfh8", true))
-	assert.Len(t, getCVEExceptionMatchCVENameFromList([]armotypes.VulnerabilityExceptionPolicy{p}, "CVE-2021-44228", false), 1)
+	assert.Empty(t, buildCVEExceptionIndex([]armotypes.VulnerabilityExceptionPolicy{p}).lookup("CVE-2021-44228", true))
+	assert.Empty(t, buildCVEExceptionIndex([]armotypes.VulnerabilityExceptionPolicy{p}).lookup("GHSA-jfh8", true))
+	assert.Len(t, buildCVEExceptionIndex([]armotypes.VulnerabilityExceptionPolicy{p}).lookup("CVE-2021-44228", false), 1)
 }
 
 // Summarize collected its severity stats in a map and emitted them in iteration order, which

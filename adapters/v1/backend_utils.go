@@ -234,7 +234,7 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 	for i := range vulnerabilities {
 		// Same predicate ApplySecurityExceptions uses to decide suppression for the stored
 		// manifest. Reading only ExceptionApplied[0].Actions[0] would answer a narrower
-		// question: getCVEExceptionMatchCVENameFromList appends every policy matching the
+		// question: the exception lookup appends every policy matching the
 		// CVE name without filtering on actions, so the first one is not necessarily the
 		// one carrying Ignore, and the two surfaces would then disagree about whether the
 		// finding is suppressed.
@@ -338,37 +338,11 @@ func sortBySeverity(stats []containerscan.SeverityStats) {
 	})
 }
 
-func getCVEExceptionMatchCVENameFromList(srcCVEList []armotypes.VulnerabilityExceptionPolicy, CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
-	var l []armotypes.VulnerabilityExceptionPolicy
-
-	for i := range srcCVEList {
-		if filterFixed && srcCVEList[i].ExpiredOnFix != nil && *srcCVEList[i].ExpiredOnFix {
-			continue
-		}
-		for j := range srcCVEList[i].VulnerabilityPolicies {
-			if strings.EqualFold(srcCVEList[i].VulnerabilityPolicies[j].Name, CVEName) {
-				// A policy contributes at most once. buildPolicy expands a vulnerability
-				// entry into one VulnerabilityPolicy per id and alias, so an exception
-				// listing an alias equal to its id, or the same alias twice, would
-				// otherwise return the same policy several times, and every consumer
-				// counts it that many times.
-				l = append(l, srcCVEList[i])
-				break
-			}
-		}
-	}
-
-	if len(l) > 0 {
-		return l
-	}
-	return nil
-}
-
 // cveExceptionIndex maps a lower-cased CVE/alias name to the indices, into the exception
 // list it was built from, of every exception that declares a VulnerabilityPolicy with that
 // name. It lets a scan with many matches look up candidate exceptions in roughly constant
 // time per match instead of re-walking every exception (and every policy within it) for
-// each one, which is what getCVEExceptionMatchCVENameFromList does on its own.
+// each one, which is what a linear scan of the list would do per match.
 type cveExceptionIndex struct {
 	srcCVEList []armotypes.VulnerabilityExceptionPolicy
 	byName     map[string][]int
@@ -396,9 +370,12 @@ func buildCVEExceptionIndex(srcCVEList []armotypes.VulnerabilityExceptionPolicy)
 	return idx
 }
 
-// lookup returns the same result getCVEExceptionMatchCVENameFromList(idx.srcCVEList, CVEName,
-// filterFixed) would return, but only inspects the exceptions that actually declare a policy
-// named CVEName rather than the full exception list.
+// lookup returns every exception declaring a policy named CVEName, in the order they appear
+// in the list it was built from, skipping those marked ExpiredOnFix when filterFixed is set.
+// An exception contributes at most once, however many of its policies carry that name:
+// buildPolicy expands a vulnerability entry into one VulnerabilityPolicy per id and alias, so
+// an exception listing an alias equal to its id would otherwise be returned several times and
+// every consumer would count it that many times.
 func (idx *cveExceptionIndex) lookup(CVEName string, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
 	if idx == nil {
 		return nil

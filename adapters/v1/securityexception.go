@@ -550,7 +550,7 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.
 // Keyed by vulnerability ID + artifact name + version (via \x00 separators) rather than CVE ID
 // alone, because an ExpiredOnFix policy suppresses only the matches of a CVE that have no known
-// fix (hasKnownFix, via getCVEExceptionMatchCVENameFromList), so two matches of the same CVE can
+// fix (hasKnownFix, via the exception lookup), so two matches of the same CVE can
 // have different suppression states. The manifest content is fixed across a cache hit, so these
 // keys are stable and detect both ID- and fix-state-driven changes to the ignored set.
 //
