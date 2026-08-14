@@ -3206,3 +3206,48 @@ func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
 	assert.True(t, foundExternal, "Should have found external VEX statement")
 	assert.True(t, foundCRD, "Should have found CRD SecurityException statement")
 }
+
+func TestCreateProductStructForImageAndPackage(t *testing.T) {
+	tests := []struct {
+		name          string
+		imagePullable string
+		packagePURL   string
+		wantProductID string
+	}{
+		{
+			name:          "multi-segment image reference with repository",
+			imagePullable: "gcr.io/google-samples/microservices-demo/adservice@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f",
+			packagePURL:   "pkg:golang/github.com/foo/bar@v1.0.0",
+			wantProductID: "pkg:oci/adservice@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io%2Fgoogle-samples%2Fmicroservices-demo",
+		},
+		{
+			name:          "docker:// prefix with repository",
+			imagePullable: "docker://docker.io/library/nginx:latest",
+			packagePURL:   "pkg:deb/debian/nginx@1.18.0",
+			wantProductID: "pkg:oci/nginx:latest?repository_url=docker.io%2Flibrary",
+		},
+		{
+			name:          "single-component image reference without repository",
+			imagePullable: "alpine:latest",
+			packagePURL:   "pkg:apk/alpine/musl@1.2.2",
+			wantProductID: "pkg:oci/alpine:latest",
+		},
+		{
+			name:          "single-component bare name without tag",
+			imagePullable: "redis",
+			packagePURL:   "pkg:generic/redis@7.0.0",
+			wantProductID: "pkg:oci/redis",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			product, err := createProductStructForImageAndPackage(tt.imagePullable, tt.packagePURL)
+			require.NoError(t, err)
+			require.NotNil(t, product)
+			assert.Equal(t, tt.wantProductID, product.Component.ID)
+			require.Len(t, product.Subcomponents, 1)
+			assert.Equal(t, tt.packagePURL, product.Subcomponents[0].Component.ID)
+		})
+	}
+}

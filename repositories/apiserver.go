@@ -1032,7 +1032,12 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	imageName := imageComponents[len(imageComponents)-1]
 	imageRepo := strings.Join(imageComponents[:len(imageComponents)-1], "/")
 	// pkg:oci/adservice@sha256%3A45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io/google-samples/microservices-demo
-	imageField := fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
+	var imageField string
+	if imageRepo != "" {
+		imageField = fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
+	} else {
+		imageField = fmt.Sprintf("pkg:oci/%s", url.PathEscape(imageName))
+	}
 	product := v1beta1.Product{
 		Component: v1beta1.Component{
 			ID: imageField,
