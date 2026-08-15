@@ -260,3 +260,246 @@ func TestNewLocalStatement(t *testing.T) {
 	assert.Empty(t, stmt.ActionStatement)
 	assert.Empty(t, stmt.StatusNotes)
 }
+
+// Statements kubevuln wrote before #595 carry no ID, because #595 is what started setting
+// one. #595 recognised them as ours via isLocalStatement's id == "" clause; #664 removed
+// that clause so an external feed's ID-less statement would not be overwritten, which left
+// every pre-#595 statement looking like another author's data: frozen by the reset loop and
+// duplicated by the dedup, which now skips anything non-local.
+func TestAPIServerStore_updateVEX_adoptsPre595StatementsWithoutIDs(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var target v1beta1.Statement
+	for _, s := range vexContainer.Spec.Statements {
+		if isLocalStatement(s.ID) && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+			target = s
+			break
+		}
+	}
+	require.NotEmpty(t, target.Vulnerability.Name)
+	pkg := target.Products[0].Subcomponents[0].ID
+
+	// Reshape it the way kubevuln stored it before #595: no ID, and carrying kubevuln's own
+	// impact statement. A stale status stands in for one written by an earlier scan.
+	legacy := *target.DeepCopy()
+	legacy.ID = ""
+	legacy.Status = v1beta1.Status(vex.StatusAffected)
+	legacy.ImpactStatement = defaultLocalImpactStatement
+
+	kept := make([]v1beta1.Statement, 0, len(vexContainer.Spec.Statements))
+	for _, s := range vexContainer.Spec.Statements {
+		if s.ID != target.ID {
+			kept = append(kept, s)
+		}
+	}
+	vexContainer.Spec.Statements = append(kept, legacy)
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	updated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var forTarget []v1beta1.Statement
+	for _, s := range updated.Spec.Statements {
+		if s.Vulnerability.Name != target.Vulnerability.Name {
+			continue
+		}
+		if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 || s.Products[0].Subcomponents[0].ID != pkg {
+			continue
+		}
+		forTarget = append(forTarget, s)
+	}
+
+	require.Len(t, forTarget, 1, "our own older statement must be adopted, not left beside a fresh duplicate")
+	assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), forTarget[0].Status,
+		"an adopted statement must be managed again, so the reset loop returns it to baseline")
+}
+
+// A statement can carry both legacy shapes at once: no ID, and the CVE in Vulnerability.ID
+// with the data source in Name, from before that mapping was corrected. Adoption runs ahead
+// of the normalization that repairs the mapping (it has to, since normalization only touches
+// statements already recognised as ours), so it has to read the CVE from whichever field
+// holds it or the ID it stamps is built from a URL and is wrong for good.
+func TestAPIServerStore_updateVEX_adoptsStatementsWithBothLegacyShapes(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	})
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var target v1beta1.Statement
+	for _, s := range vexContainer.Spec.Statements {
+		if isLocalStatement(s.ID) && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+			target = s
+			break
+		}
+	}
+	require.NotEmpty(t, target.Vulnerability.Name)
+	cve := target.Vulnerability.Name
+	dataSource := target.Vulnerability.ID
+	pkg := target.Products[0].Subcomponents[0].ID
+	require.Contains(t, dataSource, "://", "the fixture's data source should be a URL")
+
+	// No ID, and the CVE and data source the other way round.
+	legacy := *target.DeepCopy()
+	legacy.ID = ""
+	legacy.Vulnerability.ID = cve
+	legacy.Vulnerability.Name = dataSource
+	legacy.ImpactStatement = defaultLocalImpactStatement
+
+	kept := make([]v1beta1.Statement, 0, len(vexContainer.Spec.Statements))
+	for _, s := range vexContainer.Spec.Statements {
+		if s.ID != target.ID {
+			kept = append(kept, s)
+		}
+	}
+	vexContainer.Spec.Statements = append(kept, legacy)
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+	updated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	var forTarget []v1beta1.Statement
+	for _, s := range updated.Spec.Statements {
+		if s.Vulnerability.Name != cve {
+			continue
+		}
+		if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 || s.Products[0].Subcomponents[0].ID != pkg {
+			continue
+		}
+		forTarget = append(forTarget, s)
+	}
+
+	require.Len(t, forTarget, 1, "the doubly-legacy statement must be adopted, not duplicated")
+	assert.Equal(t, localStatementID(cve, pkg), forTarget[0].ID,
+		"the stamped ID must be built from the CVE, not from whatever Name held before normalization")
+	assert.Equal(t, dataSource, forTarget[0].Vulnerability.ID, "normalization must still repair the mapping")
+}
+
+// A statement last written while affected has no impact statement: the marking step blanks
+// it and writes an action statement instead. That action statement is still wording of ours,
+// and it arrived in #404, ten days before the IDs in #595, so a statement from that window
+// carries one and no ID. Without recognising it, an affected statement stays unmanaged and
+// gets duplicated on every rescan, the same failure this adoption exists to stop.
+func TestAPIServerStore_updateVEX_adoptsAffectedStatementsByActionStatement(t *testing.T) {
+	cveManifestFull := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	tests := []struct {
+		name            string
+		actionStatement func(purl string) string
+	}{
+		{"fallback wording", func(string) string { return defaultActionStatement }},
+		{"named fix versions", func(purl string) string { return upgradeActionStatementPrefix(purl) + "1.2.3 or 1.3.0" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewFakeAPIServerStorage("kubescape")
+			ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+				ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+				InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+				Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "anyJobContName",
+			})
+
+			require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+			vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+			require.NoError(t, err)
+
+			var target v1beta1.Statement
+			for _, s := range vexContainer.Spec.Statements {
+				if isLocalStatement(s.ID) && len(s.Products) > 0 && len(s.Products[0].Subcomponents) > 0 {
+					target = s
+					break
+				}
+			}
+			require.NotEmpty(t, target.Vulnerability.Name)
+			pkg := target.Products[0].Subcomponents[0].ID
+
+			// The shape markRelevantVulnerabilitiesAsAffectedInVex leaves behind, stored
+			// before IDs existed.
+			legacy := *target.DeepCopy()
+			legacy.ID = ""
+			legacy.Status = v1beta1.Status(vex.StatusAffected)
+			legacy.Justification = ""
+			legacy.ImpactStatement = ""
+			legacy.ActionStatement = tt.actionStatement(pkg)
+
+			kept := make([]v1beta1.Statement, 0, len(vexContainer.Spec.Statements))
+			for _, s := range vexContainer.Spec.Statements {
+				if s.ID != target.ID {
+					kept = append(kept, s)
+				}
+			}
+			vexContainer.Spec.Statements = append(kept, legacy)
+			_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(ctx, vexContainer, metav1.UpdateOptions{})
+			require.NoError(t, err)
+
+			require.NoError(t, a.StoreVEX(ctx, cveManifestFull, cveManifestFiltered, false))
+			updated, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cveManifestFull.Name, metav1.GetOptions{})
+			require.NoError(t, err)
+
+			var forTarget []v1beta1.Statement
+			for _, s := range updated.Spec.Statements {
+				if s.Vulnerability.Name != target.Vulnerability.Name {
+					continue
+				}
+				if len(s.Products) == 0 || len(s.Products[0].Subcomponents) == 0 || s.Products[0].Subcomponents[0].ID != pkg {
+					continue
+				}
+				forTarget = append(forTarget, s)
+			}
+
+			require.Len(t, forTarget, 1, "the affected statement must be adopted, not left beside a duplicate")
+			assert.Equal(t, localStatementID(target.Vulnerability.Name, pkg), forTarget[0].ID)
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), forTarget[0].Status,
+				"once adopted it is managed again, so the reset loop returns it to baseline")
+		})
+	}
+}
+
+// An action statement that opens like ours but names a different package is another author's.
+func TestIsOwnActionStatement(t *testing.T) {
+	const purl = "pkg:deb/debian/tar@1.29"
+
+	assert.True(t, isOwnActionStatement(defaultActionStatement, purl))
+	assert.True(t, isOwnActionStatement(upgradeActionStatementPrefix(purl)+"1.30", purl))
+	assert.False(t, isOwnActionStatement(upgradeActionStatementPrefix("pkg:deb/debian/other@1.0")+"2.0", purl))
+	assert.False(t, isOwnActionStatement("Upgrade something to version 9", purl))
+	assert.False(t, isOwnActionStatement("", purl))
+
+	// The constant is ours whatever the subcomponent says, but the parameterised form is
+	// only ours when it names this statement's own package, so an empty purl must not let
+	// it through.
+	assert.True(t, isOwnActionStatement(defaultActionStatement, ""))
+	assert.False(t, isOwnActionStatement(upgradeActionStatementPrefix(purl)+"1.30", ""))
+}
