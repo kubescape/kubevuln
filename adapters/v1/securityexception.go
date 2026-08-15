@@ -476,6 +476,12 @@ func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.Vulnerabili
 	kind, _ := p.Attributes["sourceKind"].(string)
 	uid, _ := p.Attributes["sourceUID"].(string)
 	if kind == "" || p.Name == "" || uid == "" {
+		logger.L().Debug("skipping suppression event: incomplete provenance",
+			helpers.String("cve", m.Vulnerability.ID),
+			helpers.String("sourceKind", kind),
+			helpers.String("sourceName", p.Name),
+			helpers.String("sourceUID", uid),
+		)
 		return
 	}
 	namespace, _ := p.Attributes["sourceNamespace"].(string)

@@ -761,6 +761,53 @@ func TestApplySecurityExceptions_EmitsEventWhenRecorderConfigured(t *testing.T) 
 	}
 }
 
+func TestApplySecurityExceptions_RecorderConfiguredButUIDMissingSkipsEventSilentlyNoMore(t *testing.T) {
+	// Regression test for a source policy that carries kind/name but no UID (e.g. an
+	// object that reached ApplySecurityExceptions before its UID was populated, such as
+	// via a fake client in tests or an un-synced watch cache). emitSuppressionEvent must
+	// still skip emitting the Event in this case — an ObjectReference needs a UID — but
+	// the skip itself should now be observable via a debug log rather than silent. This
+	// test only asserts the resulting behavior (no event, no panic), since the repo has
+	// no log-capturing test infrastructure to assert on the log line's content directly.
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-core"},
+			},
+		},
+	}
+
+	policies := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "allow-log4shell",
+				Attributes: map[string]interface{}{
+					"sourceKind": "SecurityException",
+					// sourceUID intentionally omitted — this is the only missing field.
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	recorder := record.NewFakeRecorder(1)
+
+	assert.NotPanics(t, func() {
+		ApplySecurityExceptions(doc, policies, recorder)
+	})
+
+	require.Len(t, doc.IgnoredMatches, 1, "the CVE is still suppressed even though no event is emitted")
+	select {
+	case event := <-recorder.Events:
+		t.Fatalf("expected no suppression event to be recorded when source UID is missing, got: %q", event)
+	default:
+		// expected: no event was recorded.
+	}
+}
+
 func TestApplySecurityExceptions_NilRecorderIsNoOp(t *testing.T) {
 	doc := &v1beta1.GrypeDocument{
 		Matches: []v1beta1.Match{
