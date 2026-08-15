@@ -624,6 +624,72 @@ func TestAPIServerStore_storeVEX_updateRestoresNotAffected(t *testing.T) {
 	assert.Equal(t, 0, affectedAfter, "statements that are no longer relevant should be reset to not_affected")
 }
 
+// TestAPIServerStore_storeVEX_duplicateLocalStatementsBothUpdated guards against a regression
+// where buildLocalVexStatementIndex's map[vexStatementKey]int kept only the last statement
+// index for a (vulnerability, PURL) key, so mark-affected/mark-ignored only touched one of two
+// duplicate local statements sharing that key. Such duplicates predate the ID/Name-swap
+// normalization above and can still exist in already-persisted VEX documents.
+func TestAPIServerStore_storeVEX_duplicateLocalStatementsBothUpdated(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	require.NotEmpty(t, cveManifestFiltered.Content.Matches)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, domain.CVEManifest{Name: cveManifest.Name}, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, vexContainer.Spec.Statements)
+
+	// Simulate a pre-existing document with a duplicate local statement for the same
+	// (vulnerability, PURL) key as the first statement.
+	dup := *vexContainer.Spec.Statements[0].DeepCopy()
+	vexContainer.Spec.Statements = append(vexContainer.Spec.Statements, dup)
+	_, err = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Update(context.Background(), vexContainer, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	targetName := dup.Vulnerability.Name
+	targetPURL := dup.Products[0].Subcomponents[0].ID
+
+	filtered := domain.CVEManifest{
+		Name: cveManifest.Name,
+		Content: &v1beta1.GrypeDocument{
+			Matches: []v1beta1.Match{},
+		},
+	}
+	for _, m := range cveManifest.Content.Matches {
+		if m.Vulnerability.ID == targetName && m.Artifact.PURL == targetPURL {
+			filtered.Content.Matches = append(filtered.Content.Matches, m)
+		}
+	}
+	require.NotEmpty(t, filtered.Content.Matches, "expected to find the duplicated match in the source manifest")
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, filtered, false))
+
+	vexContainerAfterUpdate, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	affectedCount := 0
+	for _, s := range vexContainerAfterUpdate.Spec.Statements {
+		if s.Vulnerability.Name == targetName && statementHasPURL(s.Products, targetPURL) {
+			if s.Status == v1beta1.Status(vex.StatusAffected) {
+				affectedCount++
+			}
+		}
+	}
+	assert.Equal(t, 2, affectedCount, "both duplicate local statements sharing the key must be promoted to affected")
+}
+
 func TestAPIServerStore_storeVEX_noopUpdatePreservesMetadata(t *testing.T) {
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
@@ -3147,6 +3213,62 @@ func TestAPIServerStore_StoreCVESummary_MixedNilContentDoesNotPanic(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), summary.Spec.Severities.Critical.All, "the real cve manifest's match must still be counted")
 	assert.Equal(t, int64(0), summary.Spec.Severities.Critical.Relevant, "cvep.Content is nil, so no relevant count should be recorded")
+}
+
+// buildLargeCVEManifest synthesizes a CVEManifest with numMatches distinct vulnerability/package
+// pairs, used to benchmark updateVEX/createVEX at a scale comparable to a large real-world image.
+func buildLargeCVEManifest(numMatches int) domain.CVEManifest {
+	matches := make([]v1beta1.Match, 0, numMatches)
+	for i := 0; i < numMatches; i++ {
+		matches = append(matches, v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:         fmt.Sprintf("CVE-BENCH-%d", i),
+					DataSource: fmt.Sprintf("GHSA-BENCH-%d", i),
+				},
+			},
+			Artifact: v1beta1.GrypePackage{
+				Name:    fmt.Sprintf("package-%d", i),
+				Version: "1.0",
+				PURL:    fmt.Sprintf("pkg:golang/package-%d@1.0", i),
+			},
+		})
+	}
+	return domain.CVEManifest{
+		Name: name,
+		Content: &v1beta1.GrypeDocument{
+			Matches: matches,
+		},
+	}
+}
+
+// BenchmarkAPIServerStore_StoreVEX_LargeManifest measures StoreVEX cost on a large manifest
+// across the create path (first call) and the update path (second call, which rescans
+// existing statements for dedup, reset-to-baseline, and mark-affected/mark-ignored). Run with:
+//
+//	go test ./repositories/... -run '^$' -bench BenchmarkAPIServerStore_StoreVEX_LargeManifest -benchmem
+func BenchmarkAPIServerStore_StoreVEX_LargeManifest(b *testing.B) {
+	const numMatches = 5000
+	cveManifest := buildLargeCVEManifest(numMatches)
+	// Filter to half the matches as "relevant", exercising markRelevantVulnerabilitiesAsAffectedInVex.
+	filtered := cveManifest
+	filteredContent := *cveManifest.Content
+	filteredContent.Matches = append([]v1beta1.Match(nil), cveManifest.Content.Matches[:numMatches/2]...)
+	filtered.Content = &filteredContent
+
+	ctx := context.TODO()
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := NewFakeAPIServerStorage("kubescape")
+		if err := a.StoreVEX(ctx, cveManifest, filtered, false); err != nil {
+			b.Fatal(err)
+		}
+		// Second call exercises updateVEX against the already-populated statement set.
+		if err := a.StoreVEX(ctx, cveManifest, filtered, false); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
