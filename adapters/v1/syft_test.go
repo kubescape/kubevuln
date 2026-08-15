@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -330,6 +331,103 @@ func Test_syftAdapter_CreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.
 		t.Fatal("stand-in Syft never finished")
 	}
 	assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status, "the late write must not affect the result")
+}
+
+// Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout is a regression test
+// for #687: pullMutex exists to prevent concurrent pulls/cataloging from exhausting disk, but
+// was released via a defer in CreateSBOM's own return path. Since deadline.Run cannot stop the
+// goroutine it spawns, a timed-out call's abandoned goroutine keeps running after CreateSBOM
+// returns Incomplete - so releasing the mutex at that point let a second CreateSBOM call start
+// pulling/cataloging fully concurrently with the still-running first one. This asserts the
+// second call cannot reach its own cataloging step until the first call's abandoned goroutine
+// has actually finished.
+func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t *testing.T) {
+	host := mockRegistryImage(t)
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstAbandonedGoroutineFinished := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	var calls atomic.Int32
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			close(firstAbandonedGoroutineFinished)
+			return &sbom.SBOM{}, nil
+		}
+		close(secondStarted)
+		return &sbom.SBOM{}, nil
+	}
+
+	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil)
+
+	type createSBOMResult struct {
+		domainSBOM domain.SBOM
+		err        error
+	}
+
+	firstReturned := make(chan struct{})
+	firstResult := make(chan createSBOMResult, 1)
+	go func() {
+		defer close(firstReturned)
+		domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+		firstResult <- createSBOMResult{domainSBOM, err}
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first call's stand-in Syft never started")
+	}
+	select {
+	case <-firstReturned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first CreateSBOM call never returned once its deadline elapsed")
+	}
+	firstRes := <-firstResult
+	require.NoError(t, firstRes.err)
+	assert.Equal(t, helpersv1.Incomplete, firstRes.domainSBOM.Status)
+	// CreateSBOM has returned Incomplete, but its abandoned goroutine is still blocked in
+	// createSBOMFn, holding pullMutex.
+
+	secondReturned := make(chan struct{})
+	secondResult := make(chan createSBOMResult, 1)
+	go func() {
+		defer close(secondReturned)
+		domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+		secondResult <- createSBOMResult{domainSBOM, err}
+	}()
+
+	select {
+	case <-secondStarted:
+		t.Fatal("second CreateSBOM call reached cataloging while the first call's abandoned goroutine was still running")
+	case <-time.After(300 * time.Millisecond):
+		// expected: the second call is blocked waiting for pullMutex
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-firstAbandonedGoroutineFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first call's abandoned goroutine never finished")
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second call never proceeded once the first call's abandoned goroutine released pullMutex")
+	}
+	select {
+	case <-secondReturned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second CreateSBOM call never returned")
+	}
+	secondRes := <-secondResult
+	require.NoError(t, secondRes.err)
 }
 
 // archRegistryVariant is one platform-specific manifest+config+layer served by
