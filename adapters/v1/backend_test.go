@@ -38,26 +38,8 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
-)
-
-// securityExceptionGVR and clusterSecurityExceptionGVR mirror the unexported GVRs of the same
-// names in package repositories (repositories/apiserver.go) — duplicated here because they're
-// not exported across the package boundary, only used to register the fake dynamic client's
-// list kinds for this test.
-var (
-	securityExceptionGVR = schema.GroupVersionResource{
-		Group:    "kubescape.io",
-		Version:  "v1beta1",
-		Resource: "securityexceptions",
-	}
-	clusterSecurityExceptionGVR = schema.GroupVersionResource{
-		Group:    "kubescape.io",
-		Version:  "v1beta1",
-		Resource: "clustersecurityexceptions",
-	}
 )
 
 type testSecurityExceptionRepo struct {

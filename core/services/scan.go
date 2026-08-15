@@ -292,7 +292,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 		}
 
-		filteredCve := domain.CVEManifest{}
+		var filteredCve domain.CVEManifest
 		var cveExceptionsComplete bool
 		// if CVE manifest is not available, create it
 		if cve.Content == nil {
