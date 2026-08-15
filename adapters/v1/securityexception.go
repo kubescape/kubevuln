@@ -341,10 +341,8 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 		matched = scopedToSubcomponent(matched, m.Artifact.PURL)
 		if len(matched) > 0 && hasIgnoreAction(matched) {
 			doc.IgnoredMatches = append(doc.IgnoredMatches, v1beta1.IgnoredMatch{
-				Match: m,
-				AppliedIgnoreRules: []v1beta1.IgnoreRule{
-					buildIgnoreRule(m, matched),
-				},
+				Match:              m,
+				AppliedIgnoreRules: buildIgnoreRules(m, matched),
 			})
 			logSuppression(m, matched, recorder)
 			matchedKinds := map[string]struct{}{}
@@ -364,45 +362,48 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 	return matchedBySource
 }
 
-// buildIgnoreRule constructs the IgnoreRule recorded on the manifest for m, populating
-// provenance fields from the first suppressing policy's Attributes (the same values
-// buildSuppressionAttributes calculates and logSuppression already logs), so this
-// information is durably stored on the manifest itself, not only logged. SourceName here
-// carries suppressionRuleID's structured kind/namespace/name form rather than the bare
-// object name, so it stays unambiguous for both namespaced and cluster-scoped exceptions.
-func buildIgnoreRule(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) v1beta1.IgnoreRule {
-	rule := v1beta1.IgnoreRule{Vulnerability: m.Vulnerability.ID}
-
+// buildIgnoreRules constructs the slice of IgnoreRule entries recorded on the manifest for m,
+// populating provenance fields from EVERY suppressing policy's Attributes (the same values
+// buildSuppressionAttributes calculates and logSuppression already logs), so complete provenance
+// is durably stored on the manifest itself when multiple policies match. SourceName here carries
+// suppressionRuleID's structured kind/namespace/name form rather than the bare object name, so it
+// stays unambiguous for both namespaced and cluster-scoped exceptions.
+func buildIgnoreRules(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionPolicy) []v1beta1.IgnoreRule {
 	suppressing := suppressingPolicies(matched)
 	if len(suppressing) == 0 {
-		return rule
+		return []v1beta1.IgnoreRule{{Vulnerability: m.Vulnerability.ID}}
 	}
-	p := suppressing[0]
 
-	if kind, ok := p.Attributes["sourceKind"].(string); ok {
-		rule.SourceKind = kind
+	rules := make([]v1beta1.IgnoreRule, 0, len(suppressing))
+	for _, p := range suppressing {
+		rule := v1beta1.IgnoreRule{Vulnerability: m.Vulnerability.ID}
+
+		if kind, ok := p.Attributes["sourceKind"].(string); ok {
+			rule.SourceKind = kind
+		}
+		if ruleID, ok := p.Attributes["ruleId"].(string); ok {
+			rule.SourceName = ruleID
+		}
+		if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
+			rule.SourceNamespace = ns
+		}
+		if status, ok := p.Attributes["status"].(string); ok {
+			// FixState is repurposed here to carry the SecurityException's status vocabulary
+			// (not_affected/fixed/affected) rather than Grype's native fix-state vocabulary.
+			// This is safe because every reader of FixState gates on SourceKind being a
+			// SecurityException/ClusterSecurityException first — native Grype ignore rules
+			// never set SourceKind, so they're unaffected.
+			rule.FixState = status
+		}
+		if just, ok := p.Attributes["justification"].(string); ok {
+			rule.Justification = just
+		}
+		if impact, ok := p.Attributes["impactStatement"].(string); ok {
+			rule.ImpactStatement = impact
+		}
+		rules = append(rules, rule)
 	}
-	if ruleID, ok := p.Attributes["ruleId"].(string); ok {
-		rule.SourceName = ruleID
-	}
-	if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
-		rule.SourceNamespace = ns
-	}
-	if status, ok := p.Attributes["status"].(string); ok {
-		// FixState is repurposed here to carry the SecurityException's status vocabulary
-		// (not_affected/fixed/affected) rather than Grype's native fix-state vocabulary.
-		// This is safe because every reader of FixState gates on SourceKind being a
-		// SecurityException/ClusterSecurityException first — native Grype ignore rules
-		// never set SourceKind, so they're unaffected.
-		rule.FixState = status
-	}
-	if just, ok := p.Attributes["justification"].(string); ok {
-		rule.Justification = just
-	}
-	if impact, ok := p.Attributes["impactStatement"].(string); ok {
-		rule.ImpactStatement = impact
-	}
-	return rule
+	return rules
 }
 
 // suppressingPolicies filters matched down to the policies that actually cause suppression,
@@ -524,20 +525,26 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 }
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
-// signature ApplySecurityExceptions writes: exactly one rule with no package set, and either
-// exception provenance (source/justification/impact) or an empty FixState.
+// signature ApplySecurityExceptions writes: non-empty AppliedIgnoreRules where every rule has no
+// package set and its SourceKind is a known exception source ("SecurityException" or
+// "ClusterSecurityException"), or matches the empty legacy-rule fallback.
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
-	if len(im.AppliedIgnoreRules) != 1 {
+	if len(im.AppliedIgnoreRules) == 0 {
 		return false
 	}
-	r := im.AppliedIgnoreRules[0]
-	if r.Package != nil {
+	for _, r := range im.AppliedIgnoreRules {
+		if r.Package != nil {
+			return false
+		}
+		if r.SourceKind == "SecurityException" || r.SourceKind == "ClusterSecurityException" {
+			continue
+		}
+		if r.SourceKind == "" && r.SourceName == "" && r.SourceNamespace == "" && r.Justification == "" && r.ImpactStatement == "" && r.FixState == "" {
+			continue
+		}
 		return false
 	}
-	if r.SourceKind != "" || r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
-		return true
-	}
-	return r.FixState == ""
+	return true
 }
 
 // IgnoredMatchKeys returns the set of match-identity keys for a manifest's ignored matches.

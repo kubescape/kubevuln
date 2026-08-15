@@ -366,6 +366,77 @@ func TestApplySecurityExceptions_MatchedCountDedupesPerFinding(t *testing.T) {
 	require.Len(t, doc.IgnoredMatches, 1, "one finding should be ignored")
 	assert.Equal(t, map[string]int{"SecurityException": 1}, matchedBySource,
 		"two policies suppressing the same finding must count as a single match")
+	assert.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 2, "both policies must be recorded in AppliedIgnoreRules")
+}
+
+func TestApplySecurityExceptions_MultipleMatchingPolicies_PopulatesAllIgnoreRules(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2023-1234"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "cluster-policy",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "ClusterSecurityException",
+					"ruleId":          "ClusterSecurityException/cluster-policy",
+					"status":          "will_not_fix",
+					"justification":   "code_not_reachable",
+					"impactStatement": "Vendor will not supply fix",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2023-1234"}},
+		},
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "namespaced-policy",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"ruleId":          "SecurityException/default/namespaced-policy",
+					"sourceNamespace": "default",
+					"status":          "not_affected",
+					"justification":   "inline_mitigation",
+					"impactStatement": "Mitigated by firewall rule",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2023-1234"}},
+		},
+	}
+
+	matchedBySource := ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	require.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 2, "both matching policies must be recorded on the IgnoredMatch")
+
+	rule1 := doc.IgnoredMatches[0].AppliedIgnoreRules[0]
+	assert.Equal(t, "CVE-2023-1234", rule1.Vulnerability)
+	assert.Equal(t, "ClusterSecurityException", rule1.SourceKind)
+	assert.Equal(t, "ClusterSecurityException/cluster-policy", rule1.SourceName)
+	assert.Equal(t, "will_not_fix", rule1.FixState)
+
+	rule2 := doc.IgnoredMatches[0].AppliedIgnoreRules[1]
+	assert.Equal(t, "CVE-2023-1234", rule2.Vulnerability)
+	assert.Equal(t, "SecurityException", rule2.SourceKind)
+	assert.Equal(t, "SecurityException/default/namespaced-policy", rule2.SourceName)
+	assert.Equal(t, "default", rule2.SourceNamespace)
+	assert.Equal(t, "not_affected", rule2.FixState)
+
+	assert.Equal(t, map[string]int{
+		"ClusterSecurityException": 1,
+		"SecurityException":        1,
+	}, matchedBySource)
+
+	// Test cache reconciliation restoration
+	restored := RestoreSuppressedMatches(doc)
+	assert.Len(t, restored.Matches, 1, "match with multiple AppliedIgnoreRules must be restored")
+	assert.Equal(t, "CVE-2023-1234", restored.Matches[0].Vulnerability.ID)
+	assert.Empty(t, restored.IgnoredMatches)
 }
 
 func TestApplySecurityExceptions_ExpiredOnFix(t *testing.T) {
@@ -773,17 +844,25 @@ func TestRestoreSuppressedMatches(t *testing.T) {
 					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-NATIVE"}}},
 					AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-NATIVE", FixState: "not-fixed"}},
 				},
+				{
+					Match: v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-CUSTOM"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{
+						{Vulnerability: "CVE-CUSTOM", SourceKind: "CustomIgnore"},
+						{Vulnerability: "CVE-CUSTOM", SourceKind: "CustomIgnore"},
+					},
+				},
 			},
 		}
 
 		restored := RestoreSuppressedMatches(doc)
 
 		require.NotNil(t, restored)
-		// only the exception-shaped entry is restored; the other is preserved
+		// only the exception-shaped entry is restored; non-exception rules (including multi-rule CustomIgnore) are preserved
 		assert.Len(t, restored.Matches, 1)
 		assert.Equal(t, "CVE-A", restored.Matches[0].Vulnerability.ID)
-		require.Len(t, restored.IgnoredMatches, 1)
+		require.Len(t, restored.IgnoredMatches, 2)
 		assert.Equal(t, "CVE-NATIVE", restored.IgnoredMatches[0].Match.Vulnerability.ID)
+		assert.Equal(t, "CVE-CUSTOM", restored.IgnoredMatches[1].Match.Vulnerability.ID)
 	})
 }
 
