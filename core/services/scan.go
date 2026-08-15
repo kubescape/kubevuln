@@ -473,29 +473,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning SBOM: %w", err)}
 		}
 
-		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		// store filtered CVE
-		if s.storage {
-			domain.UpdateScanPhase(ctx, "result_storage")
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			// Only publish VEX built from a known-complete exception set, matching how
-			// ScanCP gates its own call: a degraded fetch would otherwise emit a document
-			// asserting fewer suppressions than the user actually configured.
-			if exceptionsComplete {
-				s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
-			}
-		}
+		s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
 	} else {
 		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
@@ -593,29 +571,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: err}
 		}
 
-		// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-		filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
-
-		// store filtered CVE
-		if s.storage {
-			domain.UpdateScanPhase(ctx, "result_storage")
-			err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-					helpers.String("imageSlug", workload.ImageSlug))
-			}
-			// Only publish VEX built from a known-complete exception set, matching how
-			// ScanCVE and ScanCP gate their own calls: a degraded fetch would otherwise
-			// emit a document asserting fewer suppressions than the user configured.
-			if exceptionsComplete {
-				s.storeVEX(ctx, filteredCve, filteredCve, false, workload.ImageSlug)
-			}
-		}
+		s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
 	} else {
 		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
@@ -645,6 +601,40 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("jobID", workload.JobID))
 	return nil
+}
+
+// storeFilteredCVE applies the current exception set to cve and stores what comes out: the
+// filtered manifest, its summary, and, when that exception set was complete, the VEX document
+// built from it. ScanCVE and ScanRegistry both do exactly this once matching is done. ScanCP
+// has its own variant, which carries the relevancy manifest alongside the full one.
+//
+// The exceptions are applied whether or not storage is on, since that call is also what
+// reports the degraded, expired and active exception counts for the scan.
+//
+// Storing is best effort: a failure is logged and the scan carries on, the report sent to the
+// backend not depending on any of it.
+func (s *ScanService) storeFilteredCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string) {
+	// copy — original stays intact for SubmitCVE
+	filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
+	if !s.storage {
+		return
+	}
+
+	domain.UpdateScanPhase(ctx, "result_storage")
+	if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
+		logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
+			helpers.String("imageSlug", imageSlug))
+	}
+	if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+		logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
+			helpers.String("imageSlug", imageSlug))
+	}
+	// Only publish VEX built from a known-complete exception set, matching how ScanCP gates
+	// its own call: a degraded fetch would otherwise emit a document asserting fewer
+	// suppressions than the user actually configured.
+	if exceptionsComplete {
+		s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
+	}
 }
 
 // storeVEX writes the VEX document for a scanned image when VEX generation is enabled,
