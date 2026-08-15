@@ -96,7 +96,7 @@ func (h *HTTPController) claimTrackedJob(jobID string) bool {
 // domain.ErrPartialContainerProfile result is a warning-level expected outcome, not a failure.
 // err is the error returned by the scan (nil for success/partial) and is only consulted to
 // resolve the bounded reason label on a failed outcome; see scanFailureReason.
-func (h HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string, err error) {
+func (h *HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string, err error) {
 	if h.metrics == nil {
 		return
 	}
@@ -130,7 +130,7 @@ func scanFailureReason(outcome string, err error) string {
 // "too_many_requests" for registry back-pressure (ErrTooManyRequests) and "invalid_request"
 // for every other validation error, keeping the rejection-rate signal distinct from
 // malformed-payload noise while staying low cardinality.
-func (h HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
+func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
 	if h.metrics == nil {
 		return
 	}
@@ -203,12 +203,12 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 }
 
 // Alive returns 200 OK
-func (h HTTPController) Alive(c *gin.Context) {
+func (h *HTTPController) Alive(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
 // Ready calls scanService.Ready
-func (h HTTPController) Ready(c *gin.Context) {
+func (h *HTTPController) Ready(c *gin.Context) {
 	if !h.scanService.Ready(c.Request.Context()) {
 		_, _ = problem.Of(http.StatusServiceUnavailable).WriteTo(c.Writer)
 		return

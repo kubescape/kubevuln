@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1050,4 +1051,21 @@ func TestHTTPController_ScanStatus_AbandonedOnShutdown(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown did not finish in time")
 	}
+}
+
+// HTTPController carries a sync.Once, so a method on the value type copies that Once along
+// with the rest of the struct. Nothing goes wrong while none of them reach ensureStatuses,
+// but the copy's Once starts unfired, so one that did would build a second status store and
+// write into an object no request ever reads. go vet reports this as copylocks; the repo's
+// lint runs against the diff rather than the whole tree, so four of these sat on main
+// unnoticed from the commit that added the Once.
+//
+// reflect lists only exported methods, which is where the risk is: those are the gin handlers.
+func TestHTTPController_NoValueReceiverMethods(t *testing.T) {
+	valueType := reflect.TypeOf(HTTPController{})
+	var offenders []string
+	for i := 0; i < valueType.NumMethod(); i++ {
+		offenders = append(offenders, valueType.Method(i).Name)
+	}
+	assert.Empty(t, offenders, "these take a value receiver and so copy the sync.Once: %v", offenders)
 }
