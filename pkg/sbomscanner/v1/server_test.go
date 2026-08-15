@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -271,6 +272,23 @@ func TestResolveSource_RecordsFallbackMetrics(t *testing.T) {
 
 	assert.True(t, strings.Contains(body, `kubevuln_scan_fallbacks_total{category="registry_auth",component="sidecar",outcome="succeeded",strategy="gcp_adc"} 1`), body)
 	assert.True(t, strings.Contains(body, `kubevuln_scan_source_resolution_total{component="sidecar",outcome="fallback_assisted_success"} 1`), body)
+}
+
+func TestResolveSource_Retry429RateLimit(t *testing.T) {
+	calls := 0
+	get := func(ctx context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		return tools.RetryWithBackoff(ctx, "test_retry", tools.FastRetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
+			calls++
+			if calls < 2 {
+				return nil, &transport.Error{StatusCode: http.StatusTooManyRequests}
+			}
+			return nil, nil
+		})
+	}
+
+	_, err := resolveSource(context.Background(), get, "my-image:latest", "my-image:latest", image.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
 }
 
 // fakeAuthProvider is a scripted registryauth.Provider used to prove
@@ -552,7 +570,7 @@ func TestIsRegistryRateLimited(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isRegistryRateLimited(tt.err))
+			assert.Equal(t, tt.want, tools.IsRateLimitError(tt.err))
 		})
 	}
 }
@@ -751,4 +769,88 @@ func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
 		t.Fatal("stand-in Syft never finished")
 	}
 	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the late write must not affect the response")
+}
+
+func TestCreateSBOM_Exhausted429RateLimitFromCreateSBOMFn(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image-429/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case fmt.Sprintf("/v2/test-image-429/blobs/sha256:%s", configHash):
+			_, _ = w.Write(configBytes)
+		case fmt.Sprintf("/v2/test-image-429/blobs/sha256:%s", layerHash):
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		return nil, &transport.Error{StatusCode: http.StatusTooManyRequests}
+	}
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image-429",
+		ImageTag:        u.Host + "/test-image-429:latest",
+		Platform:        "linux/amd64",
+		MaxImageSize:    1 << 30,
+		MaxSbomSize:     1 << 30,
+		TimeoutSeconds:  30,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
+}
+
+func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`received status code: 429`))
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image-resolve-429",
+		ImageTag:        u.Host + "/test-image-resolve-429:latest",
+		Platform:        "linux/amd64",
+		MaxImageSize:    1 << 30,
+		MaxSbomSize:     1 << 30,
+		TimeoutSeconds:  5,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
 }

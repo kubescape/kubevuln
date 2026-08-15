@@ -73,7 +73,7 @@ func TestParseRetryAfter(t *testing.T) {
 	errWithDateHeader := fmt.Errorf("received status code 429 Retry-After: %s", futureTime)
 	durDate, okDate := ParseRetryAfter(errWithDateHeader)
 	assert.True(t, okDate)
-	assert.GreaterOrEqual(t, durDate, 0*time.Second)
+	assert.Greater(t, durDate, 0*time.Second)
 
 	noHdrErr := errors.New("received status code 429")
 	_, ok = ParseRetryAfter(noHdrErr)
@@ -278,4 +278,60 @@ func TestRetryWithBackoff_UnsetCeilingFallsBackToMaxWait(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Less(t, elapsed, 500*time.Millisecond, "took %s", elapsed)
+}
+
+func TestRetryWithBackoff_NonRetryableErrorNoRetry(t *testing.T) {
+	calls := 0
+	config := RetryConfig{
+		MaxAttempts: 3,
+		InitialWait: 10 * time.Millisecond,
+		MaxWait:     50 * time.Millisecond,
+		Backoff:     2.0,
+	}
+
+	nonRetryErr := errors.New("401 Unauthorized")
+	_, err := RetryWithBackoff(context.Background(), "test_non_retry", config, IsRateLimitError, func(ctx context.Context) (string, error) {
+		calls++
+		return "", nonRetryErr
+	})
+
+	assert.Equal(t, nonRetryErr, err)
+	assert.Equal(t, 1, calls)
+}
+
+func TestRetryWithBackoff_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	config := RetryConfig{
+		MaxAttempts: 5,
+		InitialWait: 50 * time.Millisecond,
+		MaxWait:     200 * time.Millisecond,
+		Backoff:     2.0,
+	}
+
+	_, err := RetryWithBackoff(ctx, "test_canceled", config, IsRateLimitError, func(c context.Context) (string, error) {
+		calls++
+		if calls == 1 {
+			cancel() // cancel context on first failure
+		}
+		return "", &transport.Error{StatusCode: http.StatusTooManyRequests}
+	})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, calls)
+}
+
+func TestRetryWithBackoff_ContextAlreadyCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-canceled
+
+	calls := 0
+	config := FastRetryConfig()
+	_, err := RetryWithBackoff(ctx, "test_pre_canceled", config, IsRateLimitError, func(c context.Context) (string, error) {
+		calls++
+		return "ok", nil
+	})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, calls, "fn must not be called when context is already canceled")
 }

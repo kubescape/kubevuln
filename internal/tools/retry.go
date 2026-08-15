@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubevuln/internal/metrics"
 )
 
+// RetryConfig specifies configuration for retrying operations.
 type RetryConfig struct {
 	MaxAttempts int
 	InitialWait time.Duration
@@ -31,6 +32,9 @@ type RetryConfig struct {
 	MaxRetryAfter time.Duration
 }
 
+// Default429RetryConfig returns standard retry settings for 429 rate limits:
+// 3 max attempts (1 initial attempt + 2 retries), starting at 500ms initial wait up to 2s,
+// with a 30s ceiling on Retry-After.
 func Default429RetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxAttempts:   3,
@@ -38,6 +42,16 @@ func Default429RetryConfig() RetryConfig {
 		MaxWait:       2 * time.Second,
 		Backoff:       2.0,
 		MaxRetryAfter: 30 * time.Second,
+	}
+}
+
+// FastRetryConfig returns fast retry settings for unit testing (1ms initial wait up to 10ms).
+func FastRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxAttempts: 3,
+		InitialWait: 1 * time.Millisecond,
+		MaxWait:     10 * time.Millisecond,
+		Backoff:     2.0,
 	}
 }
 
@@ -49,6 +63,7 @@ func (c RetryConfig) retryAfterCeiling() time.Duration {
 	return c.MaxWait
 }
 
+// IsRateLimitError reports whether err indicates a 429 Too Many Requests rate-limiting error.
 func IsRateLimitError(err error) bool {
 	if err == nil {
 		return false
@@ -67,30 +82,37 @@ func IsRateLimitError(err error) bool {
 		strings.Contains(errStr, "received status code: 429")
 }
 
+// ParseRetryAfter attempts to extract a Retry-After duration from error text or header strings.
+// Supports both numeric seconds ("120") and HTTP-date formats (RFC1123/RFC1123Z).
 func ParseRetryAfter(err error) (time.Duration, bool) {
 	if err == nil {
 		return 0, false
 	}
 	errStr := err.Error()
-	idx := strings.Index(errStr, "Retry-After:")
-	if idx == -1 {
-		return 0, false
-	}
-	rawVal := strings.TrimSpace(errStr[idx+len("Retry-After:"):])
-	spaceIdx := strings.IndexAny(rawVal, " \t\r\n,")
-	numStr := rawVal
-	if spaceIdx != -1 {
-		numStr = rawVal[:spaceIdx]
-	}
-	if secs, parseErr := strconv.Atoi(numStr); parseErr == nil && secs > 0 {
-		return time.Duration(secs) * time.Second, true
-	}
-	if t, parseErr := time.Parse(time.RFC1123, rawVal); parseErr == nil {
-		d := time.Until(t)
-		if d <= 0 {
-			d = time.Second
+	idx := strings.Index(strings.ToLower(errStr), "retry-after:")
+	if idx != -1 {
+		sub := strings.TrimSpace(errStr[idx+len("retry-after:"):])
+		fields := strings.Fields(sub)
+		if len(fields) > 0 {
+			token := strings.Trim(fields[0], ";,")
+			if seconds, parseErr := strconv.Atoi(token); parseErr == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second, true
+			}
 		}
-		return d, true
+		dateStr := sub
+		if endIdx := strings.IndexAny(sub, "\r\n"); endIdx != -1 {
+			dateStr = strings.TrimSpace(sub[:endIdx])
+		}
+		if t, parseErr := time.Parse(time.RFC1123, dateStr); parseErr == nil {
+			if d := time.Until(t); d > 0 {
+				return d, true
+			}
+		}
+		if t, parseErr := time.Parse(time.RFC1123Z, dateStr); parseErr == nil {
+			if d := time.Until(t); d > 0 {
+				return d, true
+			}
+		}
 	}
 	return 0, false
 }
@@ -101,6 +123,10 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 	wait := config.InitialWait
 
 	for attempt := 1; ; attempt++ {
+		if ctx.Err() != nil {
+			return zero, ctx.Err()
+		}
+
 		val, err := fn(ctx)
 		if err == nil {
 			if attempt > 1 {
@@ -122,6 +148,7 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 
 		metrics.RecordRetryAttempt(ctx, operation, metrics.RetryOutcomeAttempt)
 
+		// Calculate wait duration with Retry-After header or backoff + jitter
 		delay := wait
 		if retryAfter, ok := ParseRetryAfter(err); ok {
 			delay = retryAfter
@@ -142,6 +169,7 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 		}
 
 		logger.L().Ctx(ctx).Debug("retrying operation after 429 rate limit",
+			helpers.String("operation", operation),
 			helpers.Int("attempt", attempt),
 			helpers.Int("maxAttempts", config.MaxAttempts),
 			helpers.String("delay", delay.String()),

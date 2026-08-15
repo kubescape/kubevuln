@@ -206,7 +206,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// carrying the size limit; ctxWithTimeout is what bounds the credential lookup.
 	src, err := registryauth.ResolveSource(ctxWithTimeout, metrics.ComponentInProcess,
 		func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-			return syft.GetSource(ctxWithSize, ref, syftGetSourceConfig(opts, imgPlatform))
+			return tools.RetryWithBackoff(ctxWithSize, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
+				return syft.GetSource(retryCtx, ref, syftGetSourceConfig(opts, imgPlatform))
+			})
 		},
 		rewriteImageRef(imageID, s.proxyRegistryMap),
 		rewriteImageRef(imageTag, s.proxyRegistryMap),
@@ -299,7 +301,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// timeout it keeps running after CreateSBOM has already returned Incomplete. It must
 		// therefore not touch any variable the caller reads. Keep the result local and publish
 		// it on the channel, which is only received from once dl.Run reports success.
-		created, createErr := createSBOMFn(ctxWithSize, src, cfg)
+		created, createErr := tools.RetryWithBackoff(ctxWithSize, "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (*sbom.SBOM, error) {
+			return createSBOMFn(retryCtx, src, cfg)
+		})
 		if createErr != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", createErr)
 		}

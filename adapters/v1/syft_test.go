@@ -19,6 +19,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -472,4 +473,79 @@ func Test_syftAdapter_CreateSBOM_MultiArchLocalRegistry(t *testing.T) {
 				"resolved platform must match what was requested, independent of the host's runtime.GOARCH=%s", runtime.GOARCH)
 		})
 	}
+}
+
+func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
+	var attempts int
+	var mu sync.Mutex
+
+	layer := &bytes.Buffer{}
+	gz := gzip.NewWriter(layer)
+	tw := tar.NewWriter(gz)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "etc/hostname", Mode: 0o644, Size: 4}))
+	_, err := tw.Write([]byte("test"))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	layerBytes := layer.Bytes()
+	layerHash := fmt.Sprintf("%x", sha256.Sum256(layerBytes))
+
+	uncompressed := &bytes.Buffer{}
+	zr, err := gzip.NewReader(bytes.NewReader(layerBytes))
+	require.NoError(t, err)
+	_, err = io.Copy(uncompressed, zr)
+	require.NoError(t, err)
+	diffID := fmt.Sprintf("%x", sha256.Sum256(uncompressed.Bytes()))
+
+	configBytes := []byte(fmt.Sprintf(
+		`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffID))
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		if r.URL.Path == "/v2/test-image-retry/manifests/latest" {
+			mu.Lock()
+			attempts++
+			curr := attempts
+			mu.Unlock()
+			if curr == 1 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"errors":[{"code":"TOOMANYREQUESTS","message":"rate limited"}]}`))
+				return
+			}
+		}
+
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image-retry/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case "/v2/test-image-retry/blobs/sha256:" + configHash:
+			_, _ = w.Write(configBytes)
+		case "/v2/test-image-retry/blobs/sha256:" + layerHash:
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", u.Host+"/test-image-retry:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+
+	require.NoError(t, err)
+	assert.Equal(t, helpersv1.Learning, domainSBOM.Status)
+	mu.Lock()
+	assert.GreaterOrEqual(t, attempts, 2, "expected at least 2 manifest request attempts due to 429 retry")
+	mu.Unlock()
 }
