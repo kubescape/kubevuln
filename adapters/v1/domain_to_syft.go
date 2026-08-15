@@ -157,7 +157,10 @@ func safeFileModeConvert(val int) (fs.FileMode, error) {
 	if err != nil {
 		return 0, err
 	}
-	return os.FileMode(mode), nil
+	if mode < 0 || mode > math.MaxUint32 {
+		return 0, fmt.Errorf("value %d is out of range for a file mode", mode)
+	}
+	return os.FileMode(mode), nil // #nosec G115 -- bounds-checked above
 }
 
 func toSyftLicenses(m []model.License) (p []pkg.License) {

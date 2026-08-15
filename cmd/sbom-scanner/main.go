@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -60,11 +61,14 @@ func main() {
 	if socketPath == "" {
 		socketPath = "/sbom-comm/scanner.sock"
 	}
+	socketPath = filepath.Clean(socketPath)
 
 	// Remove stale socket file from a previous run
-	os.Remove(socketPath)
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
+		logger.L().Warning("failed to remove stale socket file", helpers.Error(err), helpers.String("path", socketPath))
+	}
 
-	lis, err := net.Listen("unix", socketPath)
+	lis, err := net.Listen("unix", socketPath) // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config, not untrusted input; path is cleaned above
 	if err != nil {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
@@ -82,11 +86,13 @@ func main() {
 		sig := <-sigCh
 		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
 		gracefulStopWithTimeout(srv, shutdownTimeout)
-		os.Remove(socketPath)
+		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
+			logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
+		}
 	}()
 
 	logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
-	if err := srv.Serve(lis); err != nil {
+	if err := srv.Serve(lis); err != nil { // #nosec G703 -- see SOCKET_PATH note above
 		logger.L().Fatal("gRPC server failed", helpers.Error(err))
 	}
 }

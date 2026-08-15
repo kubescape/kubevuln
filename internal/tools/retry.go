@@ -160,7 +160,7 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 			}
 		} else {
 			if delay > 0 {
-				jitter := time.Duration(rand.Float64() * 0.25 * float64(delay))
+				jitter := time.Duration(rand.Float64() * 0.25 * float64(delay)) // #nosec G404 -- jitter for retry backoff; not security-sensitive
 				delay += jitter
 			}
 			if delay > config.MaxWait {

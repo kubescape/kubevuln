@@ -411,7 +411,9 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		logger.L().Ctx(ctx).Debug("failed to drain response body", helpers.Error(err))
+	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("scan failure report returned HTTP %d", resp.StatusCode)
 	}

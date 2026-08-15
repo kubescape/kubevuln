@@ -591,8 +591,12 @@ func checkDBDirWritable(dir string) error {
 	if err != nil {
 		return err
 	}
-	f.Close()
-	os.Remove(f.Name())
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		return err
+	}
 	return nil
 }
 
