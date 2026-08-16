@@ -572,47 +572,14 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	if cve.Content != nil {
 		manifest.Spec.Payload = *cve.Content
 	}
-	_, err := a.StorageClient.VulnerabilityManifests(a.Namespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	switch {
-	case errors.IsAlreadyExists(err):
-		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			// retrieve the latest version before attempting update
-			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Get(ctx, cve.Name, metav1.GetOptions{ResourceVersion: "metadata"})
-			if getErr != nil {
-				return getErr
-			}
-			// update the vulnerability manifest
-			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
-			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = manifest.Spec
-			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifests(a.Namespace).Update(ctx, result, metav1.UpdateOptions{})
-			return updateErr
-		})
-		if retryErr != nil {
-			logger.L().Debug("failed to update CVE manifest in storage", helpers.Error(retryErr),
-				helpers.String("name", cve.Name),
-				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-			return fmt.Errorf("failed to update CVE manifest in storage: %w", retryErr)
-		}
-		logger.L().Debug("updated CVE manifest in storage",
-			helpers.String("name", cve.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-	case err != nil:
-		logger.L().Debug("failed to store CVE manifest in storage", helpers.Error(err),
-			helpers.String("name", cve.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-		return fmt.Errorf("failed to store CVE manifest in storage: %w", err)
-	default:
-		logger.L().Debug("stored CVE manifest in storage",
-			helpers.String("name", cve.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-	}
-	return nil
+	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifests(a.Namespace),
+		"CVE manifest", cve.Name, &manifest,
+		func(existing *v1beta1.VulnerabilityManifest) {
+			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
+			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
+			existing.Spec = manifest.Spec
+		},
+		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
 
 func parseVulnerabilitiesComponents(cve domain.CVEManifest, cvep domain.CVEManifest, namespace string, withRelevancy bool) v1beta1.VulnerabilitiesComponents {
@@ -815,47 +782,14 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, workloadNamespace, withRelevancy),
 		},
 	}
-	_, err = a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Create(ctx, &manifest, metav1.CreateOptions{})
-	switch {
-	case errors.IsAlreadyExists(err):
-		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			// retrieve the latest version before attempting update
-			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, manifest.Name, metav1.GetOptions{ResourceVersion: "metadata"})
-			if getErr != nil {
-				return getErr
-			}
-			// update the vulnerability manifest
-			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
-			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = manifest.Spec
-			// try to send the updated vulnerability manifest
-			_, updateErr := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Update(ctx, result, metav1.UpdateOptions{})
-			return updateErr
-		})
-		if retryErr != nil {
-			logger.L().Debug("failed to update CVE summary manifest in storage", helpers.Error(retryErr),
-				helpers.String("name", cve.Name),
-				helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-			return fmt.Errorf("failed to update CVE summary manifest in storage: %w", retryErr)
-		}
-		logger.L().Debug("updated CVE summary manifest in storage",
-			helpers.String("name", cve.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-	case err != nil:
-		logger.L().Debug("failed to store CVE summary manifest in storage", helpers.Error(err),
-			helpers.String("name", cve.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-		return fmt.Errorf("failed to store CVE summary manifest in storage: %w", err)
-	default:
-		logger.L().Debug("stored CVE summary manifest in storage",
-			helpers.String("name", manifest.Name),
-			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
-	}
-	return nil
+	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),
+		"CVE summary manifest", manifest.Name, &manifest,
+		func(existing *v1beta1.VulnerabilityManifestSummary) {
+			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
+			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
+			existing.Spec = manifest.Spec
+		},
+		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
 
 // summaryHasVulnerabilityData reports whether a summary already holds real scan results
@@ -1870,7 +1804,10 @@ type objectStore[T any] interface {
 // wrote in between and the merge has to happen again on top of that.
 //
 // kind names the object in the logs and errors ("SBOM", "filtered SBOM").
-func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, merge func(existing T)) error {
+// extra are appended to every log line this emits, for callers that carry an additional
+// field on them. name is the object's own name and is what the Get inside the retry uses,
+// so it is the one thing every line here reports about which object is meant.
+func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, merge func(existing T), extra ...helpers.IDetails) error {
 	_, err := store.Create(ctx, obj, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -1889,19 +1826,15 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Debug("failed to update "+kind+" in storage", helpers.Error(retryErr),
-				helpers.String("name", name))
+			logger.L().Debug("failed to update "+kind+" in storage", append([]helpers.IDetails{helpers.Error(retryErr), helpers.String("name", name)}, extra...)...)
 			return fmt.Errorf("failed to update %s in storage: %w", kind, retryErr)
 		}
-		logger.L().Debug("updated "+kind+" in storage",
-			helpers.String("name", name))
+		logger.L().Debug("updated "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
 	case err != nil:
-		logger.L().Debug("failed to store "+kind+" in storage", helpers.Error(err),
-			helpers.String("name", name))
+		logger.L().Debug("failed to store "+kind+" in storage", append([]helpers.IDetails{helpers.Error(err), helpers.String("name", name)}, extra...)...)
 		return fmt.Errorf("failed to store %s in storage: %w", kind, err)
 	default:
-		logger.L().Debug("stored "+kind+" in storage",
-			helpers.String("name", name))
+		logger.L().Debug("stored "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
 	}
 	return nil
 }
