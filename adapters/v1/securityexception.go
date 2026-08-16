@@ -500,7 +500,7 @@ func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.Vulnerabili
 // so the shared stored object is never modified.
 //
 // Only ignored matches carrying the signature ApplySecurityExceptions writes (a single ignore
-// rule with CRD provenance tags like SourceKind or Justification set) are restored. Any other
+// rule carrying CRD or backend exception provenance) are restored. Any other
 // entry (e.g. one produced by GrypeAdapter wiring up IgnoreRules/VexProcessor, which drops CRD
 // tags) is preserved, so the helper is self-guarding instead of relying on an assumption.
 // Reconstruction is lossless because IgnoredMatch embeds the full Match.
@@ -526,7 +526,8 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
 // signature ApplySecurityExceptions writes: non-empty AppliedIgnoreRules where every rule has no
-// package set, and exception provenance (source/justification/impact).
+// package set, and either a known CRD sourceKind or some other exception provenance, which is
+// what a backend-delivered policy leaves behind.
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) == 0 {
 		return false
@@ -536,6 +537,17 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 			return false
 		}
 		if r.SourceKind == "SecurityException" || r.SourceKind == "ClusterSecurityException" {
+			continue
+		}
+		// A policy that never went through buildPolicy carries no sourceKind, which today means
+		// one delivered by the backend rather than a CRD. buildIgnoreRules still stamps whatever
+		// provenance that policy did carry onto the rule, so a rule holding any of it is ours.
+		//
+		// These four are safe to key on because grypeToDomainIgnoredMatchesAppliedIgnoreRules
+		// copies only Vulnerability, FixState and Package off a Grype rule, so nothing Grype
+		// produces can set them. FixState is deliberately not among them: Grype does set it, in
+		// its own fix-state vocabulary, so a rule carrying only that is not evidence of us.
+		if r.SourceName != "" || r.SourceNamespace != "" || r.Justification != "" || r.ImpactStatement != "" {
 			continue
 		}
 		return false
