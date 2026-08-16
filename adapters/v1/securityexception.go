@@ -500,10 +500,10 @@ func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.Vulnerabili
 // so the shared stored object is never modified.
 //
 // Only ignored matches carrying the signature ApplySecurityExceptions writes (a single ignore
-// rule with only the vulnerability ID set) are restored. Any other entry (e.g. one that would be
-// produced if GrypeAdapter ever wired up IgnoreRules/VexProcessor) is preserved, so the helper is
-// self-guarding instead of relying on an assumption. Reconstruction is lossless because
-// IgnoredMatch embeds the full Match.
+// rule with CRD provenance tags like SourceKind or Justification set) are restored. Any other
+// entry (e.g. one produced by GrypeAdapter wiring up IgnoreRules/VexProcessor, which drops CRD
+// tags) is preserved, so the helper is self-guarding instead of relying on an assumption.
+// Reconstruction is lossless because IgnoredMatch embeds the full Match.
 func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument {
 	if doc == nil {
 		return nil
@@ -526,8 +526,7 @@ func RestoreSuppressedMatches(doc *v1beta1.GrypeDocument) *v1beta1.GrypeDocument
 
 // isExceptionSourcedIgnore reports whether an ignored match carries the AppliedIgnoreRules
 // signature ApplySecurityExceptions writes: non-empty AppliedIgnoreRules where every rule has no
-// package set and its SourceKind is a known exception source ("SecurityException" or
-// "ClusterSecurityException"), or matches the empty legacy-rule fallback.
+// package set, and exception provenance (source/justification/impact).
 func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 	if len(im.AppliedIgnoreRules) == 0 {
 		return false
@@ -537,9 +536,6 @@ func isExceptionSourcedIgnore(im v1beta1.IgnoredMatch) bool {
 			return false
 		}
 		if r.SourceKind == "SecurityException" || r.SourceKind == "ClusterSecurityException" {
-			continue
-		}
-		if r.SourceKind == "" && r.SourceName == "" && r.SourceNamespace == "" && r.Justification == "" && r.ImpactStatement == "" && r.FixState == "" {
 			continue
 		}
 		return false

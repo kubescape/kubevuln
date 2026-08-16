@@ -1892,7 +1892,7 @@ func matchForTest(id string) v1beta1.Match {
 func ignoredMatchForTest(id string) v1beta1.IgnoredMatch {
 	return v1beta1.IgnoredMatch{
 		Match:              matchForTest(id),
-		AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: id}},
+		AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: id, SourceKind: "SecurityException"}},
 	}
 }
 
@@ -2052,8 +2052,8 @@ func TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch(t *testing.
 	// cached: both matches suppressed by the earlier, wider policy (no ExpiredOnFix)
 	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
 		IgnoredMatches: []v1beta1.IgnoredMatch{
-			{Match: fixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
-			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+			{Match: fixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X", SourceKind: "SecurityException"}}},
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X", SourceKind: "SecurityException"}}},
 		},
 	})
 
@@ -2087,7 +2087,7 @@ func TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression(t 
 	seedCachedCVEManifest(t, repo, "imageSlug", sbomVer, cveVer, cveDBVer, ctx, &v1beta1.GrypeDocument{
 		Matches: []v1beta1.Match{fixedMatch},
 		IgnoredMatches: []v1beta1.IgnoredMatch{
-			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X"}}},
+			{Match: unfixedMatch, AppliedIgnoreRules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-X", SourceKind: "SecurityException"}}},
 		},
 	})
 
