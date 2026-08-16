@@ -17,6 +17,7 @@ import (
 
 	"github.com/aquilax/truncate"
 	"github.com/distribution/distribution/reference"
+	"github.com/gofrs/flock"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -126,27 +127,71 @@ func DeleteContents(dir string) error {
 	return nil
 }
 
-// activeTempDirUsers counts in-flight callers that are actively reading from or writing to a
-// stereoscope temp dir, so StartPeriodicTempDirSweep's periodic pass can tell a busy directory
-// from an abandoned one. Both cmd/http (in-process SyftAdapter) and cmd/sbom-scanner share a
-// single stereoscope temp-dir root process-wide (stereoscope's rootTempDirGenerator is a package
-// singleton), so this is deliberately a single process-wide counter rather than something keyed
-// per-directory: while any pull/catalog is in flight, none of the shared root's contents are
-// safe to remove.
+// activeTempDirUsers counts in-flight callers, within this process, that are actively reading
+// from or writing to a stereoscope temp dir, so StartPeriodicTempDirSweep's periodic pass can
+// tell a busy directory from an abandoned one. It is deliberately a single process-wide counter
+// rather than something keyed per-directory: while any pull/catalog is in flight, none of the
+// shared root's contents are safe to remove.
+//
+// cmd/http and cmd/sbom-scanner run as separate OS processes but mount the same /tmp volume in
+// the kubevuln Pod (see the Helm chart's "tmp-dir" volume on both containers), sharing the same
+// stereoscope temp-dir root on disk. activeTempDirUsers alone is invisible across that process
+// boundary, so without the cross-process lease below, cmd/http's sweep could delete a directory
+// an in-flight cmd/sbom-scanner cataloguing job is still reading from, or vice versa.
 var activeTempDirUsers atomic.Int64
 
+// activeScanLockFileName is the cross-process lease file BeginActiveTempDirUse and
+// StartPeriodicTempDirSweep use, under the same dir they're both called with, to coordinate
+// around the shared stereoscope temp-dir root across process boundaries (see activeTempDirUsers'
+// doc comment). A flock-based lease is used instead of a marker file so a crashed process's hold
+// is released automatically by the kernel/OS, with no orphaned-lock cleanup required.
+const activeScanLockFileName = ".kubevuln-active-scan.lock"
+
+func activeScanLockPath(dir string) string {
+	return filepath.Join(dir, activeScanLockFileName)
+}
+
 // BeginActiveTempDirUse records that the caller is about to read from or write to a stereoscope
-// temp dir. Call the returned func exactly once when finished, however that happens: normal
-// completion, error, or an abandoned goroutine that outlives its own caller's deadline (e.g.
-// Syft cataloguing after a scan timeout — see adapters/v1/syft.go and
-// pkg/sbomscanner/v1/server.go). While any caller is registered, StartPeriodicTempDirSweep skips
-// its sweep entirely rather than risk deleting a directory still in use.
-func BeginActiveTempDirUse() (end func()) {
+// temp dir under dir. Call the returned func exactly once when finished, however that happens:
+// normal completion, error, or an abandoned goroutine that outlives its own caller's deadline
+// (e.g. Syft cataloguing after a scan timeout — see adapters/v1/syft.go and
+// pkg/sbomscanner/v1/server.go). While any caller is registered - in this process via
+// activeTempDirUsers, or in another process sharing dir via the shared lock acquired here -
+// StartPeriodicTempDirSweep skips its sweep entirely rather than risk deleting a directory still
+// in use.
+func BeginActiveTempDirUse(dir string) (end func()) {
 	activeTempDirUsers.Add(1)
 	var once sync.Once
-	return func() {
-		once.Do(func() { activeTempDirUsers.Add(-1) })
+	endFn := func() { once.Do(func() { activeTempDirUsers.Add(-1) }) }
+
+	fl := flock.New(activeScanLockPath(dir))
+	locked, err := fl.TryRLock()
+	if err != nil || !locked {
+		// Best-effort: cross-process coordination degrades to in-process-only tracking here,
+		// which is exactly the pre-existing behavior rather than a regression.
+		return endFn
 	}
+	return func() {
+		endFn()
+		_ = fl.Unlock()
+	}
+}
+
+// crossProcessScanInProgress reports whether another process holds the shared lock on dir's
+// active-scan lease acquired by BeginActiveTempDirUse, i.e. is mid-use there. A failure to
+// determine this (e.g. dir does not exist yet) is treated as "no cross-process information," not
+// as "busy" - activeTempDirUsers already covers this process's own in-flight uses regardless.
+func crossProcessScanInProgress(dir string) bool {
+	fl := flock.New(activeScanLockPath(dir))
+	locked, err := fl.TryLock()
+	if err != nil {
+		return false
+	}
+	if !locked {
+		return true
+	}
+	_ = fl.Unlock()
+	return false
 }
 
 // CleanupStaleTempDirs removes directories under dir whose names start with prefix and whose
@@ -203,13 +248,20 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 // cmd/sbom-scanner, which intentionally allows concurrent CreateSBOM RPCs, sustained concurrent
 // traffic can keep the counter above zero indefinitely, deferring sweeps beyond one interval.
 // This only widens the reclaim window under continuous load; it never leaves a leaked dir
-// unreclaimed forever, since the sweep still runs as soon as the process has an idle gap.
+// unreclaimed forever, since the sweep still runs as soon as the process has an idle gap. The
+// same applies across processes sharing dir, via crossProcessScanInProgress.
 func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderThan, interval time.Duration, onSweep func(removed int, err error)) {
 	sweep := func() {
 		if activeTempDirUsers.Load() > 0 {
 			// A pull or a cataloguing pass that outlived its own timeout is still using the
 			// shared temp dir root; removing anything now could delete files out from under it.
 			// Skip this pass entirely and let the next tick re-check.
+			return
+		}
+		if crossProcessScanInProgress(dir) {
+			// Another process sharing dir (see activeTempDirUsers' doc comment) is mid-use, per
+			// the lease acquired in its own BeginActiveTempDirUse call. Same reasoning as above,
+			// just visible across the process boundary rather than within this one.
 			return
 		}
 		removed, err := CleanupStaleTempDirs(dir, prefix, olderThan)

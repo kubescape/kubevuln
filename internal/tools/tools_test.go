@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -412,7 +413,7 @@ func TestStartPeriodicTempDirSweep_SkipsWhileACallerIsActive(t *testing.T) {
 	require.NoError(t, os.Mkdir(stale, 0o755))
 	require.NoError(t, os.Chtimes(stale, old, old))
 
-	end := BeginActiveTempDirUse()
+	end := BeginActiveTempDirUse(dir)
 	defer end()
 
 	removedCh := make(chan int, 1)
@@ -435,11 +436,74 @@ func TestStartPeriodicTempDirSweep_SkipsWhileACallerIsActive(t *testing.T) {
 
 func TestBeginActiveTempDirUse_EndIsIdempotent(t *testing.T) {
 	before := activeTempDirUsers.Load()
-	end := BeginActiveTempDirUse()
+	end := BeginActiveTempDirUse(t.TempDir())
 	assert.Equal(t, before+1, activeTempDirUsers.Load())
 	end()
 	end()
 	assert.Equal(t, before, activeTempDirUsers.Load(), "calling end twice must not double-decrement")
+}
+
+// TestBeginActiveTempDirUse_CrossProcessLeaseVisibleToAnotherHandle is a regression test for the
+// cross-container race CodeRabbit flagged on #669: cmd/http and cmd/sbom-scanner run as separate
+// OS processes sharing the same /tmp volume, so activeTempDirUsers alone (process-local) can't
+// stop one process's sweep from deleting a directory the other is still using. BeginActiveTempDirUse
+// acquires a shared flock alongside its in-process counter; opening the same lock file via an
+// independent *flock.Flock (simulating a second process, since flock semantics are per open file
+// description, not per process) must see it as held for as long as end() hasn't been called.
+func TestBeginActiveTempDirUse_CrossProcessLeaseVisibleToAnotherHandle(t *testing.T) {
+	dir := t.TempDir()
+
+	end := BeginActiveTempDirUse(dir)
+
+	other := flock.New(activeScanLockPath(dir))
+	locked, err := other.TryLock()
+	require.NoError(t, err)
+	assert.False(t, locked, "an independent handle must not be able to take an exclusive lock while BeginActiveTempDirUse's lease is held")
+
+	end()
+
+	locked, err = other.TryLock()
+	require.NoError(t, err)
+	assert.True(t, locked, "an independent handle must be able to take the lock once end() releases the lease")
+	if locked {
+		_ = other.Unlock()
+	}
+}
+
+// TestStartPeriodicTempDirSweep_SkipsForCrossProcessLease is a regression test for the same race:
+// a sweep must be skipped when another process (simulated the same way as above) holds the
+// active-scan lease, even though activeTempDirUsers - this process's own counter - is zero.
+func TestStartPeriodicTempDirSweep_SkipsForCrossProcessLease(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	stale := path.Join(dir, "stereoscope-old")
+	require.NoError(t, os.Mkdir(stale, 0o755))
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	otherProcess := flock.New(activeScanLockPath(dir))
+	locked, err := otherProcess.TryRLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = otherProcess.Unlock() }()
+
+	require.Zero(t, activeTempDirUsers.Load(), "this process must have no active users of its own for the test to isolate the cross-process path")
+
+	removedCh := make(chan int, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, func(removed int, err error) {
+		require.NoError(t, err)
+		removedCh <- removed
+	})
+
+	select {
+	case removed := <-removedCh:
+		t.Fatalf("expected the sweep to be skipped while another process holds the active-scan lease, but onSweep was called with removed=%d", removed)
+	case <-time.After(50 * time.Millisecond):
+		// no sweep happened, as expected
+	}
+	_, statErr := os.Stat(stale)
+	assert.NoError(t, statErr, "the stale dir should survive a sweep skipped due to a cross-process lease holder")
 }
 
 func TestStartPeriodicTempDirSweep_NilOnSweepDoesNotPanic(t *testing.T) {

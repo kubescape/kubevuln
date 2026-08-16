@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -304,7 +305,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// Registered here, not deferred at CreateSBOM's own top level: this closure can outlive
 	// CreateSBOM's return (see the comment below), so the periodic temp-dir sweep must stay
 	// blind to this closure's completion, not to CreateSBOM's.
-	endActiveTempDirUse := tools.BeginActiveTempDirUse()
+	endActiveTempDirUse := tools.BeginActiveTempDirUse(os.TempDir())
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer unlockPullMutex()
 		defer endActiveTempDirUse()
