@@ -2326,10 +2326,10 @@ func TestAPIServerStore_ListSecurityExceptions_DoesNotRepopulateAfterRacingInval
 	}
 
 	done := make(chan struct{})
+	var listErr error
 	go func() {
 		defer close(done)
-		_, _, err := a.GetSecurityExceptions(context.Background(), "ns-a")
-		assert.NoError(t, err)
+		_, _, listErr = a.GetSecurityExceptions(context.Background(), "ns-a")
 	}()
 
 	select {
@@ -2347,6 +2347,7 @@ func TestAPIServerStore_ListSecurityExceptions_DoesNotRepopulateAfterRacingInval
 	close(releaseList)
 	select {
 	case <-done:
+		assert.NoError(t, listErr)
 	case <-time.After(5 * time.Second):
 		t.Fatal("GetSecurityExceptions never returned")
 	}
@@ -2383,10 +2384,10 @@ func TestAPIServerStore_ListClusterSecurityExceptions_DoesNotRepopulateAfterRaci
 	}
 
 	done := make(chan struct{})
+	var listErr error
 	go func() {
 		defer close(done)
-		_, _, err := a.GetSecurityExceptions(context.Background(), "")
-		assert.NoError(t, err)
+		_, _, listErr = a.GetSecurityExceptions(context.Background(), "")
 	}()
 
 	select {
@@ -2400,6 +2401,7 @@ func TestAPIServerStore_ListClusterSecurityExceptions_DoesNotRepopulateAfterRaci
 	close(releaseList)
 	select {
 	case <-done:
+		assert.NoError(t, listErr)
 	case <-time.After(5 * time.Second):
 		t.Fatal("GetSecurityExceptions never returned")
 	}

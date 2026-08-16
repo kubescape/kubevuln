@@ -71,6 +71,7 @@ const (
 	securityExceptionListCacheCleaningInterval = 30 * time.Second
 	securityExceptionListCacheTTL              = 30 * time.Second
 	clusterSecurityExceptionListCacheKey       = "cse"
+	securityExceptionListCacheKeyPrefix        = "se/"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -104,9 +105,10 @@ type securityExceptionCacheEntry struct {
 }
 
 // securityExceptionCacheEntry returns the entry for cacheKey, creating it on first use. Entries
-// are never removed: the number of distinct keys is bounded by the number of namespaces that
-// have ever had SecurityExceptions listed, plus one for the cluster-scoped key, which is small
-// and stable for the life of the process.
+// are never removed, so the key count grows with every distinct namespace that has ever had
+// SecurityExceptions listed, plus one for the cluster-scoped key. Each entry is small, so this
+// is slow growth rather than an urgent leak, but it is not bounded in clusters where namespaces
+// are created and deleted continuously.
 func (a *APIServerStore) securityExceptionCacheEntry(cacheKey string) *securityExceptionCacheEntry {
 	v, _ := a.securityExceptionCacheEntries.LoadOrStore(cacheKey, &securityExceptionCacheEntry{})
 	return v.(*securityExceptionCacheEntry)
@@ -326,7 +328,7 @@ func (a *APIServerStore) invalidateSecurityExceptionCacheForObject(obj interface
 		return
 	}
 	if namespace := u.GetNamespace(); namespace != "" {
-		a.invalidateSecurityExceptionCacheKey("se/" + namespace)
+		a.invalidateSecurityExceptionCacheKey(securityExceptionListCacheKeyPrefix + namespace)
 		return
 	}
 	a.invalidateAllSecurityExceptionCaches()
@@ -351,7 +353,7 @@ func (a *APIServerStore) invalidateAllSecurityExceptionCaches() {
 		return
 	}
 	a.securityExceptionCacheEntries.Range(func(key, _ interface{}) bool {
-		if cacheKey, ok := key.(string); ok && strings.HasPrefix(cacheKey, "se/") {
+		if cacheKey, ok := key.(string); ok && strings.HasPrefix(cacheKey, securityExceptionListCacheKeyPrefix) {
 			a.invalidateSecurityExceptionCacheKey(cacheKey)
 		}
 		return true
@@ -419,13 +421,14 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 // silently re-populate the cache with the pre-change result after the informer had already
 // evicted it — see #733.
 func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, namespace string) ([]sev1beta1.SecurityException, error) {
-	cacheKey := "se/" + namespace
+	cacheKey := securityExceptionListCacheKeyPrefix + namespace
+	var seenGeneration uint64
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(cacheKey); ok {
 			return cached.([]sev1beta1.SecurityException), nil
 		}
+		seenGeneration = a.beginSecurityExceptionCacheRefresh(cacheKey)
 	}
-	seenGeneration := a.beginSecurityExceptionCacheRefresh(cacheKey)
 
 	seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 	if err != nil {
@@ -455,12 +458,13 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 // The write back to the cache after a List() is conditional on no invalidation having raced it -
 // see listSecurityExceptions' and trySetSecurityExceptionCache's doc comments, and #733.
 func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
+	var seenGeneration uint64
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey); ok {
 			return cached.([]sev1beta1.ClusterSecurityException), nil
 		}
+		seenGeneration = a.beginSecurityExceptionCacheRefresh(clusterSecurityExceptionListCacheKey)
 	}
-	seenGeneration := a.beginSecurityExceptionCacheRefresh(clusterSecurityExceptionListCacheKey)
 
 	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
 	if err != nil {
