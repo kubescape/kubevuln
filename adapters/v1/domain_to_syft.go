@@ -77,6 +77,18 @@ func warnConversionErrors[T any](converted []T, errors []error) []T {
 	return converted
 }
 
+func deduplicateErrors(errors []error) []string {
+	errorCounts := make(map[string]int)
+	var errorMessages []string
+	for _, e := range errors {
+		errorCounts[e.Error()] = errorCounts[e.Error()] + 1
+	}
+	for msg, count := range errorCounts {
+		errorMessages = append(errorMessages, fmt.Sprintf("%q occurred %d time(s)", msg, count))
+	}
+	return errorMessages
+}
+
 func toSyftFiles(files []model.File) sbom.Artifacts {
 	ret := sbom.Artifacts{
 		FileMetadata: make(map[file.Coordinates]file.Metadata),
