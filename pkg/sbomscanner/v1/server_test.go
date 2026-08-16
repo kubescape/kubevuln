@@ -693,6 +693,64 @@ func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
 	assert.Empty(t, resp.Status)
 }
 
+// TestCreateSBOM_PullTimeout_ReturnsIncompleteInsteadOfHanging is a regression test for #742: a
+// registry that accepts the connection but never responds to the manifest request used to hang
+// the pull - and the RPC with it - indefinitely, since neither the request context nor any
+// deadline bounded resolveSource's call chain. The mock registry below blocks on the manifest
+// request until the test explicitly releases it, simulating exactly that stalling registry.
+// CreateSBOM must still return, bounded by TimeoutSeconds, well before that release happens.
+func TestCreateSBOM_PullTimeout_ReturnsIncompleteInsteadOfHanging(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Never respond to the manifest request until the test releases it - a connection
+		// that accepts the request but stalls, not one that errors or refuses outright.
+		<-release
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	// close(release) must run before server.Close(), which blocks until the handler above
+	// returns - deferred in this order so it does, since defers run LIFO.
+	defer server.Close()
+	defer close(release)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	type result struct {
+		resp *pb.CreateSBOMResponse
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+			ImageId:         u.Host + "/test-image",
+			ImageTag:        u.Host + "/test-image:latest",
+			Platform:        "linux/amd64",
+			MaxImageSize:    1 << 30,
+			MaxSbomSize:     1 << 30,
+			TimeoutSeconds:  1,
+			InsecureUseHttp: true,
+		})
+		done <- result{resp, err}
+	}()
+
+	select {
+	case r := <-done:
+		require.NoError(t, r.err)
+		require.NotNil(t, r.resp)
+		assert.Equal(t, helpersv1.Incomplete, r.resp.Status, "a stalled pull must surface as Incomplete, the same status a cataloguing timeout already uses")
+		assert.Empty(t, r.resp.ErrorMessage)
+	case <-time.After(10 * time.Second):
+		t.Fatal("CreateSBOM never returned after the pull's TimeoutSeconds elapsed - the pull is not bounded by any deadline")
+	}
+}
+
 // TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft covers the deadline path: deadline.Run
 // does not (and documents that it cannot) stop the work function, and Syft's cataloguers do
 // not observe cancellation, so on timeout the Syft goroutine keeps running and finishes after

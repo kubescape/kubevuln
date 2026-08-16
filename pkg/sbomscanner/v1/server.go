@@ -146,11 +146,24 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		Credentials:           credentials,
 	}
 
-	// Download image from registry
+	// timeout bounds both the pull below and SBOM generation further down, as two independent
+	// windows (not one budget split across both) - matching adapters/v1/syft.go's scanTimeout,
+	// which bounds its own pull and cataloging phases the same way.
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	// Download image from registry, bounded by timeout: a registry that accepts a connection
+	// but then stalls (no error, just no timely response) used to hang this call - and the
+	// caller's scanConcurrency slot with it - indefinitely, since neither the request ctx nor
+	// any deadline reached this pull; the only deadline in this method wrapped generation,
+	// which starts after the pull already returned. See #742.
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
-	src, err := resolveSource(ctx, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
-		// Pulls intentionally run on a detached context (see #421); the request ctx is used only for the registry auth provider inside resolveSource.
-		return tools.RetryWithBackoff(context.Background(), "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
+	ctxWithTimeout, cancelPull := context.WithTimeout(ctx, timeout)
+	defer cancelPull()
+	src, err := resolveSource(ctxWithTimeout, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
+		return tools.RetryWithBackoff(ctxWithTimeout, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
 			ctxWithSize := context.WithValue(retryCtx, image.MaxImageSize, req.MaxImageSize) //nolint:staticcheck // stereoscope requires string context key
 			return syft.GetSource(ctxWithSize, ref,
 				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
@@ -158,6 +171,15 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}, imageID, imageTag, registryOptions)
 
 	switch {
+	// stereoscope/oci-registry wraps deadline errors in a custom error type that does not
+	// implement Unwrap(), so the strings.Contains check is required alongside errors.Is (same
+	// as adapters/v1/syft.go's identical check on its own pull timeout).
+	case err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded")):
+		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
+		logger.L().Warning("image pull timed out", helpers.String("imageID", imageID))
+		return &pb.CreateSBOMResponse{
+			Status: helpersv1.Incomplete,
+		}, nil
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyImageTooLarge, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("Image exceeds size limit",
@@ -212,12 +234,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		resolvedPlatform = formatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant)
 	}
 
-	// Generate SBOM with timeout
+	// Generate SBOM with timeout (reuses the same timeout duration computed above for the
+	// pull, as its own independent window).
 	var syftSBOM *sbom.SBOM
-	timeout := time.Duration(req.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
-	}
 	dl := deadline.New(timeout)
 	// Buffered so the abandoned goroutine below can always publish and exit, even when
 	// nobody is left to receive.
