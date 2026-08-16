@@ -503,3 +503,56 @@ func TestIsOwnActionStatement(t *testing.T) {
 	assert.True(t, isOwnActionStatement(defaultActionStatement, ""))
 	assert.False(t, isOwnActionStatement(upgradeActionStatementPrefix(purl)+"1.30", ""))
 }
+
+// Every ignored match in a manifest came from ApplySecurityExceptions, that being the only
+// thing that writes IgnoredMatches, and Grype is given no VEX documents or ignore rules of
+// its own. A backend-delivered exception policy never goes through buildPolicy, so it
+// carries no sourceKind and its rule carries no SourceKind, which is not grounds for calling
+// the suppression external.
+func TestIgnoredMatchAssessment_AttributesBySource(t *testing.T) {
+	match := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+		},
+	}
+
+	tests := []struct {
+		name  string
+		rules []v1beta1.IgnoreRule
+		want  string
+	}{
+		{
+			name:  "CRD SecurityException",
+			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228", SourceKind: "SecurityException", SourceName: "se/ns/name"}},
+			want:  securityExceptionImpactStatement,
+		},
+		{
+			name:  "cluster-scoped CRD",
+			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228", SourceKind: "ClusterSecurityException", SourceName: "cse/name"}},
+			want:  securityExceptionImpactStatement,
+		},
+		{
+			// What buildIgnoreRule leaves behind for a backend-delivered policy: the
+			// vulnerability id and nothing else.
+			name:  "backend-delivered exception policy",
+			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228"}},
+			want:  cloudExceptionImpactStatement,
+		},
+		{
+			// Grype states its own ignore rules against a package, which buildIgnoreRule
+			// never sets. Nothing produces this today; #387 is what would.
+			name:  "not ours",
+			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228", Package: &v1beta1.IgnoreRulePackage{Name: "tar"}}},
+			want:  externalIgnoreImpactStatement,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ignoredMatchAssessment(v1beta1.IgnoredMatch{Match: match, AppliedIgnoreRules: tt.rules})
+			assert.Equal(t, tt.want, got.impactStatement)
+			assert.Equal(t, v1beta1.Status(vex.StatusNotAffected), got.status,
+				"all of these are suppressions, so the status is unchanged")
+		})
+	}
+}

@@ -3277,7 +3277,10 @@ func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
 	store := NewFakeAPIServerStorage(namespace)
 
 	// Simulate a CVE manifest with two ignored matches:
-	// 1. Grype suppressed a finding natively (no SecurityException)
+	// 1. Suppressed by a backend-delivered exception policy. Those never go through
+	//    buildPolicy, so they carry no sourceKind and the rule buildIgnoreRule writes for
+	//    them holds the vulnerability id and nothing else. It is not a Grype-native ignore:
+	//    Grype states those against a package, which buildIgnoreRule never sets.
 	// 2. Suppressed by a genuine SecurityException
 	cveManifest := domain.CVEManifest{
 		Name: "deployment-my-app",
@@ -3315,17 +3318,21 @@ func TestStoreVEX_ExternalVEXMasking(t *testing.T) {
 	vexContainer, err := store.StorageClient.OpenVulnerabilityExchangeContainers(namespace).Get(ctx, cveManifest.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 
-	var foundExternal, foundCRD bool
+	var foundPolicy, foundCRD bool
 	for _, stmt := range vexContainer.Spec.Statements {
 		if stmt.Vulnerability.Name == "CVE-2023-1234" {
-			foundExternal = true
-			assert.Equal(t, "Vulnerability was ignored by an external VEX document or scanner configuration", stmt.ImpactStatement)
+			foundPolicy = true
+			// Still the point of this test: a suppression with no CRD provenance must not
+			// be attributed to a SecurityException. It is attributed to the policy that
+			// actually made it rather than to an external document.
+			assert.Equal(t, cloudExceptionImpactStatement, stmt.ImpactStatement)
+			assert.NotEqual(t, securityExceptionImpactStatement, stmt.ImpactStatement)
 		} else if stmt.Vulnerability.Name == "CVE-2023-5678" {
 			foundCRD = true
-			assert.Equal(t, "Vulnerability was ignored by a SecurityException", stmt.ImpactStatement)
+			assert.Equal(t, securityExceptionImpactStatement, stmt.ImpactStatement)
 		}
 	}
-	assert.True(t, foundExternal, "Should have found external VEX statement")
+	assert.True(t, foundPolicy, "Should have found the exception-policy statement")
 	assert.True(t, foundCRD, "Should have found CRD SecurityException statement")
 }
 
