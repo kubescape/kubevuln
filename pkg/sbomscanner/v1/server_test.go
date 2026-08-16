@@ -727,6 +727,7 @@ func TestCreateSBOM_PullTimeout_ReturnsIncompleteInsteadOfHanging(t *testing.T) 
 		err  error
 	}
 	done := make(chan result, 1)
+	start := time.Now()
 	go func() {
 		resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
 			ImageId:         u.Host + "/test-image",
@@ -742,11 +743,17 @@ func TestCreateSBOM_PullTimeout_ReturnsIncompleteInsteadOfHanging(t *testing.T) 
 
 	select {
 	case r := <-done:
+		// Bounds the response to the configured 1s pull timeout plus CI scheduling
+		// tolerance, not just "eventually" - a regression that returns after several
+		// seconds instead of hanging forever would otherwise still pass.
+		assert.Less(t, time.Since(start), 4*time.Second, "CreateSBOM should return shortly after the pull's TimeoutSeconds, not after an unrelated delay")
 		require.NoError(t, r.err)
 		require.NotNil(t, r.resp)
 		assert.Equal(t, helpersv1.Incomplete, r.resp.Status, "a stalled pull must surface as Incomplete, the same status a cataloguing timeout already uses")
 		assert.Empty(t, r.resp.ErrorMessage)
 	case <-time.After(10 * time.Second):
+		// Deadlock fallback only, well above the 4s bound asserted above: if the pull
+		// truly never returns, fail with a clear message instead of hanging the suite.
 		t.Fatal("CreateSBOM never returned after the pull's TimeoutSeconds elapsed - the pull is not bounded by any deadline")
 	}
 }
