@@ -5,9 +5,11 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -313,6 +315,205 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 func TestCleanupStaleTempDirs_NonexistentDir(t *testing.T) {
 	_, err := CleanupStaleTempDirs(path.Join(t.TempDir(), "does-not-exist"), "stereoscope-", time.Hour)
 	require.Error(t, err)
+}
+
+func TestStartPeriodicTempDirSweep_RunsAnImmediateSweepSynchronously(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	stale := path.Join(dir, "stereoscope-old")
+	require.NoError(t, os.Mkdir(stale, 0o755))
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	var mu sync.Mutex
+	var calls []int
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	// A long interval means only the immediate, synchronous-before-return sweep can have run
+	// by the time this call returns - if it hadn't, the assertions below would be racy.
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, func(removed int, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		require.NoError(t, err)
+		calls = append(calls, removed)
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []int{1}, calls)
+	_, statErr := os.Stat(stale)
+	assert.True(t, os.IsNotExist(statErr), "the stale dir present before startup should be reclaimed by the immediate sweep")
+}
+
+func TestStartPeriodicTempDirSweep_ReclaimsDirsLeakedAfterStartup(t *testing.T) {
+	dir := t.TempDir()
+	stop := make(chan struct{})
+	defer close(stop)
+
+	removedCh := make(chan int, 8)
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", 10*time.Millisecond, 10*time.Millisecond, func(removed int, err error) {
+		require.NoError(t, err)
+		removedCh <- removed
+	})
+
+	// the immediate sweep runs against an empty dir
+	require.Equal(t, 0, <-removedCh)
+
+	// simulate a leak from an ordinary (non-crash) failure occurring while this process is
+	// already running - e.g. a registry pull whose temp dir is created before an error path
+	// returns with nothing left to clean it up. A one-time startup sweep would never reclaim
+	// this; it must be caught by a later periodic tick.
+	old := time.Now().Add(-time.Hour)
+	leaked := path.Join(dir, "stereoscope-leaked-midflight")
+	require.NoError(t, os.Mkdir(leaked, 0o755))
+	require.NoError(t, os.Chtimes(leaked, old, old))
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(leaked)
+		return os.IsNotExist(err)
+	}, time.Second, 5*time.Millisecond, "a dir leaked after startup should be reclaimed by a subsequent periodic sweep")
+}
+
+func TestStartPeriodicTempDirSweep_StopsTickingOnceStopIsClosed(t *testing.T) {
+	dir := t.TempDir()
+	stop := make(chan struct{})
+
+	var mu sync.Mutex
+	calls := 0
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", 10*time.Millisecond, 10*time.Millisecond, func(int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+	})
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls >= 3
+	}, time.Second, 5*time.Millisecond, "expected several periodic sweeps before stopping")
+
+	close(stop)
+	mu.Lock()
+	observedAtStop := calls
+	mu.Unlock()
+
+	// long enough for several more ticks to have fired had the goroutine kept running
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, observedAtStop, calls, "no sweep should run after stop is closed")
+}
+
+func TestStartPeriodicTempDirSweep_SkipsWhileACallerIsActive(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	stale := path.Join(dir, "stereoscope-old")
+	require.NoError(t, os.Mkdir(stale, 0o755))
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	end := BeginActiveTempDirUse(dir)
+	defer end()
+
+	removedCh := make(chan int, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, func(removed int, err error) {
+		require.NoError(t, err)
+		removedCh <- removed
+	})
+
+	select {
+	case removed := <-removedCh:
+		t.Fatalf("expected the sweep to be skipped while a caller is active, but onSweep was called with removed=%d", removed)
+	case <-time.After(50 * time.Millisecond):
+		// no sweep happened, as expected
+	}
+	_, statErr := os.Stat(stale)
+	assert.NoError(t, statErr, "the stale dir should survive a sweep skipped due to an active caller")
+}
+
+func TestBeginActiveTempDirUse_EndIsIdempotent(t *testing.T) {
+	before := activeTempDirUsers.Load()
+	end := BeginActiveTempDirUse(t.TempDir())
+	assert.Equal(t, before+1, activeTempDirUsers.Load())
+	end()
+	end()
+	assert.Equal(t, before, activeTempDirUsers.Load(), "calling end twice must not double-decrement")
+}
+
+// TestBeginActiveTempDirUse_CrossProcessLeaseVisibleToAnotherHandle is a regression test for the
+// cross-container race CodeRabbit flagged on #669: cmd/http and cmd/sbom-scanner run as separate
+// OS processes sharing the same /tmp volume, so activeTempDirUsers alone (process-local) can't
+// stop one process's sweep from deleting a directory the other is still using. BeginActiveTempDirUse
+// acquires a shared flock alongside its in-process counter; opening the same lock file via an
+// independent *flock.Flock (simulating a second process, since flock semantics are per open file
+// description, not per process) must see it as held for as long as end() hasn't been called.
+func TestBeginActiveTempDirUse_CrossProcessLeaseVisibleToAnotherHandle(t *testing.T) {
+	dir := t.TempDir()
+
+	end := BeginActiveTempDirUse(dir)
+
+	other := flock.New(activeScanLockPath(dir))
+	locked, err := other.TryLock()
+	require.NoError(t, err)
+	assert.False(t, locked, "an independent handle must not be able to take an exclusive lock while BeginActiveTempDirUse's lease is held")
+
+	end()
+
+	locked, err = other.TryLock()
+	require.NoError(t, err)
+	assert.True(t, locked, "an independent handle must be able to take the lock once end() releases the lease")
+	if locked {
+		_ = other.Unlock()
+	}
+}
+
+// TestStartPeriodicTempDirSweep_SkipsForCrossProcessLease is a regression test for the same race:
+// a sweep must be skipped when another process (simulated the same way as above) holds the
+// active-scan lease, even though activeTempDirUsers - this process's own counter - is zero.
+func TestStartPeriodicTempDirSweep_SkipsForCrossProcessLease(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * time.Hour)
+	stale := path.Join(dir, "stereoscope-old")
+	require.NoError(t, os.Mkdir(stale, 0o755))
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	otherProcess := flock.New(activeScanLockPath(dir))
+	locked, err := otherProcess.TryRLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = otherProcess.Unlock() }()
+
+	require.Zero(t, activeTempDirUsers.Load(), "this process must have no active users of its own for the test to isolate the cross-process path")
+
+	removedCh := make(chan int, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, func(removed int, err error) {
+		require.NoError(t, err)
+		removedCh <- removed
+	})
+
+	select {
+	case removed := <-removedCh:
+		t.Fatalf("expected the sweep to be skipped while another process holds the active-scan lease, but onSweep was called with removed=%d", removed)
+	case <-time.After(50 * time.Millisecond):
+		// no sweep happened, as expected
+	}
+	_, statErr := os.Stat(stale)
+	assert.NoError(t, statErr, "the stale dir should survive a sweep skipped due to a cross-process lease holder")
+}
+
+func TestStartPeriodicTempDirSweep_NilOnSweepDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	stop := make(chan struct{})
+	defer close(stop)
+
+	assert.NotPanics(t, func() {
+		StartPeriodicTempDirSweep(stop, dir, "stereoscope-", time.Hour, time.Hour, nil)
+	})
 }
 
 // LabelsFromImageID drops any label that fails DNS1123 validation, so a value SanitizeLabel

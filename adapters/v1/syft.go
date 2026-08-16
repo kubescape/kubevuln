@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
-	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging"
@@ -179,16 +179,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		return domainSBOM, err
 	}
 
-	// prepare temporary directory for image download
-	t := file.NewTempDirGenerator("stereoscope")
-	defer func(t *file.TempDirGenerator) {
-		err := t.Cleanup()
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to cleanup temp dir", helpers.Error(err),
-				helpers.String("imageID", imageID))
-		}
-	}(t)
-
 	// download image
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 
@@ -312,8 +302,13 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// or failure, late if the deadline fired first - is what makes pullMutex serialize the
 	// disk-touching work itself, not just the synchronous portion of the call.
 	dl := deadline.New(s.scanTimeout)
+	// Registered here, not deferred at CreateSBOM's own top level: this closure can outlive
+	// CreateSBOM's return (see the comment below), so the periodic temp-dir sweep must stay
+	// blind to this closure's completion, not to CreateSBOM's.
+	endActiveTempDirUse := tools.BeginActiveTempDirUse(os.TempDir())
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer unlockPullMutex()
+		defer endActiveTempDirUse()
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {

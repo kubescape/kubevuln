@@ -35,6 +35,22 @@ func TestLoadConfigNotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// A non-positive ScanTimeout reaches tools.StartPeriodicTempDirSweep as both the sweep
+// interval and staleness threshold, which hands it to time.NewTicker: NewTicker panics on a
+// non-positive duration. LoadConfig must reject this at startup instead of letting the panic
+// happen later.
+func TestLoadConfigRejectsNonPositiveScanTimeout(t *testing.T) {
+	for _, v := range []string{"0", "-1s"} {
+		t.Run(v, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv("SCANTIMEOUT", v)
+			_, err := LoadConfig("testdata")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "scanTimeout")
+		})
+	}
+}
+
 func TestLoadBackendServicesConfig(t *testing.T) {
 	services, err := LoadBackendServicesConfig("testdata", "")
 	assert.NoError(t, err)

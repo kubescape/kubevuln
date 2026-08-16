@@ -65,6 +65,7 @@ var sourceResolutionCounter metric.Int64Counter
 var registryAuthCacheCounter metric.Int64Counter
 var singleflightHitsCounter metric.Int64Counter
 var retryAttemptsCounter metric.Int64Counter
+var tempDirSweepCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -84,6 +85,7 @@ type Metrics struct {
 	SourceResolutionCounter   metric.Int64Counter
 	SingleflightHitsCounter   metric.Int64Counter
 	RetryAttemptsCounter      metric.Int64Counter
+	TempDirSweepCounter       metric.Int64Counter
 }
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
@@ -209,12 +211,21 @@ func New() (*Metrics, error) {
 		return nil, err
 	}
 
+	tempDirSweepMetric, err := meter.Int64Counter(
+		"kubevuln_temp_dir_sweep_removed_total",
+		metric.WithDescription("Total number of stale stereoscope temp directories removed by the periodic sweep, by component"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	recorderMu.Lock()
 	fallbackCounter = scanFallbackCounter
 	sourceResolutionCounter = sourceResolutionMetric
 	registryAuthCacheCounter = registryAuthCacheMetric
 	singleflightHitsCounter = singleflightHitsMetric
 	retryAttemptsCounter = retryAttemptsMetric
+	tempDirSweepCounter = tempDirSweepMetric
 	recorderMu.Unlock()
 
 	return &Metrics{
@@ -231,6 +242,7 @@ func New() (*Metrics, error) {
 		SourceResolutionCounter:   sourceResolutionMetric,
 		SingleflightHitsCounter:   singleflightHitsMetric,
 		RetryAttemptsCounter:      retryAttemptsMetric,
+		TempDirSweepCounter:       tempDirSweepMetric,
 	}, nil
 }
 
@@ -326,5 +338,23 @@ func RecordRetryAttempt(ctx context.Context, operation, outcome string) {
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("operation", operation),
 		attribute.String("outcome", outcome),
+	))
+}
+
+// RecordTempDirSweep reports how many stale temp directories a periodic sweep removed for
+// component (ComponentInProcess/ComponentSidecar). A steady, non-zero count is itself a signal
+// worth alerting on: it means leaks are occurring at least as fast as the sweep interval.
+func RecordTempDirSweep(ctx context.Context, component string, removed int) {
+	if removed <= 0 {
+		return
+	}
+	recorderMu.RLock()
+	counter := tempDirSweepCounter
+	recorderMu.RUnlock()
+	if counter == nil {
+		return
+	}
+	counter.Add(ctx, int64(removed), metric.WithAttributes(
+		attribute.String("component", component),
 	))
 }

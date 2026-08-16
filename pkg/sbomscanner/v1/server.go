@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
-	"github.com/anchore/stereoscope/pkg/file"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
@@ -84,7 +84,7 @@ func NewScannerServer() pb.SBOMScannerServer {
 }
 
 // CreateSBOM handles one scan per call, with no state shared across concurrent calls: each
-// invocation downloads into its own temp dir (via its own file.NewTempDirGenerator) and builds
+// invocation downloads into its own temp dir (managed internally by stereoscope) and builds
 // its own SBOM from its own source. s.version is set once in NewScannerServer and never
 // mutated, so it's safe to read concurrently without a lock. Do not add a mutex/semaphore
 // around this method — a previous version serialized the whole RPC (pull + generation) behind
@@ -145,15 +145,6 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		InsecureUseHTTP:       req.InsecureUseHttp,
 		Credentials:           credentials,
 	}
-
-	// Prepare temp dir for stereoscope
-	t := file.NewTempDirGenerator("stereoscope")
-	defer func() {
-		if err := t.Cleanup(); err != nil {
-			logger.L().Warning("failed to cleanup temp dir", helpers.Error(err),
-				helpers.String("imageID", imageID))
-		}
-	}()
 
 	// Download image from registry
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
@@ -231,7 +222,12 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Buffered so the abandoned goroutine below can always publish and exit, even when
 	// nobody is left to receive.
 	generated := make(chan *sbom.SBOM, 1)
+	// Registered here rather than deferred at the handler's own top level: this closure can
+	// outlive the handler's return (see the comment below), so the periodic temp-dir sweep
+	// must stay blind to this closure's completion, not the handler's.
+	endActiveTempDirUse := tools.BeginActiveTempDirUse(os.TempDir())
 	err = dl.Run(func(stopper <-chan struct{}) error {
+		defer endActiveTempDirUse()
 		defer func(src source.Source) {
 			if err := src.Close(); err != nil {
 				logger.L().Warning("failed to close source", helpers.Error(err),

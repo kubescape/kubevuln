@@ -152,6 +152,14 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	// cmd/http passes ScanTimeout straight through to
+	// tools.StartPeriodicTempDirSweep as both the sweep interval and staleness threshold,
+	// which hands it to time.NewTicker: NewTicker panics on a non-positive duration, which
+	// would crash the process at startup instead of failing config validation cleanly.
+	if config.ScanTimeout <= 0 {
+		return Config{}, fmt.Errorf("scanTimeout must be positive, got %s", config.ScanTimeout)
+	}
+
 	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
 	// the legacy useDefaultMatchers boolean is set, derive the mode from it
