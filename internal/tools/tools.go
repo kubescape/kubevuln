@@ -177,21 +177,22 @@ func BeginActiveTempDirUse(dir string) (end func()) {
 	}
 }
 
-// crossProcessScanInProgress reports whether another process holds the shared lock on dir's
-// active-scan lease acquired by BeginActiveTempDirUse, i.e. is mid-use there. A failure to
+// acquireSweepLease takes the exclusive side of dir's active-scan lease and returns a release
+// func. It reports false when another process holds the shared lease acquired by
+// BeginActiveTempDirUse, i.e. is mid-use there. The lease is held for the whole sweep pass, so a
+// concurrent BeginActiveTempDirUse cannot start between the check and the removal. A failure to
 // determine this (e.g. dir does not exist yet) is treated as "no cross-process information," not
 // as "busy" - activeTempDirUsers already covers this process's own in-flight uses regardless.
-func crossProcessScanInProgress(dir string) bool {
+func acquireSweepLease(dir string) (release func(), ok bool) {
 	fl := flock.New(activeScanLockPath(dir))
 	locked, err := fl.TryLock()
 	if err != nil {
-		return false
+		return func() {}, true
 	}
 	if !locked {
-		return true
+		return func() {}, false
 	}
-	_ = fl.Unlock()
-	return false
+	return func() { _ = fl.Unlock() }, true
 }
 
 // CleanupStaleTempDirs removes directories under dir whose names start with prefix and whose
@@ -249,7 +250,7 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 // traffic can keep the counter above zero indefinitely, deferring sweeps beyond one interval.
 // This only widens the reclaim window under continuous load; it never leaves a leaked dir
 // unreclaimed forever, since the sweep still runs as soon as the process has an idle gap. The
-// same applies across processes sharing dir, via crossProcessScanInProgress.
+// same applies across processes sharing dir, via acquireSweepLease.
 func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderThan, interval time.Duration, onSweep func(removed int, err error)) {
 	sweep := func() {
 		if activeTempDirUsers.Load() > 0 {
@@ -258,12 +259,14 @@ func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderTh
 			// Skip this pass entirely and let the next tick re-check.
 			return
 		}
-		if crossProcessScanInProgress(dir) {
+		release, ok := acquireSweepLease(dir)
+		if !ok {
 			// Another process sharing dir (see activeTempDirUsers' doc comment) is mid-use, per
 			// the lease acquired in its own BeginActiveTempDirUse call. Same reasoning as above,
 			// just visible across the process boundary rather than within this one.
 			return
 		}
+		defer release()
 		removed, err := CleanupStaleTempDirs(dir, prefix, olderThan)
 		if onSweep != nil {
 			onSweep(removed, err)
