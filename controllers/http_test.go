@@ -1288,12 +1288,15 @@ func TestHTTPController_ScanCP_InvalidRequest(t *testing.T) {
 		scanService: services.NewMockScanService(true),
 		workerPool:  workerpool.New(1),
 	}
+	defer c.Shutdown(5 * time.Second)
+
 	router := gin.Default()
 	path := "/v1/scanApplicationProfile"
 	router.POST(path, c.ScanCP)
 
 	file, err := os.Open("../api/v1/testdata/scan-invalid.yaml")
 	require.NoError(t, err)
+	defer file.Close()
 	req, _ := http.NewRequest("POST", path, file)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
