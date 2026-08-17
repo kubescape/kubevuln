@@ -177,28 +177,39 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
+	h.runTrackedScan(bgCtx, newScan.JobID, "generateSBOM", h.scanService.GenerateSBOM,
+		"service error - GenerateSBOM",
+		helpers.String("imageSlug", newScan.ImageSlug),
+		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
+		helpers.String("imageHash", newScan.ImageHash))
+}
+
+// runTrackedScan submits scan to the worker pool and reports its result to both the scan
+// metrics and the status store. GenerateSBOM, ScanCVE and ScanRegistry all report the same
+// way, differing only in the endpoint label, the service call and the fields on the error
+// log line, which is what errMsg and errDetails carry.
+//
+// ScanCP keeps its own copy: ErrPartialContainerProfile is a third outcome there, recorded
+// as "partial" for the metric while still marking the job succeeded, and it has no
+// equivalent in the other three.
+func (h *HTTPController) runTrackedScan(bgCtx context.Context, jobID, endpoint string, scan func(context.Context) error, errMsg string, errDetails ...helpers.IDetails) {
 	h.workerPool.Submit(func() {
-		if !h.claimTrackedJob(newScan.JobID) {
+		if !h.claimTrackedJob(jobID) {
 			return
 		}
 		start := time.Now()
-		err = h.scanService.GenerateSBOM(bgCtx)
+		err := scan(bgCtx)
 		outcome := "success"
 		if err != nil {
 			outcome = "error"
 		}
-		h.recordScan(bgCtx, "generateSBOM", start, outcome, err)
+		h.recordScan(bgCtx, endpoint, start, outcome, err)
 		if err != nil {
-			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
-		} else {
-			h.ensureStatuses().markSucceeded(newScan.JobID)
+			h.ensureStatuses().markFailed(jobID, scanFailureReason(outcome, err))
+			logger.L().Ctx(bgCtx).Error(errMsg, append([]helpers.IDetails{helpers.Error(err)}, errDetails...)...)
+			return
 		}
-		if err != nil {
-			logger.L().Ctx(bgCtx).Error("service error - GenerateSBOM", helpers.Error(err),
-				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-				helpers.String("imageHash", newScan.ImageHash))
-		}
+		h.ensureStatuses().markSucceeded(jobID)
 	})
 }
 
@@ -335,30 +346,12 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
-	h.workerPool.Submit(func() {
-		if !h.claimTrackedJob(newScan.JobID) {
-			return
-		}
-		start := time.Now()
-		err = h.scanService.ScanCVE(bgCtx)
-		outcome := "success"
-		if err != nil {
-			outcome = "error"
-		}
-		h.recordScan(bgCtx, "scanCVE", start, outcome, err)
-		if err != nil {
-			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
-		} else {
-			h.ensureStatuses().markSucceeded(newScan.JobID)
-		}
-		if err != nil {
-			logger.L().Ctx(bgCtx).Error("service error - ScanCVE", helpers.Error(err),
-				helpers.String("wlid", newScan.Wlid),
-				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-				helpers.String("imageHash", newScan.ImageHash))
-		}
-	})
+	h.runTrackedScan(bgCtx, newScan.JobID, "scanCVE", h.scanService.ScanCVE,
+		"service error - ScanCVE",
+		helpers.String("wlid", newScan.Wlid),
+		helpers.String("imageSlug", newScan.ImageSlug),
+		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
+		helpers.String("imageHash", newScan.ImageHash))
 }
 
 // validationStatusCode maps a validation error to the HTTP status code that best
@@ -433,29 +426,11 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
-	h.workerPool.Submit(func() {
-		if !h.claimTrackedJob(newScan.JobID) {
-			return
-		}
-		start := time.Now()
-		err = h.scanService.ScanRegistry(bgCtx)
-		outcome := "success"
-		if err != nil {
-			outcome = "error"
-		}
-		h.recordScan(bgCtx, "scanRegistry", start, outcome, err)
-		if err != nil {
-			h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason(outcome, err))
-		} else {
-			h.ensureStatuses().markSucceeded(newScan.JobID)
-		}
-		if err != nil {
-			logger.L().Ctx(bgCtx).Error("service error - ScanRegistry", helpers.Error(err),
-				helpers.String("imageSlug", newScan.ImageSlug),
-				helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-				helpers.String("imageHash", newScan.ImageHash))
-		}
-	})
+	h.runTrackedScan(bgCtx, newScan.JobID, "scanRegistry", h.scanService.ScanRegistry,
+		"service error - ScanRegistry",
+		helpers.String("imageSlug", newScan.ImageSlug),
+		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
+		helpers.String("imageHash", newScan.ImageHash))
 }
 
 // registryScanCommandToScanCommand converts a RegistryScanCommand into a domain.ScanCommand, populating normalized image reference, image hash, and image slug.
