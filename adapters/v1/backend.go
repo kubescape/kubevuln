@@ -158,11 +158,17 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 				return nil, backoff.Permanent(retryErr)
 			}
 			if wait, ok := parseRetryAfter(resp); ok {
-				if wait > 0 {
-					wait = wait.Round(time.Second)
-					if wait == 0 {
-						wait = time.Second
-					}
+				// Rounded because backoff.RetryAfter takes whole seconds, and floored at one
+				// because a zero wait is worse than no header at all: backoff resets its
+				// interval whenever it sees a RetryAfterError, so a zero one retries
+				// immediately with no backoff left, for the whole remaining budget. Zero
+				// arrives from Retry-After: 0 and from a date-form header that has already
+				// passed, which a few seconds of clock skew is enough to produce, and this
+				// path retries 429, so the request being throttled is the one that would
+				// spin against a backend already asking it to slow down.
+				wait = wait.Round(time.Second)
+				if wait <= 0 {
+					wait = time.Second
 				}
 				return nil, backoff.RetryAfter(int(wait.Seconds()))
 			}

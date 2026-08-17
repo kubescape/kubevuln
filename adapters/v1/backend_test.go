@@ -1524,3 +1524,42 @@ func TestHttpPostWithContext_HonorsRetryAfter(t *testing.T) {
 		"should have waited close to the requested 1s, not the default ~500ms backoff interval")
 	assert.Less(t, elapsed, 5*time.Second, "should not have waited far longer than requested")
 }
+
+// A Retry-After of zero used to be honoured literally. backoff resets its interval whenever
+// it sees a RetryAfterError, so a zero one left no backoff at all and the retry spun for the
+// rest of the budget: measured at roughly 25,000 requests in two seconds against about three
+// with ordinary backoff. Zero arrives from an explicit "0" and from a date-form header that
+// has already passed, which a few seconds of clock skew produces on its own, and this path
+// retries 429, so the request being throttled was the one that would spin.
+func TestHttpPostWithContext_ZeroRetryAfterDoesNotSpin(t *testing.T) {
+	tests := []struct {
+		name   string
+		header func() string
+	}{
+		{"explicit zero", func() string { return "0" }},
+		{"date already passed", func() string {
+			return time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&attempts, 1)
+				w.Header().Set("Retry-After", tt.header())
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer server.Close()
+
+			_, err := httpPostWithContext(context.Background(), server.Client(), server.URL, nil, nil, 3*time.Second)
+			require.Error(t, err, "the server never succeeds, so the budget should be spent and give up")
+
+			got := atomic.LoadInt32(&attempts)
+			// one second floor over a three second budget, so a handful of attempts. the
+			// bound is loose on purpose: what it rules out is the thousands the hot loop made.
+			assert.LessOrEqual(t, got, int32(10),
+				"a zero Retry-After must still back off, got %d attempts", got)
+			assert.GreaterOrEqual(t, got, int32(2), "should still have retried at least once")
+		})
+	}
+}
