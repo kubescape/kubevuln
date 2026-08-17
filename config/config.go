@@ -101,8 +101,8 @@ func LoadConfig(path string) (Config, error) {
 	// maxQueueDepth bounds how many scans HTTPController will accept but not yet finish
 	// (queued or running) before rejecting new requests instead of queuing them (see #748:
 	// the underlying workerpool.Submit never blocks and its queue is otherwise unbounded).
-	// 0 preserves the pre-existing unbounded behavior, so this ships without changing
-	// anyone's runtime behavior until they opt in.
+	// 0 (or less) preserves the pre-existing unbounded behavior, so this ships without
+	// changing anyone's runtime behavior until they opt in.
 	v.SetDefault("maxQueueDepth", 0)
 	v.SetDefault("scanTimeout", 5*time.Minute)
 	v.SetDefault("scannerReadinessTimeout", 60*time.Second)

@@ -37,12 +37,14 @@ type HTTPController struct {
 	statusesOnce sync.Once
 
 	// maxQueueDepth bounds the number of scans tryAdmit will let through; see
-	// WithMaxQueueDepth. Zero (the default) means unbounded.
+	// WithMaxQueueDepth. Zero (the default) or a negative value means unbounded.
 	maxQueueDepth int
 	// pending counts scans currently accepted but not yet finished (queued or running),
 	// guarded against maxQueueDepth by tryAdmit/release below. Unused when maxQueueDepth
-	// is zero.
-	pending atomic.Int32
+	// is zero. int64, not int32: comparing against int64(h.maxQueueDepth) instead of
+	// narrowing maxQueueDepth into an int32 avoids the wraparound a large configured
+	// value would otherwise cause on a 64-bit build (int is 64 bits there).
+	pending atomic.Int64
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -109,9 +111,10 @@ func (h *HTTPController) tryAdmit() bool {
 	if h.maxQueueDepth <= 0 {
 		return true
 	}
+	limit := int64(h.maxQueueDepth)
 	for {
 		current := h.pending.Load()
-		if current >= int32(h.maxQueueDepth) { // #nosec G115 -- maxQueueDepth is operator-configured, not attacker-controlled
+		if current >= limit {
 			return false
 		}
 		if h.pending.CompareAndSwap(current, current+1) {

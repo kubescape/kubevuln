@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1108,6 +1109,16 @@ func TestHTTPController_TryAdmitRelease(t *testing.T) {
 				require.True(t, h.tryAdmit(), "depth=%d", depth)
 			}
 		}
+	})
+
+	// A depth above math.MaxInt32 must not be admittable at all: an int32-narrowed limit
+	// wraps negative, so an unguarded comparison would make every admission attempt read
+	// pending (0) as already past the limit and reject unconditionally, on a 64-bit build
+	// where int is 64 bits.
+	t.Run("depth above math.MaxInt32 does not wrap and still admits", func(t *testing.T) {
+		h := (&HTTPController{}).WithMaxQueueDepth(math.MaxInt32 + 1)
+		require.True(t, h.tryAdmit(), "a depth above math.MaxInt32 must still admit, not wrap negative and reject everything")
+		assert.EqualValues(t, 1, h.pending.Load())
 	})
 }
 
