@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -558,6 +561,7 @@ func TestHTTPController_GenerateSBOM_EmptyJobIDStillRuns(t *testing.T) {
 
 func TestValidationStatusCode(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, validationStatusCode(domain.ErrTooManyRequests))
+	assert.Equal(t, http.StatusServiceUnavailable, validationStatusCode(domain.ErrQueueFull))
 	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMissingCpInfo))
 	assert.Equal(t, http.StatusBadRequest, validationStatusCode(domain.ErrMockError))
 }
@@ -1068,4 +1072,211 @@ func TestHTTPController_NoValueReceiverMethods(t *testing.T) {
 		offenders = append(offenders, valueType.Method(i).Name)
 	}
 	assert.Empty(t, offenders, "these take a value receiver and so copy the sync.Once: %v", offenders)
+}
+
+// TestHTTPController_TryAdmitRelease exercises tryAdmit/release directly (regression
+// coverage for #748: workerpool.Submit never blocks and its queue is otherwise unbounded, so
+// this pair is the only thing standing between a request burst and unbounded memory growth).
+func TestHTTPController_TryAdmitRelease(t *testing.T) {
+	t.Run("unbounded by default", func(t *testing.T) {
+		h := &HTTPController{}
+		for range 1000 {
+			require.True(t, h.tryAdmit())
+		}
+		// release is a no-op when unbounded: it must not panic or drive pending negative.
+		h.release()
+		assert.EqualValues(t, 0, h.pending.Load())
+	})
+
+	t.Run("bounded rejects at capacity and admits again after release", func(t *testing.T) {
+		h := (&HTTPController{}).WithMaxQueueDepth(2)
+
+		require.True(t, h.tryAdmit())
+		require.True(t, h.tryAdmit())
+		assert.False(t, h.tryAdmit(), "a third admission must be rejected once at capacity")
+		assert.EqualValues(t, 2, h.pending.Load())
+
+		h.release()
+		assert.EqualValues(t, 1, h.pending.Load())
+		assert.True(t, h.tryAdmit(), "a slot freed by release must be admittable again")
+		assert.EqualValues(t, 2, h.pending.Load())
+	})
+
+	t.Run("non-positive depth means unbounded", func(t *testing.T) {
+		for _, depth := range []int{0, -1} {
+			h := (&HTTPController{}).WithMaxQueueDepth(depth)
+			for range 100 {
+				require.True(t, h.tryAdmit(), "depth=%d", depth)
+			}
+		}
+	})
+
+	// A depth above math.MaxInt32 must not be admittable at all: an int32-narrowed limit
+	// wraps negative, so an unguarded comparison would make every admission attempt read
+	// pending (0) as already past the limit and reject unconditionally, on a 64-bit build
+	// where int is 64 bits.
+	t.Run("depth above math.MaxInt32 does not wrap and still admits", func(t *testing.T) {
+		h := (&HTTPController{}).WithMaxQueueDepth(math.MaxInt32 + 1)
+		require.True(t, h.tryAdmit(), "a depth above math.MaxInt32 must still admit, not wrap negative and reject everything")
+		assert.EqualValues(t, 1, h.pending.Load())
+	})
+}
+
+// TestHTTPController_TryAdmitNoOvershootUnderConcurrency proves the CAS loop in tryAdmit
+// admits exactly maxQueueDepth callers when many race it at once, not more (an unguarded
+// check-then-act against pending could overshoot) and not fewer (a buggy CAS could starve a
+// caller that should have been admitted).
+func TestHTTPController_TryAdmitNoOvershootUnderConcurrency(t *testing.T) {
+	const depth = 10
+	const racers = 200
+
+	h := (&HTTPController{}).WithMaxQueueDepth(depth)
+
+	var admitted atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(racers)
+	for range racers {
+		go func() {
+			defer wg.Done()
+			<-start
+			if h.tryAdmit() {
+				admitted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.EqualValues(t, depth, admitted.Load())
+	assert.EqualValues(t, depth, h.pending.Load())
+}
+
+// TestHTTPController_GenerateSBOM_QueueFull is the HTTP-level regression test for #748:
+// once the controller is at its configured maxQueueDepth, a new scan request must be
+// rejected with 503/ErrQueueFull instead of being queued, and a slot freed by a finished
+// job must be usable by the next request.
+func TestHTTPController_GenerateSBOM_QueueFull(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	// Simulate one job already occupying the controller's only admission slot -- the same
+	// state a real in-flight scan would leave pending in, without needing to synchronize
+	// against a background goroutine.
+	require.True(t, c.tryAdmit())
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+
+	// Freeing the slot must let the next request through.
+	c.release()
+
+	file2, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req2, _ := http.NewRequest("POST", "/v1/generateSBOM", file2)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+}
+
+// TestHTTPController_ScanCP_QueueFull mirrors TestHTTPController_GenerateSBOM_QueueFull for
+// ScanCP, which submits to the worker pool via its own closure rather than runTrackedScan
+// (see runTrackedScan's doc comment) and so needs its own regression coverage that it
+// respects admission control the same way.
+func TestHTTPController_ScanCP_QueueFull(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	require.True(t, c.tryAdmit())
+
+	router := gin.Default()
+	router.POST("/v1/scanCP", c.ScanCP)
+
+	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(`{
+		"wlid": "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+		"args": {"name": "daemonset-kube-proxy", "namespace": "kube-system"}
+	}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+}
+
+// TestHTTPController_MaxQueueDepth_ReleasesSlotAfterScanCompletes is an end-to-end regression
+// test that runTrackedScan's deferred release() actually fires once a real (non-simulated)
+// tracked scan finishes, not just that tryAdmit/release are individually correct.
+func TestHTTPController_MaxQueueDepth_ReleasesSlotAfterScanCompletes(t *testing.T) {
+	spy := &contextSpyScanService{generateSBOMCh: make(chan struct{})}
+	c := (&HTTPController{
+		scanService: spy,
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"jobID": "job-1"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	select {
+	case <-spy.generateSBOMCh:
+	case <-time.After(1 * time.Second):
+		t.Fatal("GenerateSBOM worker was not executed in time")
+	}
+
+	require.Eventually(t, func() bool { return c.pending.Load() == 0 }, time.Second, 5*time.Millisecond,
+		"pending should drop back to 0 once the tracked scan's closure finishes")
+}
+
+// TestHTTPController_MetricsEndpoint_RecordsQueueFullRejection mirrors
+// TestHTTPController_MetricsEndpoint_RecordsRejection for the queue_full rejection reason,
+// proving it's recorded distinctly from too_many_requests/invalid_request rather than
+// conflated with either.
+func TestHTTPController_MetricsEndpoint_RecordsQueueFullRejection(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	require.True(t, c.tryAdmit())
+
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	file, err := os.Open("../api/v1/testdata/scan.yaml")
+	require.NoError(t, err)
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="queue_full"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="too_many_requests"`), body)
+	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
 }

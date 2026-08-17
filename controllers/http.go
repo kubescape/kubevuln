@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wssc "github.com/armosec/armoapi-go/apis"
@@ -34,6 +35,16 @@ type HTTPController struct {
 	diagnostics  func(ctx context.Context) domain.Diagnostics
 	statuses     *scanStatusStore
 	statusesOnce sync.Once
+
+	// maxQueueDepth bounds the number of scans tryAdmit will let through; see
+	// WithMaxQueueDepth. Zero (the default) or a negative value means unbounded.
+	maxQueueDepth int
+	// pending counts scans currently accepted but not yet finished (queued or running),
+	// guarded against maxQueueDepth by tryAdmit/release below. Unused when maxQueueDepth
+	// is zero. int64, not int32: comparing against int64(h.maxQueueDepth) instead of
+	// narrowing maxQueueDepth into an int32 avoids the wraparound a large configured
+	// value would otherwise cause on a 64-bit build (int is 64 bits there).
+	pending atomic.Int64
 }
 
 // NewHTTPController initializes the HTTPController struct with the injected scanService
@@ -73,6 +84,71 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 func (h *HTTPController) WithDiagnostics(f func(ctx context.Context) domain.Diagnostics) *HTTPController {
 	h.diagnostics = f
 	return h
+}
+
+// WithMaxQueueDepth bounds the number of scans this controller will accept but not yet
+// finish (queued or running) to n. workerpool.Submit never blocks and its waiting queue is
+// unbounded regardless of scanConcurrency, so without an admission check here a sustained
+// burst of requests grows the backlog -- and the registry credentials each queued job's
+// closure holds onto -- without limit (see #748). Once at capacity, new scan requests are
+// rejected with a 503 (domain.ErrQueueFull) instead of being queued.
+//
+// n <= 0, including never calling this (the struct's zero value), means unbounded, preserving
+// the pre-existing behavior for anyone who doesn't opt in.
+func (h *HTTPController) WithMaxQueueDepth(n int) *HTTPController {
+	h.maxQueueDepth = n
+	return h
+}
+
+// tryAdmit atomically reserves one slot of the controller's admission budget, returning false
+// without side effects if maxQueueDepth is already reached. Every caller that receives true
+// owns exactly one matching release() call once that job's outcome (success or failure) is
+// recorded -- for GenerateSBOM/ScanCVE/ScanRegistry that's runTrackedScan's worker closure
+// returning; ScanCP's own copy of that closure does the same. Always true when maxQueueDepth
+// is unbounded (<= 0), which also skips touching pending, so the unbounded default carries no
+// extra synchronization cost over the pre-#748 behavior.
+func (h *HTTPController) tryAdmit() bool {
+	if h.maxQueueDepth <= 0 {
+		return true
+	}
+	limit := int64(h.maxQueueDepth)
+	for {
+		current := h.pending.Load()
+		if current >= limit {
+			return false
+		}
+		if h.pending.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
+}
+
+// release returns one slot of admission budget reserved by a prior successful tryAdmit call.
+// A no-op when maxQueueDepth is unbounded, matching tryAdmit never having reserved anything in
+// that case.
+func (h *HTTPController) release() {
+	if h.maxQueueDepth <= 0 {
+		return
+	}
+	h.pending.Add(-1)
+}
+
+// admitQueueSlot reserves one slot of admission budget for endpoint via tryAdmit. If the
+// controller is at capacity, it writes the 503/ErrQueueFull rejection response to c itself
+// (mirroring the ErrTooManyRequests handling each handler already does for its own validation
+// errors) and returns false; the caller must stop processing the request without reserving a
+// slot. On true, the caller owns exactly one release() call once the accepted job's outcome is
+// recorded.
+func (h *HTTPController) admitQueueSlot(c *gin.Context, ctx context.Context, endpoint string, details problem.Option) bool {
+	if h.tryAdmit() {
+		return true
+	}
+	logger.L().Ctx(ctx).Warning("rejecting scan, queue is full",
+		helpers.String("endpoint", endpoint),
+		helpers.Int("maxQueueDepth", h.maxQueueDepth))
+	h.recordRejection(ctx, endpoint, domain.ErrQueueFull)
+	_, _ = problem.Of(validationStatusCode(domain.ErrQueueFull)).Append(details).WriteTo(c.Writer)
+	return false
 }
 
 func (h *HTTPController) ensureStatuses() *scanStatusStore {
@@ -127,16 +203,20 @@ func scanFailureReason(outcome string, err error) string {
 }
 
 // recordRejection records a validation-time rejection for the given endpoint. reason is
-// "too_many_requests" for registry back-pressure (ErrTooManyRequests) and "invalid_request"
-// for every other validation error, keeping the rejection-rate signal distinct from
-// malformed-payload noise while staying low cardinality.
+// "too_many_requests" for registry back-pressure (ErrTooManyRequests), "queue_full" for local
+// admission control (ErrQueueFull, see WithMaxQueueDepth), and "invalid_request" for every
+// other validation error, keeping the rejection-rate signal distinct from malformed-payload
+// noise while staying low cardinality.
 func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
 	if h.metrics == nil {
 		return
 	}
 	reason := "invalid_request"
-	if errors.Is(err, domain.ErrTooManyRequests) {
+	switch {
+	case errors.Is(err, domain.ErrTooManyRequests):
 		reason = "too_many_requests"
+	case errors.Is(err, domain.ErrQueueFull):
+		reason = "queue_full"
 	}
 	h.metrics.RejectCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("endpoint", endpoint),
@@ -171,6 +251,10 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 		return
 	}
 
+	if !h.admitQueueSlot(c, ctx, "generateSBOM", details) {
+		return
+	}
+
 	h.ensureStatuses().recordAccepted(newScan.JobID, "generateSBOM")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
@@ -192,8 +276,13 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 // ScanCP keeps its own copy: ErrPartialContainerProfile is a third outcome there, recorded
 // as "partial" for the metric while still marking the job succeeded, and it has no
 // equivalent in the other three.
+//
+// Called only once the caller has already reserved a slot via admitQueueSlot, so the
+// submitted closure owns exactly one matching release() call; deferred first so it still
+// fires on the claimTrackedJob early return below.
 func (h *HTTPController) runTrackedScan(bgCtx context.Context, jobID, endpoint string, scan func(context.Context) error, errMsg string, errDetails ...helpers.IDetails) {
 	h.workerPool.Submit(func() {
+		defer h.release()
 		if !h.claimTrackedJob(jobID) {
 			return
 		}
@@ -278,6 +367,10 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		return
 	}
 
+	if !h.admitQueueSlot(c, ctx, "scanCP", details) {
+		return
+	}
+
 	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCP")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
@@ -285,6 +378,7 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
 	h.workerPool.Submit(func() {
+		defer h.release()
 		if !h.claimTrackedJob(newScan.JobID) {
 			return
 		}
@@ -340,6 +434,10 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		return
 	}
 
+	if !h.admitQueueSlot(c, ctx, "scanCVE", details) {
+		return
+	}
+
 	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCVE")
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
@@ -354,12 +452,17 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		helpers.String("imageHash", newScan.ImageHash))
 }
 
-// validationStatusCode maps a validation error to the HTTP status code that best
-// describes it. ErrTooManyRequests reflects transient registry back-pressure, not
-// a malformed request, so it maps to 429 rather than 400.
+// validationStatusCode maps a validation/admission error to the HTTP status code that best
+// describes it. ErrTooManyRequests reflects transient registry back-pressure caused by the
+// caller's own request, so it maps to 429; ErrQueueFull reflects the controller's own local
+// capacity, not anything wrong with the request, so it maps to 503 rather than either 429 or
+// 400 -- a retry against the same instance may well succeed once the backlog drains.
 func validationStatusCode(err error) int {
-	if errors.Is(err, domain.ErrTooManyRequests) {
+	switch {
+	case errors.Is(err, domain.ErrTooManyRequests):
 		return http.StatusTooManyRequests
+	case errors.Is(err, domain.ErrQueueFull):
+		return http.StatusServiceUnavailable
 	}
 	return http.StatusBadRequest
 }
@@ -417,6 +520,10 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 			helpers.String("imageHash", newScan.ImageHash))
 		h.recordRejection(ctx, "scanRegistry", err)
 		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
+		return
+	}
+
+	if !h.admitQueueSlot(c, ctx, "scanRegistry", details) {
 		return
 	}
 

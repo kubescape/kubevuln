@@ -158,6 +158,7 @@ func main() {
 		service.SetEventRecorder(eventRecorder)
 	}
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
+	controller = controller.WithMaxQueueDepth(c.MaxQueueDepth)
 	controller = controller.WithDiagnostics(func(diagCtx context.Context) domain.Diagnostics {
 		return domain.Diagnostics{
 			ScanMode:                scanMode,
