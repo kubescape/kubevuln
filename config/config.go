@@ -66,6 +66,7 @@ type Config struct {
 	KeepLocal               bool              `mapstructure:"keepLocal"`
 	ListingURL              string            `mapstructure:"listingURL"`
 	MaxImageSize            int64             `mapstructure:"maxImageSize"`
+	MaxQueueDepth           int               `mapstructure:"maxQueueDepth"`
 	MaxSBOMSize             int               `mapstructure:"maxSBOMSize"`
 	Namespace               string            `mapstructure:"namespace"`
 	NodeSbomGeneration      bool              `mapstructure:"nodeSbomGeneration"`
@@ -97,6 +98,12 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("maxImageSize", 512*1024*1024)
 	v.SetDefault("maxSBOMSize", 20*1024*1024)
 	v.SetDefault("scanConcurrency", 1)
+	// maxQueueDepth bounds how many scans HTTPController will accept but not yet finish
+	// (queued or running) before rejecting new requests instead of queuing them (see #748:
+	// the underlying workerpool.Submit never blocks and its queue is otherwise unbounded).
+	// 0 preserves the pre-existing unbounded behavior, so this ships without changing
+	// anyone's runtime behavior until they opt in.
+	v.SetDefault("maxQueueDepth", 0)
 	v.SetDefault("scanTimeout", 5*time.Minute)
 	v.SetDefault("scannerReadinessTimeout", 60*time.Second)
 	// cmd/http/main.go spends up to 5s on the HTTP server's own Shutdown before this

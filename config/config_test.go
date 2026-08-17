@@ -29,6 +29,16 @@ func TestLoadConfigShutdownTimeoutDefault(t *testing.T) {
 	assert.Equal(t, 20*time.Second, c.ShutdownTimeout)
 }
 
+// TestLoadConfigMaxQueueDepthDefault is a regression test for #748: maxQueueDepth must
+// default to 0 (unbounded), preserving the pre-existing behavior for anyone who doesn't
+// explicitly opt in to bounding the HTTP controller's admission queue.
+func TestLoadConfigMaxQueueDepthDefault(t *testing.T) {
+	viper.Reset()
+	c, err := LoadConfig("testdata")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, c.MaxQueueDepth)
+}
+
 func TestLoadConfigNotFound(t *testing.T) {
 	viper.Reset()
 	_, err := LoadConfig("testdataInvalid")

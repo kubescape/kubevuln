@@ -36,6 +36,10 @@ var (
 	ErrCastingWorkload          = errors.New("casting workload")
 	ErrMockError                = errors.New("mock error")
 	ErrTooManyRequests          = errors.New("too many requests")
+	// ErrQueueFull indicates the HTTP controller's worker pool is already holding
+	// maxQueueDepth accepted-but-unfinished scans and cannot admit another one. See
+	// HTTPController.WithMaxQueueDepth (controllers/http.go).
+	ErrQueueFull = errors.New("scan queue is full")
 	// ErrExceptionsDegraded indicates the SecurityException set is incomplete
 	// (e.g. the CRD list failed). Callers must not treat missing exceptions as
 	// deletions.
