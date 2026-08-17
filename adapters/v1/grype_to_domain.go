@@ -44,41 +44,48 @@ func toRawMessage(v interface{}) json.RawMessage {
 func grypeToDomainMatches(matches []models.Match) []v1beta1.Match {
 	var result []v1beta1.Match
 	for _, m := range matches {
-		result = append(result, v1beta1.Match{
-			Vulnerability: v1beta1.Vulnerability{
-				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
-					ID:          m.Vulnerability.VulnerabilityMetadata.ID,
-					DataSource:  m.Vulnerability.VulnerabilityMetadata.DataSource,
-					Namespace:   m.Vulnerability.VulnerabilityMetadata.Namespace,
-					Severity:    m.Vulnerability.VulnerabilityMetadata.Severity,
-					URLs:        m.Vulnerability.VulnerabilityMetadata.URLs,
-					Description: m.Vulnerability.VulnerabilityMetadata.Description,
-					Cvss:        grypeToDomainMatchesCvss(m.Vulnerability.VulnerabilityMetadata.Cvss),
-				},
-				Fix: v1beta1.Fix{
-					Versions: m.Vulnerability.Fix.Versions,
-					State:    m.Vulnerability.Fix.State,
-				},
-				Advisories: grypeToDomainMatchesAdvisories(m.Vulnerability.Advisories),
-			},
-			RelatedVulnerabilities: grypeToDomainMatchesRelatedVulnerabilities(m.RelatedVulnerabilities),
-			MatchDetails:           grypeToDomainMatchesMatchDetails(m.MatchDetails),
-			Artifact: v1beta1.GrypePackage{
-				Name:         m.Artifact.Name,
-				Version:      m.Artifact.Version,
-				Type:         v1beta1.SyftType(m.Artifact.Type),
-				Locations:    grypeToDomainMatchesLocations(m.Artifact.Locations),
-				Language:     v1beta1.SyftLanguage(m.Artifact.Language),
-				Licenses:     m.Artifact.Licenses,
-				CPEs:         m.Artifact.CPEs,
-				PURL:         m.Artifact.PURL,
-				Upstreams:    grypeToDomainMatchesUpstreams(m.Artifact.Upstreams),
-				MetadataType: v1beta1.MetadataType(m.Artifact.MetadataType),
-				Metadata:     toRawMessage(m.Artifact.Metadata),
-			},
-		})
+		result = append(result, grypeToDomainMatch(m))
 	}
 	return result
+}
+
+// grypeToDomainMatch converts one match. models.IgnoredMatch embeds models.Match, so both
+// grypeToDomainMatches and grypeToDomainIgnoredMatches convert the same thing and a field
+// added here would otherwise have to be added to each of them separately.
+func grypeToDomainMatch(m models.Match) v1beta1.Match {
+	return v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:          m.Vulnerability.VulnerabilityMetadata.ID,
+				DataSource:  m.Vulnerability.VulnerabilityMetadata.DataSource,
+				Namespace:   m.Vulnerability.VulnerabilityMetadata.Namespace,
+				Severity:    m.Vulnerability.VulnerabilityMetadata.Severity,
+				URLs:        m.Vulnerability.VulnerabilityMetadata.URLs,
+				Description: m.Vulnerability.VulnerabilityMetadata.Description,
+				Cvss:        grypeToDomainMatchesCvss(m.Vulnerability.VulnerabilityMetadata.Cvss),
+			},
+			Fix: v1beta1.Fix{
+				Versions: m.Vulnerability.Fix.Versions,
+				State:    m.Vulnerability.Fix.State,
+			},
+			Advisories: grypeToDomainMatchesAdvisories(m.Vulnerability.Advisories),
+		},
+		RelatedVulnerabilities: grypeToDomainMatchesRelatedVulnerabilities(m.RelatedVulnerabilities),
+		MatchDetails:           grypeToDomainMatchesMatchDetails(m.MatchDetails),
+		Artifact: v1beta1.GrypePackage{
+			Name:         m.Artifact.Name,
+			Version:      m.Artifact.Version,
+			Type:         v1beta1.SyftType(m.Artifact.Type),
+			Locations:    grypeToDomainMatchesLocations(m.Artifact.Locations),
+			Language:     v1beta1.SyftLanguage(m.Artifact.Language),
+			Licenses:     m.Artifact.Licenses,
+			CPEs:         m.Artifact.CPEs,
+			PURL:         m.Artifact.PURL,
+			Upstreams:    grypeToDomainMatchesUpstreams(m.Artifact.Upstreams),
+			MetadataType: v1beta1.MetadataType(m.Artifact.MetadataType),
+			Metadata:     toRawMessage(m.Artifact.Metadata),
+		},
+	}
 }
 
 func grypeToDomainMatchesCvss(cvss []models.Cvss) []v1beta1.Cvss {
@@ -164,39 +171,7 @@ func grypeToDomainIgnoredMatches(ignoredMatches []models.IgnoredMatch) []v1beta1
 	var result []v1beta1.IgnoredMatch
 	for _, m := range ignoredMatches {
 		result = append(result, v1beta1.IgnoredMatch{
-			Match: v1beta1.Match{
-				Vulnerability: v1beta1.Vulnerability{
-					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
-						ID:          m.Vulnerability.VulnerabilityMetadata.ID,
-						DataSource:  m.Vulnerability.VulnerabilityMetadata.DataSource,
-						Namespace:   m.Vulnerability.VulnerabilityMetadata.Namespace,
-						Severity:    m.Vulnerability.VulnerabilityMetadata.Severity,
-						URLs:        m.Vulnerability.VulnerabilityMetadata.URLs,
-						Description: m.Vulnerability.VulnerabilityMetadata.Description,
-						Cvss:        grypeToDomainMatchesCvss(m.Vulnerability.VulnerabilityMetadata.Cvss),
-					},
-					Fix: v1beta1.Fix{
-						Versions: m.Vulnerability.Fix.Versions,
-						State:    m.Vulnerability.Fix.State,
-					},
-					Advisories: grypeToDomainMatchesAdvisories(m.Vulnerability.Advisories),
-				},
-				RelatedVulnerabilities: grypeToDomainMatchesRelatedVulnerabilities(m.RelatedVulnerabilities),
-				MatchDetails:           grypeToDomainMatchesMatchDetails(m.MatchDetails),
-				Artifact: v1beta1.GrypePackage{
-					Name:         m.Artifact.Name,
-					Version:      m.Artifact.Version,
-					Type:         v1beta1.SyftType(m.Artifact.Type),
-					Locations:    grypeToDomainMatchesLocations(m.Artifact.Locations),
-					Language:     v1beta1.SyftLanguage(m.Artifact.Language),
-					Licenses:     m.Artifact.Licenses,
-					CPEs:         m.Artifact.CPEs,
-					PURL:         m.Artifact.PURL,
-					Upstreams:    grypeToDomainMatchesUpstreams(m.Artifact.Upstreams),
-					MetadataType: v1beta1.MetadataType(m.Artifact.MetadataType),
-					Metadata:     toRawMessage(m.Artifact.Metadata),
-				},
-			},
+			Match:              grypeToDomainMatch(m.Match),
 			AppliedIgnoreRules: grypeToDomainIgnoredMatchesAppliedIgnoreRules(m.AppliedIgnoreRules),
 		})
 	}
