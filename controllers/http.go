@@ -224,23 +224,33 @@ func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, e
 	))
 }
 
+// bindScanCommand decodes the request body into T and converts it to a domain.ScanCommand.
+// A body that will not bind is answered here with the same 400 each handler used to write
+// for itself, and reported as ok=false so the caller returns without scanning. T is the
+// wire command the endpoint accepts, which is WebsocketScanCommand for three of the four
+// and RegistryScanCommand for ScanRegistry.
+func bindScanCommand[T any](c *gin.Context, ctx context.Context, convert func(T) domain.ScanCommand) (domain.ScanCommand, bool) {
+	var cmd T
+	if err := c.ShouldBindJSON(&cmd); err != nil {
+		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
+		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		return domain.ScanCommand{}, false
+	}
+	return convert(cmd), true
+}
+
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
 func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var websocketScanCommand wssc.WebsocketScanCommand
-	err := c.ShouldBindJSON(&websocketScanCommand)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+	newScan, ok := bindScanCommand(c, ctx, websocketScanCommandToScanCommand)
+	if !ok {
 		return
 	}
 
-	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
-
 	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
 
-	ctx, err = h.scanService.ValidateGenerateSBOM(ctx, newScan)
+	ctx, err := h.scanService.ValidateGenerateSBOM(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),
@@ -342,21 +352,16 @@ func (h *HTTPController) ScanStatus(c *gin.Context) {
 func (h *HTTPController) ScanCP(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var websocketScanCommand wssc.WebsocketScanCommand
-	err := c.ShouldBindJSON(&websocketScanCommand)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+	newScan, ok := bindScanCommand(c, ctx, websocketScanCommandToScanCommand)
+	if !ok {
 		return
 	}
-
-	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
 	name, _ := newScan.Args[domain.ArgsName].(string)
 	namespace, _ := newScan.Args[domain.ArgsNamespace].(string)
 
 	details := problem.Detailf("Wlid=%s, Name=%s, Namespace=%s", newScan.Wlid, name, namespace)
 
-	ctx, err = h.scanService.ValidateScanCP(ctx, newScan)
+	ctx, err := h.scanService.ValidateScanCP(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("wlid", newScan.Wlid),
@@ -411,19 +416,14 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 func (h *HTTPController) ScanCVE(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var websocketScanCommand wssc.WebsocketScanCommand
-	err := c.ShouldBindJSON(&websocketScanCommand)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+	newScan, ok := bindScanCommand(c, ctx, websocketScanCommandToScanCommand)
+	if !ok {
 		return
 	}
 
-	newScan := websocketScanCommandToScanCommand(websocketScanCommand)
-
 	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
 
-	ctx, err = h.scanService.ValidateScanCVE(ctx, newScan)
+	ctx, err := h.scanService.ValidateScanCVE(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),
@@ -500,19 +500,14 @@ func sessionChainToSession(s wssc.SessionChain) domain.Session {
 func (h *HTTPController) ScanRegistry(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var registryScanCommand wssc.RegistryScanCommand
-	err := c.ShouldBindJSON(&registryScanCommand)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+	newScan, ok := bindScanCommand(c, ctx, registryScanCommandToScanCommand)
+	if !ok {
 		return
 	}
 
-	newScan := registryScanCommandToScanCommand(registryScanCommand)
-
 	details := problem.Detailf("ImageTag=%s", newScan.ImageTag)
 
-	ctx, err = h.scanService.ValidateScanRegistry(ctx, newScan)
+	ctx, err := h.scanService.ValidateScanRegistry(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
 			helpers.String("imageSlug", newScan.ImageSlug),

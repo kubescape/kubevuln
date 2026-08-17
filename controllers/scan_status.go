@@ -158,7 +158,7 @@ func (s *scanStatusStore) markPhase(jobID, phase string) {
 	if !ok {
 		return
 	}
-	if status.State == domain.ScanStateSucceeded || status.State == domain.ScanStateFailed || status.State == domain.ScanStateAbandoned {
+	if isTerminal(status.State) {
 		return
 	}
 	status.Phase = phase
