@@ -325,11 +325,3 @@ func appendUnique(forms []string, form string) []string {
 	}
 	return append(forms, form)
 }
-
-func RemoveContainerFromSlug(slug, container string) string {
-	i := strings.LastIndex(slug, container)
-	if i == -1 {
-		return slug
-	}
-	return slug[:i-1]
-}
