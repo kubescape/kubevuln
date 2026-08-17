@@ -2293,6 +2293,172 @@ func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testin
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
+// TestAPIServerStore_ListSecurityExceptions_DoesNotRepopulateAfterRacingInvalidation is a
+// regression test for #733: enableSecurityExceptionCacheInvalidation evicts a cache key as soon
+// as its CRD changes, but a List() already in flight for that key when the change lands used to
+// still write its now-stale result back to the cache once it returned, silently undoing the
+// invalidation. The hook blocks the fake client's List() call exactly where the real one would
+// be in flight against a real apiserver, letting the test fire the informer's invalidation
+// handler while List() hasn't returned yet - the same interleaving the issue describes.
+func TestAPIServerStore_ListSecurityExceptions_DoesNotRepopulateAfterRacingInvalidation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+
+	listInFlight := make(chan struct{})
+	releaseList := make(chan struct{})
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		securityExceptionGVR: {
+			ResourceInterface: dynClient.Resource(securityExceptionGVR),
+			hook: func(context.Context) {
+				close(listInFlight)
+				<-releaseList
+			},
+		},
+	}
+
+	a := &APIServerStore{
+		DynamicClient:              wrapped,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	done := make(chan struct{})
+	var listErr error
+	go func() {
+		defer close(done)
+		_, _, listErr = a.GetSecurityExceptions(context.Background(), "ns-a")
+	}()
+
+	select {
+	case <-listInFlight:
+	case <-time.After(5 * time.Second):
+		t.Fatal("List() never reached the point where it should be in flight")
+	}
+
+	// Simulate a SecurityException change in ns-a landing while the List() above is still in
+	// flight, the same way the informer's event handler would invoke this on a real change.
+	a.invalidateSecurityExceptionCacheForObject(&unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{"namespace": "ns-a"},
+	}})
+
+	close(releaseList)
+	select {
+	case <-done:
+		assert.NoError(t, listErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetSecurityExceptions never returned")
+	}
+
+	_, ok := a.securityExceptionListCache.Get("se/ns-a")
+	assert.False(t, ok, "a List() that raced an invalidation must not repopulate the cache with its now-stale result")
+}
+
+// TestAPIServerStore_ListClusterSecurityExceptions_DoesNotRepopulateAfterRacingInvalidation is
+// the cluster-scoped counterpart of the test above, for invalidateClusterSecurityExceptionCache.
+func TestAPIServerStore_ListClusterSecurityExceptions_DoesNotRepopulateAfterRacingInvalidation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+
+	listInFlight := make(chan struct{})
+	releaseList := make(chan struct{})
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		clusterSecurityExceptionGVR: {
+			ResourceInterface: dynClient.Resource(clusterSecurityExceptionGVR),
+			hook: func(context.Context) {
+				close(listInFlight)
+				<-releaseList
+			},
+		},
+	}
+
+	a := &APIServerStore{
+		DynamicClient:              wrapped,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	done := make(chan struct{})
+	var listErr error
+	go func() {
+		defer close(done)
+		_, _, listErr = a.GetSecurityExceptions(context.Background(), "")
+	}()
+
+	select {
+	case <-listInFlight:
+	case <-time.After(5 * time.Second):
+		t.Fatal("List() never reached the point where it should be in flight")
+	}
+
+	a.invalidateClusterSecurityExceptionCache()
+
+	close(releaseList)
+	select {
+	case <-done:
+		assert.NoError(t, listErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetSecurityExceptions never returned")
+	}
+
+	_, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey)
+	assert.False(t, ok, "a List() that raced an invalidation must not repopulate the cache with its now-stale result")
+}
+
+
+
+
+// TestAPIServerStore_TrySetSecurityExceptionCache_GenerationMismatchSkipsWrite unit-tests the
+// compare-and-swap primitive directly, without goroutines: the write must be skipped whenever an
+// invalidation bumped the generation after the snapshot the caller took before its List() call.
+func TestAPIServerStore_TrySetSecurityExceptionCache_GenerationMismatchSkipsWrite(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+
+	seenGeneration := a.beginSecurityExceptionCacheRefresh("se/ns-a")
+	a.invalidateSecurityExceptionCacheKey("se/ns-a") // simulates a CRD change landing mid-List()
+	a.trySetSecurityExceptionCache("se/ns-a", seenGeneration, []sev1beta1.SecurityException{{}})
+
+	_, ok := a.securityExceptionListCache.Get("se/ns-a")
+	assert.False(t, ok, "a stale generation must prevent the write")
+}
+
+// TestAPIServerStore_TrySetSecurityExceptionCache_GenerationMatchWrites is the non-racing
+// counterpart: with no invalidation in between, the write must still succeed exactly as before
+// this fix, so #733's fix does not change GetSecurityExceptions' behavior on the common path.
+func TestAPIServerStore_TrySetSecurityExceptionCache_GenerationMatchWrites(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+
+	seenGeneration := a.beginSecurityExceptionCacheRefresh("se/ns-a")
+	a.trySetSecurityExceptionCache("se/ns-a", seenGeneration, []sev1beta1.SecurityException{{}})
+
+	cached, ok := a.securityExceptionListCache.Get("se/ns-a")
+	require.True(t, ok, "an unraced write must still populate the cache")
+	assert.Len(t, cached.([]sev1beta1.SecurityException), 1)
+}
+
+// TestAPIServerStore_InvalidateAllSecurityExceptionCaches_CoversInFlightKey is a regression test
+// for the "unrecognized object" fallback path in invalidateSecurityExceptionCacheForObject: it
+// must invalidate a namespace whose List() is in flight (and so has no value in
+// securityExceptionListCache yet, only an entry in securityExceptionCacheEntries), not just
+// namespaces that already have a cached value to range over.
+func TestAPIServerStore_InvalidateAllSecurityExceptionCaches_CoversInFlightKey(t *testing.T) {
+	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
+
+	seenGeneration := a.beginSecurityExceptionCacheRefresh("se/ns-a") // List() "in flight", no Set() yet
+
+	a.invalidateSecurityExceptionCacheForObject(&unstructured.Unstructured{}) // unresolvable -> invalidate all
+
+	a.trySetSecurityExceptionCache("se/ns-a", seenGeneration, []sev1beta1.SecurityException{{}})
+
+	_, ok := a.securityExceptionListCache.Get("se/ns-a")
+	assert.False(t, ok, "an in-flight key must be covered by the invalidate-all fallback, not just already-cached keys")
+}
+
 func TestAPIServerStore_InvalidateSecurityExceptionCacheForObject(t *testing.T) {
 	a := &APIServerStore{securityExceptionListCache: cache.New(time.Minute)}
 	a.securityExceptionListCache.Set("se/ns-a", []sev1beta1.SecurityException{{}}, time.Minute)

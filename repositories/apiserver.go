@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akyoto/cache"
@@ -70,6 +71,7 @@ const (
 	securityExceptionListCacheCleaningInterval = 30 * time.Second
 	securityExceptionListCacheTTL              = 30 * time.Second
 	clusterSecurityExceptionListCacheKey       = "cse"
+	securityExceptionListCacheKeyPrefix        = "se/"
 )
 
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
@@ -83,7 +85,77 @@ type APIServerStore struct {
 	// literals directly instead of through the constructors below).
 	securityExceptionListCache *cache.Cache
 
+	// securityExceptionCacheEntries backs the compare-and-swap that keeps a List() in flight
+	// when a CRD change invalidates its cache key from silently re-populating the cache with
+	// its now-stale result afterward — see securityExceptionCacheEntry's doc comment and #733.
+	// Zero value (empty sync.Map) is ready to use, so this needs no constructor initialization.
+	securityExceptionCacheEntries sync.Map // cacheKey (string) -> *securityExceptionCacheEntry
+
 	securityExceptionInformerStop context.CancelFunc
+}
+
+// securityExceptionCacheEntry pairs a cache key's invalidation generation with the mutex that
+// makes reading/bumping it, and conditionally writing securityExceptionListCache for that key,
+// atomic with respect to each other. See securityExceptionCacheEntry (the method) for why this
+// exists: a plain generation counter alone still leaves a check-then-act gap between reading it
+// and calling Set().
+type securityExceptionCacheEntry struct {
+	mu         sync.Mutex
+	generation uint64
+}
+
+// securityExceptionCacheEntry returns the entry for cacheKey, creating it on first use. Entries
+// are never removed, so the key count grows with every distinct namespace that has ever had
+// SecurityExceptions listed, plus one for the cluster-scoped key. Each entry is small, so this
+// is slow growth rather than an urgent leak, but it is not bounded in clusters where namespaces
+// are created and deleted continuously.
+func (a *APIServerStore) securityExceptionCacheEntry(cacheKey string) *securityExceptionCacheEntry {
+	v, _ := a.securityExceptionCacheEntries.LoadOrStore(cacheKey, &securityExceptionCacheEntry{})
+	return v.(*securityExceptionCacheEntry)
+}
+
+// invalidateSecurityExceptionCacheKey evicts cacheKey from securityExceptionListCache and bumps
+// its generation, atomically with respect to beginSecurityExceptionCacheRefresh/
+// trySetSecurityExceptionCache below: whichever of an invalidation and a racing List()'s
+// conditional Set() acquires the entry's mutex last determines the outcome, and in either order
+// the result is correct (see trySetSecurityExceptionCache's doc comment for why).
+func (a *APIServerStore) invalidateSecurityExceptionCacheKey(cacheKey string) {
+	entry := a.securityExceptionCacheEntry(cacheKey)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	entry.generation++
+	a.securityExceptionListCache.Delete(cacheKey)
+}
+
+// beginSecurityExceptionCacheRefresh snapshots cacheKey's current generation before a caller
+// starts a List() call for it, to later pass to trySetSecurityExceptionCache.
+func (a *APIServerStore) beginSecurityExceptionCacheRefresh(cacheKey string) (seenGeneration uint64) {
+	entry := a.securityExceptionCacheEntry(cacheKey)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.generation
+}
+
+// trySetSecurityExceptionCache writes value to securityExceptionListCache under cacheKey only if
+// cacheKey's generation is still seenGeneration, i.e. no invalidation has happened for it since
+// the caller's beginSecurityExceptionCacheRefresh snapshot. This closes the race #733 describes:
+// without it, a List() started before a CRD change could still write its now-stale result to the
+// cache after the informer's invalidation for that change already ran, silently undoing it. The
+// check and the write happen under the same per-key mutex invalidateSecurityExceptionCacheKey
+// uses, so there is no gap between "check the generation" and "write the cache" for a concurrent
+// invalidation to land in — unlike a bare atomic counter compared just before an unguarded Set().
+// The List() call itself is deliberately not covered by this lock: holding it across a network
+// call would let a slow List() delay an unrelated invalidation for the same key, and informers
+// typically deliver events to a handler serially, so that delay could stall processing of other,
+// unrelated CRD events too.
+func (a *APIServerStore) trySetSecurityExceptionCache(cacheKey string, seenGeneration uint64, value interface{}) {
+	entry := a.securityExceptionCacheEntry(cacheKey)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.generation != seenGeneration {
+		return
+	}
+	a.securityExceptionListCache.Set(cacheKey, value, securityExceptionListCacheTTL)
 }
 
 var (
@@ -256,7 +328,7 @@ func (a *APIServerStore) invalidateSecurityExceptionCacheForObject(obj interface
 		return
 	}
 	if namespace := u.GetNamespace(); namespace != "" {
-		a.securityExceptionListCache.Delete("se/" + namespace)
+		a.invalidateSecurityExceptionCacheKey(securityExceptionListCacheKeyPrefix + namespace)
 		return
 	}
 	a.invalidateAllSecurityExceptionCaches()
@@ -266,16 +338,23 @@ func (a *APIServerStore) invalidateClusterSecurityExceptionCache() {
 	if a == nil || a.securityExceptionListCache == nil {
 		return
 	}
-	a.securityExceptionListCache.Delete(clusterSecurityExceptionListCacheKey)
+	a.invalidateSecurityExceptionCacheKey(clusterSecurityExceptionListCacheKey)
 }
 
+// invalidateAllSecurityExceptionCaches invalidates every namespaced SecurityException cache key
+// this process has ever seen, for events unstructuredFromEvent could not resolve to a specific
+// namespace (a defensive fallback, not the normal add/update/delete path). It ranges over
+// securityExceptionCacheEntries rather than securityExceptionListCache so it also covers a key
+// with a List() currently in flight but no cached value yet (see beginSecurityExceptionCacheRefresh):
+// that entry already exists by the time its List() call started, even though it may not exist in
+// securityExceptionListCache until that List() returns.
 func (a *APIServerStore) invalidateAllSecurityExceptionCaches() {
 	if a == nil || a.securityExceptionListCache == nil {
 		return
 	}
-	a.securityExceptionListCache.Range(func(key, _ interface{}) bool {
-		if cacheKey, ok := key.(string); ok && strings.HasPrefix(cacheKey, "se/") {
-			a.securityExceptionListCache.Delete(cacheKey)
+	a.securityExceptionCacheEntries.Range(func(key, _ interface{}) bool {
+		if cacheKey, ok := key.(string); ok && strings.HasPrefix(cacheKey, securityExceptionListCacheKeyPrefix) {
+			a.invalidateSecurityExceptionCacheKey(cacheKey)
 		}
 		return true
 	})
@@ -336,13 +415,19 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 }
 
 // listSecurityExceptions returns the namespaced SecurityExceptions for namespace, from
-// securityExceptionListCache when a fresh entry exists.
+// securityExceptionListCache when a fresh entry exists. The write back to the cache after a
+// List() is conditional on no invalidation having raced it (see trySetSecurityExceptionCache) -
+// without that, a List() started just before a SecurityException change in namespace would
+// silently re-populate the cache with the pre-change result after the informer had already
+// evicted it — see #733.
 func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, namespace string) ([]sev1beta1.SecurityException, error) {
-	cacheKey := "se/" + namespace
+	cacheKey := securityExceptionListCacheKeyPrefix + namespace
+	var seenGeneration uint64
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(cacheKey); ok {
 			return cached.([]sev1beta1.SecurityException), nil
 		}
+		seenGeneration = a.beginSecurityExceptionCacheRefresh(cacheKey)
 	}
 
 	seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
@@ -362,7 +447,7 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 	}
 
 	if a.securityExceptionListCache != nil {
-		a.securityExceptionListCache.Set(cacheKey, exceptions, securityExceptionListCacheTTL)
+		a.trySetSecurityExceptionCache(cacheKey, seenGeneration, exceptions)
 	}
 	return exceptions, nil
 }
@@ -370,11 +455,15 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 // listClusterSecurityExceptions returns every ClusterSecurityException in the cluster, from
 // securityExceptionListCache when a fresh entry exists. The result is the same regardless of
 // which workload/namespace triggered the call, so it is cached under a single cluster-wide key.
+// The write back to the cache after a List() is conditional on no invalidation having raced it -
+// see listSecurityExceptions' and trySetSecurityExceptionCache's doc comments, and #733.
 func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
+	var seenGeneration uint64
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey); ok {
 			return cached.([]sev1beta1.ClusterSecurityException), nil
 		}
+		seenGeneration = a.beginSecurityExceptionCacheRefresh(clusterSecurityExceptionListCacheKey)
 	}
 
 	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
@@ -394,7 +483,7 @@ func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Cont
 	}
 
 	if a.securityExceptionListCache != nil {
-		a.securityExceptionListCache.Set(clusterSecurityExceptionListCacheKey, clusterExceptions, securityExceptionListCacheTTL)
+		a.trySetSecurityExceptionCache(clusterSecurityExceptionListCacheKey, seenGeneration, clusterExceptions)
 	}
 	return clusterExceptions, nil
 }
