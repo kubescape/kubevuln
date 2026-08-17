@@ -3546,3 +3546,39 @@ func TestCreateProductStructForImageAndPackage(t *testing.T) {
 		})
 	}
 }
+
+// StoreCVESummary writes a VulnerabilityManifestSummary named for the workload, not for the
+// CVE manifest it was built from, so cve.Name and the stored object's name are two different
+// strings on any real scan. Three of that function's four log lines used to report cve.Name,
+// which named nothing that exists in storage; only the success line reported the object.
+// Passing the name once to createOrUpdate is what keeps those from disagreeing.
+func TestAPIServerStore_StoreCVESummary_reportsTheSummaryName(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-kind/namespace-local-path-storage/deployment-local-path-provisioner",
+		ContainerName: "local-path-provisioner",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	cve := domain.CVEManifest{Name: "some-image-slug-cve-manifest"}
+
+	summaryName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, cve.Name)
+	require.NoError(t, err)
+	// the premise: the two names are not the same string
+	require.NotEqual(t, cve.Name, summaryName)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	require.NoError(t, a.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false))
+
+	ns, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	// the object exists under the summary name
+	stored, err := a.StorageClient.VulnerabilityManifestSummaries(ns).Get(ctx, summaryName, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, summaryName, stored.Name)
+
+	// and nothing was written under the CVE manifest's name
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(ns).Get(ctx, cve.Name, metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(err), "expected no summary stored under the CVE manifest name, got %v", err)
+}
