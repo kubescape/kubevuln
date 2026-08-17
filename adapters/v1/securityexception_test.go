@@ -1251,8 +1251,8 @@ func TestConvertAffectedRecordsProvenance(t *testing.T) {
 }
 
 func TestRestoreSuppressedMatches_ExternalVEXFalsePositive(t *testing.T) {
-	// This simulates what happens when Grype processes a VEX file and 
-	// Kubevuln drops the tags during conversion. We are left with a single 
+	// This simulates what happens when Grype processes a VEX file and
+	// Kubevuln drops the tags during conversion. We are left with a single
 	// rule that only has the Vulnerability ID.
 	doc := &v1beta1.GrypeDocument{
 		Matches: []v1beta1.Match{
@@ -1275,7 +1275,7 @@ func TestRestoreSuppressedMatches_ExternalVEXFalsePositive(t *testing.T) {
 
 func TestRestoreSuppressedMatches_GenuineCRDException(t *testing.T) {
 	// This simulates a genuine CRD-sourced IgnoreRule which has provenance
-	// tags (like SourceKind) but an empty FixState. It proves we haven't 
+	// tags (like SourceKind) but an empty FixState. It proves we haven't
 	// broken restoration for legitimate CRD exceptions.
 	doc := &v1beta1.GrypeDocument{
 		Matches: []v1beta1.Match{},
@@ -1300,3 +1300,72 @@ func TestRestoreSuppressedMatches_GenuineCRDException(t *testing.T) {
 	assert.Len(t, restored.IgnoredMatches, 0, "Genuine CRD-suppressed match should no longer be ignored")
 }
 
+// A backend-delivered exception policy never goes through buildPolicy, so it carries no
+// sourceKind and buildIgnoreRules leaves SourceKind empty on the rule it writes. #701 narrowed
+// isExceptionSourcedIgnore to a known CRD sourceKind, which took those with it: a cloud-sourced
+// suppression stopped being restored, so once it had suppressed a finding, removing the policy
+// could never bring the finding back on the cached path.
+func TestRestoreSuppressedMatches_RestoresCloudSourcedSuppressions(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "cloud-allow",
+				Attributes: map[string]interface{}{
+					"ruleId":        "some-cloud-rule-id",
+					"justification": "vulnerable_code_not_present",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions, nil)
+	require.Len(t, doc.IgnoredMatches, 1)
+	require.Empty(t, doc.IgnoredMatches[0].AppliedIgnoreRules[0].SourceKind,
+		"a cloud-sourced policy carries no sourceKind, which is the premise here")
+
+	// the policy is gone from the backend now, so the cached path restores before re-applying
+	restored := RestoreSuppressedMatches(doc)
+	assert.Len(t, restored.Matches, 1, "a cloud-suppressed match must come back for re-evaluation")
+	assert.Empty(t, restored.IgnoredMatches)
+}
+
+// The counterpart: a rule Grype itself produced must stay suppressed. #701's case.
+// grypeToDomainIgnoredMatchesAppliedIgnoreRules copies only Vulnerability, FixState and
+// Package off a Grype rule, so neither shape below can carry our provenance.
+func TestRestoreSuppressedMatches_LeavesGrypeSourcedIgnoresAlone(t *testing.T) {
+	tests := []struct {
+		name string
+		rule v1beta1.IgnoreRule
+	}{
+		{
+			name: "bare rule, as a VEX-suppressed match arrives",
+			rule: v1beta1.IgnoreRule{Vulnerability: "CVE-VEX"},
+		},
+		{
+			name: "fix-state only, Grype's own vocabulary",
+			rule: v1beta1.IgnoreRule{Vulnerability: "CVE-VEX", FixState: "wont-fix"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &v1beta1.GrypeDocument{
+				IgnoredMatches: []v1beta1.IgnoredMatch{{
+					Match:              v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-VEX"}}},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{tt.rule},
+				}},
+			}
+
+			restored := RestoreSuppressedMatches(doc)
+			assert.Empty(t, restored.Matches, "must not undo a suppression we did not make")
+			assert.Len(t, restored.IgnoredMatches, 1)
+		})
+	}
+}
