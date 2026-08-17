@@ -81,6 +81,9 @@ func deduplicateErrors(errors []error) []string {
 	errorCounts := make(map[string]int)
 	var errorMessages []string
 	for _, e := range errors {
+		if e == nil {
+			continue
+		}
 		errorCounts[e.Error()] = errorCounts[e.Error()] + 1
 	}
 	for msg, count := range errorCounts {

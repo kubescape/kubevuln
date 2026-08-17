@@ -123,7 +123,7 @@ func Test_domainJSONToSyft_DropsErrors(t *testing.T) {
 
 	got, err := domainJSONToSyft(sbomData)
 	assert.NoError(t, err)
-	
+
 	// The bad package is kept but its invalid CPE is silently dropped
 	assert.Equal(t, 2, got.Artifacts.Packages.PackageCount())
 	pkgCountWithCPEs := 0
@@ -150,6 +150,16 @@ func Test_deduplicateErrors(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "empty errors",
+			errs: []error{},
+			want: nil,
+		},
+		{
+			name: "nil errors are filtered out",
+			errs: []error{nil, nil},
+			want: nil,
+		},
+		{
 			name: "one error is reported once",
 			errs: []error{errors.New("bad cpe")},
 			want: []string{`"bad cpe" occurred 1 time(s)`},
@@ -160,9 +170,10 @@ func Test_deduplicateErrors(t *testing.T) {
 			want: []string{`"bad cpe" occurred 3 time(s)`},
 		},
 		{
-			name: "distinct errors each keep their own count",
+			name: "distinct errors each keep their own count with nil errors filtered",
 			errs: []error{
 				errors.New("bad cpe"),
+				nil,
 				errors.New("unknown relationship"),
 				errors.New("bad cpe"),
 			},
