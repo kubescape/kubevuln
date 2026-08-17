@@ -2,10 +2,10 @@ package registryauth
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"golang.org/x/sync/singleflight"
 )
@@ -22,6 +22,17 @@ const expiryLeeway = 1 * time.Minute
 // the result -- for every other caller still waiting on it.
 const fetchTimeout = 30 * time.Second
 
+// maxCacheEntries bounds a credentialCache's size. The cache is keyed by registry host
+// (registryauth.go), and that key space is not a small, operator-controlled set: an ECR
+// hostname embeds a 12-digit account ID and region, and a GCR/Artifact Registry hostname is
+// only pattern-matched, not looked up against a known list. Both are read straight out of a
+// scanned workload's image reference, so without a cap, a fleet with many distinct
+// registries -- or a workload able to set its own image reference -- can grow the cache
+// without bound for the life of the process. Bounding it with an LRU also means an entry
+// that's never looked up again after it expires doesn't sit in the map forever: it ages out
+// under normal turnover instead of only being removed by the lazy check in lookup. See #750.
+const maxCacheEntries = 1024
+
 // credentialFetch is a provider's underlying fetch: it returns credentials plus the time
 // they stop being valid. A zero expiry means "no reported expiry" -- the credential is
 // still returned, but not cached, since there's nothing to bound the cache entry's
@@ -36,8 +47,9 @@ type credentialFetch func(ctx context.Context) (*image.RegistryCredentials, time
 // HTTP controller's worker pool runs many scans in parallel) each fired their own upstream
 // request, risking cloud provider rate limiting. See #569.
 type credentialCache struct {
-	mu       sync.Mutex
-	entries  map[string]cacheEntry
+	// entries is a size-bounded LRU, not a plain map: it is already safe for concurrent
+	// use, so entries no longer needs a mutex of its own the way a map would.
+	entries  *lru.Cache[string, cacheEntry]
 	group    singleflight.Group
 	strategy string
 	// now is overridable in tests so expiry can be exercised without a real time.Sleep.
@@ -61,7 +73,12 @@ type cacheEntry struct {
 }
 
 func newCredentialCache(strategy string) *credentialCache {
-	return &credentialCache{entries: map[string]cacheEntry{}, strategy: strategy, now: time.Now}
+	entries, err := lru.New[string, cacheEntry](maxCacheEntries)
+	if err != nil {
+		// lru.New only errors when size <= 0, and maxCacheEntries is a positive constant.
+		panic(err)
+	}
+	return &credentialCache{entries: entries, strategy: strategy, now: time.Now}
 }
 
 // get returns a cached, still-valid credential for key if one exists, otherwise calls
@@ -112,9 +129,7 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 			return nil, ferr
 		}
 		if !expiry.IsZero() {
-			c.mu.Lock()
-			c.entries[key] = cacheEntry{creds: creds, expiry: expiry.Add(-expiryLeeway)}
-			c.mu.Unlock()
+			c.entries.Add(key, cacheEntry{creds: creds, expiry: expiry.Add(-expiryLeeway)})
 		}
 		return creds, nil
 	})
@@ -139,17 +154,15 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 }
 
 func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, ok := c.entries[key]
+	entry, ok := c.entries.Get(key)
 	if !ok {
 		return nil, false
 	}
 	if !c.now().Before(entry.expiry) {
-		// expired entries are never overwritten by get() until something asks for this
-		// key again, so without deleting here they'd sit in the map forever -- across
-		// however many distinct ECR/GCR hosts a cluster ever pulls from.
-		delete(c.entries, key)
+		// Remove it now instead of leaving it for the LRU to evict on its own schedule: a
+		// key that's looked up once and never again would otherwise sit in the cache,
+		// still occupying a slot, until capacity eventually forced it out.
+		c.entries.Remove(key)
 		return nil, false
 	}
 	return entry.creds, true
@@ -159,7 +172,5 @@ func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) 
 // need the next Credentials() call to actually reach the override instead of a value
 // cached by an earlier test.
 func (c *credentialCache) reset() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.entries = map[string]cacheEntry{}
+	c.entries.Purge()
 }
