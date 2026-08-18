@@ -1442,6 +1442,61 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress("quay.io"))
 	assert.Equal(t, "x.quay.io", parseAuthorityFromServerAddress("https://x.quay.io"))
 	assert.Equal(t, "europe-docker.pkg.dev", parseAuthorityFromServerAddress("europe-docker.pkg.dev/xxx/xxx"))
+	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("quay.io:5000"))
+
+	// A host is not a URL just because it starts with those four letters. These went to
+	// url.Parse, which reports an empty Host for a string with no scheme, so the whole
+	// address came back with its path still attached and matched no registry.
+	assert.Equal(t, "http-registry.internal", parseAuthorityFromServerAddress("http-registry.internal/v2/"))
+	assert.Equal(t, "httpsregistry.example.com", parseAuthorityFromServerAddress("httpsregistry.example.com/v2/"))
+}
+
+// The auth field is the canonical one; username and password are supplementary and an entry
+// may carry one without the other. The fallback used to require both halves to be missing,
+// so an entry with a username but no password fell through it and then failed the
+// "both non-empty" check below it, and its credentials were dropped entirely: the pull went
+// out anonymous and came back 401.
+func Test_registryCredentialsFromCredentialsList_incompletePair(t *testing.T) {
+	auth := base64.StdEncoding.EncodeToString([]byte("realuser:realpass"))
+	tests := []struct {
+		name     string
+		cred     registry.AuthConfig
+		wantUser string
+		wantPass string
+	}{
+		{
+			name:     "username without password falls back to auth",
+			cred:     registry.AuthConfig{ServerAddress: "reg.example.com", Username: "realuser", Auth: auth},
+			wantUser: "realuser",
+			wantPass: "realpass",
+		},
+		{
+			name:     "password without username falls back to auth",
+			cred:     registry.AuthConfig{ServerAddress: "reg.example.com", Password: "realpass", Auth: auth},
+			wantUser: "realuser",
+			wantPass: "realpass",
+		},
+		{
+			name:     "a complete pair is kept over auth",
+			cred:     registry.AuthConfig{ServerAddress: "reg.example.com", Username: "explicit", Password: "explicitpass", Auth: auth},
+			wantUser: "explicit",
+			wantPass: "explicitpass",
+		},
+		{
+			name:     "a malformed auth does not clobber the username that was set",
+			cred:     registry.AuthConfig{ServerAddress: "reg.example.com", Username: "realuser", Auth: "not-base64!!"},
+			wantUser: "",
+			wantPass: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList([]registry.AuthConfig{tt.cred})
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantUser, got[0].Username)
+			assert.Equal(t, tt.wantPass, got[0].Password)
+		})
+	}
 }
 
 func Test_filterSBOM(t *testing.T) {
