@@ -898,8 +898,15 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 			rc.Token = cred.RegistryToken
 		}
 		username, password := cred.Username, cred.Password
-		if username == "" && password == "" && cred.Auth != "" {
-			username, password = credentialsFromAuth(cred.Auth)
+		// Consulted whenever the pair is incomplete, not only when both halves are
+		// missing: an entry carrying a username but no password is still an entry whose
+		// credentials live in auth, and requiring both to be empty dropped it entirely
+		// rather than falling back. Only a complete decoded pair is taken, so a
+		// malformed auth cannot overwrite a username that was set.
+		if (username == "" || password == "") && cred.Auth != "" {
+			if u, p := credentialsFromAuth(cred.Auth); u != "" && p != "" {
+				username, password = u, p
+			}
 		}
 		if username != "" && password != "" {
 			rc.Username = username
@@ -935,8 +942,11 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 		return ""
 	}
 
-	// server address has no scheme
-	if !strings.HasPrefix(serverAddress, "http") {
+	// A scheme is "http://" or "https://", not a host that merely starts with those
+	// letters. Treating http-registry.internal as a URL sends it to url.Parse, which
+	// returns an empty Host for a string with no scheme, so the whole thing came back
+	// as the authority with its path still attached and matched no registry.
+	if !strings.HasPrefix(serverAddress, "http://") && !strings.HasPrefix(serverAddress, "https://") {
 		res, _, _ := strings.Cut(serverAddress, "/")
 		return res
 	}
