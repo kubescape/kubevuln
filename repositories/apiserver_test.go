@@ -4616,3 +4616,57 @@ func TestSortVexStatements_FractionalTimestamp(t *testing.T) {
 	assert.Equal(t, "stmt-earlier", stmts[0].ID, "earlier fractional timestamp should sort first")
 	assert.Equal(t, "stmt-later", stmts[1].ID)
 }
+
+// A SecurityException that fails to convert is dropped from the list. That leaves the set
+// incomplete in exactly the way a failed List() does, and the caller decides whether a
+// suppression that is missing means "deleted" from that flag alone: with the set reported
+// complete, reconcileCachedCVE persists the removals and republishes VEX from a set quietly
+// short an entry. Caching it would pin that for the TTL, against GetSecurityExceptions' own
+// documented property that a failure is never cached.
+func TestAPIServerStore_GetSecurityExceptions_ConversionFailureDegrades(t *testing.T) {
+	good := map[string]interface{}{
+		"apiVersion": "kubescape.io/v1beta1",
+		"kind":       "SecurityException",
+		"metadata":   map[string]interface{}{"name": "good", "namespace": "kubescape"},
+		"spec":       map[string]interface{}{"vulnerabilities": []interface{}{}},
+	}
+	// spec.vulnerabilities is a list on the typed struct, so a string here fails conversion
+	bad := map[string]interface{}{
+		"apiVersion": "kubescape.io/v1beta1",
+		"kind":       "SecurityException",
+		"metadata":   map[string]interface{}{"name": "bad", "namespace": "kubescape"},
+		"spec":       map[string]interface{}{"vulnerabilities": "not-a-list"},
+	}
+
+	var listCalls int32
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&listCalls, 1)
+		return true, &unstructured.UnstructuredList{
+			Object: map[string]interface{}{"apiVersion": "kubescape.io/v1beta1", "kind": "SecurityExceptionList"},
+			Items:  []unstructured.Unstructured{{Object: good}, {Object: bad}},
+		}, nil
+	})
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
+	}
+
+	got, _, err := a.GetSecurityExceptions(context.TODO(), "kubescape")
+	require.Error(t, err, "a dropped exception leaves the set incomplete and must be reported")
+
+	// the ones that did convert are still applied, the same as a partial result from a
+	// failed List(): losing them too would drop working suppressions as well
+	require.Len(t, got, 1)
+	assert.Equal(t, "good", got[0].Name)
+
+	// and nothing was cached, so the next call re-lists rather than serving the short set
+	_, _, err = a.GetSecurityExceptions(context.TODO(), "kubescape")
+	require.Error(t, err)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&listCalls),
+		"an incomplete list must not be cached; the second call has to go back to the apiserver")
+}

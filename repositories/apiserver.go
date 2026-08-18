@@ -437,13 +437,25 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 	}
 
 	var exceptions []sev1beta1.SecurityException
+	var convErrs []error
 	for i := range seList.Items {
 		var se sev1beta1.SecurityException
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(seList.Items[i].Object, &se); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err),
+				helpers.String("namespace", namespace), helpers.String("name", seList.Items[i].GetName()))
+			convErrs = append(convErrs, fmt.Errorf("converting SecurityException %s/%s: %w", namespace, seList.Items[i].GetName(), err))
 			continue
 		}
 		exceptions = append(exceptions, se)
+	}
+
+	// A dropped exception leaves the set incomplete just as a failed List() does, so it is
+	// reported the same way and not cached. Returning it as complete would let the caller
+	// persist the missing suppressions as removals and republish VEX from a set that is
+	// quietly short an entry; caching it would pin that for the TTL rather than letting the
+	// next call self-heal.
+	if len(convErrs) > 0 {
+		return exceptions, stderrors.Join(convErrs...)
 	}
 
 	if a.securityExceptionListCache != nil {
@@ -473,13 +485,22 @@ func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Cont
 	}
 
 	var clusterExceptions []sev1beta1.ClusterSecurityException
+	var convErrs []error
 	for i := range cseList.Items {
 		var cse sev1beta1.ClusterSecurityException
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(cseList.Items[i].Object, &cse); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err),
+				helpers.String("name", cseList.Items[i].GetName()))
+			convErrs = append(convErrs, fmt.Errorf("converting ClusterSecurityException %s: %w", cseList.Items[i].GetName(), err))
 			continue
 		}
 		clusterExceptions = append(clusterExceptions, cse)
+	}
+
+	// See listSecurityExceptions: a dropped exception is an incomplete set, reported and
+	// left uncached the same way a failed List() is.
+	if len(convErrs) > 0 {
+		return clusterExceptions, stderrors.Join(convErrs...)
 	}
 
 	if a.securityExceptionListCache != nil {
