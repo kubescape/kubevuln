@@ -2,6 +2,7 @@ package registryauth
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -47,8 +48,15 @@ type credentialFetch func(ctx context.Context) (*image.RegistryCredentials, time
 // HTTP controller's worker pool runs many scans in parallel) each fired their own upstream
 // request, risking cloud provider rate limiting. See #569.
 type credentialCache struct {
-	// entries is a size-bounded LRU, not a plain map: it is already safe for concurrent
-	// use, so entries no longer needs a mutex of its own the way a map would.
+	// mu guards the compound operations below, not individual entries calls: lru.Cache is
+	// already safe for a single Get/Add/Remove call on its own, but lookup's
+	// read-expiry-then-remove and get's re-check-then-add are each a check-then-act
+	// sequence across two separate calls into it, and lru.Cache exposes no compare-and-
+	// delete or compare-and-add to make either one atomic by itself. Without mu, one
+	// goroutine's expiry-driven Remove can race a concurrent refresh's Add for the same
+	// key and delete the fresh entry the refresh just cached instead of the stale one it
+	// observed. See #753 review.
+	mu       sync.Mutex
 	entries  *lru.Cache[string, cacheEntry]
 	group    singleflight.Group
 	strategy string
@@ -129,7 +137,9 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 			return nil, ferr
 		}
 		if !expiry.IsZero() {
+			c.mu.Lock()
 			c.entries.Add(key, cacheEntry{creds: creds, expiry: expiry.Add(-expiryLeeway)})
+			c.mu.Unlock()
 		}
 		return creds, nil
 	})
@@ -154,6 +164,8 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 }
 
 func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	entry, ok := c.entries.Get(key)
 	if !ok {
 		return nil, false
@@ -161,7 +173,11 @@ func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) 
 	if !c.now().Before(entry.expiry) {
 		// Remove it now instead of leaving it for the LRU to evict on its own schedule: a
 		// key that's looked up once and never again would otherwise sit in the cache,
-		// still occupying a slot, until capacity eventually forced it out.
+		// still occupying a slot, until capacity eventually forced it out. Removing it
+		// under the same mu critical section as the Get/expiry-check above -- rather than
+		// as a separate, later call -- is what keeps this atomic: a concurrent refresh's
+		// Add for this key can only happen entirely before this section starts or entirely
+		// after it ends, never in the middle of it.
 		c.entries.Remove(key)
 		return nil, false
 	}
@@ -172,5 +188,7 @@ func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) 
 // need the next Credentials() call to actually reach the override instead of a value
 // cached by an earlier test.
 func (c *credentialCache) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries.Purge()
 }

@@ -226,6 +226,52 @@ func TestCredentialCache_BoundedSizeEvictsLeastRecentlyUsed(t *testing.T) {
 		"the least-recently-used key must have been evicted to make room, forcing a refetch")
 }
 
+// Before mu was reintroduced (review on #753), lookup's read-expiry-then-remove and get's
+// re-check-then-add were each a check-then-act sequence spanning two separate, individually
+// thread-safe calls into entries -- with nothing making either sequence atomic across
+// goroutines. A concurrent refresh's Add for a key could land between another caller's Get
+// and Remove for that same key, and get deleted along with the stale entry Remove actually
+// meant to evict. This stress-tests that exact interleaving many times over, with both
+// operations starting from the same barrier so the scheduler has every opportunity to
+// interleave them: a freshly cached credential must never be lost to a concurrent expiry
+// check that observed the key before it was refreshed.
+func TestCredentialCache_ExpiryRemovalDoesNotRaceConcurrentRefresh(t *testing.T) {
+	const iterations = 300
+
+	for i := 0; i < iterations; i++ {
+		c := newCredentialCache("test")
+		now := time.Now()
+		c.now = func() time.Time { return now }
+
+		// Seed an already-expired entry directly: the scenario under test is a caller
+		// finding an existing stale entry, not the fetch path that would have created it.
+		c.entries.Add("k", cacheEntry{creds: &image.RegistryCredentials{Password: "stale"}, expiry: now.Add(-time.Minute)})
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			c.lookup("k") // observes "k" expired and removes it
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := c.get(context.Background(), "k", func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+				return &image.RegistryCredentials{Password: "fresh"}, now.Add(time.Hour), nil
+			})
+			assert.NoError(t, err)
+		}()
+		close(start)
+		wg.Wait()
+
+		creds, ok := c.lookup("k")
+		require.True(t, ok, "iteration %d: a freshly cached credential must survive a concurrent expiry-driven removal of the stale entry it replaced", i)
+		assert.Equal(t, "fresh", creds.Password, "iteration %d", i)
+	}
+}
+
 // scrapeMetrics renders the current metric values in Prometheus text format.
 func scrapeMetrics(t *testing.T, m *metrics.Metrics) string {
 	t.Helper()
