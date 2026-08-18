@@ -134,3 +134,44 @@ func TestErrorsAreDistinguishable(t *testing.T) {
 		}
 	}
 }
+
+// An IPv6 address can carry an IPv4 one inside it, and the packet is delivered to that
+// IPv4 destination. net.IP.To4 unwraps only the IPv4-mapped form, so for the rest the
+// checks in checkIPAllowed saw an ordinary global-unicast IPv6 address and allowed it.
+// On an IPv6-only cluster running DNS64/NAT64, an ordinary Kubernetes setup, that meant
+// 64:ff9b::a9fe:a9fe reached 169.254.169.254, the endpoint this package exists to block.
+func TestCheckIPAllowed_EmbeddedIPv4(t *testing.T) {
+	tests := []struct {
+		name    string
+		ip      string
+		wantErr bool
+	}{
+		{"NAT64 well-known to cloud metadata", "64:ff9b::a9fe:a9fe", true},
+		{"NAT64 well-known to RFC1918", "64:ff9b::a00:1", true},
+		{"NAT64 well-known to loopback", "64:ff9b::7f00:1", true},
+		{"NAT64 local-use prefix (RFC 8215)", "64:ff9b:1::a9fe:a9fe", true},
+		{"6to4 to cloud metadata", "2002:a9fe:a9fe::", true},
+		{"IPv4-compatible to cloud metadata", "::a9fe:a9fe", true},
+		{"IPv4-translated to cloud metadata", "::ffff:0:a9fe:a9fe", true},
+		{"IPv4-mapped to loopback", "::ffff:127.0.0.1", true},
+
+		// the embedded address is what decides it, so translation to a genuinely
+		// public host stays reachable: on an IPv6-only cluster NAT64 is how it is
+		// reached at all.
+		{"NAT64 well-known to public IPv4", "64:ff9b::808:808", false},
+		{"6to4 to public IPv4", "2002:808:808::", false},
+		{"ordinary public IPv6", "2606:4700:4700::1111", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			require.NotNil(t, ip, "test IP %q failed to parse", tt.ip)
+			err := checkIPAllowed(ip)
+			if tt.wantErr {
+				assert.ErrorIs(t, err, ErrBlockedIP)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
