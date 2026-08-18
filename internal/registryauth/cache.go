@@ -142,7 +142,14 @@ func (c *credentialCache) lookup(key string) (*image.RegistryCredentials, bool) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
-	if !ok || !c.now().Before(entry.expiry) {
+	if !ok {
+		return nil, false
+	}
+	if !c.now().Before(entry.expiry) {
+		// expired entries are never overwritten by get() until something asks for this
+		// key again, so without deleting here they'd sit in the map forever -- across
+		// however many distinct ECR/GCR hosts a cluster ever pulls from.
+		delete(c.entries, key)
 		return nil, false
 	}
 	return entry.creds, true

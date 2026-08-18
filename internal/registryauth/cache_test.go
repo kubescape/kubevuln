@@ -60,6 +60,24 @@ func TestCredentialCache_RefetchesAfterExpiry(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "expired entry must be refetched")
 }
 
+func TestCredentialCache_ExpiredEntryIsEvicted(t *testing.T) {
+	c := newCredentialCache("test")
+	now := time.Now()
+	c.now = func() time.Time { return now }
+
+	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Password: "p"}, now.Add(time.Minute), nil
+	}
+	_, err := c.get(context.Background(), "k", fetch)
+	require.NoError(t, err)
+	assert.Len(t, c.entries, 1)
+
+	now = now.Add(time.Hour)
+	_, ok := c.lookup("k")
+	assert.False(t, ok)
+	assert.Empty(t, c.entries, "expired entry should be evicted from the map, not left behind")
+}
+
 func TestCredentialCache_DistinctKeysDoNotShareEntries(t *testing.T) {
 	c := newCredentialCache("test")
 	fetch := func(password string) credentialFetch {
