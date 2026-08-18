@@ -1780,9 +1780,15 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	case err != nil:
 		return domain.SBOM{}, fmt.Errorf("failed to get SBOM from apiserver: %w", err)
 	}
-	// discard the manifest if it was created by an older version of the scanner
-	if semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) == -1 {
-		logger.L().Debug("discarding SBOM with outdated scanner version",
+	// Discard the manifest if it was created by a different version of the scanner, in
+	// either direction. A manifest older than SBOMCreatorVersion may predate a schema or
+	// content change the caller now relies on; a manifest newer than SBOMCreatorVersion may
+	// carry one the caller isn't known to handle yet (e.g. one replica of a rolling
+	// deployment/rollback writes it, and a different-versioned replica serving the same
+	// image slug reads it back next). Comparing only for "older" let the newer case through
+	// as if it were fresh (see #768).
+	if semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) != 0 {
+		logger.L().Debug("discarding SBOM with mismatched scanner version",
 			helpers.String("name", name),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
 			helpers.String("wanted scanner version", SBOMCreatorVersion))
@@ -1802,7 +1808,10 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		Name:               name,
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
-		SBOMCreatorVersion: SBOMCreatorVersion,
+		// The manifest's own recorded version, not the caller's requested SBOMCreatorVersion:
+		// semver.Compare treats build-metadata differences as equal, so the two can still
+		// differ as strings even when the check above passes.
+		SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
 		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
