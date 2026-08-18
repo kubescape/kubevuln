@@ -36,6 +36,24 @@ type HTTPController struct {
 	statuses     *scanStatusStore
 	statusesOnce sync.Once
 
+	// submitGate and shuttingDown guard workerPool.Submit against Shutdown's
+	// workerPool.Stop(), which closes the pool's task channel: submitting to a closed
+	// channel panics, and nothing about admitQueueSlot/tryAdmit above prevents a handler
+	// from still being between admission and Submit when shutdown begins (#758). submit()
+	// holds submitGate for read while it checks shuttingDown and calls Submit; Shutdown
+	// takes submitGate for write to set shuttingDown, which can only complete once every
+	// in-flight submit() call has released its read lock -- so by the time Shutdown moves
+	// on to workerPool.Stop(), either a given submit() call already finished handing its
+	// task to the (still open) pool, or it will see shuttingDown and never touch the pool
+	// at all. There is no interleaving where a submit() reaches the pool after Stop().
+	submitGate   sync.RWMutex
+	shuttingDown bool
+	// submitBeforeHook, if set, is called synchronously by submit() once it has confirmed
+	// shutdown hasn't started but before it hands the task to the pool. Tests use it as a
+	// deterministic barrier to prove Shutdown really does wait for this window to close
+	// before calling workerPool.Stop(), instead of a timing-based sleep.
+	submitBeforeHook func()
+
 	// maxQueueDepth bounds the number of scans tryAdmit will let through; see
 	// WithMaxQueueDepth. Zero (the default) or a negative value means unbounded.
 	maxQueueDepth int
@@ -149,6 +167,24 @@ func (h *HTTPController) admitQueueSlot(c *gin.Context, ctx context.Context, end
 	h.recordRejection(ctx, endpoint, domain.ErrQueueFull)
 	_, _ = problem.Of(validationStatusCode(domain.ErrQueueFull)).Append(details).WriteTo(c.Writer)
 	return false
+}
+
+// submit hands task to the worker pool, unless Shutdown has already begun, in which case
+// it returns false without touching the pool at all. Callers must treat false the same as
+// a lost race with shutdown: release the admission slot task's defer h.release() will now
+// never run to release, and mark the job abandoned instead of leaving it stuck "accepted"
+// forever, since its 200 OK response was already written before this call (see #758).
+func (h *HTTPController) submit(task func()) bool {
+	h.submitGate.RLock()
+	defer h.submitGate.RUnlock()
+	if h.shuttingDown {
+		return false
+	}
+	if h.submitBeforeHook != nil {
+		h.submitBeforeHook()
+	}
+	h.workerPool.Submit(task)
+	return true
 }
 
 func (h *HTTPController) ensureStatuses() *scanStatusStore {
@@ -277,11 +313,13 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 // as "partial" for the metric while still marking the job succeeded, and it has no
 // equivalent in the other three.
 //
-// Called only once the caller has already reserved a slot via admitQueueSlot, so the
-// submitted closure owns exactly one matching release() call; deferred first so it still
-// fires on the claimTrackedJob early return below.
+// Called only once the caller has already reserved a slot via admitQueueSlot, so exactly
+// one of the submitted closure's release() call or the shutdown fallback below owns
+// returning that slot. The submitted closure's is deferred first so it still fires on the
+// claimTrackedJob early return; the fallback only runs when submit() never handed the
+// closure to the pool in the first place, so its own defer never gets the chance to.
 func (h *HTTPController) runTrackedScan(bgCtx context.Context, jobID, endpoint string, scan func(context.Context) error, errMsg string, errDetails ...helpers.IDetails) {
-	h.workerPool.Submit(func() {
+	task := func() {
 		defer h.release()
 		if !h.claimTrackedJob(jobID) {
 			return
@@ -299,7 +337,11 @@ func (h *HTTPController) runTrackedScan(bgCtx context.Context, jobID, endpoint s
 			return
 		}
 		h.ensureStatuses().markSucceeded(jobID)
-	})
+	}
+	if !h.submit(task) {
+		h.release()
+		h.ensureStatuses().markAbandoned(jobID, domain.ScanReasonShutdownAbandoned)
+	}
 }
 
 // Alive returns 200 OK
@@ -377,7 +419,7 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
 	}))
-	h.workerPool.Submit(func() {
+	task := func() {
 		defer h.release()
 		if !h.claimTrackedJob(newScan.JobID) {
 			return
@@ -404,7 +446,11 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 			h.recordScan(bgCtx, "scanCP", start, "success", nil)
 			h.ensureStatuses().markSucceeded(newScan.JobID)
 		}
-	})
+	}
+	if !h.submit(task) {
+		h.release()
+		h.ensureStatuses().markAbandoned(newScan.JobID, domain.ScanReasonShutdownAbandoned)
+	}
 }
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
@@ -571,6 +617,15 @@ func (h *HTTPController) Shutdown(timeout time.Duration) {
 	logger.L().Info("purging SBOM creation queue",
 		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
 		helpers.String("timeout", timeout.String()))
+
+	// Taking submitGate for write blocks until every submit() call currently holding it
+	// for read has returned, so no caller can still be mid-Submit once this unlocks. Every
+	// submit() call from here on sees shuttingDown and never reaches workerPool.Submit, so
+	// the close(taskQueue) inside workerPool.Stop() below can never race one. See #758.
+	h.submitGate.Lock()
+	h.shuttingDown = true
+	h.submitGate.Unlock()
+
 	h.ensureStatuses().markAbandonedQueued(domain.ScanReasonShutdownAbandoned)
 
 	drained := make(chan struct{})

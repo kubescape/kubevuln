@@ -277,6 +277,88 @@ func TestHTTPController_Shutdown_BoundedByTimeout(t *testing.T) {
 		"Shutdown should not return before its timeout when the pool hasn't drained yet")
 }
 
+// Before #758, nothing stopped a request handler from calling workerPool.Submit while (or
+// after) Shutdown's workerPool.Stop() closed the pool's task channel -- a guaranteed "send
+// on closed channel" panic. This proves submit() refuses work once shutdown has begun,
+// instead of ever reaching the pool.
+func TestHTTPController_Submit_RejectsAfterShutdown(t *testing.T) {
+	h := &HTTPController{workerPool: workerpool.New(1)}
+	h.Shutdown(time.Second)
+
+	var ran atomic.Bool
+	ok := h.submit(func() { ran.Store(true) })
+
+	assert.False(t, ok, "submit must refuse work once shutdown has started")
+	assert.False(t, ran.Load(), "a refused task must never run")
+}
+
+// This reproduces the actual race from #758 deterministically: a caller inside submit(),
+// already past the shuttingDown check, races Shutdown starting concurrently. submitBeforeHook
+// pins the caller in that exact window -- the one where the old code could still lose the
+// race against workerPool.Stop() closing the task channel underneath it -- so releasing it
+// is what lets Shutdown's submitGate.Lock() proceed at all; there is no sleep standing in
+// for that guarantee. If submit() ever let this caller through only for workerPool.Submit to
+// hand a closed channel, this test would crash with a "send on closed channel" panic instead
+// of failing normally.
+func TestHTTPController_SubmitRacingShutdown_DoesNotPanic(t *testing.T) {
+	h := &HTTPController{workerPool: workerpool.New(1)}
+
+	inHook := make(chan struct{})
+	releaseHook := make(chan struct{})
+	h.submitBeforeHook = func() {
+		close(inHook)
+		<-releaseHook
+	}
+
+	var ran atomic.Bool
+	submitOK := make(chan bool, 1)
+	go func() {
+		submitOK <- h.submit(func() { ran.Store(true) })
+	}()
+
+	<-inHook // submit() is now paused holding submitGate for read.
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		h.Shutdown(2 * time.Second)
+		close(shutdownDone)
+	}()
+
+	close(releaseHook)
+
+	require.True(t, <-submitOK, "a submit() call already past the shutdown check must still succeed")
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish in time")
+	}
+	assert.True(t, ran.Load(), "the task submitted just before shutdown must still run")
+}
+
+// When submit() loses the race and refuses a job that was already accepted (its 200 OK
+// response already written -- see submit's doc comment), runTrackedScan must release the
+// admission slot itself, since the submitted closure that would normally do that via its
+// own deferred release() never got created, and must mark the job abandoned instead of
+// leaving it stuck "accepted" forever.
+func TestHTTPController_RunTrackedScan_AbandonsJobWhenShuttingDown(t *testing.T) {
+	h := (&HTTPController{workerPool: workerpool.New(1)}).WithMaxQueueDepth(1)
+	require.True(t, h.tryAdmit())
+	h.ensureStatuses().recordAccepted("job-1", "generateSBOM")
+	h.shuttingDown = true // simulate having lost the race, without a real Shutdown call
+
+	var scanCalled atomic.Bool
+	h.runTrackedScan(context.Background(), "job-1", "generateSBOM",
+		func(context.Context) error { scanCalled.Store(true); return nil }, "unused")
+
+	assert.False(t, scanCalled.Load(), "a job abandoned to shutdown must never actually run")
+	assert.EqualValues(t, 0, h.pending.Load(), "the admission slot must be released")
+
+	status, ok := h.ensureStatuses().get("job-1")
+	require.True(t, ok)
+	assert.Equal(t, domain.ScanStateAbandoned, status.State)
+	assert.Equal(t, domain.ScanReasonShutdownAbandoned, status.Reason)
+}
+
 func TestHTTPController_ScanRegistry(t *testing.T) {
 	tests := []struct {
 		name         string
