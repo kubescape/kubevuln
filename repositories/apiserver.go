@@ -1750,15 +1750,33 @@ func cstringFromVulnerability(v v1beta1.VexVulnerability) string {
 	return cString
 }
 
+// cstringFromComponent renders one component into the canonicalization string. Both maps are
+// walked in sorted key order because Go randomizes map iteration, and this feeds the document's
+// canonical hash, which becomes its Metadata.ID: the same content has to render the same string
+// every time or the document changes identity between runs for no reason.
+//
+// Statements kubevuln writes itself carry only an ID (see createProductStructForImageAndPackage),
+// so both maps are empty today and the order never showed. An ingested OpenVEX component
+// routinely carries several identifiers and hashes, which is where it would.
 func cstringFromComponent(c v1beta1.Component) string {
 	s := fmt.Sprintf(":%s", c.ID)
 
-	for algo, val := range c.Hashes {
-		s += fmt.Sprintf(":%s@%s", algo, val)
+	algos := make([]string, 0, len(c.Hashes))
+	for algo := range c.Hashes {
+		algos = append(algos, string(algo))
+	}
+	sort.Strings(algos)
+	for _, algo := range algos {
+		s += fmt.Sprintf(":%s@%s", algo, c.Hashes[v1beta1.Algorithm(algo)])
 	}
 
-	for t, id := range c.Identifiers {
-		s += fmt.Sprintf(":%s@%s", t, id)
+	types := make([]string, 0, len(c.Identifiers))
+	for t := range c.Identifiers {
+		types = append(types, string(t))
+	}
+	sort.Strings(types)
+	for _, t := range types {
+		s += fmt.Sprintf(":%s@%s", t, c.Identifiers[v1beta1.IdentifierType(t)])
 	}
 
 	return s

@@ -2488,9 +2488,6 @@ func TestAPIServerStore_ListClusterSecurityExceptions_DoesNotRepopulateAfterRaci
 	assert.False(t, ok, "a List() that raced an invalidation must not repopulate the cache with its now-stale result")
 }
 
-
-
-
 // TestAPIServerStore_TrySetSecurityExceptionCache_GenerationMismatchSkipsWrite unit-tests the
 // compare-and-swap primitive directly, without goroutines: the write must be skipped whenever an
 // invalidation bumped the generation after the snapshot the caller took before its List() call.
@@ -3659,4 +3656,57 @@ func TestAPIServerStore_StoreCVESummary_reportsTheSummaryName(t *testing.T) {
 	// and nothing was written under the CVE manifest's name
 	_, err = a.StorageClient.VulnerabilityManifestSummaries(ns).Get(ctx, cve.Name, metav1.GetOptions{})
 	assert.True(t, apierrors.IsNotFound(err), "expected no summary stored under the CVE manifest name, got %v", err)
+}
+
+// calculateVexCanonicalHash becomes the document's Metadata.ID, so the same content has to
+// render the same hash every time. cstringFromComponent walked Component.Hashes and
+// Identifiers with a bare range, and Go randomizes map iteration, so a component carrying
+// more than one of either hashed differently between runs and the document changed identity
+// for no reason. Statements kubevuln writes itself carry only an ID, so both maps are empty
+// today and it never showed; an ingested OpenVEX component routinely carries several.
+func TestCalculateVexCanonicalHash_StableAcrossMapOrder(t *testing.T) {
+	docFor := func(c v1beta1.Component) v1beta1.VEX {
+		return v1beta1.VEX{
+			Metadata: v1beta1.Metadata{Timestamp: "2026-08-19T10:00:00Z", Version: 1, Author: "kubescape"},
+			Statements: []v1beta1.Statement{{
+				Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2021-44228"},
+				Status:        "not_affected",
+				Products:      []v1beta1.Product{{Component: c}},
+			}},
+		}
+	}
+	distinctHashes := func(t *testing.T, c v1beta1.Component) int {
+		t.Helper()
+		seen := map[string]struct{}{}
+		// enough iterations that a randomized order shows up: an unsorted three-entry map
+		// produced nine distinct hashes over this many runs
+		for i := 0; i < 200; i++ {
+			h, err := calculateVexCanonicalHash(docFor(c))
+			require.NoError(t, err)
+			seen[h] = struct{}{}
+		}
+		return len(seen)
+	}
+
+	t.Run("component with several identifiers and hashes", func(t *testing.T) {
+		c := v1beta1.Component{
+			ID: "pkg:oci/nginx",
+			Identifiers: map[v1beta1.IdentifierType]string{
+				"purl":  "pkg:oci/nginx",
+				"cpe22": "cpe:/a:nginx:nginx",
+				"cpe23": "cpe:2.3:a:nginx:nginx",
+			},
+			Hashes: map[v1beta1.Algorithm]v1beta1.Hash{
+				"sha256": "aaa",
+				"sha512": "bbb",
+				"md5":    "ccc",
+			},
+		}
+		assert.Equal(t, 1, distinctHashes(t, c), "the same component must canonicalize to one hash")
+	})
+
+	t.Run("component carrying only an ID, as kubevuln writes today", func(t *testing.T) {
+		assert.Equal(t, 1, distinctHashes(t, v1beta1.Component{ID: "pkg:oci/nginx"}),
+			"the shape already in use must hash exactly as it did before")
+	})
 }
