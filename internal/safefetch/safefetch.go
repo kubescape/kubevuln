@@ -31,6 +31,55 @@ var carrierGradeNAT = mustParseCIDR("100.64.0.0/10")
 // working bypass of the loopback check if left unhandled.
 var thisHostOnThisNetwork = mustParseCIDR("0.0.0.0/8")
 
+// The IPv6 transition mechanisms below each carry an IPv4 address inside an IPv6 one,
+// and a packet sent to them is delivered to that IPv4 destination. net.IP.To4 unwraps
+// only the IPv4-mapped form (::ffff:a.b.c.d), so for these the checks in checkIPAllowed
+// see an ordinary global-unicast IPv6 address, match none of them, and allow it: on an
+// IPv6-only cluster running DNS64/NAT64, which is an ordinary Kubernetes setup,
+// 64:ff9b::a9fe:a9fe reaches 169.254.169.254.
+//
+// The embedded address is extracted and checked rather than the prefix being rejected
+// outright, because on such a cluster NAT64 is also how a legitimate public IPv4 host is
+// reached, and blocking the prefix would block those too.
+var (
+	// nat64WellKnown is RFC 6052's well-known prefix, which carries the IPv4 address
+	// in its low 32 bits.
+	nat64WellKnown = mustParseCIDR("64:ff9b::/96")
+	// nat64LocalUse is RFC 8215's local-use prefix. RFC 6052 splits the IPv4 address
+	// around the u octet for prefixes shorter than /96, so rather than reassemble it
+	// this is refused outright: it is a network-specific translation prefix, not
+	// somewhere a public feed is published.
+	nat64LocalUse = mustParseCIDR("64:ff9b:1::/48")
+	// sixToFour is RFC 3056's 6to4 prefix, which carries the IPv4 address in the two
+	// groups after the prefix rather than in the low 32 bits.
+	sixToFour = mustParseCIDR("2002::/16")
+	// ipv4Compatible is the ::a.b.c.d form deprecated by RFC 4291, and ipv4Translated
+	// the ::ffff:0:a.b.c.d form from RFC 2765. Both carry the address in the low 32
+	// bits, and neither is unwrapped by To4.
+	ipv4Compatible = mustParseCIDR("::/96")
+	ipv4Translated = mustParseCIDR("::ffff:0:0:0/96")
+)
+
+// embeddedIPv4 returns the IPv4 address an IPv6 transition mechanism carries inside ip,
+// or nil when ip carries none. It reports nothing for addresses To4 already unwraps,
+// since checkIPAllowed's own checks cover those.
+func embeddedIPv4(ip net.IP) net.IP {
+	if ip.To4() != nil {
+		return nil
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return nil
+	}
+	switch {
+	case sixToFour.Contains(ip16):
+		return net.IPv4(ip16[2], ip16[3], ip16[4], ip16[5])
+	case nat64WellKnown.Contains(ip16), ipv4Compatible.Contains(ip16), ipv4Translated.Contains(ip16):
+		return net.IPv4(ip16[12], ip16[13], ip16[14], ip16[15])
+	}
+	return nil
+}
+
 func mustParseCIDR(s string) *net.IPNet {
 	_, ipnet, err := net.ParseCIDR(s)
 	if err != nil {
@@ -141,8 +190,16 @@ func checkIPAllowed(ip net.IP) error {
 		ip.IsUnspecified() ||
 		ip.IsMulticast() ||
 		carrierGradeNAT.Contains(ip) ||
-		thisHostOnThisNetwork.Contains(ip) {
+		thisHostOnThisNetwork.Contains(ip) ||
+		nat64LocalUse.Contains(ip) {
 		return fmt.Errorf("%w: %s", ErrBlockedIP, ip)
+	}
+	// An IPv6 address can carry an IPv4 one that the checks above cannot see; what the
+	// packet reaches is that address, so it is what has to be allowed.
+	if v4 := embeddedIPv4(ip); v4 != nil {
+		if err := checkIPAllowed(v4); err != nil {
+			return fmt.Errorf("%w: %s embeds %s", ErrBlockedIP, ip, v4)
+		}
 	}
 	return nil
 }
