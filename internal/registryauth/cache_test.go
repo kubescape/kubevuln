@@ -207,9 +207,14 @@ func TestCredentialCache_BoundedSizeEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	require.Equal(t, maxCacheEntries, c.entries.Len())
 
-	// Key "0" is now the least recently used entry: adding one more distinct key must evict
-	// it rather than growing the cache past its cap.
-	_, err := c.get(context.Background(), "overflow", fetch)
+	// Re-access key "0" (a cache hit, not a fetch) before overflowing, making key "1" --
+	// not "0" -- the least recently used entry despite "0" still being the oldest by
+	// insertion order. A plain FIFO cache would evict "0" here; only a true LRU evicts "1"
+	// instead, so this is what actually distinguishes the two.
+	_, err := c.get(context.Background(), "0", fetch)
+	require.NoError(t, err)
+
+	_, err = c.get(context.Background(), "overflow", fetch)
 	require.NoError(t, err)
 
 	assert.Equal(t, maxCacheEntries, c.entries.Len(),
@@ -220,7 +225,15 @@ func TestCredentialCache_BoundedSizeEvictsLeastRecentlyUsed(t *testing.T) {
 		atomic.AddInt32(&calls, 1)
 		return &image.RegistryCredentials{Password: "p2"}, time.Now().Add(time.Hour), nil
 	}
+
+	// "0" was re-accessed above, so it must still be cached: no refetch.
 	_, err = c.get(context.Background(), "0", countingFetch)
+	require.NoError(t, err)
+	assert.Zero(t, atomic.LoadInt32(&calls),
+		"key \"0\" was touched after the others and must not have been evicted")
+
+	// "1" is now the true least-recently-used key and must have been evicted instead.
+	_, err = c.get(context.Background(), "1", countingFetch)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls),
 		"the least-recently-used key must have been evicted to make room, forcing a refetch")
