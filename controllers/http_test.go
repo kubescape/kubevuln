@@ -1364,3 +1364,27 @@ func TestHTTPController_MetricsEndpoint_RecordsQueueFullRejection(t *testing.T) 
 	assert.False(t, strings.Contains(body, `reason="too_many_requests"`), body)
 	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
 }
+
+// The other three endpoints each cover a body that will not bind; ScanCP did not, which
+// left the one handler whose worker closure is its own copy unexercised on that path.
+func TestHTTPController_ScanCP_InvalidRequest(t *testing.T) {
+	c := HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+	defer c.Shutdown(5 * time.Second)
+
+	router := gin.Default()
+	path := "/v1/scanApplicationProfile"
+	router.POST(path, c.ScanCP)
+
+	file, err := os.Open("../api/v1/testdata/scan-invalid.yaml")
+	require.NoError(t, err)
+	defer file.Close()
+	req, _ := http.NewRequest("POST", path, file)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "{\"status\":400,\"title\":\"Bad Request\"}", w.Body.String())
+}
