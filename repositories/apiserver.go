@@ -379,10 +379,16 @@ func unstructuredFromEvent(obj interface{}) *unstructured.Unstructured {
 // GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
 // ClusterSecurityExceptions. A List() failure is returned as an error rather than only
 // logged: the caller (BackendAdapter.GetCVEExceptions) relies on a non-nil error here to
-// avoid caching a degraded, incomplete exception set for exceptionsCacheTTL — see #477. A
-// conversion failure on an individual item is still only logged and skipped, since that's a
-// malformed single object rather than a listing-wide failure, and skipping it doesn't risk
-// masking a systemic API problem the way swallowing a List() error would.
+// avoid caching a degraded, incomplete exception set for exceptionsCacheTTL — see #477.
+//
+// A conversion failure on an individual item is reported the same way, while the items that
+// did convert are still returned. It used to be only logged and skipped, on the grounds that
+// a malformed single object is not a listing-wide failure. That holds for whether to abandon
+// the list, and this does not abandon it: the caller still receives and applies everything
+// that converted. What it cannot do is call the set complete, because the flag derived from
+// this error is what decides whether a suppression that is now missing counts as a deletion
+// (see reconcileCachedCVE) — and a skipped exception is missing for exactly the same reason
+// a failed List() leaves the set short.
 //
 // Both lists are served from securityExceptionListCache when available and fresh: the raw
 // List() results are the same for every workload in a given namespace (SecurityException) or
