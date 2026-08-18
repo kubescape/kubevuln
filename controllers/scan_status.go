@@ -218,6 +218,11 @@ func (s *scanStatusStore) markTerminal(jobID string, state domain.ScanState, rea
 	}
 	status.State = state
 	status.Phase = "completed"
+	if state == domain.ScanStateAbandoned {
+		// Match markAbandonedQueued's convention for the same terminal state, instead of
+		// the generic "completed" every other terminal state gets here.
+		status.Phase = string(domain.ScanStateAbandoned)
+	}
 	status.Reason = reason
 	if status.StartedAt == nil {
 		startedAt := now

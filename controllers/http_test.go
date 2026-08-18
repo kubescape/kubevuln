@@ -357,6 +357,8 @@ func TestHTTPController_RunTrackedScan_AbandonsJobWhenShuttingDown(t *testing.T)
 	require.True(t, ok)
 	assert.Equal(t, domain.ScanStateAbandoned, status.State)
 	assert.Equal(t, domain.ScanReasonShutdownAbandoned, status.Reason)
+	assert.Equal(t, string(domain.ScanStateAbandoned), status.Phase,
+		"markAbandoned must report the same Phase convention as markAbandonedQueued, not the generic \"completed\" every other terminal state gets")
 }
 
 func TestHTTPController_ScanRegistry(t *testing.T) {
