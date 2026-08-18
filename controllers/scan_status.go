@@ -174,6 +174,16 @@ func (s *scanStatusStore) markFailed(jobID, reason string) {
 	s.markTerminal(jobID, domain.ScanStateFailed, reason)
 }
 
+// markAbandoned marks a single job abandoned, the same terminal state markAbandonedQueued
+// gives every job still queued when Shutdown starts. It exists for a job that reaches
+// submit() after shuttingDown is already set (see HTTPController.submit): markAbandonedQueued's
+// one-time sweep runs before that job is necessarily even in the store yet, so this is what
+// keeps it from being left stuck "accepted" forever instead. A no-op if the job is already
+// terminal, so calling this after the sweep already caught the same jobID is harmless.
+func (s *scanStatusStore) markAbandoned(jobID, reason string) {
+	s.markTerminal(jobID, domain.ScanStateAbandoned, reason)
+}
+
 func (s *scanStatusStore) markAbandonedQueued(reason string) {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -208,6 +218,11 @@ func (s *scanStatusStore) markTerminal(jobID string, state domain.ScanState, rea
 	}
 	status.State = state
 	status.Phase = "completed"
+	if state == domain.ScanStateAbandoned {
+		// Match markAbandonedQueued's convention for the same terminal state, instead of
+		// the generic "completed" every other terminal state gets here.
+		status.Phase = string(domain.ScanStateAbandoned)
+	}
 	status.Reason = reason
 	if status.StartedAt == nil {
 		startedAt := now
