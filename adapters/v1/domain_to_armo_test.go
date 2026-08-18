@@ -420,3 +420,46 @@ func Test_domainToArmo_introducedInLayer(t *testing.T) {
 		})
 	}
 }
+
+// LayerOrder is what correlates a vulnerability, which carries the order parseLayersPayload
+// assigned, with the layer in the manifest that produced it. That only works if one order
+// names one layer. Metadata-only history entries used to be stamped with layerIndex, which
+// is the order of the next real layer, so on nginx six ENV/LABEL/CMD entries and the RUN
+// layer after them all came out as order 1.
+func TestParseImageManifest_LayerOrderNamesOneLayer(t *testing.T) {
+	rawConfig := []byte(`{
+	  "architecture":"amd64","os":"linux",
+	  "rootfs":{"type":"layers","diff_ids":[
+	    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]},
+	  "history":[
+	    {"created":"2024-01-01T00:00:00Z","created_by":"ADD file"},
+	    {"created":"2024-01-01T00:00:01Z","created_by":"ENV x=1","empty_layer":true},
+	    {"created":"2024-01-01T00:00:02Z","created_by":"CMD [\"sh\"]","empty_layer":true},
+	    {"created":"2024-01-01T00:00:03Z","created_by":"RUN apk add"}]
+	}`)
+	target, err := json.Marshal(source.ImageMetadata{
+		RawConfig: rawConfig,
+		Layers: []source.LayerMetadata{
+			{Digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111", Size: 100},
+			{Digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222", Size: 200},
+		},
+	})
+	require.NoError(t, err)
+
+	im, err := ParseImageManifest(&v1beta1.GrypeDocument{Source: &v1beta1.Source{Type: "image", Target: target}})
+	require.NoError(t, err)
+	require.Len(t, im.Layers, 4, "every history entry is still reported")
+
+	seen := map[int]int{}
+	for _, l := range im.Layers {
+		if l.LayerHash == "" {
+			assert.Equal(t, metadataOnlyLayerOrder, l.LayerInfo.LayerOrder,
+				"a metadata-only entry must not claim a layer's order")
+			continue
+		}
+		seen[l.LayerInfo.LayerOrder]++
+	}
+	assert.Equal(t, map[int]int{0: 1, 1: 1}, seen,
+		"each real layer holds its own order, numbered from zero")
+}

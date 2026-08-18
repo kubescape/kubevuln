@@ -15,42 +15,42 @@
       "parentLayerHash":"",
       "createdBy":"/bin/sh -c #(nop)  CMD [\"bash\"]",
       "createdTime":"2024-05-14T00:39:41.460424266Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"LABEL maintainer=NGINX Docker Maintainers \u003cdocker-maint@nginx.com\u003e",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NGINX_VERSION=1.27.0",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NJS_VERSION=0.8.4",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV NJS_RELEASE=2~bookworm",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"ENV PKG_RELEASE=2~bookworm",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":1
+      "layerOrder":-1
     },
     {
       "layerHash":"sha256:3a0cf035bbfcc7852c38d4d236673b6a0d9454e5f2621800814d1633e729ea20",
@@ -105,28 +105,28 @@
       "parentLayerHash":"",
       "createdBy":"ENTRYPOINT [\"/docker-entrypoint.sh\"]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":7
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"EXPOSE map[80/tcp:{}]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":7
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"STOPSIGNAL SIGQUIT",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":7
+      "layerOrder":-1
     },
     {
       "layerHash":"",
       "parentLayerHash":"",
       "createdBy":"CMD [\"nginx\" \"-g\" \"daemon off;\"]",
       "createdTime":"2024-05-29T23:55:01Z",
-      "layerOrder":7
+      "layerOrder":-1
     }
   ]
 }
