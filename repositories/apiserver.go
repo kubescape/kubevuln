@@ -1670,11 +1670,8 @@ func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cString := fmt.Sprintf("%d", ts.Unix())
-
-	cString += fmt.Sprintf(":%d", vexDoc.Version)
-
-	cString += fmt.Sprintf(":%s", vexDoc.Author)
+	docTsStr := ts.UTC().Format(time.RFC3339Nano)
+	cString := fmt.Sprintf(":%d:%s:%d:%d:%s", len(docTsStr), docTsStr, vexDoc.Version, len(vexDoc.Author), vexDoc.Author)
 
 	stmts := make([]v1beta1.Statement, len(vexDoc.Statements))
 	copy(stmts, vexDoc.Statements)
@@ -1685,15 +1682,16 @@ func calculateVexCanonicalHash(vexDoc v1beta1.VEX) (string, error) {
 		// 5a. Vulnerability
 		cString += cstringFromVulnerability(s.Vulnerability)
 		// 5b. Status + Justification
-		cString += fmt.Sprintf(":%s:%s", s.Status, s.Justification)
-		// 5c. Statement time, in unixtime. If it exists, if not the doc's (malformed timestamps fallback to doc time)
+		cString += fmt.Sprintf(":%d:%s:%d:%s", len(s.Status), s.Status, len(s.Justification), s.Justification)
+		// 5c. Statement time, in RFC3339Nano. If it exists, if not the doc's (malformed timestamps fallback to doc time)
 		stmtTs, err := time.Parse(time.RFC3339, s.Timestamp)
 		if err != nil {
 			stmtTs = ts
 		}
-		cString += fmt.Sprintf(":%d", stmtTs.Unix())
+		stmtTsStr := stmtTs.UTC().Format(time.RFC3339Nano)
+		cString += fmt.Sprintf(":%d:%s", len(stmtTsStr), stmtTsStr)
 		// 5d. Sorted product strings
-		cString += fmt.Sprintf(":%s", cstringFromProducts(s.Products))
+		cString += cstringFromProducts(s.Products)
 	}
 
 	h := sha256.New()
@@ -1714,13 +1712,17 @@ func cstringFromProducts(products []v1beta1.Product) string {
 			}
 			sort.Strings(subprods)
 			for _, scStr := range subprods {
-				prodString += scStr
+				prodString += fmt.Sprintf(":sub:%d:%s", len(scStr), scStr)
 			}
 		}
 		prods = append(prods, prodString)
 	}
 	sort.Strings(prods)
-	return strings.Join(prods, ":")
+	var result string
+	for _, pStr := range prods {
+		result += fmt.Sprintf(":prod:%d:%s", len(pStr), pStr)
+	}
+	return result
 }
 
 // sortVexStatements sorts a slice of VEX statements deterministically in place.
@@ -1798,26 +1800,29 @@ func sortVexStatements(stmts []v1beta1.Statement, documentTimestamp time.Time) {
 }
 
 func cstringFromVulnerability(v v1beta1.VexVulnerability) string {
-	cString := fmt.Sprintf(":%s:%s", v.ID, v.Name)
+	cString := fmt.Sprintf(":%d:%s:%d:%s", len(v.ID), v.ID, len(v.Name), v.Name)
 	if len(v.Aliases) > 0 {
 		list := make([]string, len(v.Aliases))
 		copy(list, v.Aliases)
 		sort.Strings(list)
-		cString += fmt.Sprintf(":%s", strings.Join(list, ":"))
+		for _, alias := range list {
+			cString += fmt.Sprintf(":%d:%s", len(alias), alias)
+		}
 	}
 	return cString
 }
 
 // cstringFromComponent renders one component into the canonicalization string. Both maps are
-// walked in sorted key order because Go randomizes map iteration, and this feeds the document's
-// canonical hash, which becomes its Metadata.ID: the same content has to render the same string
-// every time or the document changes identity between runs for no reason.
+// walked in sorted key order because Go randomizes map iteration, and fields are length-prefixed
+// and tagged to prevent delimiter collisions. This feeds the document's canonical hash, which
+// becomes its Metadata.ID: the same content has to render the same string every time or the
+// document changes identity between runs for no reason.
 //
 // Statements kubevuln writes itself carry only an ID (see createProductStructForImageAndPackage),
 // so both maps are empty today and the order never showed. An ingested OpenVEX component
 // routinely carries several identifiers and hashes, which is where it would.
 func cstringFromComponent(c v1beta1.Component) string {
-	s := fmt.Sprintf(":%s", c.ID)
+	s := fmt.Sprintf(":%d:%s", len(c.ID), c.ID)
 
 	algos := make([]string, 0, len(c.Hashes))
 	for algo := range c.Hashes {
@@ -1825,7 +1830,8 @@ func cstringFromComponent(c v1beta1.Component) string {
 	}
 	sort.Strings(algos)
 	for _, algo := range algos {
-		s += fmt.Sprintf(":%s@%s", algo, c.Hashes[v1beta1.Algorithm(algo)])
+		hashVal := string(c.Hashes[v1beta1.Algorithm(algo)])
+		s += fmt.Sprintf(":h:%d:%s:%d:%s", len(algo), algo, len(hashVal), hashVal)
 	}
 
 	types := make([]string, 0, len(c.Identifiers))
@@ -1834,7 +1840,8 @@ func cstringFromComponent(c v1beta1.Component) string {
 	}
 	sort.Strings(types)
 	for _, t := range types {
-		s += fmt.Sprintf(":%s@%s", t, c.Identifiers[v1beta1.IdentifierType(t)])
+		idVal := c.Identifiers[v1beta1.IdentifierType(t)]
+		s += fmt.Sprintf(":i:%d:%s:%d:%s", len(t), t, len(idVal), idVal)
 	}
 
 	return s

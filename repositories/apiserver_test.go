@@ -3902,6 +3902,133 @@ func TestCalculateVexCanonicalHash_AliasCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEqual(t, hashWithAlias, hashWithoutAlias, "CVE-2023-1 with alias 000 should not collide with CVE-2023-1000")
+
+	// Colon-containing alias should not collide with multiple split aliases
+	docWithColonAlias := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Context:   "https://openvex.dev/ns/v0.2.0",
+			Author:    "kubescape.io",
+			Timestamp: "2026-01-01T00:00:00Z",
+			Version:   1,
+		},
+		Statements: []v1beta1.Statement{
+			{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:      "https://nvd.nist.gov",
+					Name:    "CVE-2023-1234",
+					Aliases: []string{"A:B"},
+				},
+				Status: v1beta1.Status("not_affected"),
+			},
+		},
+	}
+
+	docWithSplitAliases := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Context:   "https://openvex.dev/ns/v0.2.0",
+			Author:    "kubescape.io",
+			Timestamp: "2026-01-01T00:00:00Z",
+			Version:   1,
+		},
+		Statements: []v1beta1.Statement{
+			{
+				Vulnerability: v1beta1.VexVulnerability{
+					ID:      "https://nvd.nist.gov",
+					Name:    "CVE-2023-1234",
+					Aliases: []string{"A", "B"},
+				},
+				Status: v1beta1.Status("not_affected"),
+			},
+		},
+	}
+
+	hashWithColonAlias, err := calculateVexCanonicalHash(docWithColonAlias)
+	require.NoError(t, err)
+	hashWithSplitAliases, err := calculateVexCanonicalHash(docWithSplitAliases)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hashWithColonAlias, hashWithSplitAliases, "alias 'A:B' should not collide with aliases 'A' and 'B'")
+}
+
+func TestCalculateVexCanonicalHash_ComponentFieldCollision(t *testing.T) {
+	docWithIDIncludingSuffix := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Timestamp: "2026-01-01T00:00:00Z",
+			Version:   1,
+			Author:    "kubescape.io",
+		},
+		Statements: []v1beta1.Statement{
+			{
+				Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+				Status:        v1beta1.Status("not_affected"),
+				Products: []v1beta1.Product{
+					{
+						Component: v1beta1.Component{
+							ID: "pkg:oci/nginx:h:6:sha256:4:1234",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	docWithHashes := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Timestamp: "2026-01-01T00:00:00Z",
+			Version:   1,
+			Author:    "kubescape.io",
+		},
+		Statements: []v1beta1.Statement{
+			{
+				Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+				Status:        v1beta1.Status("not_affected"),
+				Products: []v1beta1.Product{
+					{
+						Component: v1beta1.Component{
+							ID: "pkg:oci/nginx",
+							Hashes: map[v1beta1.Algorithm]v1beta1.Hash{
+								"sha256": "1234",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	docWithIdentifiers := v1beta1.VEX{
+		Metadata: v1beta1.Metadata{
+			Timestamp: "2026-01-01T00:00:00Z",
+			Version:   1,
+			Author:    "kubescape.io",
+		},
+		Statements: []v1beta1.Statement{
+			{
+				Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+				Status:        v1beta1.Status("not_affected"),
+				Products: []v1beta1.Product{
+					{
+						Component: v1beta1.Component{
+							ID: "pkg:oci/nginx",
+							Identifiers: map[v1beta1.IdentifierType]string{
+								"sha256": "1234",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	hID, err := calculateVexCanonicalHash(docWithIDIncludingSuffix)
+	require.NoError(t, err)
+	hHashes, err := calculateVexCanonicalHash(docWithHashes)
+	require.NoError(t, err)
+	hIdentifiers, err := calculateVexCanonicalHash(docWithIdentifiers)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hID, hHashes, "component ID containing hash-like suffix should not collide with component carrying Hashes")
+	assert.NotEqual(t, hHashes, hIdentifiers, "component carrying Hashes should not collide with component carrying Identifiers with same key/value")
 }
 
 func TestCalculateVexCanonicalHash_AliasOrderIndependent(t *testing.T) {
@@ -4077,11 +4204,32 @@ func TestCstringFromComponent_SortedKeys(t *testing.T) {
 		},
 	}
 
-	expected := ":pkg:deb/debian/libssl3@3.0.11:md5@hashmd5:sha1@hash1:sha256@hash256:cpe22@cpe22value:cpe23@cpe23value:purl@pkg:deb/debian/libssl3@3.0.11"
+	expected := ":29:pkg:deb/debian/libssl3@3.0.11:h:3:md5:7:hashmd5:h:4:sha1:5:hash1:h:6:sha256:7:hash256:i:5:cpe22:10:cpe22value:i:5:cpe23:10:cpe23value:i:4:purl:29:pkg:deb/debian/libssl3@3.0.11"
 	for i := 0; i < 20; i++ {
 		got := cstringFromComponent(c)
 		assert.Equal(t, expected, got)
 	}
+}
+
+func TestCstringFromComponent_FieldCollision(t *testing.T) {
+	c1 := v1beta1.Component{
+		ID: "pkg:oci/nginx:h:6:sha256:4:1234",
+	}
+	c2 := v1beta1.Component{
+		ID: "pkg:oci/nginx",
+		Hashes: map[v1beta1.Algorithm]v1beta1.Hash{
+			"sha256": "1234",
+		},
+	}
+	c3 := v1beta1.Component{
+		ID: "pkg:oci/nginx",
+		Identifiers: map[v1beta1.IdentifierType]string{
+			"sha256": "1234",
+		},
+	}
+
+	assert.NotEqual(t, cstringFromComponent(c1), cstringFromComponent(c2), "ID with serialized suffix must not collide with Hashes")
+	assert.NotEqual(t, cstringFromComponent(c2), cstringFromComponent(c3), "Hashes must not collide with Identifiers having same key/value")
 }
 
 func TestCstringFromVulnerability(t *testing.T) {
@@ -4096,7 +4244,7 @@ func TestCstringFromVulnerability(t *testing.T) {
 				ID:   "https://nvd.nist.gov",
 				Name: "CVE-2023-1234",
 			},
-			expected: ":https://nvd.nist.gov:CVE-2023-1234",
+			expected: ":20:https://nvd.nist.gov:13:CVE-2023-1234",
 		},
 		{
 			name: "single alias",
@@ -4105,7 +4253,7 @@ func TestCstringFromVulnerability(t *testing.T) {
 				Name:    "CVE-2023-1",
 				Aliases: []string{"000"},
 			},
-			expected: ":https://nvd.nist.gov:CVE-2023-1:000",
+			expected: ":20:https://nvd.nist.gov:10:CVE-2023-1:3:000",
 		},
 		{
 			name: "multiple aliases sorted",
@@ -4114,7 +4262,16 @@ func TestCstringFromVulnerability(t *testing.T) {
 				Name:    "CVE-2023-1234",
 				Aliases: []string{"RHSA-2", "GHSA-1", "ALAS-3"},
 			},
-			expected: ":https://nvd.nist.gov:CVE-2023-1234:ALAS-3:GHSA-1:RHSA-2",
+			expected: ":20:https://nvd.nist.gov:13:CVE-2023-1234:6:ALAS-3:6:GHSA-1:6:RHSA-2",
+		},
+		{
+			name: "colon-containing alias",
+			vuln: v1beta1.VexVulnerability{
+				ID:      "https://nvd.nist.gov",
+				Name:    "CVE-2023-1234",
+				Aliases: []string{"A:B"},
+			},
+			expected: ":20:https://nvd.nist.gov:13:CVE-2023-1234:3:A:B",
 		},
 	}
 
@@ -4124,6 +4281,19 @@ func TestCstringFromVulnerability(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+
+	// Distinct alias list test
+	vSplit := v1beta1.VexVulnerability{
+		ID:      "https://nvd.nist.gov",
+		Name:    "CVE-2023-1234",
+		Aliases: []string{"A", "B"},
+	}
+	vColon := v1beta1.VexVulnerability{
+		ID:      "https://nvd.nist.gov",
+		Name:    "CVE-2023-1234",
+		Aliases: []string{"A:B"},
+	}
+	assert.NotEqual(t, cstringFromVulnerability(vSplit), cstringFromVulnerability(vColon))
 }
 
 func TestSortVexStatements_TieBreakers(t *testing.T) {
@@ -4181,7 +4351,7 @@ func TestSortVexStatements_TieBreakers(t *testing.T) {
 			Vulnerability: v1beta1.VexVulnerability{ID: "src", Name: "CVE-2023-1000"},
 			Status:        v1beta1.Status("not_affected"),
 			Products: []v1beta1.Product{
-				{Component: v1beta1.Component{ID: "pkg:oci/image-beta"}},
+				{Component: v1beta1.Component{ID: "pkg:oci/image-bravo"}},
 			},
 		}
 
@@ -4189,7 +4359,7 @@ func TestSortVexStatements_TieBreakers(t *testing.T) {
 		sortVexStatements(stmts, docTime)
 
 		assert.Equal(t, "pkg:oci/image-alpha", stmts[0].Products[0].Component.ID)
-		assert.Equal(t, "pkg:oci/image-beta", stmts[1].Products[0].Component.ID)
+		assert.Equal(t, "pkg:oci/image-bravo", stmts[1].Products[0].Component.ID)
 	})
 
 	t.Run("tie breaker on statement ID", func(t *testing.T) {
@@ -4330,5 +4500,119 @@ func TestSortVexStatements_ZeroRFC3339Timestamp(t *testing.T) {
 	sortVexStatements(stmts, docTime)
 
 	assert.Equal(t, "stmt-zero", stmts[0].ID, "zero RFC3339 timestamp should sort before 2026 timestamp")
+	assert.Equal(t, "stmt-later", stmts[1].ID)
+}
+
+func TestCalculateVexCanonicalHash_FractionalTimestamp(t *testing.T) {
+	t.Run("differing fractional document timestamps produce distinct hashes", func(t *testing.T) {
+		doc1 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T00:00:00.100Z",
+			},
+			Statements: []v1beta1.Statement{
+				{Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"}},
+			},
+		}
+		doc2 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T00:00:00.200Z",
+			},
+			Statements: []v1beta1.Statement{
+				{Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"}},
+			},
+		}
+
+		h1, err := calculateVexCanonicalHash(doc1)
+		require.NoError(t, err)
+		h2, err := calculateVexCanonicalHash(doc2)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, h1, h2, "distinct fractional document timestamps must produce distinct canonical hashes")
+	})
+
+	t.Run("differing fractional statement timestamps produce distinct hashes", func(t *testing.T) {
+		doc1 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T00:00:00Z",
+			},
+			Statements: []v1beta1.Statement{
+				{
+					Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+					Timestamp:     "2026-01-01T00:00:00.123456Z",
+				},
+			},
+		}
+		doc2 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T00:00:00Z",
+			},
+			Statements: []v1beta1.Statement{
+				{
+					Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+					Timestamp:     "2026-01-01T00:00:00.654321Z",
+				},
+			},
+		}
+
+		h1, err := calculateVexCanonicalHash(doc1)
+		require.NoError(t, err)
+		h2, err := calculateVexCanonicalHash(doc2)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, h1, h2, "distinct fractional statement timestamps must produce distinct canonical hashes")
+	})
+
+	t.Run("equivalent UTC timestamps with different timezone offsets produce same hash", func(t *testing.T) {
+		doc1 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T01:00:00+01:00",
+			},
+			Statements: []v1beta1.Statement{
+				{
+					Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+					Timestamp:     "2026-01-01T02:30:00+02:30",
+				},
+			},
+		}
+		doc2 := v1beta1.VEX{
+			Metadata: v1beta1.Metadata{
+				Timestamp: "2026-01-01T00:00:00Z",
+			},
+			Statements: []v1beta1.Statement{
+				{
+					Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1234"},
+					Timestamp:     "2026-01-01T00:00:00Z",
+				},
+			},
+		}
+
+		h1, err := calculateVexCanonicalHash(doc1)
+		require.NoError(t, err)
+		h2, err := calculateVexCanonicalHash(doc2)
+		require.NoError(t, err)
+
+		assert.Equal(t, h1, h2, "equivalent timestamps with different timezone offsets must produce the same canonical hash")
+	})
+}
+
+func TestSortVexStatements_FractionalTimestamp(t *testing.T) {
+	docTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	stmtEarlier := v1beta1.Statement{
+		Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1000"},
+		Timestamp:     "2026-01-01T00:00:00.100Z",
+		ID:            "stmt-earlier",
+	}
+
+	stmtLater := v1beta1.Statement{
+		Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2023-1000"},
+		Timestamp:     "2026-01-01T00:00:00.200Z",
+		ID:            "stmt-later",
+	}
+
+	stmts := []v1beta1.Statement{stmtLater, stmtEarlier}
+	sortVexStatements(stmts, docTime)
+
+	assert.Equal(t, "stmt-earlier", stmts[0].ID, "earlier fractional timestamp should sort first")
 	assert.Equal(t, "stmt-later", stmts[1].ID)
 }
