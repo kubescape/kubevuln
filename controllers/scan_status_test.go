@@ -99,6 +99,74 @@ func TestScanStatusStore_EvictsOldestTerminalEntriesOverCap(t *testing.T) {
 	require.True(t, ok, "newly accepted job must be retained")
 }
 
+// Before #790, get() ran evictLocked's full-store sweep on every call, so a lookup for one
+// jobID paid for evaluating every other entry in the store too. This proves get() no longer
+// does that: stale, unrelated terminal entries elsewhere in the store must survive a get()
+// call for a different key, since only a write path (recordAccepted/markTerminal) or a get()
+// for that specific key is what evicts them now.
+func TestScanStatusStore_GetDoesNotEvictUnrelatedStaleEntries(t *testing.T) {
+	s := newScanStatusStore()
+	s.ttl = time.Millisecond
+
+	s.recordAccepted("stale-1", "generateSBOM")
+	s.markSucceeded("stale-1")
+	s.recordAccepted("stale-2", "generateSBOM")
+	s.markSucceeded("stale-2")
+
+	// Backdate both past the TTL directly, bypassing the eviction that recordAccepted and
+	// markSucceeded already ran while their own FinishedAt was still fresh.
+	s.mu.Lock()
+	longAgo := time.Now().UTC().Add(-time.Hour)
+	for _, jobID := range []string{"stale-1", "stale-2"} {
+		st := s.items[jobID]
+		st.FinishedAt = &longAgo
+		s.items[jobID] = st
+	}
+	s.mu.Unlock()
+
+	// A get() for an unrelated, non-existent key must not sweep the store.
+	_, ok := s.get("unrelated")
+	require.False(t, ok)
+
+	s.mu.RLock()
+	_, stale1Present := s.items["stale-1"]
+	_, stale2Present := s.items["stale-2"]
+	s.mu.RUnlock()
+	require.True(t, stale1Present, "get() for a different key must not evict unrelated stale entries")
+	require.True(t, stale2Present, "get() for a different key must not evict unrelated stale entries")
+}
+
+// get() must still refuse to hand back a terminal entry whose TTL has elapsed, and must
+// evict exactly the key it was asked about -- not the whole store -- when it finds one.
+func TestScanStatusStore_GetEvictsOnlyTheRequestedStaleKey(t *testing.T) {
+	s := newScanStatusStore()
+	s.ttl = time.Millisecond
+
+	s.recordAccepted("stale", "generateSBOM")
+	s.markSucceeded("stale")
+	s.recordAccepted("other-stale", "generateSBOM")
+	s.markSucceeded("other-stale")
+
+	s.mu.Lock()
+	longAgo := time.Now().UTC().Add(-time.Hour)
+	for _, jobID := range []string{"stale", "other-stale"} {
+		st := s.items[jobID]
+		st.FinishedAt = &longAgo
+		s.items[jobID] = st
+	}
+	s.mu.Unlock()
+
+	_, ok := s.get("stale")
+	require.False(t, ok, "expired terminal entry must not be returned")
+
+	s.mu.RLock()
+	_, stalePresent := s.items["stale"]
+	_, otherPresent := s.items["other-stale"]
+	s.mu.RUnlock()
+	require.False(t, stalePresent, "get() must evict the specific expired key it was asked about")
+	require.True(t, otherPresent, "get() must not evict unrelated expired entries it wasn't asked about")
+}
+
 func TestScanStatusStore_MarkRunningOnlyClaimsQueuedJobs(t *testing.T) {
 	s := newScanStatusStore()
 	s.recordAccepted("job", "generateSBOM")
@@ -124,4 +192,25 @@ func TestScanStatusStore_MarkRunningOnlyClaimsQueuedJobs(t *testing.T) {
 	status, ok = s.get("job")
 	require.True(t, ok)
 	require.Equal(t, domain.ScanStateAbandoned, status.State, "terminal jobs must reject later failure writes")
+}
+
+// Before #790, get()'s cost scaled with the store's total size (evictLocked's full sweep).
+// This benchmark's ns/op should stay flat across store sizes now that a lookup only touches
+// the one key it was asked for; run with -benchtime and compare sizes to see the effect, e.g.
+// go test ./controllers/ -run '^$' -bench BenchmarkScanStatusStore_Get -benchtime=200000x
+func BenchmarkScanStatusStore_Get(b *testing.B) {
+	for _, size := range []int{100, 10000} {
+		b.Run(fmt.Sprintf("storeSize=%d", size), func(b *testing.B) {
+			s := newScanStatusStore()
+			for i := 0; i < size; i++ {
+				jobID := fmt.Sprintf("job-%d", i)
+				s.recordAccepted(jobID, "generateSBOM")
+				s.markSucceeded(jobID)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				s.get("job-0")
+			}
+		})
+	}
 }

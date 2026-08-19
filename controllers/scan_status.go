@@ -38,15 +38,18 @@ func newScanStatusStore() *scanStatusStore {
 	}
 }
 
+// expiredTerminal reports whether status is a terminal record whose TTL has elapsed as of
+// now. Used both by evictLocked's full-store sweep and by get's single-key check.
+func expiredTerminal(status domain.ScanStatus, now time.Time, ttl time.Duration) bool {
+	return isTerminal(status.State) && status.FinishedAt != nil && now.Sub(*status.FinishedAt) > ttl
+}
+
 // evictLocked removes terminal records older than s.ttl, then, if still over
 // s.maxEntries, removes the oldest terminal records until the cap is met. Active
 // (queued/running) records are never evicted. Callers must hold s.mu for writing.
 func (s *scanStatusStore) evictLocked(now time.Time) {
 	for jobID, status := range s.items {
-		if !isTerminal(status.State) {
-			continue
-		}
-		if status.FinishedAt != nil && now.Sub(*status.FinishedAt) > s.ttl {
+		if expiredTerminal(status, now, s.ttl) {
 			delete(s.items, jobID)
 		}
 	}
@@ -235,10 +238,30 @@ func (s *scanStatusStore) markTerminal(jobID string, state domain.ScanState, rea
 	s.evictLocked(now)
 }
 
+// get looks up jobID without paying for evictLocked's full-store sweep: recordAccepted and
+// markTerminal already run it on every write, so the store is kept bounded and mostly fresh
+// without a read needing to do that work too (see #790). The one thing a read still owes on
+// its own is not handing back a terminal record whose TTL has elapsed but that no write has
+// evicted yet -- expiredTerminal is the same check evictLocked uses, applied to just this one
+// entry instead of every entry in the store.
 func (s *scanStatusStore) get(jobID string) (domain.ScanStatus, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.evictLocked(time.Now().UTC())
+	s.mu.RLock()
 	status, ok := s.items[jobID]
-	return status, ok
+	s.mu.RUnlock()
+	if !ok {
+		return domain.ScanStatus{}, false
+	}
+	now := time.Now().UTC()
+	if !expiredTerminal(status, now, s.ttl) {
+		return status, true
+	}
+
+	// Evict just this key: re-check under the write lock in case a concurrent write
+	// already removed or changed it between the RUnlock above and here.
+	s.mu.Lock()
+	if cur, ok := s.items[jobID]; ok && expiredTerminal(cur, now, s.ttl) {
+		delete(s.items, jobID)
+	}
+	s.mu.Unlock()
+	return domain.ScanStatus{}, false
 }
