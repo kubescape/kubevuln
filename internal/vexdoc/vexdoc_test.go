@@ -2,6 +2,7 @@ package vexdoc
 
 import (
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,6 +71,14 @@ func TestWriteToTempFile_CleanupIsSafeToCallOnErrorPath(t *testing.T) {
 }
 
 func TestWriteToTempFile_FileHasRestrictivePermissions(t *testing.T) {
+	// Windows has no Unix permission bits: os.OpenFile's mode argument is ignored beyond
+	// the read-only flag, so Perm() reads back 0666 however the file was created and the
+	// assertion below can never hold there. The property is still worth asserting on the
+	// platforms kubevuln runs on, so skip rather than weaken it.
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission bits are not implemented on Windows")
+	}
+
 	path, cleanup, err := WriteToTempFile([]byte("sensitive vendor data"))
 	require.NoError(t, err)
 	defer cleanup()
