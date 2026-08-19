@@ -363,3 +363,46 @@ func TestLoadConfigEnvBindingKeepsFilePrecedence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "from-env", c.AccountID, "the environment must still win over the file")
 }
+
+// With no API_URL, clusterData.json is the last place LoadBackendServicesConfig looks, and
+// its failure used to be discarded in favour of a fixed message telling the operator to set
+// backendOpenAPI. That reads as "the file is missing" for all three ways it can fail, two of
+// which mean the file was found and rejected. This runs at startup and is fatal, so it is
+// the only message they get.
+func TestLoadBackendServicesConfig_NoAPIURL_SurfacesClusterDataError(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		wantIn   string
+	}{
+		{
+			name:     "clusterData parses but carries no usable URLs",
+			contents: `{"clusterName":"test"}`,
+			wantIn:   "no static backend URLs",
+		},
+		{
+			name:     "clusterData is not valid json",
+			contents: "{invalid-json",
+			wantIn:   "failed to parse",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(tt.contents), 0o600))
+
+			_, err := LoadBackendServicesConfig(dir, "")
+			require.Error(t, err)
+			// the guidance is still there, so a genuinely absent file still reads the same
+			assert.Contains(t, err.Error(), "no service configuration")
+			// and now says why the file it did find was rejected
+			assert.Contains(t, err.Error(), tt.wantIn)
+		})
+	}
+
+	t.Run("a genuinely absent clusterData still reports the guidance", func(t *testing.T) {
+		_, err := LoadBackendServicesConfig(t.TempDir(), "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no service configuration")
+	})
+}
