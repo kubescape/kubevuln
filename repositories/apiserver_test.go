@@ -164,11 +164,13 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 		SBOMCreatorVersion string
 	}
 	tests := []struct {
-		name          string
-		args          args
-		sbom          domain.SBOM
-		wantErr       error
-		wantEmptySBOM bool
+		name                    string
+		args                    args
+		sbom                    domain.SBOM
+		wantErr                 error
+		wantEmptySBOM           bool
+		wantSBOMCreatorVersion  string
+		checkSBOMCreatorVersion bool
 	}{
 		{
 			"valid SBOM is retrieved",
@@ -181,6 +183,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 				Content: &v1beta1.SyftDocument{},
 			},
 			nil,
+			false,
+			"",
 			false,
 		},
 		{
@@ -195,9 +199,13 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			},
 			nil,
 			false,
+			"",
+			false,
 		},
 		{
-			"SBOMCreatorVersion mismatch",
+			// The stored manifest predates the version the caller wants: content it was
+			// never validated against would otherwise be served as if it were current.
+			"SBOMCreatorVersion mismatch, manifest older than requested",
 			args{
 				ctx:                context.TODO(),
 				name:               name,
@@ -210,6 +218,48 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			},
 			domain.ErrOutdatedSBOM,
 			false,
+			"v1.0.0",
+			true,
+		},
+		{
+			// The stored manifest is newer than the caller's version, e.g. written by a
+			// different-versioned replica during a rolling deploy/rollback of the same
+			// image slug. The caller's own version has no compatibility guarantee with it
+			// either, so this must be discarded exactly like the older-manifest case (#768).
+			"SBOMCreatorVersion mismatch, manifest newer than requested",
+			args{
+				ctx:                context.TODO(),
+				name:               name,
+				SBOMCreatorVersion: "v1.0.0",
+			},
+			domain.SBOM{
+				Name:               name,
+				SBOMCreatorVersion: "v1.1.0",
+				Content:            &v1beta1.SyftDocument{},
+			},
+			domain.ErrOutdatedSBOM,
+			false,
+			"v1.1.0",
+			true,
+		},
+		{
+			// On a match, the returned SBOMCreatorVersion must be what the manifest actually
+			// records, not merely echo the caller's requested value back (#768).
+			"SBOMCreatorVersion match",
+			args{
+				ctx:                context.TODO(),
+				name:               name,
+				SBOMCreatorVersion: "v1.2.3",
+			},
+			domain.SBOM{
+				Name:               name,
+				SBOMCreatorVersion: "v1.2.3",
+				Content:            &v1beta1.SyftDocument{},
+			},
+			nil,
+			false,
+			"v1.2.3",
+			true,
 		},
 		{
 			"empty name",
@@ -225,6 +275,8 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			},
 			nil,
 			true,
+			"",
+			false,
 		},
 	}
 	for _, tt := range tests {
@@ -243,6 +295,10 @@ func TestAPIServerStore_GetSBOM(t *testing.T) {
 			if (gotSBOM.Content == nil) != tt.wantEmptySBOM {
 				t.Errorf("GetSBOM() gotSBOM.Content = %v, wantEmptySBOM %v", gotSBOM.Content, tt.wantEmptySBOM)
 				return
+			}
+			if tt.checkSBOMCreatorVersion {
+				require.Equal(t, tt.wantSBOMCreatorVersion, gotSBOM.SBOMCreatorVersion,
+					"GetSBOM() must return the manifest's own recorded version, not the caller's requested one")
 			}
 		})
 	}
