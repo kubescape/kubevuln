@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -119,7 +118,7 @@ func DeleteContents(dir string) error {
 		return err
 	}
 	for _, c := range d {
-		err := os.RemoveAll(path.Join([]string{dir, c.Name()}...))
+		err := os.RemoveAll(filepath.Join(dir, c.Name()))
 		if err != nil {
 			return err
 		}
@@ -222,7 +221,7 @@ func CleanupStaleTempDirs(dir, prefix string, olderThan time.Duration) (int, err
 		if !info.ModTime().Before(cutoff) {
 			continue // young enough — may belong to a live sidecar scan
 		}
-		if err := os.RemoveAll(path.Join(dir, e.Name())); err != nil {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 			allErrs = errors.Join(allErrs, err)
 			continue
 		}

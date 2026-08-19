@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +87,7 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 	g := &GrypeAdapter{
 		distCfg: distCfg,
 		installCfg: installation.Config{
-			DBRootDir: path.Join(xdg.CacheHome, "grype", "db"),
+			DBRootDir: filepath.Join(xdg.CacheHome, "grype", "db"),
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
@@ -220,7 +220,7 @@ func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, tru
 	g := &GrypeAdapter{
 		distCfg: distCfg,
 		installCfg: installation.Config{
-			DBRootDir: path.Join(xdg.CacheHome, "grype-offline", "db"),
+			DBRootDir: filepath.Join(xdg.CacheHome, "grype-offline", "db"),
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
