@@ -149,8 +149,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Build Verification
 
 ```bash
-# Check binary
-./kubevuln --help
+# Check the binary runs (it takes no flags, so this starts the server; Ctrl-C to stop)
+./kubevuln
 
 # Check size
 ls -lh kubevuln
@@ -292,13 +292,16 @@ func TestScanService_GenerateSBOM_Error(t *testing.T) {
 
 ### Local Debugging
 
+kubevuln parses no command-line flags: everything is configured through the config file
+and environment. Log level is one of `debug`, `info`, `warning`, `error` or `fatal`.
+
 ```bash
 # Run with debug logging
-./kubevuln -alsologtostderr -v=4
-
-# Or set environment variables
-export GOLOG_LOG_LEVEL=debug
+export KS_LOGGER_LEVEL=debug
 ./kubevuln
+
+# Optionally name the logger in the output
+export KS_LOGGER_NAME=pretty
 ```
 
 ### Using Delve Debugger
@@ -632,9 +635,9 @@ go mod verify
       "mode": "auto",
       "program": "${workspaceFolder}/cmd/http",
       "env": {
-        "CONFIG_DIR": "${workspaceFolder}/.dev/config"
-      },
-      "args": ["-alsologtostderr", "-v=4"]
+        "CONFIG_DIR": "${workspaceFolder}/.dev/config",
+        "KS_LOGGER_LEVEL": "debug"
+      }
     },
     {
       "name": "Test Current Package",
