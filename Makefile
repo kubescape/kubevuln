@@ -19,13 +19,13 @@ lint:
 	@base_ref=$${GITHUB_BASE_REF:-main}; \
 	base=$$(git merge-base HEAD upstream/$$base_ref 2>/dev/null || git merge-base HEAD origin/$$base_ref 2>/dev/null || true); \
 	if [ -n "$$base" ]; then \
-		golangci-lint run --timeout=5m --new-from-rev="$$base"; \
+		golangci-lint run --timeout=15m --new-from-rev="$$base"; \
 	else \
-		golangci-lint run --timeout=5m; \
+		golangci-lint run --timeout=15m; \
 	fi
 
 lint-all:
-	golangci-lint run --timeout=5m
+	golangci-lint run --timeout=15m
 
 verify: build test vet lint
 
