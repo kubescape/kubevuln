@@ -269,6 +269,12 @@ func activeScanLockPathForTest() string {
 // acquireSweepLease needs before it will remove anything - proving the guard is held for the
 // pull, not just for cataloguing afterward.
 func Test_syftAdapter_CreateSBOM_PullHoldsTempDirGuard(t *testing.T) {
+	// Both this test and its sidecar counterpart (pkg/sbomscanner/v1) contend for the same
+	// process-global lease file under os.TempDir(), and go test runs packages as concurrent
+	// processes. Redirect os.TempDir() to a directory private to this test - it reads TMPDIR
+	// at call time - so the two can never observe each other's lease.
+	t.Setenv("TMPDIR", t.TempDir())
+
 	release := make(chan struct{})
 	pullStarted := make(chan struct{})
 	var once sync.Once
@@ -305,7 +311,8 @@ func Test_syftAdapter_CreateSBOM_PullHoldsTempDirGuard(t *testing.T) {
 
 	independentLease := flock.New(activeScanLockPathForTest())
 	locked, lockErr := independentLease.TryLock()
-	if lockErr == nil && locked {
+	require.NoError(t, lockErr, "probing the sweep's exclusive lease must not itself fail")
+	if locked {
 		_ = independentLease.Unlock()
 	}
 	assert.False(t, locked, "a sweep's exclusive lease must not be acquirable while a pull is still in flight, before cataloguing has even started")
