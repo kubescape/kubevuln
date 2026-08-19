@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"container/heap"
-	"slices"
 	"sync"
 	"time"
 
@@ -71,9 +70,8 @@ func (s *scanStatusStore) evictLocked(now time.Time) {
 			heap.Fix(&selected, 0)
 		}
 	}
-	slices.SortFunc([]candidate(selected), func(a, b candidate) int {
-		return a.finishedAt.Compare(b.finishedAt)
-	})
+	// Not sorted first: every selected entry is deleted, so their order changes nothing
+	// about which records survive. The heap above is what picks them.
 	for _, cand := range selected {
 		delete(s.items, cand.jobID)
 	}
