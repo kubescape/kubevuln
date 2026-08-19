@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/opencontainers/go-digest"
@@ -174,7 +175,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		Credentials:           credentials,
 	}
 
-	imgPlatform, err := parseSyftPlatform(options.Platform)
+	imgPlatform, err := syftsource.ParsePlatform(options.Platform)
 	if err != nil {
 		return domainSBOM, err
 	}
@@ -228,7 +229,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	src, err := registryauth.ResolveSource(ctxWithTimeout, metrics.ComponentInProcess,
 		func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
 			return tools.RetryWithBackoff(ctxWithSize, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
-				return syft.GetSource(retryCtx, ref, syftGetSourceConfig(opts, imgPlatform))
+				return syft.GetSource(retryCtx, ref, syftsource.GetSourceConfig(opts, imgPlatform))
 			})
 		},
 		rewriteImageRef(imageID, s.proxyRegistryMap),

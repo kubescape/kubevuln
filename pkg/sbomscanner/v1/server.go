@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
 	"github.com/kubescape/kubevuln/internal/syftmeta"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -117,17 +118,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// paths (registry rescans, periodic CRD-based rescans) that have no node context to derive
 	// a platform from: defaulting to runtime.GOARCH here used to force a platform mismatch for
 	// single-arch images that don't happen to match the sidecar container's own arch (see #512).
-	var imgPlatform *image.Platform
-	if req.Platform != "" {
-		platformStr := req.Platform
-		if !strings.Contains(platformStr, "/") {
-			platformStr = "linux/" + platformStr
-		}
-		p, err := image.NewPlatform(platformStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid platform %q: %w", platformStr, err)
-		}
-		imgPlatform = p
+	imgPlatform, err := syftsource.ParsePlatform(req.Platform)
+	if err != nil {
+		return nil, fmt.Errorf("invalid platform %q: %w", req.Platform, err)
 	}
 
 	// Build registry credentials
@@ -165,8 +158,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	src, err := resolveSource(ctxWithTimeout, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
 		return tools.RetryWithBackoff(ctxWithTimeout, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
 			ctxWithSize := context.WithValue(retryCtx, image.MaxImageSize, req.MaxImageSize) //nolint:staticcheck // stereoscope requires string context key
-			return syft.GetSource(ctxWithSize, ref,
-				syft.DefaultGetSourceConfig().WithRegistryOptions(opts).WithPlatform(imgPlatform).WithSources("registry"))
+			return syft.GetSource(ctxWithSize, ref, syftsource.GetSourceConfig(opts, imgPlatform))
 		})
 	}, imageID, imageTag, registryOptions)
 
