@@ -330,10 +330,16 @@ func LoadBackendServicesConfig(configDir, apiURL string) (schema.IBackendService
 	}
 
 	if apiURL == "" {
-		if services, err := loadBackendServicesFromClusterData(configDir); err == nil {
+		services, err := loadBackendServicesFromClusterData(configDir)
+		if err == nil {
 			return services, nil
 		}
-		return nil, fmt.Errorf("no service configuration: provide %s/services.json, set API_URL, or set backendOpenAPI/eventReceiverRestURL in clusterData.json", configDir)
+		// Wrapped rather than replaced: clusterData.json being absent is only one of the
+		// three ways this fails. It also reports a parse failure and a file that parses but
+		// carries no usable URLs, and dropping those told an operator who had already set
+		// backendOpenAPI to go and set it, with nothing saying the file had been read and
+		// rejected. This runs at startup and is fatal, so it is the only message they get.
+		return nil, fmt.Errorf("no service configuration: provide %s/services.json, set API_URL, or set backendOpenAPI/eventReceiverRestURL in clusterData.json: %w", configDir, err)
 	}
 
 	client, err := v3.NewServiceDiscoveryClientV3(apiURL)
