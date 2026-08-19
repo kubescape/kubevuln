@@ -25,12 +25,20 @@ jobs:
   reset-run-number:
     runs-on: ubuntu-latest
     name: reset github.run_number
+    # This job adds github.run_number to a fixed offset and returns the result. It reads
+    # nothing and writes nothing, so it does not want the workflow-level token at all, and
+    # without this it inherits every scope declared above: contents, packages, id-token and
+    # attestations, all write.
+    permissions: {}
     outputs:
       run-number: ${{ steps.get-build.outputs.build-number }}
     steps:
     - name: Get build number
       id: get-build
-      uses: mlilback/build-number@v1
+      # Pinned by commit rather than by the v1 tag: a tag is mutable, and this action was
+      # last released in February 2023, so whoever holds that repository can change what
+      # runs here at any point. Update deliberately.
+      uses: mlilback/build-number@81a5eb0abae9b77d036138284ba1094d49acbc32 # v1
       with:
         base: -149
         run-id: ${{ github.run_number }}

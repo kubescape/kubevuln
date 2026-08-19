@@ -10,7 +10,9 @@ jobs:
         permissions:
             actions: write
         steps:
-            - uses: liskin/gh-workflow-keepalive@v1
+            # Pinned by commit rather than by the mutable v1 tag, as with
+            # mlilback/build-number in pr-merged.yaml. Update deliberately.
+            - uses: liskin/gh-workflow-keepalive@f72ff1a1336129f29bf0166c0fd0ca6cf1bcb38c # v1
     deploy:
         runs-on: ubuntu-latest
         steps:
