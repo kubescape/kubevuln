@@ -3,6 +3,11 @@ on:
   pull_request:
     types: [synchronize, ready_for_review, opened, reopened]
 
+# The image is pushed to Quay with its own registry secrets, not GITHUB_TOKEN, so read
+# access for the checkout is all this needs.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
