@@ -1,4 +1,4 @@
-package v1
+package syftsource
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseSyftPlatform(t *testing.T) {
+func TestParsePlatform(t *testing.T) {
 	tests := []struct {
 		name     string
 		platform string
@@ -48,7 +48,7 @@ func TestParseSyftPlatform(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseSyftPlatform(tt.platform)
+			got, err := ParsePlatform(tt.platform)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -65,14 +65,23 @@ func TestParseSyftPlatform(t *testing.T) {
 	}
 }
 
-func TestSyftGetSourceConfig_usesPlatform(t *testing.T) {
-	platform, err := parseSyftPlatform("linux/arm64")
+func TestGetSourceConfig_usesPlatform(t *testing.T) {
+	platform, err := ParsePlatform("linux/arm64")
 	require.NoError(t, err)
 
-	cfg := syftGetSourceConfig(&image.RegistryOptions{}, platform)
+	cfg := GetSourceConfig(&image.RegistryOptions{}, platform)
 	require.NotNil(t, cfg)
 	require.NotNil(t, cfg.SourceProviderConfig)
 	require.NotNil(t, cfg.SourceProviderConfig.Platform)
 	assert.Equal(t, "linux", cfg.SourceProviderConfig.Platform.OS)
 	assert.Equal(t, "arm64", cfg.SourceProviderConfig.Platform.Architecture)
+}
+
+// The point of the package: both SBOM paths resolve a platform the same way, so an
+// architecture on its own means the same thing whichever one runs it.
+func TestGetSourceConfig_restrictsToRegistry(t *testing.T) {
+	cfg := GetSourceConfig(&image.RegistryOptions{}, nil)
+	require.NotNil(t, cfg)
+	assert.Equal(t, []string{"registry"}, cfg.Sources,
+		"kubevuln always pulls; falling back to a local daemon or containerd socket is not wanted")
 }
