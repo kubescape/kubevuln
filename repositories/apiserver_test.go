@@ -3766,3 +3766,50 @@ func TestCalculateVexCanonicalHash_StableAcrossMapOrder(t *testing.T) {
 			"the shape already in use must hash exactly as it did before")
 	})
 }
+
+// The enrich helpers take the caller's own manifest maps. They used to alias them and write
+// through, so a CVE manifest came back from StoreCVESummary carrying summary annotations and
+// labels it never had: eight labels where it passed one. applyExceptionsToManifest already
+// clones for this reason; these did not.
+func TestEnrichSummaryManifestObject_DoesNotMutateCaller(t *testing.T) {
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-a/namespace-b/deployment-c",
+		ContainerName: "app",
+	})
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1))
+
+	annotations := map[string]string{"mine": "keep"}
+	labels := map[string]string{"mine": "keep"}
+
+	gotAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, annotations)
+	require.NoError(t, err)
+	gotLabels, err := enrichSummaryManifestObjectLabels(ctx, labels, true)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{"mine": "keep"}, annotations, "caller's annotations must be untouched")
+	assert.Equal(t, map[string]string{"mine": "keep"}, labels, "caller's labels must be untouched")
+
+	// and the returned maps still carry both the caller's entries and the added ones
+	assert.Equal(t, "keep", gotAnnotations["mine"])
+	assert.Equal(t, "keep", gotLabels["mine"])
+	assert.Equal(t, helpersv1.ContextMetadataKeyFiltered, gotLabels[helpersv1.ContextMetadataKey])
+	assert.Equal(t, "deployment", gotLabels[helpersv1.RelatedKindMetadataKey])
+	assert.NotEmpty(t, gotAnnotations[helpersv1.WlidMetadataKey])
+}
+
+// A nil map in still gives a usable map out, which is what the nil checks used to provide.
+func TestEnrichSummaryManifestObject_HandlesNilMaps(t *testing.T) {
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid: "wlid://cluster-a/namespace-b/deployment-c",
+	})
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1))
+
+	gotAnnotations, err := enrichSummaryManifestObjectAnnotations(ctx, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, gotAnnotations)
+
+	gotLabels, err := enrichSummaryManifestObjectLabels(ctx, nil, false)
+	require.NoError(t, err)
+	assert.NotNil(t, gotLabels)
+	assert.Equal(t, helpersv1.ContextMetadataKeyNonFiltered, gotLabels[helpersv1.ContextMetadataKey])
+}

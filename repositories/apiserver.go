@@ -748,10 +748,12 @@ func parseSeverities(cve domain.CVEManifest, cvep domain.CVEManifest, withReleva
 }
 
 func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map[string]string) (map[string]string, error) {
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	enrichedAnnotations := annotations
+	// Copied, not aliased: the caller passes its own manifest's map, and the entries added
+	// below belong to the summary object being built rather than to that manifest. Writing
+	// through left a CVE manifest carrying summary annotations it never had, which is the
+	// same hazard applyExceptionsToManifest already clones to avoid.
+	enrichedAnnotations := make(map[string]string, len(annotations)+3)
+	maps.Copy(enrichedAnnotations, annotations)
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
@@ -769,15 +771,14 @@ func enrichSummaryManifestObjectAnnotations(ctx context.Context, annotations map
 }
 
 func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]string, withRelevancy bool) (map[string]string, error) {
-	if labels == nil {
-		labels = make(map[string]string)
-	}
+	// Copied for the same reason as the annotations above.
+	enrichedLabels := make(map[string]string, len(labels)+7)
+	maps.Copy(enrichedLabels, labels)
 	if withRelevancy {
-		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
+		enrichedLabels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
 	} else {
-		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
+		enrichedLabels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
 	}
-	enrichedLabels := labels
 
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
