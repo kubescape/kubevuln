@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
+	"github.com/gofrs/flock"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -756,6 +758,105 @@ func TestCreateSBOM_PullTimeout_ReturnsIncompleteInsteadOfHanging(t *testing.T) 
 		// truly never returns, fail with a clear message instead of hanging the suite.
 		t.Fatal("CreateSBOM never returned after the pull's TimeoutSeconds elapsed - the pull is not bounded by any deadline")
 	}
+}
+
+// activeScanLockPath must match internal/tools' own unexported activeScanLockPath(os.TempDir()):
+// same directory (os.TempDir(), which BeginActiveTempDirUse is always called with in this
+// package and adapters/v1), same filename. There is no exported way to ask tools for this path,
+// so it is duplicated here deliberately, the same way #796's own evidence had to cite it as a
+// literal to describe the mechanism from outside internal/tools.
+func activeScanLockPathForTest() string {
+	return filepath.Join(os.TempDir(), ".kubevuln-active-scan.lock")
+}
+
+// TestCreateSBOM_PullHoldsTempDirGuard is the regression test for #796: BeginActiveTempDirUse
+// used to be registered only once the pull had already finished (right before cataloguing
+// started), leaving the pull itself - which is what actually creates the stereoscope temp dir
+// and downloads layers into it - completely unprotected against a concurrent
+// StartPeriodicTempDirSweep pass in this process or the in-process adapter's, sharing the same
+// os.TempDir(). This stalls a real pull mid-flight (the manifest request never completes until
+// released) and, while it's stalled, asserts that a fresh, independent handle on the same
+// cross-process lease file cannot take the exclusive lock StartPeriodicTempDirSweep's own
+// acquireSweepLease needs before it will remove anything - proving the guard is held for the
+// pull, not just for cataloguing afterward.
+func TestCreateSBOM_PullHoldsTempDirGuard(t *testing.T) {
+	// Both this test and its in-process counterpart (adapters/v1) contend for the same
+	// process-global lease file under os.TempDir(), and go test runs packages as concurrent
+	// processes. Redirect os.TempDir() to a directory private to this test - it reads TMPDIR
+	// at call time - so the two can never observe each other's lease.
+	t.Setenv("TMPDIR", t.TempDir())
+
+	release := make(chan struct{})
+	pullStarted := make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Never respond to the manifest request until the test releases it - a connection
+		// that accepts the request but stalls, not one that errors or refuses outright, so
+		// the pull is genuinely still in flight while this test inspects the lease.
+		once.Do(func() { close(pullStarted) })
+		<-release
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+			ImageId:         u.Host + "/test-image",
+			ImageTag:        u.Host + "/test-image:latest",
+			Platform:        "linux/amd64",
+			MaxImageSize:    1 << 30,
+			MaxSbomSize:     1 << 30,
+			TimeoutSeconds:  30,
+			InsecureUseHttp: true,
+		})
+	}()
+
+	select {
+	case <-pullStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pull never reached the manifest request")
+	}
+
+	independentLease := flock.New(activeScanLockPathForTest())
+	locked, lockErr := independentLease.TryLock()
+	require.NoError(t, lockErr, "probing the sweep's exclusive lease must not itself fail")
+	if locked {
+		_ = independentLease.Unlock()
+	}
+	assert.False(t, locked, "a sweep's exclusive lease must not be acquirable while a pull is still in flight, before cataloguing has even started")
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("CreateSBOM never returned after the pull was released")
+	}
+
+	// The lease must be fully released once CreateSBOM has returned, so a genuinely stale
+	// directory left by some other, truly abandoned run can still be swept afterward.
+	require.Eventually(t, func() bool {
+		l := flock.New(activeScanLockPathForTest())
+		ok, lockErr := l.TryLock()
+		if lockErr != nil {
+			return false
+		}
+		if ok {
+			_ = l.Unlock()
+		}
+		return ok
+	}, 5*time.Second, 50*time.Millisecond, "the temp-dir guard must be released once CreateSBOM returns")
 }
 
 // TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft covers the deadline path: deadline.Run

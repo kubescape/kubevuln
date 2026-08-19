@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -155,6 +156,18 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	logger.L().Debug("downloading image", helpers.String("imageID", imageID))
 	ctxWithTimeout, cancelPull := context.WithTimeout(ctx, timeout)
 	defer cancelPull()
+
+	// Registered before the pull, not just cataloguing: resolveSource below is what actually
+	// creates the stereoscope temp dir and downloads image layers into it, and that used to
+	// run fully unprotected against a concurrent StartPeriodicTempDirSweep pass -- in this
+	// process or the in-process adapter's, which shares the same os.TempDir() -- deleting the
+	// directory out from under a still-in-progress pull (see #796). Ownership of ending it
+	// transfers to the dl.Run closure below once source resolution succeeds; every early-return
+	// branch between here and there must end it for itself.
+	endTempDirUseOnce := sync.Once{}
+	endTempDirUseFn := tools.BeginActiveTempDirUse(os.TempDir())
+	endActiveTempDirUse := func() { endTempDirUseOnce.Do(endTempDirUseFn) }
+
 	src, err := resolveSource(ctxWithTimeout, func(_ context.Context, ref string, opts *image.RegistryOptions) (source.Source, error) {
 		return tools.RetryWithBackoff(ctxWithTimeout, "source_resolution", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (source.Source, error) {
 			ctxWithSize := context.WithValue(retryCtx, image.MaxImageSize, req.MaxImageSize) //nolint:staticcheck // stereoscope requires string context key
@@ -169,6 +182,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	case err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded")):
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 		logger.L().Warning("image pull timed out", helpers.String("imageID", imageID))
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			Status: helpersv1.Incomplete,
 		}, nil
@@ -177,11 +191,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		logger.L().Warning("Image exceeds size limit",
 			helpers.Int("maxImageSize", int(req.MaxImageSize)),
 			helpers.String("imageID", imageID))
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.TooLarge,
 			StatusReason: domain.ReasonImageTooLarge,
 		}, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
@@ -197,6 +213,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			helpers.String("platform", req.Platform),
 			helpers.String("imageID", imageID),
 			helpers.Error(err))
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
 			StatusReason: domain.ReasonPlatformNotFound,
@@ -206,6 +223,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		// SidecarSBOMAdapter.CreateSBOM) reconstructs a *transport.Error from it to keep
 		// ScanService.checkCreateSBOM's errors.As(...) check working the same way it does
 		// for the in-process syft adapter.
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
 			StatusReason: domain.ReasonTooManyRequests,
@@ -214,6 +232,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		if isPlatformMismatch(err) {
 			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		}
+		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
 		}, nil
@@ -233,10 +252,6 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Buffered so the abandoned goroutine below can always publish and exit, even when
 	// nobody is left to receive.
 	generated := make(chan *sbom.SBOM, 1)
-	// Registered here rather than deferred at the handler's own top level: this closure can
-	// outlive the handler's return (see the comment below), so the periodic temp-dir sweep
-	// must stay blind to this closure's completion, not the handler's.
-	endActiveTempDirUse := tools.BeginActiveTempDirUse(os.TempDir())
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer endActiveTempDirUse()
 		defer func(src source.Source) {

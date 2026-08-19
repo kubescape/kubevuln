@@ -223,6 +223,18 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	pullMutexUnlockOnce := sync.Once{}
 	unlockPullMutex := func() { pullMutexUnlockOnce.Do(s.pullMutex.Unlock) }
 
+	// Registered before the pull, not just cataloguing: registryauth.ResolveSource below is
+	// what actually creates the stereoscope temp dir and downloads image layers into it, and
+	// that used to run fully unprotected against a concurrent StartPeriodicTempDirSweep pass
+	// -- in this process or the sidecar's, which shares the same os.TempDir() -- deleting the
+	// directory out from under a still-in-progress pull (see #796). Ownership of ending it
+	// transfers to the dl.Run closure below once source resolution succeeds, the same way
+	// pullMutex's unlock does; every early-return branch between here and there must end it
+	// for itself.
+	endTempDirUseOnce := sync.Once{}
+	endTempDirUseFn := tools.BeginActiveTempDirUse(os.TempDir())
+	endActiveTempDirUse := func() { endTempDirUseOnce.Do(endTempDirUseFn) }
+
 	// The MANIFEST_UNKNOWN and 401 fallback ladder lives in internal/registryauth, shared
 	// with the sidecar scanner, which ran a copy of it. The pull keeps its own context,
 	// carrying the size limit; ctxWithTimeout is what bounds the credential lookup.
@@ -244,6 +256,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		logger.L().Ctx(ctx).Warning("Syft timed out during image resolution",
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.Incomplete
+		endActiveTempDirUse()
 		unlockPullMutex()
 		return domainSBOM, nil
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
@@ -254,10 +267,12 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		domainSBOM.Status = helpersv1.TooLarge
 		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonImageTooLarge
 		domainSBOM.Annotations[domain.MaxImageSizeAnnotationKey] = fmt.Sprintf("%d", s.maxImageSize)
+		endActiveTempDirUse()
 		unlockPullMutex()
 		return domainSBOM, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		domainSBOM.Status = helpersv1.Unauthorize
+		endActiveTempDirUse()
 		unlockPullMutex()
 		return domainSBOM, err
 	case err != nil:
@@ -275,6 +290,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// match options.Platform). Propagated as-is: classifySBOMError in core/services
 		// recognizes it via errors.As and reports a distinct "platform not found" reason
 		// instead of the generic SBOM-generation-failed fallback (see #512).
+		endActiveTempDirUse()
 		unlockPullMutex()
 		return domainSBOM, err
 	}
@@ -303,10 +319,6 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// or failure, late if the deadline fired first - is what makes pullMutex serialize the
 	// disk-touching work itself, not just the synchronous portion of the call.
 	dl := deadline.New(s.scanTimeout)
-	// Registered here, not deferred at CreateSBOM's own top level: this closure can outlive
-	// CreateSBOM's return (see the comment below), so the periodic temp-dir sweep must stay
-	// blind to this closure's completion, not to CreateSBOM's.
-	endActiveTempDirUse := tools.BeginActiveTempDirUse(os.TempDir())
 	err = dl.Run(func(stopper <-chan struct{}) error {
 		defer unlockPullMutex()
 		defer endActiveTempDirUse()
