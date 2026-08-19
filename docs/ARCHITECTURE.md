@@ -307,7 +307,7 @@ The central business logic component implementing the `ScanService` port.
 **Sidecar SBOM Adapter** (`adapters/v1/sidecar.go`)
 - Implements the same `SBOMCreator` port as the Syft adapter, so the scan service is unaware of which one it holds
 - Delegates SBOM generation to the `sbom-scanner` sidecar over gRPC on a Unix domain socket, instead of running Syft in this process
-- Selected at startup when `SBOM_SCANNER_SOCKET` is set; see [SBOM Generation Modes](#sbom-generation-modes)
+- Attempted at startup when `SBOM_SCANNER_SOCKET` is set, and selected only once the sidecar passes its readiness check; startup falls back to the Syft adapter if it does not. See [SBOM Generation Modes](#sbom-generation-modes)
 
 **Grype Adapter** (`adapters/v1/grype.go`)
 - Manages vulnerability database updates
