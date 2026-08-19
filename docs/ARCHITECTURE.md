@@ -182,9 +182,11 @@ Kubevuln follows the hexagonal architecture pattern to achieve:
 kubevuln/
 ├── adapters/                    # External service implementations
 │   ├── v1/
-│   │   ├── syft.go             # SBOM generation using Syft
+│   │   ├── syft.go             # SBOM generation using Syft, in-process
+│   │   ├── sidecar.go          # SBOM generation via the sbom-scanner sidecar
 │   │   ├── grype.go            # CVE scanning using Grype
 │   │   ├── backend.go          # Kubescape backend communication
+│   │   ├── securityexception.go # SecurityException CRDs -> exception policies
 │   │   └── container_profile.go # Relevancy provider
 │   ├── mockcve.go              # Mock CVE scanner for testing
 │   ├── mockplatform.go         # Mock platform for testing
@@ -193,6 +195,8 @@ kubevuln/
 ├── cmd/
 │   ├── http/
 │   │   └── main.go             # HTTP server entry point
+│   ├── sbom-scanner/
+│   │   └── main.go             # Sidecar SBOM scanner entry point (gRPC over a Unix socket)
 │   └── cli/
 │       └── main.go             # CLI entry point (not implemented)
 │
@@ -218,11 +222,20 @@ kubevuln/
 │       └── scan.go             # Main scanning business logic
 │
 ├── internal/
-│   └── tools/                  # Internal utilities
+│   ├── tools/                  # Internal utilities
+│   ├── metrics/                # OpenTelemetry instruments and recorders
+│   ├── registryauth/           # Registry credential resolution, shared by both SBOM paths
+│   ├── syftmeta/               # Syft metadata reattachment
+│   ├── safefetch/              # SSRF-guarded HTTPS fetcher for user-supplied URLs
+│   └── vexdoc/                 # Safe temp-file writer for VEX documents
+│
+├── pkg/                        # Importable by other projects
+│   ├── sbomscanner/v1/         # Sidecar scanner protocol: gRPC client, server, proto
+│   └── securityexception/v1beta1/ # SecurityException / ClusterSecurityException CRD types
 │
 └── repositories/
     ├── apiserver.go            # Kubernetes API server storage
-    ├── memory.go               # In-memory storage
+    ├── memory.go               # In-memory storage (testing)
     └── broken.go               # Always-failing storage (testing)
 ```
 
@@ -291,6 +304,11 @@ The central business logic component implementing the `ScanService` port.
 - Handles image size limits and timeouts
 - Supports multiple registry authentication methods
 
+**Sidecar SBOM Adapter** (`adapters/v1/sidecar.go`)
+- Implements the same `SBOMCreator` port as the Syft adapter, so the scan service is unaware of which one it holds
+- Delegates SBOM generation to the `sbom-scanner` sidecar over gRPC on a Unix domain socket, instead of running Syft in this process
+- Attempted at startup when `SBOM_SCANNER_SOCKET` is set, and selected only once the sidecar passes its readiness check; startup falls back to the Syft adapter if it does not. See [SBOM Generation Modes](#sbom-generation-modes)
+
 **Grype Adapter** (`adapters/v1/grype.go`)
 - Manages vulnerability database updates
 - Scans SBOMs for CVEs using Grype library
@@ -314,6 +332,53 @@ The central business logic component implementing the `ScanService` port.
 - Used with `keepLocal: true`
 
 ---
+
+### SBOM Generation Modes
+
+SBOM generation runs in one of two places, chosen once at startup. Both implement the same
+`SBOMCreator` port, so nothing downstream of `ScanService` behaves differently.
+
+**In-process** (default). `SyftAdapter` runs Syft inside the kubevuln process. This is what
+runs when `SBOM_SCANNER_SOCKET` is unset.
+
+**Sidecar.** Setting `SBOM_SCANNER_SOCKET` points kubevuln at a second binary, `cmd/sbom-scanner`,
+running as another container in the same pod. It serves the gRPC service in `pkg/sbomscanner/v1`
+over a Unix domain socket, and `SidecarSBOMAdapter` calls it in place of running Syft locally.
+
+The reason for the split is memory. Syft's peak usage scales with image size and is hard to bound
+in advance, so a large image can exhaust the container's memory limit. In the sidecar, the kernel
+kills that container instead of kubevuln, and the HTTP server, the scan queue and the Grype
+database stay up.
+
+```
+┌──────────────────────────┐        ┌────────────────────────────┐
+│ kubevuln container       │        │ sbom-scanner container     │
+│                          │        │                            │
+│  SidecarSBOMAdapter ─────┼── gRPC ┼──> scannerServer           │
+│                          │  (uds) │      └─ syft.CreateSBOM    │
+│  GrypeAdapter            │        │                            │
+│  HTTP controller         │        │  OOM here does not take    │
+│                          │        │  kubevuln down             │
+└──────────────────────────┘        └────────────────────────────┘
+```
+
+Startup is fail-soft: `NewSBOMScannerClient` health-checks the sidecar, bounded by
+`scannerReadinessTimeout`, and if it never becomes ready kubevuln logs the failure and falls back
+to the in-process adapter rather than refusing to start. The mode actually in effect is reported
+by `/v1/diagnostics` as `scanMode`.
+
+Two consequences worth knowing when reading the code:
+
+- The two paths are separate implementations of the same behaviour, so a change to one usually
+  needs the same change to the other. Shared pieces have been factored out where practical, for
+  example `internal/registryauth` for the credential fallback ladder.
+- Concurrency differs. The in-process adapter serialises pulls behind a mutex so concurrent scans
+  cannot exhaust local disk; the sidecar intentionally does not, and bounds in-flight work by the
+  caller's `scanConcurrency` instead.
+
+Relevant env vars: `SBOM_SCANNER_SOCKET` selects the mode on the kubevuln side; `SOCKET_PATH`
+and `METRICS_ADDR` configure the sidecar; `SCANNER_MEMORY_LIMIT` is read at startup and passed
+to the adapter, which records it on an SBOM it reports as too large for the scanner.
 
 ## Data Flow
 
