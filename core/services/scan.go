@@ -225,6 +225,15 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		return fmt.Errorf("getting container relevancy scans: %w", err)
 	}
 
+	// failed counts containers that did not produce a scan result; lastFailure is the most
+	// recent one's classified error. If any container fails, ScanCP must not report success
+	// (see #816): a container-level failure is a real scan failure, not the informational
+	// "come back once the profile is complete" signal domain.ErrPartialContainerProfile
+	// carries from the relevancy lookup above, so it is surfaced the same way GenerateSBOM,
+	// ScanCVE and ScanRegistry surface theirs — as a returned *domain.ScanError.
+	var failed int
+	var lastFailure *domain.ScanError
+
 	for _, scan := range scans {
 		imageTagNormalized := tools.NormalizeReference(scan.ImageTag)
 		slug, err := names.ImageInfoToSlug(imageTagNormalized, scan.ImageID)
@@ -232,6 +241,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			logger.L().Ctx(mainCtx).Error("getting image slug, skipping scan", helpers.Error(err),
 				helpers.String("imageTag", scan.ImageTag),
 				helpers.String("imageID", scan.ImageID))
+			failed++
+			lastFailure = &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: fmt.Errorf("getting image slug: %w", err)}
 			continue // we need the slug
 		}
 
@@ -274,11 +285,20 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			if sbomErr != nil {
 				logger.L().Ctx(ctx).Error("creating SBOM, skipping scan", helpers.Error(sbomErr),
 					helpers.String("imageSlug", slug))
+				failed++
+				reason := classifySBOMError(sbomErr)
+				var scanErr *domain.ScanError
+				if errors.As(sbomErr, &scanErr) {
+					reason = scanErr.Reason
+				}
+				lastFailure = &domain.ScanError{Reason: reason, Err: fmt.Errorf("creating SBOM: %w", sbomErr)}
 				continue // we need the SBOM
 			}
 			if !s.sbomGeneration && sbom.Content == nil {
 				logger.L().Ctx(ctx).Error("missing SBOM, skipping scan",
 					helpers.String("imageSlug", slug))
+				failed++
+				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: domain.ErrMissingSBOM}
 				continue // we need the SBOM
 			}
 
@@ -286,8 +306,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 				logger.L().Ctx(ctx).Warning("incomplete or too large SBOM, skipping scan",
 					helpers.String("imageSlug", slug))
-				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration,
-					classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations), nil)
+				reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureSBOMGeneration, reason, nil)
+				failed++
+				lastFailure = &domain.ScanError{Reason: reason, Err: domain.ErrIncompleteSBOM}
 				continue // do not process this SBOM
 			}
 		}
@@ -304,6 +326,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					helpers.String("imageSlug", slug))
 				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
 					scanfailure.ReasonCVEMatchingFailed, err)
+				failed++
+				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning SBOM: %w", err)}
 				continue // we need the CVE
 			}
 
@@ -339,6 +363,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			if err != nil {
 				logger.L().Ctx(ctx).Error("filtering SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
+				failed++
+				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: fmt.Errorf("filtering SBOM: %w", err)}
 				continue // we need the SBOM'
 			}
 			if s.storeFilteredSbom {
@@ -359,6 +385,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			if err != nil {
 				logger.L().Ctx(ctx).Error("scanning filtered SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
+				failed++
+				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning filtered SBOM: %w", err)}
 				continue // we need the CVE'
 			}
 
@@ -403,6 +431,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 				scanfailure.ReasonResultUploadFailed, err)
+			failed++
+			lastFailure = &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: fmt.Errorf("submitting CVEs: %w", err)}
 			continue // we need to submit the CVE
 		}
 	}
@@ -411,6 +441,9 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
+	if failed > 0 {
+		return lastFailure
+	}
 	return nil
 }
 
