@@ -337,6 +337,7 @@ func TestScanService_ScanCP(t *testing.T) {
 		wantCvep        bool
 		wantEmptyReport bool
 		wantErr         bool
+		wantReason      string
 	}{
 		{
 			name:    "no workload",
@@ -347,14 +348,20 @@ func TestScanService_ScanCP(t *testing.T) {
 			workload: true,
 		},
 		{
+			// regression test for #816: ScanCP used to swallow this failure and return nil
 			name:            "create SBOM error",
 			createSBOMError: true,
 			workload:        true,
+			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
+			// regression test for #816: ScanCP used to swallow this failure and return nil
 			name:            "create SBOM too many requests",
 			toomanyrequests: true,
 			workload:        true,
+			wantErr:         true,
+			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:      "empty wlid",
@@ -399,11 +406,14 @@ func TestScanService_ScanCP(t *testing.T) {
 			workload:      true,
 		},
 		{
-			name:     "timeout SBOM",
-			sbom:     true,
-			storage:  true,
-			timeout:  true,
-			workload: true,
+			// regression test for #816: ScanCP used to swallow this failure and return nil
+			name:       "timeout SBOM",
+			sbom:       true,
+			storage:    true,
+			timeout:    true,
+			workload:   true,
+			wantErr:    true,
+			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
 			name:     "with SBOMp",
@@ -480,8 +490,18 @@ func TestScanService_ScanCP(t *testing.T) {
 			err := storageCP.StoreContainerProfile(ctx, ap)
 			require.NoError(t, err)
 
-			if err := s.ScanCP(ctx); (err != nil) != tt.wantErr {
-				t.Errorf("ScanCP() error = %v, wantErr %v", err, tt.wantErr)
+			scanCPErr := s.ScanCP(ctx)
+			if (scanCPErr != nil) != tt.wantErr {
+				t.Errorf("ScanCP() error = %v, wantErr %v", scanCPErr, tt.wantErr)
+			}
+			if tt.wantReason != "" {
+				// regression coverage for #816: a per-container failure inside ScanCP must
+				// come back as a classified *domain.ScanError, exactly like the single-image
+				// scan flows already do, so the HTTP layer can resolve a bounded reason
+				// label instead of collapsing every failure into "unexpected_error".
+				var scanErr *domain.ScanError
+				require.ErrorAsf(t, scanCPErr, &scanErr, "expected a *domain.ScanError, got %T: %v", scanCPErr, scanCPErr)
+				assert.Equal(t, tt.wantReason, scanErr.Reason)
 			}
 			if tt.toomanyrequests {
 				// the 429 marker must be recorded under the same canonical key every
@@ -497,6 +517,90 @@ func TestScanService_ScanCP(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stubRelevancyProvider is a ports.Relevancy test double that returns a fixed list of scans,
+// letting tests exercise ScanCP's per-container loop with more than one container -- something
+// the real ContainerProfileAdapter never does today (one ContainerProfile resolves to at most
+// one scan), but that the ports.Relevancy contract and ScanCP's loop are both written for.
+type stubRelevancyProvider struct {
+	scans []ports.ContainerRelevancyScan
+}
+
+func (s stubRelevancyProvider) GetContainerRelevancyScans(_ context.Context, _, _ string, _ bool) ([]ports.ContainerRelevancyScan, error) {
+	return s.scans, nil
+}
+
+// TestScanService_ScanCP_PartialContainerFailure is a regression test for #816. When a
+// ContainerProfile fans out to multiple containers, one container succeeding must not mask
+// another container failing: that is a real scan failure, not the "come back once relevancy
+// data is complete" signal domain.ErrPartialContainerProfile carries from the relevancy lookup,
+// so it has to surface the same way a total failure does -- as a non-nil, classified error --
+// rather than being reported as a plain success because at least one container scanned cleanly.
+func TestScanService_ScanCP_PartialContainerFailure(t *testing.T) {
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	cveAdapter := adapters.NewMockCVEAdapter()
+	storageSBOM := repositories.NewMemoryStorage(false, false)
+	storageCVE := repositories.NewMemoryStorage(false, false)
+
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	goodImageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	goodImageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{
+		{
+			ContainerName: "kube-proxy",
+			ImageID:       goodImageID,
+			ImageTag:      goodImageTag,
+			InstanceID:    instanceID,
+			Labels:        map[string]string{},
+			RelevantFiles: mapset.NewSet[string](),
+			Wlid:          wlid,
+		},
+		{
+			// an empty ImageID fails names.ImageInfoToSlug (see ImageInfoToSlug's
+			// imageIDSlugHashLength check) before this container ever reaches SBOM
+			// creation -- a deterministic, adapter-independent way to fail just this
+			// one container without touching the mock SBOM adapter's shared state.
+			ContainerName: "sidecar",
+			ImageID:       "",
+			ImageTag:      "k8s.gcr.io/sidecar:v1",
+			InstanceID:    instanceID,
+			Labels:        map[string]string{},
+			RelevantFiles: mapset.NewSet[string](),
+			Wlid:          wlid,
+		},
+	}}
+
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(false, nil), relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	scanCPErr := s.ScanCP(ctx)
+	require.Error(t, scanCPErr, "one container failing must not be hidden just because another container succeeded")
+
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, scanCPErr, &scanErr, "expected a *domain.ScanError, got %T: %v", scanCPErr, scanCPErr)
+	assert.NotEmpty(t, scanErr.Reason)
+
+	slug, err := names.ImageInfoToSlug(tools.NormalizeReference(goodImageTag), goodImageID)
+	require.NoError(t, err)
+	_, getErr := storageCVE.GetCVE(ctx, slug, sbomAdapter.Version(), cveAdapter.Version(), cveAdapter.DBVersion(ctx))
+	assert.NoError(t, getErr, "the container that scanned successfully must still have had its result stored")
 }
 
 // countingSBOMCreator wraps a ports.SBOMCreator and counts CreateSBOM invocations, so tests can
@@ -564,7 +668,12 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	// the canonical key ScanCP writes to (ImageTagNormalized, see rateLimitCacheKey)
 	s.tooManyRequests.Set(tools.NormalizeReference(imageTag), true, ttl)
 
-	require.NoError(t, s.ScanCP(ctx))
+	// skipping the pull still means this container produced no scan result, so ScanCP must
+	// report the failure (see #816) even though the skip itself worked correctly.
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, scanfailure.ReasonSBOMGenerationFailed, scanErr.Reason)
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
 }
 

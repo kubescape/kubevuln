@@ -858,6 +858,11 @@ func (s scanErrorService) ScanRegistry(context.Context) error {
 	return s.err
 }
 
+func (s scanErrorService) ScanCP(context.Context) error {
+	s.signalStarted()
+	return s.err
+}
+
 func (s scanErrorService) ValidateGenerateSBOM(ctx context.Context, _ domain.ScanCommand) (context.Context, error) {
 	return ctx, nil
 }
@@ -913,6 +918,15 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			register:     func(router *gin.Engine, c *HTTPController) { router.POST("/v1/generateSBOM", c.GenerateSBOM) },
 			wantReason:   scanfailure.ReasonUnexpected,
 			unclassified: true,
+		},
+		{
+			// regression test for #816: a real per-container failure inside ScanCP must
+			// surface as outcome="error" with a classified reason, not "success".
+			name:       "scanCP, classified reason",
+			path:       "/v1/scanCP",
+			endpoint:   "scanCP",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/scanCP", c.ScanCP) },
+			wantReason: scanfailure.ReasonCVEMatchingFailed,
 		},
 	}
 	for _, tt := range tests {
@@ -995,6 +1009,22 @@ func (s statusFlowScanService) ValidateGenerateSBOM(ctx context.Context, _ domai
 	return ctx, nil
 }
 
+func (s statusFlowScanService) ScanCP(ctx context.Context) error {
+	if s.phase != "" {
+		domain.UpdateScanPhase(ctx, s.phase)
+	}
+	if s.startedCh != nil {
+		select {
+		case s.startedCh <- struct{}{}:
+		default:
+		}
+	}
+	if s.blockCh != nil {
+		<-s.blockCh
+	}
+	return s.err
+}
+
 func TestHTTPController_ScanStatus_Succeeded(t *testing.T) {
 	c := NewHTTPController(statusFlowScanService{
 		MockScanService: services.NewMockScanService(true),
@@ -1067,6 +1097,49 @@ func TestHTTPController_ScanStatus_Failed(t *testing.T) {
 
 	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason)
 	assert.Equal(t, "completed", status.Phase)
+	require.NotNil(t, status.FinishedAt)
+	assert.False(t, status.FinishedAt.IsZero())
+}
+
+// TestHTTPController_ScanStatus_ScanCPFailed is a regression test for #816: ScanCP's own
+// closure (it does not go through runTrackedScan, see that function's doc comment) used to
+// mark the job succeeded no matter what its per-container loop actually did. A failure
+// returned from the scan service must now reach /v1/scanStatus as state="failed" with its
+// classified reason, exactly like GenerateSBOM/ScanCVE/ScanRegistry already do.
+func TestHTTPController_ScanStatus_ScanCPFailed(t *testing.T) {
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		err:             &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: errors.New("boom")},
+	}, 1)
+	t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+
+	router := gin.Default()
+	router.POST("/v1/scanCP", c.ScanCP)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	req, _ := http.NewRequest("POST", "/v1/scanCP", strings.NewReader(`{
+		"jobID": "job-scancp-failed",
+		"args": {"name": "daemonset-kube-proxy", "namespace": "kube-system"}
+	}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ = http.NewRequest("GET", "/v1/scanStatus/job-scancp-failed", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason)
 	require.NotNil(t, status.FinishedAt)
 	assert.False(t, status.FinishedAt.IsZero())
 }
