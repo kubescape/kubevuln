@@ -299,6 +299,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	if len(seList) > 0 || len(cseList) > 0 {
 		target := BuildExceptionTarget(ctx, workload, seList, cseList, a.securityExceptionRepo)
 		crdPolicies, crdStats := ConvertToVulnerabilityExceptionPolicies(seList, cseList, target)
+		crdPolicies = excludeCloudCoveredPolicies(crdPolicies, vulnExceptionList)
 		vulnExceptionList = append(vulnExceptionList, crdPolicies...)
 		stats = crdStats
 
@@ -326,6 +327,42 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	}
 
 	return vulnExceptionList, stats, nil
+}
+
+// excludeCloudCoveredPolicies drops CRD-derived policies that cover a CVE the cloud-fetched
+// list already covers, per docs/security-exception-design.md's "Conflict Resolution &
+// Precedence" section: "If the cloud backend has an exception for a given CVE on a workload,
+// the cloud exception's status and metadata are used, and any conflicting CRD exception for
+// the same CVE on the same workload is ignored." Without this, GetCVEExceptions returned both
+// sources' policies for an overlapping CVE, so the manifest ended up with a CRD-attributed
+// IgnoreRule and exceptions_matched_total{sourceKind="SecurityException"} count that the
+// documented precedence says should not exist once cloud already owns that suppression (#812).
+//
+// Reuses cveExceptionIndex's own name normalization (lower-cased CVE ID/alias) so a CRD
+// exception naming a CVE by an alias the cloud exception names by its canonical ID, or vice
+// versa, still counts as the same CVE. A CRD policy not covered by any cloud policy passes
+// through unchanged, matching the doc's separate "non-overlapping exceptions are merged"
+// clause.
+func excludeCloudCoveredPolicies(crdPolicies, cloudPolicies []armotypes.VulnerabilityExceptionPolicy) []armotypes.VulnerabilityExceptionPolicy {
+	if len(cloudPolicies) == 0 || len(crdPolicies) == 0 {
+		return crdPolicies
+	}
+	cloudIndex := buildCVEExceptionIndex(cloudPolicies)
+
+	var filtered []armotypes.VulnerabilityExceptionPolicy
+	for _, p := range crdPolicies {
+		coveredByCloud := false
+		for _, vp := range p.VulnerabilityPolicies {
+			if len(cloudIndex.byName[strings.ToLower(vp.Name)]) > 0 {
+				coveredByCloud = true
+				break
+			}
+		}
+		if !coveredByCloud {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
 }
 
 // ReportError reports the given error to the platform

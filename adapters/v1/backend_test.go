@@ -1067,6 +1067,114 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 	assert.Empty(t, stats.ExpiredBySource, "nothing expired in this scenario")
 }
 
+// TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD is the regression test for #812:
+// docs/security-exception-design.md documents that when both a cloud and a CRD exception
+// cover the same CVE on the same workload, the cloud exception's status/metadata are used and
+// the conflicting CRD exception is ignored. GetCVEExceptions used to append CRD policies
+// unconditionally, so a CVE covered by both sources reached the caller (and, downstream, the
+// manifest's IgnoreRule provenance and the exceptions_matched_total metric) twice.
+func TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD(t *testing.T) {
+	cloudPolicies := []armotypes.VulnerabilityExceptionPolicy{
+		{
+			PortalBase:            armotypes.PortalBase{Name: "cloud-rule"},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2024-0001"}},
+		},
+	}
+
+	mockRepo := &mockSecurityExceptionRepo{
+		exceptions: []sev1beta1.SecurityException{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "crd-rule", Namespace: "default"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						// Same CVE the cloud already covers.
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2024-0001"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+						// Not covered by cloud: must still come through.
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2024-0002"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					},
+				},
+			},
+		},
+	}
+
+	a := &BackendAdapter{
+		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
+		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return cloudPolicies, nil
+		},
+		securityExceptionRepo: mockRepo,
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid: "wlid://cluster-test/namespace-default/deployment-myapp",
+	})
+
+	exceptions, _, err := a.GetCVEExceptions(ctx)
+	require.NoError(t, err)
+
+	var names []string
+	for _, e := range exceptions {
+		for _, vp := range e.VulnerabilityPolicies {
+			names = append(names, vp.Name)
+		}
+	}
+	assert.ElementsMatch(t, []string{"CVE-2024-0001", "CVE-2024-0002"}, names,
+		"CVE-2024-0001 must appear exactly once (cloud's), not twice; CVE-2024-0002 (CRD-only) must still come through")
+
+	// The one CVE-2024-0001 entry must be the cloud's own policy (identifiable by its rule
+	// name), not the CRD's - the CRD's conflicting entry must be dropped, not merely deduplicated.
+	for _, e := range exceptions {
+		if e.VulnerabilityPolicies[0].Name == "CVE-2024-0001" {
+			assert.Equal(t, "cloud-rule", e.Name, "the surviving CVE-2024-0001 policy must be the cloud's, per the documented precedence")
+		}
+	}
+}
+
+func TestExcludeCloudCoveredPolicies(t *testing.T) {
+	cloud := func(names ...string) []armotypes.VulnerabilityExceptionPolicy {
+		var vp []armotypes.VulnerabilityPolicy
+		for _, n := range names {
+			vp = append(vp, armotypes.VulnerabilityPolicy{Name: n})
+		}
+		return []armotypes.VulnerabilityExceptionPolicy{{VulnerabilityPolicies: vp}}
+	}
+	crd := func(names ...string) []armotypes.VulnerabilityExceptionPolicy {
+		var vp []armotypes.VulnerabilityPolicy
+		for _, n := range names {
+			vp = append(vp, armotypes.VulnerabilityPolicy{Name: n})
+		}
+		return []armotypes.VulnerabilityExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "crd-rule"}, VulnerabilityPolicies: vp}}
+	}
+
+	tests := []struct {
+		name        string
+		crdPolicies []armotypes.VulnerabilityExceptionPolicy
+		cloud       []armotypes.VulnerabilityExceptionPolicy
+		wantLen     int
+	}{
+		{"no cloud policies: CRD passes through unchanged", crd("CVE-1"), nil, 1},
+		{"no CRD policies: nothing to filter", nil, cloud("CVE-1"), 0},
+		{"no overlap: CRD policy is kept", crd("CVE-1"), cloud("CVE-2"), 1},
+		{"exact overlap: CRD policy is dropped", crd("CVE-1"), cloud("CVE-1"), 0},
+		{"case-insensitive overlap: CRD policy is dropped", crd("cve-1"), cloud("CVE-1"), 0},
+		{
+			"alias overlap: a CRD policy naming the CVE by an alias the cloud policy names by its canonical ID is still dropped",
+			crd("CVE-2024-ALIAS"), cloud("CVE-2024-0001", "CVE-2024-ALIAS"), 0,
+		},
+		{
+			"a CRD policy listing multiple names (ID + aliases) is dropped entirely if any one of them overlaps",
+			crd("CVE-2024-0001", "CVE-2024-ALIAS"), cloud("CVE-2024-ALIAS"), 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := excludeCloudCoveredPolicies(tt.crdPolicies, tt.cloud)
+			assert.Len(t, got, tt.wantLen)
+		})
+	}
+}
+
 func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 	// A cluster exception scoped to redis images must NOT be applied to an
 	// nginx workload — this is the fail-open regression the match logic fixes.
