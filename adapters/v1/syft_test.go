@@ -39,26 +39,6 @@ func fileContent(path string) []byte {
 	return b
 }
 
-func TestFormatResolvedPlatform(t *testing.T) {
-	tests := []struct {
-		name    string
-		os      string
-		arch    string
-		variant string
-		want    string
-	}{
-		{name: "os and arch", os: "linux", arch: "amd64", want: "linux/amd64"},
-		{name: "os, arch and variant", os: "linux", arch: "arm", variant: "v7", want: "linux/arm/v7"},
-		{name: "neither known", want: ""},
-		{name: "arch known, os unknown", arch: "amd64", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, formatResolvedPlatform(tt.os, tt.arch, tt.variant))
-		})
-	}
-}
-
 func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false, nil)
 	version := s.Version()

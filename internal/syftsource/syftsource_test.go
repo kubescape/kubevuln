@@ -1,6 +1,8 @@
 package syftsource
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -84,4 +86,63 @@ func TestGetSourceConfig_restrictsToRegistry(t *testing.T) {
 	require.NotNil(t, cfg)
 	assert.Equal(t, []string{"registry"}, cfg.Sources,
 		"kubevuln always pulls; falling back to a local daemon or containerd socket is not wanted")
+}
+
+// TestIsPlatformMismatch pins what counts as a platform mismatch for both SBOM paths.
+// The "unrelated error" case is the one that matters: classification is by typed error,
+// so an error that merely mentions the phrase must not be treated as one.
+func TestIsPlatformMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "typed platform mismatch",
+			err:  &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"},
+			want: true,
+		},
+		{
+			name: "wrapped typed platform mismatch",
+			err:  fmt.Errorf("resolving source: %w", &image.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64"}),
+			want: true,
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("mismatched platform mentioned but not the typed error"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsPlatformMismatch(tt.err))
+		})
+	}
+}
+
+func TestFormatResolvedPlatform(t *testing.T) {
+	tests := []struct {
+		name    string
+		os      string
+		arch    string
+		variant string
+		want    string
+	}{
+		{name: "os and arch", os: "linux", arch: "amd64", want: "linux/amd64"},
+		{name: "os, arch and variant", os: "linux", arch: "arm", variant: "v7", want: "linux/arm/v7"},
+		{name: "neither known", want: ""},
+		{name: "arch known, os unknown", arch: "amd64", want: ""},
+		{name: "os known, arch unknown", os: "linux", want: ""},
+		{name: "variant without arch", variant: "v7", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FormatResolvedPlatform(tt.os, tt.arch, tt.variant))
+		})
+	}
 }

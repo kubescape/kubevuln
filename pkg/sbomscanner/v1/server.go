@@ -33,30 +33,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-// isPlatformMismatch reports whether err is (or wraps) stereoscope's
-// *image.ErrPlatformMismatch, returned once a provider has positively resolved the image but
-// its OS/architecture doesn't match the platform that was requested.
-func isPlatformMismatch(err error) bool {
-	var platformErr *image.ErrPlatformMismatch
-	return errors.As(err, &platformErr)
-}
-
-// formatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
-// fields Syft/stereoscope actually resolved an image against. Returns "" unless both os and
-// architecture are known. Duplicated from adapters/v1/syft.go's helper of the same name since
-// the two packages don't share a dependency either could live in without introducing one
-// (same rationale as syftToDomain's duplication, documented there).
-func formatResolvedPlatform(os, arch, variant string) string {
-	if os == "" || arch == "" {
-		return ""
-	}
-	parts := []string{os, arch}
-	if variant != "" {
-		parts = append(parts, variant)
-	}
-	return strings.Join(parts, "/")
-}
-
 // createSBOMFn is an indirection over syft.CreateSBOM so the deadline handling in
 // CreateSBOM can be unit-tested without cataloguing a real image.
 var createSBOMFn = syft.CreateSBOM
@@ -202,7 +178,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			Status:       helpersv1.Unauthorize,
 			ErrorMessage: err.Error(),
 		}, nil
-	case err != nil && isPlatformMismatch(err):
+	case err != nil && syftsource.IsPlatformMismatch(err):
 		metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		// The requested platform doesn't exist in the image's manifest. StatusReason travels
 		// over gRPC as a plain string; the caller's classifySBOMError also recognizes the
@@ -229,9 +205,9 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			StatusReason: domain.ReasonTooManyRequests,
 		}, nil
 	case err != nil:
-		if isPlatformMismatch(err) {
-			metrics.RecordScanFallback(ctx, metrics.ComponentSidecar, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
-		}
+		// No syftsource.IsPlatformMismatch check here: the arm above already claims every such error,
+		// so a copy of it in this arm can never run. Anything reaching here has no more
+		// specific classification than "SBOM generation failed".
 		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			ErrorMessage: err.Error(),
@@ -242,7 +218,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// Syft to pick, so a silently-wrong-arch SBOM is inspectable after the fact (see #512).
 	var resolvedPlatform string
 	if meta, ok := src.Describe().Metadata.(source.ImageMetadata); ok {
-		resolvedPlatform = formatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant)
+		resolvedPlatform = syftsource.FormatResolvedPlatform(meta.OS, meta.Architecture, meta.Variant)
 	}
 
 	// Generate SBOM with timeout (reuses the same timeout duration computed above for the
