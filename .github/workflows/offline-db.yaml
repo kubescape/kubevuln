@@ -3,6 +3,13 @@ on:
     workflow_dispatch:
     schedule:
         - cron: "1 1 * * *"
+
+# Default for every job here. workflow-keepalive overrides it below with the actions:write
+# it needs; deploy authenticates to Quay with its own secrets rather than GITHUB_TOKEN, so
+# read access for the checkout is all it wants.
+permissions:
+    contents: read
+
 jobs:
     workflow-keepalive:
         if: github.event_name == 'schedule'
