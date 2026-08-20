@@ -379,10 +379,16 @@ func unstructuredFromEvent(obj interface{}) *unstructured.Unstructured {
 // GetSecurityExceptions lists both namespaced SecurityExceptions and cluster-scoped
 // ClusterSecurityExceptions. A List() failure is returned as an error rather than only
 // logged: the caller (BackendAdapter.GetCVEExceptions) relies on a non-nil error here to
-// avoid caching a degraded, incomplete exception set for exceptionsCacheTTL — see #477. A
-// conversion failure on an individual item is still only logged and skipped, since that's a
-// malformed single object rather than a listing-wide failure, and skipping it doesn't risk
-// masking a systemic API problem the way swallowing a List() error would.
+// avoid caching a degraded, incomplete exception set for exceptionsCacheTTL — see #477.
+//
+// A conversion failure on an individual item is reported the same way, while the items that
+// did convert are still returned. It used to be only logged and skipped, on the grounds that
+// a malformed single object is not a listing-wide failure. That holds for whether to abandon
+// the list, and this does not abandon it: the caller still receives and applies everything
+// that converted. What it cannot do is call the set complete, because the flag derived from
+// this error is what decides whether a suppression that is now missing counts as a deletion
+// (see reconcileCachedCVE) — and a skipped exception is missing for exactly the same reason
+// a failed List() leaves the set short.
 //
 // Both lists are served from securityExceptionListCache when available and fresh: the raw
 // List() results are the same for every workload in a given namespace (SecurityException) or
@@ -437,13 +443,25 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 	}
 
 	var exceptions []sev1beta1.SecurityException
+	var convErrs []error
 	for i := range seList.Items {
 		var se sev1beta1.SecurityException
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(seList.Items[i].Object, &se); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to convert SecurityException", helpers.Error(err),
+				helpers.String("namespace", namespace), helpers.String("name", seList.Items[i].GetName()))
+			convErrs = append(convErrs, fmt.Errorf("converting SecurityException %s/%s: %w", namespace, seList.Items[i].GetName(), err))
 			continue
 		}
 		exceptions = append(exceptions, se)
+	}
+
+	// A dropped exception leaves the set incomplete just as a failed List() does, so it is
+	// reported the same way and not cached. Returning it as complete would let the caller
+	// persist the missing suppressions as removals and republish VEX from a set that is
+	// quietly short an entry; caching it would pin that for the TTL rather than letting the
+	// next call self-heal.
+	if len(convErrs) > 0 {
+		return exceptions, stderrors.Join(convErrs...)
 	}
 
 	if a.securityExceptionListCache != nil {
@@ -473,13 +491,22 @@ func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Cont
 	}
 
 	var clusterExceptions []sev1beta1.ClusterSecurityException
+	var convErrs []error
 	for i := range cseList.Items {
 		var cse sev1beta1.ClusterSecurityException
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(cseList.Items[i].Object, &cse); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to convert ClusterSecurityException", helpers.Error(err),
+				helpers.String("name", cseList.Items[i].GetName()))
+			convErrs = append(convErrs, fmt.Errorf("converting ClusterSecurityException %s: %w", cseList.Items[i].GetName(), err))
 			continue
 		}
 		clusterExceptions = append(clusterExceptions, cse)
+	}
+
+	// See listSecurityExceptions: a dropped exception is an incomplete set, reported and
+	// left uncached the same way a failed List() is.
+	if len(convErrs) > 0 {
+		return clusterExceptions, stderrors.Join(convErrs...)
 	}
 
 	if a.securityExceptionListCache != nil {
