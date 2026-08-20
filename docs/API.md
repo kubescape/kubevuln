@@ -291,6 +291,7 @@ POST /v1/sbomCreation
 | `200 OK` | Request accepted, SBOM generation started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -344,6 +345,7 @@ POST /v1/scanImage
 | `200 OK` | Request accepted, CVE scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -394,6 +396,7 @@ POST /v1/scanRegistryImage
 | `200 OK` | Request accepted, registry scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -448,6 +451,7 @@ POST /v1/applicationProfileScan
 |--------|-------------|
 | `200 OK` | Request accepted, profile scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -548,7 +552,7 @@ All responses follow RFC 7807.
 | `400` | Bad Request | Invalid JSON, missing required fields, or validation failed |
 | `429` | Too Many Requests | Registry rate limit hit on a previous pull for this image |
 | `500` | Internal Server Error | Internal error |
-| `503` | Service Unavailable | Service not ready (vulnerability DB not loaded) |
+| `503` | Service Unavailable | Two distinct causes, unrelated to each other: `/v1/readiness` reports it when the vulnerability DB isn't loaded, and a scan endpoint reports it when scan admission capacity is full (positive `maxQueueDepth` reached) |
 
 ### Common Errors
 
@@ -673,7 +677,10 @@ instead of a generic error.
 
 Kubevuln implements internal concurrency control via a worker pool. The number of concurrent scans is controlled by the `scanConcurrency` configuration option.
 
-When the worker queue is full, requests are still accepted but will be queued for processing.
+Whether an accepted-but-unfinished scan past that concurrency is queued or rejected depends on `maxQueueDepth` (see [CONFIGURATION.md](CONFIGURATION.md#scanning-options)):
+
+- **Unset, or `0`/negative (the default):** unbounded. Every request that passes validation is accepted and queued for processing, however large the backlog grows.
+- **A positive value:** bounded. Once that many scans are accepted but not yet finished (queued or running), each of the four scan endpoints (`sbomCreation`, `scanImage`, `scanRegistryImage`, `applicationProfileScan`) rejects further requests with `503 Service Unavailable` instead of queuing them — see each endpoint's Response table above. Callers should treat this as a signal to retry later, not as an error with the request itself.
 
 ---
 
