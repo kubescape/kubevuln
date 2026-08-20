@@ -291,7 +291,7 @@ POST /v1/sbomCreation
 | `200 OK` | Request accepted, SBOM generation started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
-| `503 Service Unavailable` | Scan admission queue is full (`maxQueueDepth` reached); retry later. Unrelated to `/v1/readiness` |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -345,7 +345,7 @@ POST /v1/scanImage
 | `200 OK` | Request accepted, CVE scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
-| `503 Service Unavailable` | Scan admission queue is full (`maxQueueDepth` reached); retry later. Unrelated to `/v1/readiness` |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -396,7 +396,7 @@ POST /v1/scanRegistryImage
 | `200 OK` | Request accepted, registry scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
-| `503 Service Unavailable` | Scan admission queue is full (`maxQueueDepth` reached); retry later. Unrelated to `/v1/readiness` |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -451,7 +451,7 @@ POST /v1/applicationProfileScan
 |--------|-------------|
 | `200 OK` | Request accepted, profile scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
-| `503 Service Unavailable` | Scan admission queue is full (`maxQueueDepth` reached); retry later. Unrelated to `/v1/readiness` |
+| `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 
 #### Example
 
@@ -552,7 +552,7 @@ All responses follow RFC 7807.
 | `400` | Bad Request | Invalid JSON, missing required fields, or validation failed |
 | `429` | Too Many Requests | Registry rate limit hit on a previous pull for this image |
 | `500` | Internal Server Error | Internal error |
-| `503` | Service Unavailable | Two distinct causes, unrelated to each other: `/v1/readiness` reports it when the vulnerability DB isn't loaded, and a scan endpoint reports it when the admission queue is full (`maxQueueDepth` reached) |
+| `503` | Service Unavailable | Two distinct causes, unrelated to each other: `/v1/readiness` reports it when the vulnerability DB isn't loaded, and a scan endpoint reports it when scan admission capacity is full (positive `maxQueueDepth` reached) |
 
 ### Common Errors
 
