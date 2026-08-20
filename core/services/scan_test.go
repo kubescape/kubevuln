@@ -1268,6 +1268,124 @@ func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
 	})
 }
 
+type storeCVESummaryCall struct {
+	cve           domain.CVEManifest
+	cvep          domain.CVEManifest
+	withRelevancy bool
+}
+
+// summaryCapturingRepo wraps a ports.CVERepository and records every StoreCVESummary call
+// verbatim, so a test can inspect exactly which manifest a scan flow handed to the summary
+// write. MemoryStore alone can't answer that: StoreCVE and StoreCVESummary key their map off
+// the same cveID, so a later call silently overwrites an earlier one's entry.
+type summaryCapturingRepo struct {
+	ports.CVERepository
+	calls []storeCVESummaryCall
+}
+
+func (r *summaryCapturingRepo) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	r.calls = append(r.calls, storeCVESummaryCall{cve: cve, cvep: cvep, withRelevancy: withRelevancy})
+	return r.CVERepository.StoreCVESummary(ctx, cve, cvep, withRelevancy)
+}
+
+// TestScanService_ScanCP_SummaryExcludesSuppressedCVEFromTotals is a regression test for #819.
+// ScanCP's relevancy branch used to pass the *unfiltered* CVE manifest as StoreCVESummary's
+// first argument, so a SecurityException-suppressed CVE stayed in severities.*.all even though
+// every other StoreCVESummary call site (ScanCP's own non-relevancy branch above it,
+// storeFilteredCVE used by ScanCVE/ScanRegistry, and the cache-hit path in reconcileCachedCVE)
+// already excludes it there. Asserts every StoreCVESummary call ScanCP makes -- both the
+// non-relevancy and relevancy branches -- agrees that the suppressed CVE belongs in
+// IgnoredMatches, never in Matches.
+func TestScanService_ScanCP_SummaryExcludesSuppressedCVEFromTotals(t *testing.T) {
+	const suppressedCVE = "CVE-2023-9999"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	mockRepo := &mockSecurityExceptionRepo{
+		exceptions: []sev1beta1.SecurityException{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					Reason: "test exception",
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{
+							Vulnerability: sev1beta1.VulnerabilityRef{ID: suppressedCVE},
+							Status:        sev1beta1.VulnerabilityStatusNotAffected,
+						},
+					},
+				},
+			},
+		},
+	}
+	mockPlatform := adapters.NewMockPlatform(false, mockRepo)
+	storageCP := repositories.NewMemoryStorage(false, false)
+	cveRepo := &summaryCapturingRepo{CVERepository: repositories.NewMemoryStorage(false, false)}
+
+	s := NewScanService(
+		adapters.NewMockSBOMAdapter(false, false, false),
+		repositories.NewMemoryStorage(false, false),
+		&fakeCVEScannerWithVuln{},
+		cveRepo,
+		mockPlatform,
+		v1.NewContainerProfileAdapter(storageCP),
+		true,  // storage
+		false, // vexGeneration
+		true,  // sbomGeneration
+		false, // storeFilteredSbom
+		false, // partialRelevancy
+	)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err := s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	ap := v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "daemonset-kube-proxy",
+			Namespace: "kube-system",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.InstanceIDMetadataKey: "apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy",
+				helpersv1.StatusMetadataKey:     helpersv1.Learning,
+				helpersv1.WlidMetadataKey:       wlid,
+			},
+			Labels: map[string]string{"foo": "bar"},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			ImageID:  "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+			ImageTag: "k8s.gcr.io/kube-proxy:v1.24.3",
+		},
+	}
+	require.NoError(t, storageCP.StoreContainerProfile(ctx, ap))
+
+	require.NoError(t, s.ScanCP(ctx))
+	require.NotEmpty(t, cveRepo.calls, "ScanCP should have called StoreCVESummary")
+
+	relevancyCall := cveRepo.calls[len(cveRepo.calls)-1]
+	require.True(t, relevancyCall.withRelevancy, "expected the relevancy-branch StoreCVESummary call last")
+	require.NotNil(t, relevancyCall.cve.Content)
+	assert.Empty(t, relevancyCall.cve.Content.Matches, "suppressed CVE must not be counted toward severities.*.all")
+	require.Len(t, relevancyCall.cve.Content.IgnoredMatches, 1)
+	assert.Equal(t, suppressedCVE, relevancyCall.cve.Content.IgnoredMatches[0].Vulnerability.VulnerabilityMetadata.ID)
+
+	for _, call := range cveRepo.calls {
+		if call.cve.Content == nil {
+			continue
+		}
+		for _, m := range call.cve.Content.Matches {
+			assert.NotEqual(t, suppressedCVE, m.Vulnerability.VulnerabilityMetadata.ID,
+				"a StoreCVESummary call included the suppressed CVE in its unfiltered totals")
+		}
+	}
+}
+
 func TestScanService_ValidateScanRegistry(t *testing.T) {
 	tests := []struct {
 		name     string
