@@ -2,6 +2,14 @@ name: PR Image Build
 on:
   pull_request:
     types: [synchronize, ready_for_review, opened, reopened]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.dockerignore'
+      - 'build/**'
+      - '.github/workflows/pr-image.yaml'
 
 # The image is pushed to Quay with its own registry secrets, not GITHUB_TOKEN, so read
 # access for the checkout is all this needs.
