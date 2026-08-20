@@ -133,3 +133,52 @@ func TestResolve_ReferenceWithNoPURL_ReturnsErrNoPURL(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrNoPURL)
 }
+
+// TestResolve_PURLUnderFullProductNames_NotBranches proves the fix for a
+// real gap flagged in review: a purl declared under the separate top-level
+// product_tree.full_product_names field, rather than nested inside
+// product_tree.branches, must still resolve correctly. The original
+// hand-rolled tree walk only checked branches, so a document shaped this
+// way would silently return ErrNoPURL even though the purl genuinely
+// exists in the document - this did not trigger against the bundled real
+// Red Hat advisory, which happens to declare everything under branches, so
+// the existing tests did not catch it.
+func TestResolve_PURLUnderFullProductNames_NotBranches(t *testing.T) {
+	category := csaf.RelationshipCategory("default_component_of")
+	name := "some-package"
+	compositeID := csaf.ProductID("distro:some-package")
+	bareRef := csaf.ProductID("some-package")
+	distroRef := csaf.ProductID("distro")
+	purl := csaf.PURL("pkg:rpm/redhat/some-package")
+
+	tree := &csaf.ProductTree{
+		// Deliberately empty Branches - the purl lives only under
+		// FullProductNames, proving Resolve does not depend on the
+		// branches tree to find it.
+		FullProductNames: &csaf.FullProductNames{
+			&csaf.FullProductName{
+				Name:      &name,
+				ProductID: &bareRef,
+				ProductIdentificationHelper: &csaf.ProductIdentificationHelper{
+					PURL: &purl,
+				},
+			},
+		},
+		RelationShips: &csaf.Relationships{
+			&csaf.Relationship{
+				Category: &category,
+				FullProductName: &csaf.FullProductName{
+					Name:      &name,
+					ProductID: &compositeID,
+				},
+				ProductReference:          &bareRef,
+				RelatesToProductReference: &distroRef,
+			},
+		},
+	}
+
+	resolver := New(tree)
+	got, err := resolver.Resolve(string(compositeID))
+	require.NoError(t, err, "a purl declared under full_product_names should resolve, not return ErrNoPURL")
+	assert.Equal(t, "pkg:rpm/redhat/some-package", got)
+}
