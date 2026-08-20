@@ -7,13 +7,26 @@ RUN apk add --no-cache curl jq
 # Set the working directory
 WORKDIR /app/grype-db
 
-# Download the listing.json file
+# Download the listing.json file.
+#
+# --fail on every download: without it curl treats an HTTP error as a successful transfer,
+# exits 0, and writes the error body to the file. The database download below is the last
+# command in its RUN, so its exit status is the layer's, and a 404 would ship an error page
+# to air-gapped clusters as their vulnerability database. --location follows a redirect
+# rather than saving it, and --show-error keeps the reason visible under --silent.
 ARG GRYPE_DB_ROOT=https://grype.anchore.io/databases/v6
-RUN curl -O $GRYPE_DB_ROOT/latest.json
+RUN curl --fail --location --silent --show-error -O $GRYPE_DB_ROOT/latest.json
 
-# Extract the database URL from the listing file and download it
+# Extract the database URL from the listing file and download it.
+#
+# DB_PATH is checked before use: jq prints "null" and exits 0 for a well-formed listing that
+# has no .path, which would otherwise be requested as a URL and fail the same quiet way.
 RUN DB_PATH=$(jq -r '.path' latest.json) && \
-    curl -O ${GRYPE_DB_ROOT}/$DB_PATH
+    if [ -z "$DB_PATH" ] || [ "$DB_PATH" = "null" ]; then \
+        echo "latest.json has no .path" >&2; \
+        exit 1; \
+    fi && \
+    curl --fail --location --silent --show-error -O ${GRYPE_DB_ROOT}/$DB_PATH
 
 # Stage 2: The final production image
 FROM busybox:latest
