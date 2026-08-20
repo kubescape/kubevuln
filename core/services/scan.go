@@ -374,9 +374,17 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 					// no continue, storing the CVE' is not critical
 				}
-				// Summary uses original cve (all matches for total counts) and
-				// filteredCvep (exceptions applied to relevant matches only).
-				err = s.cveRepository.StoreCVESummary(ctx, cve, filteredCvep, true)
+				// Summary uses filteredCve (all matches, exceptions applied) and
+				// filteredCvep (exceptions applied to relevant matches only), matching
+				// every other StoreCVESummary call site (storeFilteredCVE,
+				// reconcileCachedCVE, and ScanCP's own non-relevancy branch above) so
+				// severities.*.all means the same thing regardless of which scan flow
+				// last wrote this workload/container's VulnerabilityManifestSummary.
+				// See #819: this used to pass the unfiltered cve, so a
+				// SecurityException-suppressed CVE's presence in severities.*.all
+				// flipped depending on whether ScanCVE/ScanRegistry or ScanCP scanned
+				// last.
+				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, filteredCvep, true)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
 						helpers.String("imageSlug", slug))
