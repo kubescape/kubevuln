@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -118,9 +119,9 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 //
 // path.Match is a full-string match, so each pattern is tried against every
 // equivalent form of the reference (see tools.ReferenceMatchForms): a pattern
-// pinning a tag ("docker.io/library/nginx:1.25") must still match a workload
+// pinning a tag ("docker.io/library/nginx:1.25" or short "nginx:1.25") must still match a workload
 // deployed with a digest ("docker.io/library/nginx:1.25@sha256:..."), and a
-// pattern naming the bare repository ("docker.io/library/nginx") matches that
+// pattern naming the bare repository ("docker.io/library/nginx" or "nginx") matches that
 // repository at any tag or digest.
 func matchImages(patterns []string, image string) bool {
 	if len(patterns) == 0 {
@@ -131,13 +132,54 @@ func matchImages(patterns []string, image string) bool {
 	}
 	forms := tools.ReferenceMatchForms(image)
 	for _, p := range patterns {
-		for _, form := range forms {
-			if ok, err := path.Match(p, form); err == nil && ok {
-				return true
+		pForms := expandPatternForms(p, image)
+		for _, pf := range pForms {
+			for _, form := range forms {
+				if ok, err := path.Match(pf, form); err == nil && ok {
+					return true
+				}
 			}
 		}
 	}
 	return false
+}
+
+// expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
+// (e.g. "nginx:1.25", "nginx:*", "library/nginx:1.25", "kubescape/kubevuln:*") without an explicit
+// registry domain or top-level wildcard in its first segment, it expands p with the target domain
+// and default Docker Hub namespace when applicable.
+func expandPatternForms(p, image string) []string {
+	patterns := []string{p}
+	if p == "" {
+		return patterns
+	}
+
+	targetDomain := "docker.io"
+	if n, err := reference.ParseNormalizedNamed(image); err == nil {
+		if d := reference.Domain(n); d != "" {
+			targetDomain = d
+		}
+	}
+
+	if !strings.Contains(p, "/") {
+		repoName, _, _ := strings.Cut(p, ":")
+		if repoName == "*" {
+			return patterns
+		}
+		patterns = append(patterns, targetDomain+"/library/"+p)
+		if targetDomain != "docker.io" {
+			patterns = append(patterns, targetDomain+"/"+p)
+		}
+		return patterns
+	}
+
+	firstSeg, _, _ := strings.Cut(p, "/")
+	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
+	if !hasDomainOrWildcard {
+		patterns = append(patterns, targetDomain+"/"+p)
+	}
+
+	return patterns
 }
 
 // labelSelectorMatches evaluates a standard Kubernetes label selector against a
