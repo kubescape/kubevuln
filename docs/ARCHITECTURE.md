@@ -325,7 +325,7 @@ The central business logic component implementing the `ScanService` port.
 **API Server Store** (`repositories/apiserver.go`)
 - Stores SBOMs as `SBOMSyft` CRDs
 - Stores CVE results as `VulnerabilityManifest` CRDs
-- Stores VEX documents as `OpenVulnerabilityExchangeContainer` CRDs
+- Stores VEX documents as `OpenVulnerabilityExchangeContainer` CRDs (see [VEX.md](VEX.md))
 
 **Memory Store** (`repositories/memory.go`)
 - In-memory storage for testing

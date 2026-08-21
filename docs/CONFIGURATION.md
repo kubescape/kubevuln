@@ -206,7 +206,7 @@ The main configuration file. All options can be overridden via environment varia
 | `keepLocal` | bool | `false` | Don't send reports to backend (local mode) |
 | `nodeSbomGeneration` | bool | `false` | Enable node-level SBOM generation |
 | `partialRelevancy` | bool | `false` | Enable partial relevancy matching |
-| `vexGeneration` | bool | `false` | Generate VEX (Vulnerability Exploitability eXchange) documents |
+| `vexGeneration` | bool | `false` | Generate VEX (Vulnerability Exploitability eXchange) documents. Requires `storage: true`. See [VEX.md](VEX.md) for what is produced, when, and how a status is chosen. |
 | `proxyRegistryMap` | map[string]string | `{}` | Maps a registry hostname to an internal mirror for image pulls, e.g. `{"docker.io": "my-mirror.example.com"}`. Applied to every SBOM-generation path (in-process and sidecar). Config keys are parsed with a `::` delimiter specifically so hostnames containing `.` are treated as a single map key instead of being split into nested keys (see #359/#361) — no special escaping needed in `docker.io`-style keys. Via `PROXYREGISTRYMAP` env var, pass the whole map as a JSON object string, e.g. `PROXYREGISTRYMAP='{"docker.io":"my-mirror.example.com"}'` (single-quote in shells so the double quotes reach the process unescaped; malformed JSON now fails config loading with an error instead of silently disabling mirroring). |
 
 ### Complete Schema
