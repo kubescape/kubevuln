@@ -508,6 +508,59 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 	assert.True(t, foundIgnored2, "Second IgnoredMatch should be included in the VEX document during update")
 }
 
+func TestBuildIgnoredVEXAssessmentMap_DistinguishesVulnerabilityAndPURL(t *testing.T) {
+	cve := &domain.CVEManifest{
+		Content: &v1beta1.GrypeDocument{
+			IgnoredMatches: []v1beta1.IgnoredMatch{
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+								ID: "A",
+							},
+						},
+						Artifact: v1beta1.GrypePackage{
+							PURL: "BC",
+						},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						Justification:   "justification-A",
+						ImpactStatement: "impact-A",
+					}},
+				},
+				{
+					Match: v1beta1.Match{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+								ID: "AB",
+							},
+						},
+						Artifact: v1beta1.GrypePackage{
+							PURL: "C",
+						},
+					},
+					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						Justification:   "justification-AB",
+						ImpactStatement: "impact-AB",
+					}},
+				},
+			},
+		},
+	}
+
+	ignoredMap := buildIgnoredVEXAssessmentMap(cve)
+
+	assessmentA, ok := ignoredMap[vexStatementKey{name: "A", purl: "BC"}]
+	require.True(t, ok)
+	assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), assessmentA.justification)
+	assert.Equal(t, "Vulnerability was ignored by an exception policy", assessmentA.impactStatement)
+
+	assessmentAB, ok := ignoredMap[vexStatementKey{name: "AB", purl: "C"}]
+	require.True(t, ok)
+	assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), assessmentAB.justification)
+	assert.Equal(t, "Vulnerability was ignored by an exception policy", assessmentAB.impactStatement)
+}
+
 func TestAPIServerStore_storeVEX_ignoredMatchesDoNotCollide(t *testing.T) {
 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
