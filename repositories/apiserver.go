@@ -632,20 +632,30 @@ func (a *APIServerStore) GetCVESummary(ctx context.Context) (*v1beta1.Vulnerabil
 		logger.L().Debug("empty name provided, skipping summary CVE retrieval")
 		return nil, nil
 	}
-	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	workloadNamespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if workloadNamespace == "" {
+		workloadNamespace = a.Namespace
+	}
+	manifest, err := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("summary CVE manifest not found in storage",
-			helpers.String("name", name))
+			helpers.String("name", name),
+			helpers.String("namespace", workloadNamespace))
 		return nil, nil
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get summary CVE manifest from apiserver", helpers.Error(err),
-			helpers.String("name", name))
+			helpers.String("name", name),
+			helpers.String("namespace", workloadNamespace))
 		return nil, err
 	}
 
 	logger.L().Debug("got summary CVE manifest from storage",
-		helpers.String("name", name))
+		helpers.String("name", name),
+		helpers.String("namespace", workloadNamespace))
 	return manifest, nil
 }
 

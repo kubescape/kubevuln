@@ -2250,8 +2250,55 @@ func TestAPIServerStore_GetCVESummary_ctxPropagated(t *testing.T) {
 	ctx := context.WithValue(canaryCtx(), domain.WorkloadKey{}, workload)
 	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
 	_, _ = a.GetCVESummary(ctx)
-	require.Contains(t, wrapped.vulnSummaries, a.Namespace)
-	requireCanaryCtx(t, wrapped.vulnSummaries[a.Namespace].getCtx)
+	require.Contains(t, wrapped.vulnSummaries, "anyNamespaceJob")
+	requireCanaryCtx(t, wrapped.vulnSummaries["anyNamespaceJob"].getCtx)
+}
+
+func TestAPIServerStore_GetCVESummary_WorkloadNamespace(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+	workload := domain.ScanCommand{
+		Wlid: "wlid://cluster-aaa/namespace-custom-workload-ns/deployment-my-deployment",
+		Args: map[string]interface{}{
+			domain.ArgsName:      "my-deployment",
+			domain.ArgsNamespace: "custom-workload-ns",
+		},
+		ContainerName: "main",
+		ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		ImageTag:      "nginx:latest",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	require.NoError(t, a.StoreCVESummaryStub(ctx, "Success"))
+
+	summary, err := a.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	require.Equal(t, "deployment-my-deployment-main", summary.Name)
+
+	storedInNs, err := clientset.SpdxV1beta1().VulnerabilityManifestSummaries("custom-workload-ns").Get(ctx, "deployment-my-deployment-main", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, storedInNs)
+
+	_, err = clientset.SpdxV1beta1().VulnerabilityManifestSummaries("kubescape").Get(ctx, "deployment-my-deployment-main", metav1.GetOptions{})
+	require.Error(t, err)
+	require.True(t, apierrors.IsNotFound(err))
+}
+
+func TestAPIServerStore_GetCVESummary_FallbackNamespace(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
+	a := newFakeAPIServerStore("kubescape", wrapped)
+
+	workload := domain.ScanCommand{
+		ImageHash: "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+		ImageTag:  "nginx:latest",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	_, _ = a.GetCVESummary(ctx)
+
+	require.Contains(t, wrapped.vulnSummaries, "kubescape")
 }
 
 func TestAPIServerStore_GetCVESummary_returnsTransientError(t *testing.T) {
