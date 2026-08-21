@@ -1614,10 +1614,10 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
 	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
-	ignoredMap := make(map[string]ignoredVEXAssessment)
+	ignoredMap := make(map[vexStatementKey]ignoredVEXAssessment)
 	if cve.Content != nil {
 		for _, v := range cve.Content.IgnoredMatches {
-			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = ignoredMatchAssessment(v)
+			ignoredMap[vexStatementKey{name: v.Vulnerability.ID, purl: v.Artifact.PURL}] = ignoredMatchAssessment(v)
 		}
 	}
 
@@ -1638,7 +1638,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 		var assessment ignoredVEXAssessment
 		isIgnored := anyPURLMatches(vexDoc.Statements[i].Products, func(purl string) bool {
-			if ignoredAssessment, ok := ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]; ok {
+			if ignoredAssessment, ok := ignoredMap[vexStatementKey{name: vexDoc.Statements[i].Vulnerability.Name, purl: purl}]; ok {
 				assessment = ignoredAssessment
 				return true
 			}

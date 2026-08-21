@@ -508,6 +508,146 @@ func TestAPIServerStore_storeVEX_ignoredMatches_append(t *testing.T) {
 	assert.True(t, foundIgnored2, "Second IgnoredMatch should be included in the VEX document during update")
 }
 
+func TestAPIServerStore_storeVEX_ignoredMatchesDoNotCollide(t *testing.T) {
+	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	cveManifestFiltered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+
+	// Keep the test completely focused on the two synthetic ignored matches.
+	cveManifest.Content.Matches = nil
+	cveManifest.Content.IgnoredMatches = nil
+	cveManifestFiltered.Content.Matches = nil
+	cveManifestFiltered.Content.IgnoredMatches = nil
+
+	// These two (vulnerability, PURL) pairs collide when represented as
+	// Vulnerability.ID + Artifact.PURL:
+	//
+	//   A  + BC = ABC
+	//   AB + C  = ABC
+	//
+	// A composite key must keep these two findings distinct.
+	cveManifest.Content.IgnoredMatches = []v1beta1.IgnoredMatch{
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:         "A",
+						DataSource: "https://example.test/A",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					PURL: "BC",
+				},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "A",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/A",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusNotAffected),
+				Justification:   "justification-A",
+				ImpactStatement: "impact-A",
+			}},
+		},
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:         "AB",
+						DataSource: "https://example.test/AB",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					PURL: "C",
+				},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "AB",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/AB",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusNotAffected),
+				Justification:   "justification-AB",
+				ImpactStatement: "impact-AB",
+			}},
+		},
+	}
+
+	a := NewFakeAPIServerStorage("kubescape")
+
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	// First call creates the VEX document with both ignored statements.
+	err := a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false)
+	require.NoError(t, err)
+
+	// Change the filtered manifest before the second call so StoreVEX
+	// must execute the update path instead of treating the scan as a no-op.
+	secondFiltered := cveManifestFiltered
+	secondFiltered.Content = &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:         "CVE-UPDATE-TRIGGER",
+						DataSource: "https://example.test/CVE-UPDATE-TRIGGER",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					PURL: "pkg:deb/example/update-trigger@1.0",
+				},
+			},
+		},
+		IgnoredMatches: cveManifestFiltered.Content.IgnoredMatches,
+	}
+
+	// Second call must execute updateVEX. The ignored-match map is rebuilt
+	// during this update, which is the path where the composite-key bug occurs.
+	err = a.StoreVEX(ctx, cveManifest, secondFiltered, false)
+	require.NoError(t, err)
+
+	vexContainer, err := a.StorageClient.
+		OpenVulnerabilityExchangeContainers(a.Namespace).
+		Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, vexContainer)
+
+	var statementA, statementAB *v1beta1.Statement
+
+	for i := range vexContainer.Spec.Statements {
+		stmt := &vexContainer.Spec.Statements[i]
+
+		switch {
+		case stmt.Vulnerability.Name == "A" &&
+			statementHasPURL(stmt.Products, "BC"):
+			statementA = stmt
+
+		case stmt.Vulnerability.Name == "AB" &&
+			statementHasPURL(stmt.Products, "C"):
+			statementAB = stmt
+		}
+	}
+
+	require.NotNil(t, statementA, "statement for A/BC should exist")
+	require.NotNil(t, statementAB, "statement for AB/C should exist")
+
+	// The assessments must remain associated with their own
+	// (vulnerability, PURL) pair. With the old concatenated-string
+	// lookup, A/BC and AB/C both resolve to the same key: "ABC".
+	assert.Equal(t, "justification-A", string(statementA.Justification))
+	assert.Equal(t, "impact-A", statementA.ImpactStatement)
+
+	assert.Equal(t, "justification-AB", string(statementAB.Justification))
+	assert.Equal(t, "impact-AB", statementAB.ImpactStatement)
+}
+
 func TestAPIServerStore_storeVEX_preservesSecurityExceptionSemantics(t *testing.T) {
 	ignoredMatches := []v1beta1.IgnoredMatch{
 		{
