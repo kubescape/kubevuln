@@ -59,12 +59,7 @@ func WriteToTempFile(data []byte) (path string, cleanup func(), err error) {
 		return "", noop, ErrEmptyDocument
 	}
 
-	name, err := randomFilename()
-	if err != nil {
-		return "", noop, fmt.Errorf("vexdoc: generating a random filename: %w", err)
-	}
-
-	path = filepath.Join(os.TempDir(), name)
+	path = filepath.Join(os.TempDir(), randomFilename())
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -92,10 +87,14 @@ func WriteToTempFile(data []byte) (path string, cleanup func(), err error) {
 // randomFilename returns an unpredictable filename with a recognizable
 // prefix and extension, so a leaked or leftover file is identifiable as
 // belonging to this package during debugging.
-func randomFilename() (string, error) {
+//
+// It returns no error because it cannot fail. crypto/rand.Read "never
+// returns an error, and always fills b entirely"; on a failure it crashes
+// the program irrecoverably rather than reporting one. That has been its
+// contract since Go 1.24, and this module requires 1.26, so the error this
+// used to return was unreachable and every caller's check for it was dead.
+func randomFilename() string {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("kubevuln-vexdoc-%s.json", hex.EncodeToString(b)), nil
+	rand.Read(b) //nolint:errcheck // documented to never fail; it crashes instead
+	return fmt.Sprintf("kubevuln-vexdoc-%s.json", hex.EncodeToString(b))
 }

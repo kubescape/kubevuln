@@ -2,7 +2,9 @@ package vexdoc
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -150,5 +152,68 @@ func TestWriteToTempFile_ManyCallsNeverProduceADuplicatePath(t *testing.T) {
 
 		require.False(t, seen[path], "path %q was generated more than once across %d calls", path, n)
 		seen[path] = true
+	}
+}
+
+// redirectTempDir points os.TempDir at dir for the duration of the test, skipping if this
+// platform resolves it some other way. os.TempDir reads TMPDIR on unix and TMP/TEMP on
+// Windows, so all three are set and the result is checked rather than assumed.
+func redirectTempDir(t *testing.T, dir string) {
+	t.Helper()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, dir)
+	}
+	if got := os.TempDir(); got != dir {
+		t.Skipf("cannot redirect os.TempDir on %s: got %q, want %q", runtime.GOOS, got, dir)
+	}
+}
+
+// TestWriteToTempFile_ReportsCreateFailure covers the one failure this function can
+// actually hit: the temp directory not being usable. Everything else it guards against is
+// either impossible (the filename is generated, never supplied) or not reachable without
+// changing the signature to accept a writer.
+//
+// The contract on that path is what matters to a caller: no path, a wrapped error naming
+// the step, and a cleanup that is still safe to defer.
+func TestWriteToTempFile_ReportsCreateFailure(t *testing.T) {
+	redirectTempDir(t, filepath.Join(t.TempDir(), "does-not-exist"))
+
+	path, cleanup, err := WriteToTempFile([]byte(`{"@context":"https://openvex.dev/ns/v0.2.0"}`))
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "creating temp file")
+	assert.Empty(t, path, "no path may be returned when the file was never created")
+	require.NotNil(t, cleanup, "cleanup must be non-nil so a caller can defer it unconditionally")
+	assert.NotPanics(t, cleanup)
+	assert.NotPanics(t, cleanup, "cleanup must stay safe when called more than once")
+}
+
+// TestWriteToTempFile_CreateFailureIsNotMistakenForAnEmptyDocument keeps the two error
+// paths distinguishable. Both return an empty path, so a caller telling them apart depends
+// on the errors themselves, and ErrEmptyDocument is the sentinel one.
+func TestWriteToTempFile_CreateFailureIsNotMistakenForAnEmptyDocument(t *testing.T) {
+	redirectTempDir(t, filepath.Join(t.TempDir(), "does-not-exist"))
+
+	_, _, err := WriteToTempFile([]byte("real content"))
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrEmptyDocument)
+
+	_, _, emptyErr := WriteToTempFile(nil)
+	assert.ErrorIs(t, emptyErr, ErrEmptyDocument)
+}
+
+// TestRandomFilename covers the shape the debugging story depends on: a leftover file has
+// to be identifiable as this package's, and two calls must not collide.
+func TestRandomFilename(t *testing.T) {
+	seen := make(map[string]struct{}, 1000)
+	for i := 0; i < 1000; i++ {
+		name := randomFilename()
+		assert.True(t, strings.HasPrefix(name, "kubevuln-vexdoc-"), name)
+		assert.True(t, strings.HasSuffix(name, ".json"), name)
+		// 16 random bytes hex-encoded, between the fixed prefix and suffix.
+		assert.Len(t, name, len("kubevuln-vexdoc-")+32+len(".json"), name)
+		_, dup := seen[name]
+		require.False(t, dup, "duplicate filename %q after %d draws", name, i)
+		seen[name] = struct{}{}
 	}
 }
