@@ -53,6 +53,27 @@ func TestHasKnownFix(t *testing.T) {
 			wantVersion: "2.17.0",
 		},
 		{
+			// #844: the fix-versions list from the upstream feed is not guaranteed to be
+			// sorted, and can list branches older than what's installed. hasKnownFix must
+			// still surface the nearest real upgrade, never a version older than current.
+			name: "unsorted fix versions still suggest the nearest upgrade",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "14.7.0"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"15.10.0", "10.24.0", "14.16.0"}}},
+			},
+			wantFixed:   true,
+			wantVersion: "14.16.0",
+		},
+		{
+			name: "fix versions all older than current do not suggest a downgrade",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "16.0.0"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"10.0.0", "12.0.0"}}},
+			},
+			wantFixed:   true,
+			wantVersion: "",
+		},
+		{
 			name: "fix state fixed without versions",
 			match: v1beta1.Match{
 				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed}},
