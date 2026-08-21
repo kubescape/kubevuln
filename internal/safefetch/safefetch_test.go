@@ -175,3 +175,234 @@ func TestCheckIPAllowed_EmbeddedIPv4(t *testing.T) {
 		})
 	}
 }
+
+// transportOf returns the SSRF-guarded transport New wired up, so the dial-time
+// checks can be driven directly. Fetch reaches them only through a real connection
+// attempt, which is why the guards below were previously exercised only for
+// loopback and not for the rest of what checkIPAllowed refuses.
+func transportOf(t *testing.T, f *Fetcher) *http.Transport {
+	t.Helper()
+	tr, ok := f.Client.Transport.(*http.Transport)
+	require.True(t, ok, "New must install an *http.Transport")
+	return tr
+}
+
+// TestNew_DialBlocksAddress is the dial-time half of the SSRF guard, and the half
+// that makes DNS rebinding not work.
+//
+// Fetch validates nothing about the destination itself: it checks the scheme and
+// hands the URL to the client. The address check happens inside DialContext,
+// against the IP the resolver just returned, at the moment the connection is made.
+// So a host that passes any earlier inspection and only then resolves to an internal
+// address is still refused, because there is no earlier inspection to pass.
+//
+// "localhost" is the case that shows it: the string carries no IP, so nothing about
+// the URL is refusable, and it is blocked purely on what it resolved to.
+func TestNew_DialBlocksAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+	}{
+		{"loopback literal", "127.0.0.1:443"},
+		{"loopback IPv6 literal", "[::1]:443"},
+		{"hostname resolving to loopback", "localhost:443"},
+		{"cloud metadata endpoint", "169.254.169.254:80"},
+		{"RFC1918 private", "10.0.0.1:443"},
+		{"carrier-grade NAT", "100.64.0.1:443"},
+		{"0.0.0.0/8, routes to localhost on Linux", "0.0.0.1:443"},
+		{"NAT64 to cloud metadata", "[64:ff9b::a9fe:a9fe]:443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := New()
+			conn, err := transportOf(t, f).DialContext(context.Background(), "tcp", tt.addr)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrBlockedIP)
+			assert.Nil(t, conn)
+		})
+	}
+}
+
+func TestNew_DialRejectsAddressWithoutPort(t *testing.T) {
+	f := New()
+	conn, err := transportOf(t, f).DialContext(context.Background(), "tcp", "example.com")
+	require.Error(t, err)
+	assert.Nil(t, conn)
+	assert.Contains(t, err.Error(), "splitting host/port")
+}
+
+// TestNew_DialHonoursContextCancellation checks the dial does not outlive the caller.
+// Resolution runs on the caller's context, so a cancelled one fails before any
+// connection is attempted.
+func TestNew_DialHonoursContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := New()
+	conn, err := transportOf(t, f).DialContext(ctx, "tcp", "localhost:443")
+	require.Error(t, err)
+	assert.Nil(t, conn)
+}
+
+// TestNew_RedirectPolicy covers the other way an SSRF gets in: the first URL is a
+// perfectly ordinary public https one, and the server answers with a redirect
+// pointing somewhere it should not go.
+//
+// The scheme case matters most. Fetch refuses a non-https URL up front, but that
+// check runs once, on the URL the caller passed. Without the same check on each hop,
+// a public host could redirect to http:// and the request would go out in cleartext
+// to whatever it named.
+func TestNew_RedirectPolicy(t *testing.T) {
+	// via carries the prior requests, which is what CheckRedirect counts.
+	via := func(n int) []*http.Request {
+		reqs := make([]*http.Request, 0, n)
+		for i := 0; i < n; i++ {
+			reqs = append(reqs, httptest.NewRequest(http.MethodGet, "https://example.com/", nil))
+		}
+		return reqs
+	}
+
+	tests := []struct {
+		name    string
+		target  string
+		hops    int
+		wantErr error
+	}{
+		{"https target, first hop", "https://example.com/a", 1, nil},
+		{"https target, last allowed hop", "https://example.com/a", defaultMaxRedirects - 1, nil},
+		{"one hop past the limit", "https://example.com/a", defaultMaxRedirects, ErrTooManyRedirects},
+		{"well past the limit", "https://example.com/a", defaultMaxRedirects + 10, ErrTooManyRedirects},
+		{"downgrade to http", "http://example.com/a", 1, ErrScheme},
+		{"redirect to a file URL", "file:///etc/passwd", 1, ErrScheme},
+		{"redirect to internal http host", "http://169.254.169.254/latest/meta-data/", 1, ErrScheme},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := New()
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			err := f.Client.CheckRedirect(req, via(tt.hops))
+			if tt.wantErr == nil {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestNew_RedirectLimitIsCheckedBeforeScheme pins the order. A hop that is both over
+// the limit and downgraded reports the limit, so a scheme downgrade cannot be used to
+// mask a redirect loop.
+func TestNew_RedirectLimitIsCheckedBeforeScheme(t *testing.T) {
+	f := New()
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/a", nil)
+	over := make([]*http.Request, defaultMaxRedirects)
+	for i := range over {
+		over[i] = httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	}
+	err := f.Client.CheckRedirect(req, over)
+	assert.ErrorIs(t, err, ErrTooManyRedirects)
+	assert.NotErrorIs(t, err, ErrScheme)
+}
+
+func TestNew_Defaults(t *testing.T) {
+	f := New()
+	require.NotNil(t, f.Client)
+	assert.Equal(t, int64(defaultMaxBytes), f.MaxBytes)
+	assert.Equal(t, defaultTimeout, f.Client.Timeout)
+	require.NotNil(t, f.Client.CheckRedirect)
+	assert.NotNil(t, transportOf(t, f).DialContext)
+}
+
+func TestFetch_RejectsNon2xxStatus(t *testing.T) {
+	codes := []int{
+		http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusServiceUnavailable,
+	}
+	for _, code := range codes {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(code)
+				fmt.Fprint(w, `{"error": "body should be discarded"}`)
+			}))
+			defer server.Close()
+
+			// Same reason as TestFetch_RejectsOversizedBody: the test server
+			// necessarily listens on loopback, which New's dialer correctly
+			// refuses, so this drives Fetch's own logic with the server's client.
+			f := &Fetcher{Client: server.Client()}
+			body, err := f.Fetch(context.Background(), server.URL)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrStatus)
+			assert.Nil(t, body)
+		})
+	}
+}
+
+func TestFetch_ReturnsBody(t *testing.T) {
+	const payload = `{"@context":"https://openvex.dev/ns/v0.2.0","statements":[]}`
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, payload)
+	}))
+	defer server.Close()
+
+	f := &Fetcher{Client: server.Client(), MaxBytes: 1 << 20}
+	body, err := f.Fetch(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, payload, string(body))
+}
+
+// TestFetch_BodyExactlyAtLimit guards the boundary. Fetch reads MaxBytes+1 so an
+// oversized body is caught rather than truncated, which means a body of exactly
+// MaxBytes still has to be accepted whole.
+func TestFetch_BodyExactlyAtLimit(t *testing.T) {
+	const size = 64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, strings.Repeat("x", size))
+	}))
+	defer server.Close()
+
+	f := &Fetcher{Client: server.Client(), MaxBytes: size}
+	body, err := f.Fetch(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Len(t, body, size)
+
+	f.MaxBytes = size - 1
+	_, err = f.Fetch(context.Background(), server.URL)
+	assert.ErrorIs(t, err, ErrTooLarge)
+}
+
+// TestFetch_UnsetMaxBytesUsesDefault covers a Fetcher built as a literal rather than
+// by New. A zero MaxBytes has to mean the default limit, never no limit.
+func TestFetch_UnsetMaxBytesUsesDefault(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "small")
+	}))
+	defer server.Close()
+
+	for _, maxBytes := range []int64{0, -1} {
+		f := &Fetcher{Client: server.Client(), MaxBytes: maxBytes}
+		body, err := f.Fetch(context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, "small", string(body))
+	}
+}
+
+func TestFetch_PropagatesContextCancellation(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ok")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := &Fetcher{Client: server.Client()}
+	_, err := f.Fetch(ctx, server.URL)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
