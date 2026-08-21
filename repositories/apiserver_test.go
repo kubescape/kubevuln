@@ -524,6 +524,7 @@ func TestBuildIgnoredVEXAssessmentMap_DistinguishesVulnerabilityAndPURL(t *testi
 						},
 					},
 					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						SourceKind:      "SecurityException",
 						Justification:   "justification-A",
 						ImpactStatement: "impact-A",
 					}},
@@ -540,6 +541,7 @@ func TestBuildIgnoredVEXAssessmentMap_DistinguishesVulnerabilityAndPURL(t *testi
 						},
 					},
 					AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+						SourceKind:      "SecurityException",
 						Justification:   "justification-AB",
 						ImpactStatement: "impact-AB",
 					}},
@@ -552,13 +554,15 @@ func TestBuildIgnoredVEXAssessmentMap_DistinguishesVulnerabilityAndPURL(t *testi
 
 	assessmentA, ok := ignoredMap[vexStatementKey{name: "A", purl: "BC"}]
 	require.True(t, ok)
-	assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), assessmentA.justification)
-	assert.Equal(t, "Vulnerability was ignored by an exception policy", assessmentA.impactStatement)
+
+	assert.Equal(t, v1beta1.Justification("justification-A"), assessmentA.justification)
+	assert.Equal(t, "impact-A", assessmentA.impactStatement)
 
 	assessmentAB, ok := ignoredMap[vexStatementKey{name: "AB", purl: "C"}]
 	require.True(t, ok)
-	assert.Equal(t, v1beta1.Justification(vex.VulnerableCodeNotPresent), assessmentAB.justification)
-	assert.Equal(t, "Vulnerability was ignored by an exception policy", assessmentAB.impactStatement)
+
+	assert.Equal(t, v1beta1.Justification("justification-AB"), assessmentAB.justification)
+	assert.Equal(t, "impact-AB", assessmentAB.impactStatement)
 }
 
 func TestAPIServerStore_storeVEX_ignoredMatchesDoNotCollide(t *testing.T) {
