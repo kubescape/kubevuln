@@ -48,7 +48,13 @@ func TestMatchImages(t *testing.T) {
 		{name: "short name bare repo matches normalized reference", patterns: []string{"nginx"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "library name with tag matches normalized reference", patterns: []string{"library/nginx:1.25"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "library name wildcard tag matches normalized reference", patterns: []string{"library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
-		{name: "custom registry short repo matches normalized reference", patterns: []string{"kubescape/kubevuln:v1.0.0"}, image: "quay.io/kubescape/kubevuln:v1.0.0", want: true},
+		// A domain-less pattern is shorthand for Docker Hub, not "whatever registry
+		// this scan's image happens to come from" -- see the expandPatternForms
+		// doc comment. Otherwise a SecurityException written expecting to scope
+		// suppression to Docker Hub would also suppress an unrelated image at any
+		// other registry, since that registry would always equal its own fallback.
+		{name: "short pattern does not match a different registry", patterns: []string{"kubescape/kubevuln:v1.0.0"}, image: "quay.io/kubescape/kubevuln:v1.0.0", want: false},
+		{name: "custom registry requires an explicit domain in the pattern", patterns: []string{"quay.io/kubescape/kubevuln:v1.0.0"}, image: "quay.io/kubescape/kubevuln:v1.0.0", want: true},
 		{name: "OR across patterns", patterns: []string{"docker.io/library/redis:*", "docker.io/library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "malformed pattern is skipped", patterns: []string{"[bad"}, image: "docker.io/library/nginx:1.25", want: false},
 	}

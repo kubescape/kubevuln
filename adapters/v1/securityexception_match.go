@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
-	"github.com/distribution/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -132,7 +131,7 @@ func matchImages(patterns []string, image string) bool {
 	}
 	forms := tools.ReferenceMatchForms(image)
 	for _, p := range patterns {
-		pForms := expandPatternForms(p, image)
+		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
 			for _, form := range forms {
 				if ok, err := path.Match(pf, form); err == nil && ok {
@@ -146,19 +145,19 @@ func matchImages(patterns []string, image string) bool {
 
 // expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
 // (e.g. "nginx:1.25", "nginx:*", "library/nginx:1.25", "kubescape/kubevuln:*") without an explicit
-// registry domain or top-level wildcard in its first segment, it expands p with the target domain
-// and default Docker Hub namespace when applicable.
-func expandPatternForms(p, image string) []string {
+// registry domain or top-level wildcard in its first segment, it expands p against the fixed
+// default Docker Hub domain and namespace ("docker.io"/"library").
+//
+// The fallback domain is pinned rather than derived from the image being scanned. A domain-less
+// pattern like "nginx:1.25" is, per its own author's intent, shorthand for Docker Hub's
+// nginx:1.25 -- not "whatever registry this particular scan's image happens to come from". Basing
+// the fallback on the scanned image made the registry check a no-op for every short-form pattern:
+// a SecurityException written expecting to scope suppression to Docker Hub would also suppress an
+// unrelated image at any other registry, since that registry would always equal its own fallback.
+func expandPatternForms(p string) []string {
 	patterns := []string{p}
 	if p == "" {
 		return patterns
-	}
-
-	targetDomain := "docker.io"
-	if n, err := reference.ParseNormalizedNamed(image); err == nil {
-		if d := reference.Domain(n); d != "" {
-			targetDomain = d
-		}
 	}
 
 	if !strings.Contains(p, "/") {
@@ -166,17 +165,14 @@ func expandPatternForms(p, image string) []string {
 		if repoName == "*" {
 			return patterns
 		}
-		patterns = append(patterns, targetDomain+"/library/"+p)
-		if targetDomain != "docker.io" {
-			patterns = append(patterns, targetDomain+"/"+p)
-		}
+		patterns = append(patterns, "docker.io/library/"+p)
 		return patterns
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
 	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
 	if !hasDomainOrWildcard {
-		patterns = append(patterns, targetDomain+"/"+p)
+		patterns = append(patterns, "docker.io/"+p)
 	}
 
 	return patterns
