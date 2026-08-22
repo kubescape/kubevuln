@@ -360,17 +360,35 @@ func TestStartPeriodicTempDirSweep_StopsTickingOnceStopIsClosed(t *testing.T) {
 		return calls >= 3
 	}, time.Second, 5*time.Millisecond, "expected several periodic sweeps before stopping")
 
+	readCalls := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls
+	}
+
 	close(stop)
-	mu.Lock()
-	observedAtStop := calls
-	mu.Unlock()
+
+	// A sweep already running when stop closes still finishes: the select only stops the
+	// goroutine starting another one, and a sweep is real work (a lease file plus a
+	// directory walk), never instantaneous. Taking the baseline immediately therefore read
+	// a count that an in-flight sweep was about to increment, and this failed with one more
+	// call than expected whenever the machine was loaded enough to widen that window.
+	//
+	// Wait for the count to stop moving first, so what is asserted is that no further sweep
+	// *starts*, which is the property, rather than that close(stop) halts one mid-flight,
+	// which it does not promise.
+	require.Eventually(t, func() bool {
+		before := readCalls()
+		time.Sleep(50 * time.Millisecond)
+		return before == readCalls()
+	}, 5*time.Second, 10*time.Millisecond, "sweeps should quiesce once stop is closed")
+
+	observedAtStop := readCalls()
 
 	// long enough for several more ticks to have fired had the goroutine kept running
 	time.Sleep(100 * time.Millisecond)
 
-	mu.Lock()
-	defer mu.Unlock()
-	assert.Equal(t, observedAtStop, calls, "no sweep should run after stop is closed")
+	assert.Equal(t, observedAtStop, readCalls(), "no sweep should start after stop is closed")
 }
 
 func TestStartPeriodicTempDirSweep_SkipsWhileACallerIsActive(t *testing.T) {
