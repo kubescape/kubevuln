@@ -591,6 +591,17 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return &domain.ScanError{Reason: reason, Err: sbomErr}
 		}
 
+		// With sbomGeneration off, getOrCreateSBOM returns a zero SBOM and a nil error, so
+		// nothing about err says the SBOM is missing and only Content does. ScanCVE and
+		// ScanCP each stop here for the same reason: the CVE scanner dereferences
+		// sbom.Content, so handing it a zero SBOM is a nil dereference, on a worker-pool
+		// goroutine that does not recover. See #846.
+		if !s.sbomGeneration && sbom.Content == nil {
+			logger.L().Ctx(ctx).Warning("missing SBOM",
+				helpers.String("imageSlug", workload.ImageSlug))
+			return &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: domain.ErrMissingSBOM}
+		}
+
 		// do not process timed out SBOM
 		if sbom.Status == helpersv1.Incomplete || sbom.Status == helpersv1.TooLarge {
 			reason := classifySBOMStatusWithAnnotation(sbom.Status, sbom.Annotations)
