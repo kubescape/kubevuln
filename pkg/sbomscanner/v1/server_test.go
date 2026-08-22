@@ -76,7 +76,11 @@ func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
-	go srv.Serve(lis)
+	go func() {
+		// Serve returns ErrServerStopped on the graceful Stop below; nothing else to do
+		// with it here, but ignoring it silently is what errcheck flags.
+		_ = srv.Serve(lis)
+	}()
 
 	conn, err := grpc.NewClient("unix:"+sock,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -461,7 +465,7 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 		}
 		if r.URL.Path == "/v2/test-image/manifests/latest" {
 			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
-			w.Write([]byte(fmt.Sprintf(`{
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
 				"schemaVersion": 2,
 				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
 				"config": {
@@ -480,11 +484,11 @@ func TestCreateSBOM_ImageTooLarge_LocalRegistry(t *testing.T) {
 			return
 		}
 		if r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash) {
-			w.Write(configBytes)
+			_, _ = w.Write(configBytes)
 			return
 		}
 		if r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash) {
-			w.Write(layerBytes)
+			_, _ = w.Write(layerBytes)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -595,7 +599,7 @@ func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case r.URL.Path == "/v2/test-image/manifests/latest":
 			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
-			w.Write([]byte(fmt.Sprintf(`{
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
 				"schemaVersion": 2,
 				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
 				"config": {
@@ -612,9 +616,9 @@ func TestCreateSBOM_PlatformMismatch_LocalRegistry(t *testing.T) {
 				]
 			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
 		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", configHash):
-			w.Write(configBytes)
+			_, _ = w.Write(configBytes)
 		case r.URL.Path == fmt.Sprintf("/v2/test-image/blobs/sha256:%s", layerHash):
-			w.Write(layerBytes)
+			_, _ = w.Write(layerBytes)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
