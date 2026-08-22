@@ -281,23 +281,41 @@ func linkToVuln(id string) string {
 	}
 }
 
+// suggestedVersion returns the nearest version in versions that fixes current: the
+// smallest one strictly greater than current. versions is not guaranteed to be sorted
+// (it comes straight from the upstream vulnerability feed, which may list fix versions
+// for several maintained branches in any order), so the whole slice must be scanned
+// rather than trusting the first qualifying entry.
+//
+// If current is not a version, the first entry is returned, since there is nothing to
+// compare against. If current is a version but no entry in versions is greater than it,
+// "" is returned rather than falling back to versions[0]; versions[0] could be older
+// than current, which would suggest a downgrade.
 func suggestedVersion(current string, versions []string) string {
 	if len(versions) == 0 {
 		return ""
 	}
-	// compare with semver
-	// if current is not a version, return the first version
-	if c, err := semver.NewVersion(current); err == nil {
-		for _, version := range versions {
-			v, err := semver.NewVersion(version)
-			if err == nil {
-				if c.LessThan(v) {
-					return version
-				}
-			}
+	c, err := semver.NewVersion(current)
+	if err != nil {
+		return versions[0]
+	}
+
+	var nearest *semver.Version
+	var nearestStr string
+	for _, version := range versions {
+		v, err := semver.NewVersion(version)
+		if err != nil {
+			continue
+		}
+		if !c.LessThan(v) {
+			continue
+		}
+		if nearest == nil || v.LessThan(nearest) {
+			nearest = v
+			nearestStr = version
 		}
 	}
-	return versions[0]
+	return nearestStr
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {

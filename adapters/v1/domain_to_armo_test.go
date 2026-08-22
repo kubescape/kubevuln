@@ -288,6 +288,43 @@ func Test_suggestedVersion(t *testing.T) {
 			versions: []string{"10.24.0", "12.21.0", "14.16.0", "15.10.0"},
 			want:     "14.16.0",
 		},
+		{
+			// versions is not guaranteed to be sorted; the fix listed first for an
+			// older branch must not win over the nearer fix listed later.
+			name:     "unsorted branch list picks the nearest fix, not the first entry",
+			current:  "14.7.0",
+			versions: []string{"15.10.0", "10.24.0", "14.16.0"},
+			want:     "14.16.0",
+		},
+		{
+			// every listed fix version is for a branch already superseded by current;
+			// there is no upgrade to suggest, so this must not fall back to versions[0]
+			// and suggest a downgrade.
+			name:     "no version above current returns empty rather than a downgrade",
+			current:  "16.0.0",
+			versions: []string{"10.0.0", "12.0.0"},
+			want:     "",
+		},
+		{
+			name:     "current equal to the only candidate returns empty, not a downgrade",
+			current:  "2.0.0",
+			versions: []string{"2.0.0"},
+			want:     "",
+		},
+		{
+			name:     "unparseable entries are skipped in favour of a valid nearer fix",
+			current:  "1.0.0",
+			versions: []string{"not-a-version", "3.0.0", "2.0.0"},
+			want:     "2.0.0",
+		},
+		{
+			// current parses, but nothing in versions does: there is no comparable
+			// candidate, so nothing is suggested.
+			name:     "current parses but every version is unparseable returns empty",
+			current:  "1.0.0",
+			versions: []string{"not-a-version", "also-not-a-version"},
+			want:     "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
