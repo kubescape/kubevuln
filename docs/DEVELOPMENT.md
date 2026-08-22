@@ -473,9 +473,10 @@ CONFIG_DIR=.dev/config go run ./cmd/http
 # Optional integration suite when external dependencies are available
 go test -tags=integration ./...
 
-# Known-vulnerability scan of the dependency call graph; queries vuln.go.dev,
-# so it runs on a schedule/push-to-main in CI rather than gating every PR
-# (see #854). go install golang.org/x/vuln/cmd/govulncheck@latest to install.
+# Known-vulnerability scan of the compiled binary; queries vuln.go.dev, so it
+# runs on a schedule/push-to-main in CI rather than gating every PR (see
+# #854). go install golang.org/x/vuln/cmd/govulncheck@v1.7.0 to install
+# (pinned to match CI).
 make govulncheck
 ```
 

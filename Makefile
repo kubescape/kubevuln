@@ -28,8 +28,10 @@ lint-all:
 	golangci-lint run --timeout=15m
 
 # Queries vuln.go.dev, so it's kept out of `verify`'s fast local path (see #854).
-govulncheck:
-	govulncheck ./...
+# Binary mode scans the actual compiled artifact rather than source, so the
+# result reflects what's really shipped (build tags, dead-code elimination).
+govulncheck: build
+	govulncheck -mode=binary $(BINARY_NAME)
 
 verify: build test vet lint
 
