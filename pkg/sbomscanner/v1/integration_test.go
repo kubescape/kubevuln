@@ -28,7 +28,11 @@ func startIntegrationServer(t *testing.T) (SBOMScannerClient, *grpc.Server, stri
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
-	go srv.Serve(lis)
+	go func() {
+		// Serve returns ErrServerStopped on the graceful Stop below; nothing else to do
+		// with it here, but ignoring it silently is what errcheck flags.
+		_ = srv.Serve(lis)
+	}()
 
 	conn, err := grpc.NewClient("unix:"+sock,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

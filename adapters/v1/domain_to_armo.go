@@ -171,7 +171,7 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 			vulnerabilityResult.Categories.IsRCE = vulnerabilityResult.IsRCE()
 			// add layer information
 			// make sure we have at least one location
-			if m.Artifact.Locations == nil || len(m.Artifact.Locations) < 1 {
+			if len(m.Artifact.Locations) == 0 {
 				m.Artifact.Locations = []v1beta1.SyftCoordinates{
 					{
 						FileSystemID: dummyLayer,
