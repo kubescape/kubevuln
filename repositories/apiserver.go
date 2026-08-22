@@ -1124,6 +1124,24 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 	return &product, nil
 }
 
+func buildIgnoredVEXAssessmentMap(cve *domain.CVEManifest) map[vexStatementKey]ignoredVEXAssessment {
+	ignoredMap := make(map[vexStatementKey]ignoredVEXAssessment)
+
+	if cve == nil || cve.Content == nil {
+		return ignoredMap
+	}
+
+	for _, v := range cve.Content.IgnoredMatches {
+		key := vexStatementKey{
+			name: v.Vulnerability.ID,
+			purl: v.Artifact.PURL,
+		}
+		ignoredMap[key] = ignoredMatchAssessment(v)
+	}
+
+	return ignoredMap
+}
+
 // anyPURLMatches reports whether fn returns true for any subcomponent PURL across any
 // product in products. This is the shared traversal used by both statementHasPURL and
 // the ignored-vulnerability lookup in updateVEX, so both stay correct together if the
@@ -1614,12 +1632,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	// ignoredMap drives the "reset every statement" pass below; guarded the same way as the
 	// Matches/IgnoredMatches loops above, since it reads the same cve.Content.
-	ignoredMap := make(map[string]ignoredVEXAssessment)
-	if cve.Content != nil {
-		for _, v := range cve.Content.IgnoredMatches {
-			ignoredMap[v.Vulnerability.ID+v.Artifact.PURL] = ignoredMatchAssessment(v)
-		}
-	}
+	ignoredMap := buildIgnoredVEXAssessmentMap(&cve)
 
 	// Reset every statement back to the baseline "not affected" status before
 	// reapplying the current filtered manifest.
@@ -1638,7 +1651,7 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 		var assessment ignoredVEXAssessment
 		isIgnored := anyPURLMatches(vexDoc.Statements[i].Products, func(purl string) bool {
-			if ignoredAssessment, ok := ignoredMap[vexDoc.Statements[i].Vulnerability.Name+purl]; ok {
+			if ignoredAssessment, ok := ignoredMap[vexStatementKey{name: vexDoc.Statements[i].Vulnerability.Name, purl: purl}]; ok {
 				assessment = ignoredAssessment
 				return true
 			}
