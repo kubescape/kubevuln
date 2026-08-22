@@ -4,7 +4,7 @@ BINARY_NAME=kubevuln
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 TAG=v0.0.0
 
-.PHONY: build test vet lint lint-all verify verify-image
+.PHONY: build test vet lint lint-all verify verify-image govulncheck
 
 build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
@@ -26,6 +26,10 @@ lint:
 
 lint-all:
 	golangci-lint run --timeout=15m
+
+# Queries vuln.go.dev, so it's kept out of `verify`'s fast local path (see #854).
+govulncheck:
+	govulncheck ./...
 
 verify: build test vet lint
 
