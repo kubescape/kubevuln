@@ -3332,3 +3332,102 @@ func TestScanService_SingleflightSBOMFailure_ReportsEveryWaiter(t *testing.T) {
 	assert.ElementsMatch(t, wantJobIDs, platform.jobIDs,
 		"each ReportScanFailure call must carry the reporting caller's own JobID, not just the leader's")
 }
+
+// recordingScanner records every SBOM handed to it, so a test can assert not just what a
+// scan flow returned but what it passed downstream on the way there.
+type recordingScanner struct {
+	ports.CVEScanner
+	got []domain.SBOM
+}
+
+func (r *recordingScanner) DBVersion(context.Context) string { return "v1.0.0" }
+func (r *recordingScanner) Ready(context.Context) bool       { return true }
+func (r *recordingScanner) Version() string                  { return "v1.0.0" }
+
+func (r *recordingScanner) ScanSBOM(_ context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	r.got = append(r.got, sbom)
+	return domain.CVEManifest{
+		Name:              sbom.Name,
+		CVEScannerVersion: "v1.0.0",
+		CVEDBVersion:      "v1.0.0",
+		Content:           &v1beta1.GrypeDocument{},
+	}, nil
+}
+
+// newScanServiceWithoutSBOMGeneration builds a service configured the way
+// nodeSbomGeneration: true configures it, where kubevuln generates no SBOM itself and
+// expects to find one already in storage.
+func newScanServiceWithoutSBOMGeneration(scanner ports.CVEScanner) (*ScanService, *repositories.MemoryStore) {
+	storage := repositories.NewMemoryStorage(false, false)
+	return NewScanService(
+		adapters.NewMockSBOMAdapter(false, false, false), storage,
+		scanner, storage,
+		adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(),
+		false, // storage
+		false, // vexGeneration
+		false, // sbomGeneration -- the setting under test
+		false, false,
+	), storage
+}
+
+func registryWorkload() domain.ScanCommand {
+	return domain.ScanCommand{
+		ImageSlug:          "imageSlug",
+		ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+	}
+}
+
+// TestScanService_MissingSBOM_NoFlowScansANilSBOM is the property all three CVE flows have
+// to agree on.
+//
+// With sbomGeneration off, getOrCreateSBOM returns a zero domain.SBOM and a nil error, so
+// sbom.Content is nil and nothing about the error tells a flow that. ScanCVE and ScanCP
+// each check for it and stop with domain.ErrMissingSBOM. ScanRegistry did not, and handed
+// the zero SBOM to the CVE scanner, which dereferences Content.
+func TestScanService_MissingSBOM_NoFlowScansANilSBOM(t *testing.T) {
+	t.Run("ScanRegistry", func(t *testing.T) {
+		scanner := &recordingScanner{}
+		s, _ := newScanServiceWithoutSBOMGeneration(scanner)
+
+		ctx, err := s.ValidateScanRegistry(context.TODO(), registryWorkload())
+		require.NoError(t, err)
+
+		err = s.ScanRegistry(ctx)
+
+		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
+	})
+
+	t.Run("ScanCVE", func(t *testing.T) {
+		scanner := &recordingScanner{}
+		s, _ := newScanServiceWithoutSBOMGeneration(scanner)
+
+		// ScanCVE additionally requires ImageHash; ScanRegistry does not.
+		workload := registryWorkload()
+		workload.ImageHash = "sha256:aaaa"
+		ctx, err := s.ValidateScanCVE(context.TODO(), workload)
+		require.NoError(t, err)
+
+		err = s.ScanCVE(ctx)
+
+		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
+	})
+}
+
+// TestScanService_MissingSBOM_ScannerNeverSeesNilContent states the consequence directly.
+// The production scanner, GrypeAdapter.ScanSBOM, does `domainToSyft(*sbom.Content)`, so a
+// zero SBOM reaching it is a nil dereference. The scan runs on a worker-pool goroutine
+// with no recover, so that panic takes the process down rather than failing one scan.
+func TestScanService_MissingSBOM_ScannerNeverSeesNilContent(t *testing.T) {
+	scanner := &recordingScanner{}
+	s, _ := newScanServiceWithoutSBOMGeneration(scanner)
+
+	ctx, err := s.ValidateScanRegistry(context.TODO(), registryWorkload())
+	require.NoError(t, err)
+	_ = s.ScanRegistry(ctx)
+
+	for _, sbom := range scanner.got {
+		assert.NotNil(t, sbom.Content, "the CVE scanner dereferences Content; it must never be handed a nil one")
+	}
+}
