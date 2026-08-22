@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -26,8 +27,15 @@ type sbomID struct {
 	SBOMCreatorVersion string
 }
 
-// MemoryStore implements both CVERepository and SBOMRepository with in-memory storage (maps) to be used for tests
+// MemoryStore implements both CVERepository and SBOMRepository with in-memory storage (maps) to be used for tests.
+//
+// mu guards every field below it: production code never runs more than one scan concurrently
+// against the same MemoryStore instance (only APIServerStore is wired up outside of tests), but
+// the test suite deliberately does -- singleflight and worker-pool concurrency tests construct
+// several goroutines against one shared MemoryStore -- so unsynchronized map/slice access here
+// is a real data race under `go test -race`, not a hypothetical one.
 type MemoryStore struct {
+	mu           sync.RWMutex
 	aps          map[apID]v1beta1.ContainerProfile
 	cveManifests map[cveID]domain.CVEManifest
 	sboms        map[sbomID]domain.SBOM
@@ -46,6 +54,8 @@ var _ ports.SBOMRepository = (*MemoryStore)(nil)
 // SBOMStores reports how many times StoreSBOM was called, so a test can tell an SBOM that
 // was written from one that was only read back.
 func (m *MemoryStore) SBOMStores() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.sbomStores
 }
 
@@ -72,6 +82,8 @@ func (m *MemoryStore) GetContainerProfile(ctx context.Context, namespace string,
 		Namespace: namespace,
 		Name:      name,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.aps[id]; ok {
 		return value, nil
 	}
@@ -90,6 +102,8 @@ func (m *MemoryStore) StoreContainerProfile(ctx context.Context, ap v1beta1.Cont
 		Namespace: ap.Namespace,
 		Name:      ap.Name,
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.aps[id] = ap
 	return nil
 }
@@ -109,6 +123,8 @@ func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVES
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.cveManifests[id]; ok {
 		return value, nil
 	}
@@ -137,6 +153,8 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 		CVEScannerVersion:  cve.CVEScannerVersion,
 		CVEDBVersion:       cve.CVEDBVersion,
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.cveManifests[id] = cve
 	return nil
 }
@@ -156,6 +174,9 @@ func (m *MemoryStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifes
 		CVEScannerVersion:  cve.CVEScannerVersion,
 		CVEDBVersion:       cve.CVEDBVersion,
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if withRelevancy {
 		idSumm := cveID{
@@ -180,12 +201,16 @@ func (m *MemoryStore) StoreCVESummaryStub(ctx context.Context, status string) er
 		return domain.ErrMockError
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.summaryStubs = append(m.summaryStubs, status)
 	return nil
 }
 
 // CVESummaryStubs returns the statuses passed to StoreCVESummaryStub, for tests
 func (m *MemoryStore) CVESummaryStubs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.summaryStubs
 }
 
@@ -202,6 +227,8 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.sboms[id]; ok {
 		if value.Content == nil {
 			// APIServerStore always reads back a document (Content: &manifest.Spec.Syft),
@@ -219,6 +246,9 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) error {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.sbomStores++
 
@@ -242,6 +272,8 @@ func (m *MemoryStore) DeleteSBOM(ctx context.Context, name string) error {
 		return domain.ErrMockError
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id := range m.sboms {
 		if id.Name == name {
 			delete(m.sboms, id)
