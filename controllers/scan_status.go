@@ -137,6 +137,23 @@ func (s *scanStatusStore) recordAccepted(jobID, endpoint string) bool {
 	return true
 }
 
+// isActive reports whether jobID currently names a record that is still queued or running.
+// It's a cheap read-only precedence check for admitJob: without it, a jobID that collides
+// with the very job occupying the controller's last admission slot would be rejected as
+// "queue full" (503) before recordAccepted ever got a chance to diagnose it as a duplicate
+// (409), since admitQueueSlot ran first. recordAccepted's own atomic check-and-write under
+// s.mu remains the actual correctness guard against a genuine race between two admissions;
+// this is only about which rejection reason a caller sees when both are true at once.
+func (s *scanStatusStore) isActive(jobID string) bool {
+	if jobID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status, ok := s.items[jobID]
+	return ok && !isTerminal(status.State)
+}
+
 func (s *scanStatusStore) markRunning(jobID string) bool {
 	if jobID == "" {
 		return false

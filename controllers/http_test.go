@@ -1446,12 +1446,15 @@ func TestHTTPController_GenerateSBOM_DuplicateJobIDRejected(t *testing.T) {
 	c := (&HTTPController{
 		scanService: services.NewMockScanService(true),
 		workerPool:  workerpool.New(1),
-	})
+	}).WithMaxQueueDepth(1)
 	defer c.Shutdown(2 * time.Second)
 
 	// Simulate a job already accepted under the same jobID the request below uses, without
 	// needing to synchronize against a background goroutine -- the same style
-	// TestHTTPController_GenerateSBOM_QueueFull uses for tryAdmit.
+	// TestHTTPController_GenerateSBOM_QueueFull uses for tryAdmit. maxQueueDepth is bounded
+	// here specifically so pending is actually exercised: with the default unbounded queue,
+	// tryAdmit/release are no-ops and pending stays 0 regardless of whether the rejection
+	// path is correct.
 	require.True(t, c.ensureStatuses().recordAccepted("job-dup", "generateSBOM"))
 
 	router := gin.Default()
@@ -1462,13 +1465,48 @@ func TestHTTPController_GenerateSBOM_DuplicateJobIDRejected(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 
-	// The rejected duplicate's queue slot must not leak.
+	// admitJob's isActive precedence check catches this before admitQueueSlot ever reserves
+	// a slot for it, so the controller's one slot of capacity must still be free afterward.
 	require.Eventually(t, func() bool { return c.pending.Load() == 0 }, time.Second, 5*time.Millisecond,
-		"the duplicate's admission slot must be released, not leaked, on rejection")
+		"a duplicate rejection must not consume the controller's admission capacity")
 
 	status, ok := c.ensureStatuses().get("job-dup")
 	require.True(t, ok)
 	assert.Equal(t, domain.ScanStateQueued, status.State, "the original job's record must be untouched by the rejected duplicate")
+}
+
+// TestHTTPController_DuplicateJobID_TakesPrecedenceOverQueueFull covers the ordering CodeRabbit
+// flagged on #857: if the job occupying the controller's one and only admission slot is the
+// same jobID a new request reuses, admitQueueSlot alone would reject that request as 503
+// queue-full without ever getting a chance to diagnose it as a 409 duplicate, since capacity
+// is genuinely exhausted. admitJob's isActive check runs before admitQueueSlot specifically
+// so this case is still reported as a duplicate, which more precisely describes the actual
+// conflict and doesn't imply retrying with a fresh jobID would also be rejected.
+func TestHTTPController_DuplicateJobID_TakesPrecedenceOverQueueFull(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	// The one and only admission slot is occupied by "job-dup" itself, exhausting capacity.
+	require.True(t, c.tryAdmit())
+	require.True(t, c.ensureStatuses().recordAccepted("job-dup", "generateSBOM"))
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:dup","jobID":"job-dup"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String(),
+		"a jobID collision must be reported as 409, not 503, even when it also happens to be the request holding the only free slot")
+
+	// A different, non-duplicate jobID must still see the queue as genuinely full.
+	req2, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:other","jobID":"job-other"}`))
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusServiceUnavailable, w2.Code, w2.Body.String())
 }
 
 // TestHTTPController_DuplicateJobID_PreservesFirstJobOutcome end-to-end reproduces the

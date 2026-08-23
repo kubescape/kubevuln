@@ -177,21 +177,41 @@ func (h *HTTPController) admitQueueSlot(c *gin.Context, ctx context.Context, end
 // active job -- it writes the appropriate rejection response itself, releases any queue slot
 // it reserved, and returns false; either way the caller must stop processing the request
 // without doing anything else.
+//
+// The isActive check runs before admitQueueSlot on purpose: without it, a jobID that
+// collides with the very job occupying the controller's last admission slot would be
+// rejected as queue-full (503) before recordAccepted ever got a chance to diagnose it as a
+// duplicate (409), since admission capacity would already be exhausted by the time
+// recordAccepted ran. It's a precedence check only -- recordAccepted's own atomic
+// check-and-write remains the actual guard against a genuine race between two admissions
+// for the same jobID, so a duplicate that slips past this read-only check is still caught
+// there.
 func (h *HTTPController) admitJob(c *gin.Context, ctx context.Context, endpoint, jobID string, details problem.Option) bool {
+	if h.ensureStatuses().isActive(jobID) {
+		h.rejectDuplicateJobID(c, ctx, endpoint, jobID, details)
+		return false
+	}
 	if !h.admitQueueSlot(c, ctx, endpoint, details) {
 		return false
 	}
 	if !h.ensureStatuses().recordAccepted(jobID, endpoint) {
 		h.release()
-		logger.L().Ctx(ctx).Warning("rejecting scan, jobID already has an active scan in progress",
-			helpers.String("endpoint", endpoint),
-			helpers.String("jobID", jobID))
-		h.recordRejection(ctx, endpoint, domain.ErrDuplicateJobID)
-		_, _ = problem.Of(validationStatusCode(domain.ErrDuplicateJobID)).Append(details).WriteTo(c.Writer)
+		h.rejectDuplicateJobID(c, ctx, endpoint, jobID, details)
 		return false
 	}
 	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 	return true
+}
+
+// rejectDuplicateJobID writes the 409/ErrDuplicateJobID rejection response for jobID and
+// records it, shared by admitJob's two rejection points (the isActive precedence check and
+// the recordAccepted race fallback).
+func (h *HTTPController) rejectDuplicateJobID(c *gin.Context, ctx context.Context, endpoint, jobID string, details problem.Option) {
+	logger.L().Ctx(ctx).Warning("rejecting scan, jobID already has an active scan in progress",
+		helpers.String("endpoint", endpoint),
+		helpers.String("jobID", jobID))
+	h.recordRejection(ctx, endpoint, domain.ErrDuplicateJobID)
+	_, _ = problem.Of(validationStatusCode(domain.ErrDuplicateJobID)).Append(details).WriteTo(c.Writer)
 }
 
 // submit hands task to the worker pool, unless Shutdown has already begun, in which case
