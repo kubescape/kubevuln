@@ -169,6 +169,31 @@ func (h *HTTPController) admitQueueSlot(c *gin.Context, ctx context.Context, end
 	return false
 }
 
+// admitJob reserves a queue slot for endpoint via admitQueueSlot and then records jobID as
+// newly accepted via recordAccepted, rejecting a jobID that already belongs to an active
+// (queued or running) job instead of silently resetting its tracking record out from under
+// it (see #856). On success it writes the 200 OK response the caller uses to start polling
+// ScanStatus and returns true. On failure -- the queue is full, or jobID collides with an
+// active job -- it writes the appropriate rejection response itself, releases any queue slot
+// it reserved, and returns false; either way the caller must stop processing the request
+// without doing anything else.
+func (h *HTTPController) admitJob(c *gin.Context, ctx context.Context, endpoint, jobID string, details problem.Option) bool {
+	if !h.admitQueueSlot(c, ctx, endpoint, details) {
+		return false
+	}
+	if !h.ensureStatuses().recordAccepted(jobID, endpoint) {
+		h.release()
+		logger.L().Ctx(ctx).Warning("rejecting scan, jobID already has an active scan in progress",
+			helpers.String("endpoint", endpoint),
+			helpers.String("jobID", jobID))
+		h.recordRejection(ctx, endpoint, domain.ErrDuplicateJobID)
+		_, _ = problem.Of(validationStatusCode(domain.ErrDuplicateJobID)).Append(details).WriteTo(c.Writer)
+		return false
+	}
+	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
+	return true
+}
+
 // submit hands task to the worker pool, unless Shutdown has already begun, in which case
 // it returns false without touching the pool at all. Callers must treat false the same as
 // a lost race with shutdown: release the admission slot task's defer h.release() will now
@@ -240,9 +265,10 @@ func scanFailureReason(outcome string, err error) string {
 
 // recordRejection records a validation-time rejection for the given endpoint. reason is
 // "too_many_requests" for registry back-pressure (ErrTooManyRequests), "queue_full" for local
-// admission control (ErrQueueFull, see WithMaxQueueDepth), and "invalid_request" for every
-// other validation error, keeping the rejection-rate signal distinct from malformed-payload
-// noise while staying low cardinality.
+// admission control (ErrQueueFull, see WithMaxQueueDepth), "duplicate_job_id" for a jobID
+// that already belongs to an active job (ErrDuplicateJobID, see admitJob), and
+// "invalid_request" for every other validation error, keeping the rejection-rate signal
+// distinct from malformed-payload noise while staying low cardinality.
 func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
 	if h.metrics == nil {
 		return
@@ -253,6 +279,8 @@ func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, e
 		reason = "too_many_requests"
 	case errors.Is(err, domain.ErrQueueFull):
 		reason = "queue_full"
+	case errors.Is(err, domain.ErrDuplicateJobID):
+		reason = "duplicate_job_id"
 	}
 	h.metrics.RejectCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("endpoint", endpoint),
@@ -297,12 +325,9 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 		return
 	}
 
-	if !h.admitQueueSlot(c, ctx, "generateSBOM", details) {
+	if !h.admitJob(c, ctx, "generateSBOM", newScan.JobID, details) {
 		return
 	}
-
-	h.ensureStatuses().recordAccepted(newScan.JobID, "generateSBOM")
-	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
@@ -414,12 +439,9 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		return
 	}
 
-	if !h.admitQueueSlot(c, ctx, "scanCP", details) {
+	if !h.admitJob(c, ctx, "scanCP", newScan.JobID, details) {
 		return
 	}
-
-	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCP")
-	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
@@ -480,12 +502,9 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		return
 	}
 
-	if !h.admitQueueSlot(c, ctx, "scanCVE", details) {
+	if !h.admitJob(c, ctx, "scanCVE", newScan.JobID, details) {
 		return
 	}
-
-	h.ensureStatuses().recordAccepted(newScan.JobID, "scanCVE")
-	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
@@ -503,12 +522,17 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 // caller's own request, so it maps to 429; ErrQueueFull reflects the controller's own local
 // capacity, not anything wrong with the request, so it maps to 503 rather than either 429 or
 // 400 -- a retry against the same instance may well succeed once the backlog drains.
+// ErrDuplicateJobID reflects a conflict with another resource already tracked under the same
+// jobID, so it maps to 409 -- retrying with the same jobID won't help until that job finishes,
+// but retrying with a fresh jobID will.
 func validationStatusCode(err error) int {
 	switch {
 	case errors.Is(err, domain.ErrTooManyRequests):
 		return http.StatusTooManyRequests
 	case errors.Is(err, domain.ErrQueueFull):
 		return http.StatusServiceUnavailable
+	case errors.Is(err, domain.ErrDuplicateJobID):
+		return http.StatusConflict
 	}
 	return http.StatusBadRequest
 }
@@ -564,12 +588,9 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 		return
 	}
 
-	if !h.admitQueueSlot(c, ctx, "scanRegistry", details) {
+	if !h.admitJob(c, ctx, "scanRegistry", newScan.JobID, details) {
 		return
 	}
-
-	h.ensureStatuses().recordAccepted(newScan.JobID, "scanRegistry")
-	_, _ = problem.Of(http.StatusOK).Append(details).WriteTo(c.Writer)
 
 	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
 		h.ensureStatuses().markPhase(newScan.JobID, phase)
