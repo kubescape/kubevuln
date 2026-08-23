@@ -15,7 +15,6 @@ import (
 
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
-
 )
 
 // cpeMatchDetail builds a cpe-match detail carrying the given version constraint, the
@@ -65,13 +64,29 @@ func TestHasKnownFix(t *testing.T) {
 			wantVersion: "14.16.0",
 		},
 		{
-			name: "fix versions all older than current do not suggest a downgrade",
+			// #844 established that no downgrade may be suggested here. The version is
+			// "unknown" rather than "" because a fix does exist, and "" is what this
+			// function uses to say one does not: returning it alongside true contradicts
+			// the bool, and downstream leaves the record's own IsFixed=1 disagreeing with
+			// CalculateFixed(Fixes)=0. See #858.
+			name: "fix versions all older than current report unknown, never a downgrade",
 			match: v1beta1.Match{
 				Artifact:      v1beta1.GrypePackage{Version: "16.0.0"},
 				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"10.0.0", "12.0.0"}}},
 			},
 			wantFixed:   true,
-			wantVersion: "",
+			wantVersion: unknownFixVersion,
+		},
+		{
+			// The equal case takes the same path: suggestedVersion compares strictly, so a
+			// package already at the only listed fix version has nothing above it either.
+			name: "fix version equal to current reports unknown",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "1.5.0"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"1.5.0"}}},
+			},
+			wantFixed:   true,
+			wantVersion: unknownFixVersion,
 		},
 		{
 			name: "fix state fixed without versions",

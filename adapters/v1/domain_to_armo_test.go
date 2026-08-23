@@ -500,3 +500,81 @@ func TestParseImageManifest_LayerOrderNamesOneLayer(t *testing.T) {
 	assert.Equal(t, map[int]int{0: 1, 1: 1}, seen,
 		"each real layer holds its own order, numbered from zero")
 }
+
+// TestDomainToArmo_IsFixedAgreesWithFixes pins the two "is there a fix?" answers a single
+// report record carries, which are produced from different halves of hasKnownFix.
+//
+// IsFixed comes from the bool. Fixes[].Version comes from the version string, and the
+// backend summary counts fixes from that, via containerscan.CalculateFixed, which ignores
+// an entry whose Version is "" or "None". So an empty version alongside a true bool makes a
+// record contradict itself: IsFixed=1, yet contributing 0 to FixAvailableOfTotalCount.
+//
+// The two cases below are the ones that reach it, both being "a fix exists but nothing
+// above what is installed": every listed fix version older than current, and the only
+// listed one equal to it.
+func TestDomainToArmo_IsFixedAgreesWithFixes(t *testing.T) {
+	tests := []struct {
+		name        string
+		installed   string
+		fixVersions []string
+		wantVersion string
+	}{
+		{
+			name:        "a real upgrade is suggested",
+			installed:   "1.0.0",
+			fixVersions: []string{"1.5.0", "1.2.0"},
+			wantVersion: "1.2.0",
+		},
+		{
+			name:        "every fix version is older than installed",
+			installed:   "2.0.0",
+			fixVersions: []string{"1.5.0", "1.2.0"},
+			wantVersion: unknownFixVersion,
+		},
+		{
+			name:        "the only fix version equals installed",
+			installed:   "1.5.0",
+			fixVersions: []string{"1.5.0"},
+			wantVersion: unknownFixVersion,
+		},
+		{
+			name:        "installed version is not a version",
+			installed:   "not-a-version",
+			fixVersions: []string{"1.5.0"},
+			wantVersion: "1.5.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := v1beta1.GrypeDocument{
+				Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
+				Matches: []v1beta1.Match{{
+					Vulnerability: v1beta1.Vulnerability{
+						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2024-0001", Severity: "High"},
+						Fix:                   v1beta1.Fix{State: fixStateFixed, Versions: tt.fixVersions},
+					},
+					Artifact: v1beta1.GrypePackage{Name: "pkg", Version: tt.installed},
+				}},
+			}
+
+			ctx := context.TODO()
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+			ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+			ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+			got, err := DomainToArmo(ctx, doc, nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+
+			r := got[0]
+			require.Len(t, r.Fixes, 1)
+			assert.Equal(t, tt.wantVersion, r.Fixes[0].Version)
+
+			// The property itself: a record that says it is fixed has to count as fixed.
+			assert.Equal(t, 1, r.IsFixed)
+			assert.Equal(t, 1, containerscan.CalculateFixed(r.Fixes),
+				"IsFixed=%d but CalculateFixed=%d: the record contradicts itself",
+				r.IsFixed, containerscan.CalculateFixed(r.Fixes))
+		})
+	}
+}
