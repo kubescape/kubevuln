@@ -856,11 +856,11 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 	contName := strings.ToLower(workload.ContainerName)
 
 	if kind == "" && name == "" {
-		if cveName != "" {
-			return cveName, nil
-		}
 		if workload.ImageSlug != "" {
 			return workload.ImageSlug, nil
+		}
+		if cveName != "" {
+			return cveName, nil
 		}
 		if contName != "" {
 			return contName, nil
