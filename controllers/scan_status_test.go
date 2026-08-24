@@ -194,6 +194,68 @@ func TestScanStatusStore_MarkRunningOnlyClaimsQueuedJobs(t *testing.T) {
 	require.Equal(t, domain.ScanStateAbandoned, status.State, "terminal jobs must reject later failure writes")
 }
 
+// TestScanStatusStore_RecordAcceptedRejectsActiveJobID is the regression test for #856:
+// reusing a jobID while its prior job is still queued or running must not silently reset
+// that job's tracking record. Before the fix, a second recordAccepted for the same jobID
+// always overwrote the first, letting a second closure claim the same jobID via markRunning
+// and then race the first job's own markTerminal call for which outcome the shared record
+// keeps -- silently dropping whichever one lost the race.
+func TestScanStatusStore_RecordAcceptedRejectsActiveJobID(t *testing.T) {
+	s := newScanStatusStore()
+
+	require.True(t, s.recordAccepted("job", "generateSBOM"), "first admission for a fresh jobID must succeed")
+	require.False(t, s.recordAccepted("job", "generateSBOM"), "reusing a queued jobID must be rejected")
+
+	status, ok := s.get("job")
+	require.True(t, ok)
+	require.Equal(t, domain.ScanStateQueued, status.State, "the rejected re-admission must not have touched the record")
+
+	require.True(t, s.markRunning("job"))
+	require.False(t, s.recordAccepted("job", "generateSBOM"), "reusing a running jobID must be rejected")
+
+	status, ok = s.get("job")
+	require.True(t, ok)
+	require.Equal(t, domain.ScanStateRunning, status.State, "the rejected re-admission must not have reset a running job back to queued")
+	require.NotNil(t, status.StartedAt, "the rejected re-admission must not have discarded StartedAt")
+
+	// The original job's own outcome must survive exactly as if the duplicate admission had
+	// never been attempted.
+	s.markFailed("job", "unexpected_error")
+	status, ok = s.get("job")
+	require.True(t, ok)
+	require.Equal(t, domain.ScanStateFailed, status.State)
+	require.Equal(t, "unexpected_error", status.Reason)
+}
+
+// TestScanStatusStore_RecordAcceptedAllowsReuseOnceTerminal proves the fix is narrowly
+// scoped: reusing a jobID is only rejected while the prior job under that ID is still
+// active. Once it has reached any terminal state, reuse must keep working exactly as
+// before -- this is the ordinary, benign case of a caller reusing an ID once its
+// predecessor is done.
+func TestScanStatusStore_RecordAcceptedAllowsReuseOnceTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reach func(s *scanStatusStore, jobID string)
+	}{
+		{"succeeded", func(s *scanStatusStore, jobID string) { s.markSucceeded(jobID) }},
+		{"failed", func(s *scanStatusStore, jobID string) { s.markFailed(jobID, "some_reason") }},
+		{"abandoned", func(s *scanStatusStore, jobID string) { s.markAbandoned(jobID, domain.ScanReasonShutdownAbandoned) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScanStatusStore()
+			require.True(t, s.recordAccepted("job", "generateSBOM"))
+			tc.reach(s, "job")
+
+			require.True(t, s.recordAccepted("job", "generateSBOM"), "reusing a jobID whose prior job is terminal must be accepted")
+
+			status, ok := s.get("job")
+			require.True(t, ok)
+			require.Equal(t, domain.ScanStateQueued, status.State, "the record must reset to a fresh queued job")
+			require.Nil(t, status.StartedAt, "the fresh record must not carry over the prior job's StartedAt")
+		})
+	}
+}
+
 // Before #790, get()'s cost scaled with the store's total size (evictLocked's full sweep).
 // This benchmark's ns/op should stay flat across store sizes now that a lookup only touches
 // the one key it was asked for; run with -benchtime and compare sizes to see the effect, e.g.

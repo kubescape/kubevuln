@@ -106,13 +106,25 @@ func isTerminal(state domain.ScanState) bool {
 	return state == domain.ScanStateSucceeded || state == domain.ScanStateFailed || state == domain.ScanStateAbandoned
 }
 
-func (s *scanStatusStore) recordAccepted(jobID, endpoint string) {
+// recordAccepted admits jobID as a newly queued job and returns true, unless jobID already
+// names a record that is still active (queued or running), in which case it returns false
+// without modifying the store. Overwriting an active record here would reset a job that's
+// already running out from under it -- claimTrackedJob would then let a second, unrelated
+// closure claim the same jobID, and both jobs' eventual markTerminal calls would race for
+// which one's outcome the shared record keeps, silently dropping the other's (see #856).
+// A jobID whose existing record is already terminal -- the ordinary case of a caller
+// reusing an ID once its predecessor is done -- is always accepted, same as before this
+// check existed.
+func (s *scanStatusStore) recordAccepted(jobID, endpoint string) bool {
 	if jobID == "" {
-		return
+		return true
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if existing, ok := s.items[jobID]; ok && !isTerminal(existing.State) {
+		return false
+	}
 	s.items[jobID] = domain.ScanStatus{
 		JobID:      jobID,
 		Endpoint:   endpoint,
@@ -122,6 +134,24 @@ func (s *scanStatusStore) recordAccepted(jobID, endpoint string) {
 		UpdatedAt:  now,
 	}
 	s.evictLocked(now)
+	return true
+}
+
+// isActive reports whether jobID currently names a record that is still queued or running.
+// It's a cheap read-only precedence check for admitJob: without it, a jobID that collides
+// with the very job occupying the controller's last admission slot would be rejected as
+// "queue full" (503) before recordAccepted ever got a chance to diagnose it as a duplicate
+// (409), since admitQueueSlot ran first. recordAccepted's own atomic check-and-write under
+// s.mu remains the actual correctness guard against a genuine race between two admissions;
+// this is only about which rejection reason a caller sees when both are true at once.
+func (s *scanStatusStore) isActive(jobID string) bool {
+	if jobID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status, ok := s.items[jobID]
+	return ok && !isTerminal(status.State)
 }
 
 func (s *scanStatusStore) markRunning(jobID string) bool {

@@ -1438,6 +1438,177 @@ func TestHTTPController_MetricsEndpoint_RecordsQueueFullRejection(t *testing.T) 
 	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
 }
 
+// TestHTTPController_GenerateSBOM_DuplicateJobIDRejected is a regression test for #856:
+// submitting a jobID that already belongs to a job still queued or running must be
+// rejected with 409, not silently accepted -- accepting it would let the new request
+// reset the first job's tracking record out from under it via recordAccepted.
+func TestHTTPController_GenerateSBOM_DuplicateJobIDRejected(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	// Simulate a job already accepted under the same jobID the request below uses, without
+	// needing to synchronize against a background goroutine -- the same style
+	// TestHTTPController_GenerateSBOM_QueueFull uses for tryAdmit. maxQueueDepth is bounded
+	// here specifically so pending is actually exercised: with the default unbounded queue,
+	// tryAdmit/release are no-ops and pending stays 0 regardless of whether the rejection
+	// path is correct.
+	require.True(t, c.ensureStatuses().recordAccepted("job-dup", "generateSBOM"))
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:dup","jobID":"job-dup"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+
+	// admitJob's isActive precedence check catches this before admitQueueSlot ever reserves
+	// a slot for it, so the controller's one slot of capacity must still be free afterward.
+	require.Eventually(t, func() bool { return c.pending.Load() == 0 }, time.Second, 5*time.Millisecond,
+		"a duplicate rejection must not consume the controller's admission capacity")
+
+	status, ok := c.ensureStatuses().get("job-dup")
+	require.True(t, ok)
+	assert.Equal(t, domain.ScanStateQueued, status.State, "the original job's record must be untouched by the rejected duplicate")
+}
+
+// TestHTTPController_DuplicateJobID_TakesPrecedenceOverQueueFull covers the ordering CodeRabbit
+// flagged on #857: if the job occupying the controller's one and only admission slot is the
+// same jobID a new request reuses, admitQueueSlot alone would reject that request as 503
+// queue-full without ever getting a chance to diagnose it as a 409 duplicate, since capacity
+// is genuinely exhausted. admitJob's isActive check runs before admitQueueSlot specifically
+// so this case is still reported as a duplicate, which more precisely describes the actual
+// conflict and doesn't imply retrying with a fresh jobID would also be rejected.
+func TestHTTPController_DuplicateJobID_TakesPrecedenceOverQueueFull(t *testing.T) {
+	c := (&HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}).WithMaxQueueDepth(1)
+	defer c.Shutdown(2 * time.Second)
+
+	// The one and only admission slot is occupied by "job-dup" itself, exhausting capacity.
+	require.True(t, c.tryAdmit())
+	require.True(t, c.ensureStatuses().recordAccepted("job-dup", "generateSBOM"))
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:dup","jobID":"job-dup"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String(),
+		"a jobID collision must be reported as 409, not 503, even when it also happens to be the request holding the only free slot")
+
+	// A different, non-duplicate jobID must still see the queue as genuinely full.
+	req2, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:other","jobID":"job-other"}`))
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusServiceUnavailable, w2.Code, w2.Body.String())
+}
+
+// TestHTTPController_DuplicateJobID_PreservesFirstJobOutcome end-to-end reproduces the
+// scenario from #856: a jobID reused while its first job is genuinely still running (not
+// just simulated store state) must be rejected, and the first job's real outcome must reach
+// ScanStatus uncorrupted once it finishes -- not silently overwritten by the duplicate the
+// way it would have been before recordAccepted rejected the re-admission.
+func TestHTTPController_DuplicateJobID_PreservesFirstJobOutcome(t *testing.T) {
+	blocked := make(chan struct{})
+	started := make(chan struct{}, 1)
+	c := NewHTTPController(statusFlowScanService{
+		MockScanService: services.NewMockScanService(true),
+		err:             &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: errors.New("boom")},
+		blockCh:         blocked,
+		startedCh:       started,
+	}, 1)
+	t.Cleanup(func() {
+		select {
+		case <-blocked:
+		default:
+			close(blocked)
+		}
+	})
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
+
+	firstReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:4","jobID":"job-reused"}`))
+	firstW := httptest.NewRecorder()
+	router.ServeHTTP(firstW, firstReq)
+	require.Equal(t, http.StatusOK, firstW.Code, firstW.Body.String())
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first job's scan was not started in time")
+	}
+
+	// The first job is now genuinely Running (blocked inside GenerateSBOM). A second request
+	// reusing the same jobID -- a retry, redelivery, or caller bug -- must be rejected rather
+	// than resetting the first job's record back to Queued.
+	dupReq, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:4","jobID":"job-reused"}`))
+	dupW := httptest.NewRecorder()
+	router.ServeHTTP(dupW, dupReq)
+	require.Equal(t, http.StatusConflict, dupW.Code, dupW.Body.String())
+
+	close(blocked)
+
+	var status domain.ScanStatus
+	require.Eventually(t, func() bool {
+		req, _ := http.NewRequest("GET", "/v1/scanStatus/job-reused", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			return false
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			return false
+		}
+		return status.State == domain.ScanStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, scanfailure.ReasonCVEMatchingFailed, status.Reason,
+		"the first job's real outcome must reach ScanStatus, not be silently dropped by the rejected duplicate")
+}
+
+// TestHTTPController_MetricsEndpoint_RecordsDuplicateJobIDRejection mirrors
+// TestHTTPController_MetricsEndpoint_RecordsQueueFullRejection for the duplicate_job_id
+// rejection reason, proving it's recorded distinctly from the other rejection reasons.
+func TestHTTPController_MetricsEndpoint_RecordsDuplicateJobIDRejection(t *testing.T) {
+	c := &HTTPController{
+		scanService: services.NewMockScanService(true),
+		workerPool:  workerpool.New(1),
+	}
+	require.True(t, c.ensureStatuses().recordAccepted("job-dup", "generateSBOM"))
+
+	m, err := metrics.New()
+	require.NoError(t, err)
+	c, err = c.WithMetrics(m)
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.POST("/v1/generateSBOM", c.GenerateSBOM)
+	router.GET("/metrics", gin.WrapH(m.Handler()))
+
+	req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(`{"imageTag":"nginx:1.24","imageHash":"sha256:dup","jobID":"job-dup"}`))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+
+	req, _ = http.NewRequest("GET", "/metrics", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.True(t, strings.Contains(body, `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="duplicate_job_id"} 1`), body)
+	assert.False(t, strings.Contains(body, `reason="queue_full"`), body)
+	assert.False(t, strings.Contains(body, `reason="invalid_request"`), body)
+}
+
 // The other three endpoints each cover a body that will not bind; ScanCP did not, which
 // left the one handler whose worker closure is its own copy unexercised on that path.
 func TestHTTPController_ScanCP_InvalidRequest(t *testing.T) {

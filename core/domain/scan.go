@@ -44,6 +44,12 @@ var (
 	// (e.g. the CRD list failed). Callers must not treat missing exceptions as
 	// deletions.
 	ErrExceptionsDegraded = errors.New("exception set is incomplete")
+	// ErrDuplicateJobID indicates the submitted jobID already belongs to a scan that is
+	// still queued or running. Admitting it again would let two unrelated jobs share one
+	// scanStatusStore record and race over which one's terminal outcome the record
+	// retains, silently dropping the other (see #856). The caller must not reuse a jobID
+	// until the job it named has reached a terminal state.
+	ErrDuplicateJobID = errors.New("jobID already has an active scan in progress")
 )
 
 // ScanError wraps a scan-flow error together with the scanfailure.Reason* classification
