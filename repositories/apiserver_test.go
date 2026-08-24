@@ -1520,6 +1520,32 @@ func TestAPIServerStore_StoreCVESummary_EmptyWlid(t *testing.T) {
 	assert.NotContains(t, got.Labels, helpersv1.ApiGroupMetadataKey)
 }
 
+func TestAPIServerStore_GetCVESummary_EmptyWlid_RetrievalRoundTrip(t *testing.T) {
+	a := NewFakeAPIServerStorage("kubescape")
+	workload := domain.ScanCommand{
+		ImageTag:           "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageTagNormalized: "registry.k8s.io/coredns/coredns:v1.10.1",
+		ImageSlug:          "registry-k8s-io-coredns-coredns-v1-10-1",
+		Wlid:               "",
+		ContainerName:      "coredns",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	cve := domain.CVEManifest{
+		Name: "different-cve-manifest-name",
+	}
+
+	err := a.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false)
+	require.NoError(t, err)
+
+	// GetCVESummary must resolve the same resource name (ImageSlug) as StoreCVESummary for non-workload scans
+	got, err := a.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "registry-k8s-io-coredns-coredns-v1-10-1", got.Name)
+}
+
 func TestAPIServerStore_StoreCVESummaryStub_EmptyWlid(t *testing.T) {
 	a := NewFakeAPIServerStorage("kubescape")
 	workload := domain.ScanCommand{
