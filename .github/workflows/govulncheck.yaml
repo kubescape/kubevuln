@@ -1,0 +1,46 @@
+name: govulncheck
+
+on:
+  # Every push to main, so a newly-reachable vulnerability is surfaced as soon
+  # as it lands rather than waiting for the weekly schedule below.
+  push:
+    branches: [ "main" ]
+  # Also catches a vulnerability that only becomes reachable because the
+  # upstream advisory database changed, not because kubevuln's own code did.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      # Deliberately not a pull_request check: govulncheck's result can change
+      # with the upstream advisory database alone, independent of any code
+      # change in a given PR, so gating merges on it would block PRs over
+      # findings they didn't introduce and can't fix by themselves. Running it
+      # here means a real finding fails this workflow and is visible in the
+      # Actions tab / notifications instead of silently passing.
+      #
+      # A currently-known, upstream-blocked finding is tracked in #854
+      # (no fix yet available for the vulnerable dependency); expect this job
+      # to be red until that's resolved one way or another.
+      - name: Run govulncheck
+        run: PATH="$(go env GOPATH)/bin:$PATH" make govulncheck

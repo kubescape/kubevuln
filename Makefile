@@ -4,7 +4,7 @@ BINARY_NAME=kubevuln
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 TAG=v0.0.0
 
-.PHONY: build test vet lint lint-all verify verify-image
+.PHONY: build test vet lint lint-all verify verify-image govulncheck
 
 build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
@@ -26,6 +26,12 @@ lint:
 
 lint-all:
 	golangci-lint run --timeout=15m
+
+# Queries vuln.go.dev, so it's kept out of `verify`'s fast local path (see #854).
+# Binary mode scans the actual compiled artifact rather than source, so the
+# result reflects what's really shipped (build tags, dead-code elimination).
+govulncheck: build
+	govulncheck -mode=binary $(BINARY_NAME)
 
 verify: build test vet lint
 
