@@ -32,7 +32,16 @@ const (
 // same CVE shows up as ignored in the VulnerabilityManifest but active in the report.
 func hasKnownFix(m v1beta1.Match) (bool, string) {
 	if len(m.Vulnerability.Fix.Versions) != 0 {
-		return true, suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions)
+		// suggestedVersion returns "" when every listed fix version is at or below the
+		// installed one, so there is nothing to suggest that is not a downgrade (#844).
+		// A fix still exists, so this is the "no concrete version" case rather than the
+		// "no fix" one, and reporting it as "unknown" is what keeps the two meanings
+		// apart: an empty version here would say no fix is known, which is the opposite
+		// of the true this returns alongside it. See #858.
+		if v := suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions); v != "" {
+			return true, v
+		}
+		return true, unknownFixVersion
 	}
 	if m.Vulnerability.Fix.State == fixStateFixed {
 		return true, unknownFixVersion
