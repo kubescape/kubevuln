@@ -11,7 +11,7 @@ Kubescape currently has **no in-cluster, declarative exception mechanism**. All 
 
 ## Solution
 
-Introduce a **SecurityException CRD** (`kubescape.io/v1`) that teams deploy via GitOps alongside their applications. It covers both vulnerability exceptions (OpenVEX-compatible) and posture/compliance exceptions in a single resource.
+Introduce a **SecurityException CRD** (`kubescape.io/v1beta1`) that teams deploy via GitOps alongside their applications. It covers both vulnerability exceptions (OpenVEX-compatible) and posture/compliance exceptions in a single resource.
 
 ## CRD Specification
 
@@ -20,7 +20,7 @@ Introduce a **SecurityException CRD** (`kubescape.io/v1`) that teams deploy via 
 | Field | Value |
 |-------|-------|
 | Group | `kubescape.io` |
-| Version | `v1` |
+| Version | `v1beta1` |
 | Kinds | `SecurityException` (namespaced), `ClusterSecurityException` (cluster-scoped) |
 | Short names | `se`, `cse` |
 
@@ -98,7 +98,7 @@ Guidance:
 #### Namespaced — target specific workloads by label and name
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: SecurityException
 metadata:
   name: nginx-exceptions
@@ -140,7 +140,7 @@ spec:
 #### Namespaced — apply to all workloads in namespace (no match selector)
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: SecurityException
 metadata:
   name: namespace-wide-log4j
@@ -158,7 +158,7 @@ spec:
 #### Cluster-scoped — target namespaces by label
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: staging-relaxed-posture
@@ -181,7 +181,7 @@ spec:
 #### Cluster-scoped — target by image pattern
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: nginx-http2-exception
@@ -204,7 +204,7 @@ spec:
 #### Cluster-scoped — target specific workloads across namespaces
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: infra-daemonset-exceptions
@@ -402,3 +402,180 @@ The vulnerability exception entries align with OpenVEX statements:
 - `impactStatement` → VEX impact statement
 
 Note: OpenVEX `products` (purl-based product/subcomponent matching) is deferred to a future version. See "Identifier Bridging" above.
+
+---
+
+# Iteration 2 — Risk Acceptance & Per-Entry Expiry
+
+This section is an additive, backward-compatible extension of the Phase 1 design documented above. Everything in Phase 1 remains valid: documents that use only the Phase 1 fields parse and behave exactly as before. Where a statement here supersedes a Phase 1 statement (the status vocabulary, the validation rules, and the OpenVEX mapping), that is called out explicitly.
+
+It captures the changes agreed in [kubevuln#453](https://github.com/kubescape/kubevuln/issues/453) (risk acceptance via an `affected` status) and [kubevuln#454](https://github.com/kubescape/kubevuln/issues/454) (per-entry `expiresAt`).
+
+## Motivation
+
+Phase 1 models only "the vulnerability does not apply here" (`not_affected`, `fixed`, `under_investigation`). It has no first-class way to express risk acceptance: "the vulnerability is real and does apply, but we have accepted the risk under stated conditions." This is the dominant case in risk-acceptance authoring surfaces such as Trivy's `.trivyignore.yaml` and Snyk's `.snyk` policy files.
+
+Without it, authors are forced to misuse `not_affected` with a stretched justification, which suppresses the finding in tooling but publishes a semantically inaccurate claim that does not survive audit scrutiny. Iteration 2 closes that gap while keeping SecurityException aligned with the OpenVEX standard it already follows.
+
+## New and changed fields
+
+Added to each `vulnerabilities[]` entry (`VulnerabilityException`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `string` | Now accepts a fourth value, `affected`, completing the OpenVEX status vocabulary. Existing three values are unchanged. |
+| `actionStatement` | `string` | Free-text narrative describing the action taken or planned for an `affected` finding. Parallel to the existing `impactStatement` (which applies to `not_affected`). Maps 1:1 to OpenVEX `action_statement`. |
+| `response` | `[]string` | Typed, machine-parsable action intent for an `affected` finding. Closed enum, aligned with CycloneDX VEX `analysis.response[]`. SecurityException extension with no OpenVEX equivalent. |
+| `expiresAt` | `metav1.Time` | Optional per-entry expiry, overriding the document-level `spec.expiresAt` for this entry only. |
+
+`actionStatement` and `impactStatement` are distinct fields bound to opposite statuses and never coexist on the same entry, mirroring OpenVEX which defines `impact_statement` (for `not_affected`) and `action_statement` (for `affected`) as separate fields.
+
+## Status vocabulary (supersedes Phase 1 "VEX Status/Justification Enums")
+
+- **status**: `not_affected`, `affected`, `fixed`, `under_investigation`
+
+The `affected` value is new. Justification values are unchanged and remain applicable only to `not_affected`.
+
+## `response` enum
+
+A closed set, aligned with CycloneDX VEX `analysis.response[]` for direct interoperability. Only meaningful when `status = affected`.
+
+| Value | Meaning |
+|-------|---------|
+| `can_not_fix` | No fix can be applied (no upstream fix, or the available fix is incompatible with the current environment or dependency chain). |
+| `will_not_fix` | No fix is planned. This is the risk-acceptance case. |
+| `update` | An update to a fixed version is planned. |
+| `rollback` | A rollback to a prior, unaffected version is planned. |
+| `workaround_available` | A non-patch workaround exists. |
+
+The enum is closed. Workflow-specific context that does not fit a typed value belongs in `actionStatement` free text.
+
+## Suppression semantics (behavior change)
+
+Phase 1 behavior: every matched exception entry suppresses its finding (the CVE moves from `Matches` to `IgnoredMatches`).
+
+Iteration 2 makes suppression depend on `status` and, for `affected`, on `response`:
+
+| Status | Response | Suppressed? | Rationale |
+|--------|----------|-------------|-----------|
+| `not_affected` | n/a | Yes | Unchanged from Phase 1. |
+| `fixed` | n/a | Yes | Unchanged from Phase 1. |
+| `under_investigation` | n/a | Unchanged from Phase 1. | |
+| `affected` | `will_not_fix` | Yes | Risk accepted; matches today's suppression semantics. |
+| `affected` | `can_not_fix` | Yes | No applicable fix; finding accepted. `expiredOnFix: true` fits the "no upstream fix" subset. |
+| `affected` | `update` / `rollback` / `workaround_available` | No | Remediation is scheduled or in place; the finding stays visible so operators can track it to completion. |
+
+The `affected` status alone never hides a finding: it acknowledges the vulnerability is real. Whether a finding is filtered is driven by `response`. This is implemented in `ApplySecurityExceptions` (invoked from `ScanService.applyExceptionsToManifest`), which decides `Matches` vs `IgnoredMatches` per entry based on the table above. Findings kept visible carry the exception's `actionStatement`/`response` as annotation so the accepted-but-visible state is observable.
+
+## Per-entry `expiresAt`
+
+`spec.expiresAt` (document level) is retained. Each `vulnerabilities[]` entry may now also carry its own `expiresAt`.
+
+Effective expiry resolution:
+
+- If the entry has `expiresAt`, it overrides the document-level value for that entry.
+- If the entry has no `expiresAt`, it inherits the document-level `spec.expiresAt` (Phase 1 behavior).
+- If neither is set, the entry never expires (Phase 1 behavior).
+
+An entry is expired when its effective `expiresAt` is in the past, evaluated at scan time as with the document-level field. Expired entries no longer suppress their finding. This lets a single resource group several accepted CVEs that share a review but expire on different dates, without fragmenting into one document per CVE.
+
+## Validation rules (supersedes Phase 1 "CRD Validation Rules (CEL)")
+
+Enforced at admission time via CEL on the CRD schema (no separate webhook). The Phase 1 rules stand, with the following changes and additions to mirror OpenVEX's conditional-requirement MUSTs:
+
+- `vulnerabilities[].status` must be one of `not_affected`, `affected`, `fixed`, `under_investigation`.
+- When `status = not_affected`: at least one of `justification` or `impactStatement` must be present. (New symmetric rule; mirrors the OpenVEX MUST for `not_affected`. This tightens the Phase 1 rule that required only `justification`.)
+- When `status = affected`: `actionStatement` is required. (Mirrors the OpenVEX MUST that an affected statement must describe the action taken to remediate or mitigate.)
+- `response[]`, if present, must contain only values from the closed enum, and is only meaningful when `status = affected`. It is always optional, including for `affected`.
+- `expiresAt` on an entry, if set, must be a valid RFC3339 timestamp (the "in the future at creation time" guidance follows the document-level field).
+
+The decision to require `actionStatement` for every `affected` entry (rather than accepting "at least one of `actionStatement` or `response[]`") was taken for strict OpenVEX conformance: it keeps every `affected` entry a valid OpenVEX statement by construction and avoids synthesizing `action_statement` from `response[]` on export. `response[]` is layered on top as the one intentional, optional step beyond OpenVEX.
+
+## Examples
+
+### Risk accepted (affected, suppressed)
+
+```yaml
+apiVersion: kubescape.io/v1beta1
+kind: SecurityException
+metadata:
+  name: risk-accepted-log4j
+  namespace: production
+spec:
+  author: "security-lead@example.com"
+  reason: "Accepted risks for Q3 2026 release"
+
+  vulnerabilities:
+    - vulnerability:
+        id: "CVE-2021-44228"
+      status: "affected"
+      response:
+        - "will_not_fix"
+      actionStatement: "Risk accepted: WAF blocks the exploit vector. Reviewed 2026-07-30 by security lead. Ticket: SEC-1234."
+      expiresAt: "2026-09-15T00:00:00Z"
+```
+
+### Remediation in progress (affected, stays visible)
+
+```yaml
+apiVersion: kubescape.io/v1beta1
+kind: SecurityException
+metadata:
+  name: openssl-update-scheduled
+  namespace: production
+spec:
+  reason: "Fix scheduled for next release"
+
+  vulnerabilities:
+    - vulnerability:
+        id: "CVE-2026-31808"
+      status: "affected"
+      response:
+        - "update"
+      actionStatement: "Bumping base image to openssl 3.x in release 2026.10. Tracked in SEC-1300."
+```
+
+### Mixed expiry in one document (per-entry override)
+
+```yaml
+apiVersion: kubescape.io/v1beta1
+kind: SecurityException
+metadata:
+  name: q3-acceptances
+  namespace: production
+spec:
+  reason: "Q3 review batch"
+  expiresAt: "2026-12-31T00:00:00Z"   # document-level default
+
+  vulnerabilities:
+    - vulnerability:
+        id: "CVE-2025-14505"
+      status: "affected"
+      response: ["will_not_fix"]
+      actionStatement: "Accepted, compensating network policy in place."
+      # inherits document-level expiresAt: 2026-12-31
+
+    - vulnerability:
+        id: "CVE-2026-31808"
+      status: "affected"
+      response: ["update"]
+      actionStatement: "Fix in flight."
+      expiresAt: "2026-09-15T00:00:00Z"   # per-entry override
+```
+
+## OpenVEX compatibility (supersedes Phase 1 "OpenVEX Compatibility")
+
+With the `affected` status and `actionStatement` added, SecurityException entries map to OpenVEX statements across the full shared vocabulary:
+
+- `vulnerability.id` → VEX vulnerability ID
+- `status` → VEX status (all four values now map 1:1: `not_affected`, `affected`, `fixed`, `under_investigation`)
+- `justification` → VEX justification (for `not_affected`)
+- `impactStatement` → VEX `impact_statement` (for `not_affected`)
+- `actionStatement` → VEX `action_statement` (for `affected`)
+
+`response[]` is a SecurityException extension with no OpenVEX equivalent. When degrading to OpenVEX it can be serialized into `action_statement` free text alongside the author-provided `actionStatement`, or dropped. Because `actionStatement` is required for `affected`, every `affected` entry already carries a valid OpenVEX `action_statement` without relying on this serialization. CycloneDX consumers see no loss, since `response[]` maps directly to `analysis.response[]`.
+
+## Deferred
+
+- **`action_statement_timestamp`** (OpenVEX field recording when the action was decided): optional and not required by adopters (confirmed on #453 and #454). Descoped from this iteration; can be added later with no breaking change, pairing naturally with the per-entry `expiresAt` field.
+- **`subcomponents[]` / purl-based product scoping** (tracked in [kubevuln#455](https://github.com/kubescape/kubevuln/issues/455)): remains deferred as described under "Identifier Bridging" above. Independent of this iteration and non-breaking when added.
