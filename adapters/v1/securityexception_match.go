@@ -118,9 +118,9 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 //
 // path.Match is a full-string match, so each pattern is tried against every
 // equivalent form of the reference (see tools.ReferenceMatchForms): a pattern
-// pinning a tag ("docker.io/library/nginx:1.25") must still match a workload
+// pinning a tag ("docker.io/library/nginx:1.25" or short "nginx:1.25") must still match a workload
 // deployed with a digest ("docker.io/library/nginx:1.25@sha256:..."), and a
-// pattern naming the bare repository ("docker.io/library/nginx") matches that
+// pattern naming the bare repository ("docker.io/library/nginx" or "nginx") matches that
 // repository at any tag or digest.
 func matchImages(patterns []string, image string) bool {
 	if len(patterns) == 0 {
@@ -131,13 +131,51 @@ func matchImages(patterns []string, image string) bool {
 	}
 	forms := tools.ReferenceMatchForms(image)
 	for _, p := range patterns {
-		for _, form := range forms {
-			if ok, err := path.Match(p, form); err == nil && ok {
-				return true
+		pForms := expandPatternForms(p)
+		for _, pf := range pForms {
+			for _, form := range forms {
+				if ok, err := path.Match(pf, form); err == nil && ok {
+					return true
+				}
 			}
 		}
 	}
 	return false
+}
+
+// expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
+// (e.g. "nginx:1.25", "nginx:*", "library/nginx:1.25", "kubescape/kubevuln:*") without an explicit
+// registry domain or top-level wildcard in its first segment, it expands p against the fixed
+// default Docker Hub domain and namespace ("docker.io"/"library").
+//
+// The fallback domain is pinned rather than derived from the image being scanned. A domain-less
+// pattern like "nginx:1.25" is, per its own author's intent, shorthand for Docker Hub's
+// nginx:1.25 -- not "whatever registry this particular scan's image happens to come from". Basing
+// the fallback on the scanned image made the registry check a no-op for every short-form pattern:
+// a SecurityException written expecting to scope suppression to Docker Hub would also suppress an
+// unrelated image at any other registry, since that registry would always equal its own fallback.
+func expandPatternForms(p string) []string {
+	patterns := []string{p}
+	if p == "" {
+		return patterns
+	}
+
+	if !strings.Contains(p, "/") {
+		repoName, _, _ := strings.Cut(p, ":")
+		if repoName == "*" {
+			return patterns
+		}
+		patterns = append(patterns, "docker.io/library/"+p)
+		return patterns
+	}
+
+	firstSeg, _, _ := strings.Cut(p, "/")
+	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
+	if !hasDomainOrWildcard {
+		patterns = append(patterns, "docker.io/"+p)
+	}
+
+	return patterns
 }
 
 // labelSelectorMatches evaluates a standard Kubernetes label selector against a
