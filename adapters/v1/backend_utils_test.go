@@ -24,7 +24,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // linearExceptionLookup is the straightforward scan the index replaced, kept here so the
@@ -146,7 +146,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
 						{Name: "CVE-2021-1234"},
 					},
-					ExpiredOnFix: pointer.Bool(true),
+					ExpiredOnFix: ptr.To(true),
 				},
 				{
 					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
@@ -159,7 +159,7 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 						{Name: "CVE-2021-1234"},
 						{Name: "CVE-2021-9012"},
 					},
-					ExpiredOnFix: pointer.Bool(true),
+					ExpiredOnFix: ptr.To(true),
 				},
 			},
 			CVEName: "CVE-2021-1234",
@@ -531,7 +531,7 @@ func Test_summarize(t *testing.T) {
 						IsLastScan:        1,
 						Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 						Vulnerability: containerscan.Vulnerability{
-							IsRelevant: pointer.Bool(false),
+							IsRelevant: ptr.To(false),
 							ImageID:    imageHash,
 							ImageTag:   imageTag,
 							Severity:   "Negligible",
@@ -548,7 +548,7 @@ func Test_summarize(t *testing.T) {
 						IsLastScan:        1,
 						Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 						Vulnerability: containerscan.Vulnerability{
-							IsRelevant: pointer.Bool(false),
+							IsRelevant: ptr.To(false),
 							ImageID:    imageHash,
 							ImageTag:   imageTag,
 							Severity:   "Medium",
@@ -566,7 +566,7 @@ func Test_summarize(t *testing.T) {
 						IsLastScan:        1,
 						Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 						Vulnerability: containerscan.Vulnerability{
-							IsRelevant:  pointer.Bool(false),
+							IsRelevant:  ptr.To(false),
 							ImageID:     imageHash,
 							ImageTag:    imageTag,
 							Description: "code execution",
@@ -585,7 +585,7 @@ func Test_summarize(t *testing.T) {
 						IsLastScan:        1,
 						Layers:            []containerscan.ESLayer{{LayerHash: dummyLayer}},
 						Vulnerability: containerscan.Vulnerability{
-							IsRelevant:  pointer.Bool(true),
+							IsRelevant:  ptr.To(true),
 							ImageID:     imageHash,
 							ImageTag:    imageTag,
 							Description: "command injection",
