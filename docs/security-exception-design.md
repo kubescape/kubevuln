@@ -11,7 +11,7 @@ Kubescape currently has **no in-cluster, declarative exception mechanism**. All 
 
 ## Solution
 
-Introduce a **SecurityException CRD** (`kubescape.io/v1`) that teams deploy via GitOps alongside their applications. It covers both vulnerability exceptions (OpenVEX-compatible) and posture/compliance exceptions in a single resource.
+Introduce a **SecurityException CRD** (`kubescape.io/v1beta1`) that teams deploy via GitOps alongside their applications. It covers both vulnerability exceptions (OpenVEX-compatible) and posture/compliance exceptions in a single resource.
 
 ## CRD Specification
 
@@ -20,7 +20,7 @@ Introduce a **SecurityException CRD** (`kubescape.io/v1`) that teams deploy via 
 | Field | Value |
 |-------|-------|
 | Group | `kubescape.io` |
-| Version | `v1` |
+| Version | `v1beta1` |
 | Kinds | `SecurityException` (namespaced), `ClusterSecurityException` (cluster-scoped) |
 | Short names | `se`, `cse` |
 
@@ -98,7 +98,7 @@ Guidance:
 #### Namespaced — target specific workloads by label and name
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: SecurityException
 metadata:
   name: nginx-exceptions
@@ -143,7 +143,7 @@ spec:
 #### Namespaced: risk-accepted finding (`affected`)
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: SecurityException
 metadata:
   name: risk-accepted-log4j
@@ -163,7 +163,7 @@ spec:
 #### Namespaced — apply to all workloads in namespace (no match selector)
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: SecurityException
 metadata:
   name: namespace-wide-log4j
@@ -181,7 +181,7 @@ spec:
 #### Cluster-scoped — target namespaces by label
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: staging-relaxed-posture
@@ -204,7 +204,7 @@ spec:
 #### Cluster-scoped — target by image pattern
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: nginx-http2-exception
@@ -227,7 +227,7 @@ spec:
 #### Cluster-scoped — target specific workloads across namespaces
 
 ```yaml
-apiVersion: kubescape.io/v1
+apiVersion: kubescape.io/v1beta1
 kind: ClusterSecurityException
 metadata:
   name: infra-daemonset-exceptions
