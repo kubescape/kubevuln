@@ -15,7 +15,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
 	"github.com/aquilax/truncate"
-	"github.com/distribution/distribution/reference"
+	"github.com/distribution/reference"
 	"github.com/gofrs/flock"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
