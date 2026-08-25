@@ -336,6 +336,142 @@ func TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance(t *testing.T) {
 	assert.Equal(t, "Vulnerable component is not loaded into the memory", rule.ImpactStatement)
 }
 
+// TestApplySecurityExceptions_PopulatesAffectedProvenance is the affected-status counterpart to
+// TestApplySecurityExceptions_PopulatesIgnoreRuleProvenance: an affected entry's actionStatement
+// and response never populate Justification/ImpactStatement directly, so without repurposing
+// those fields the way buildIgnoreRules does here, the real text an author wrote never reaches
+// the persisted IgnoreRule at all, and every affected suppression is indistinguishable on the
+// stored manifest (#866).
+func TestApplySecurityExceptions_PopulatesAffectedProvenance(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "risk-accepted-log4j",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"ruleId":          "SecurityException/production/risk-accepted-log4j",
+					"sourceNamespace": "production",
+					"status":          "affected",
+					"actionStatement": "WAF mitigation in place, ticket SEC-1234",
+					"response":        []string{"will_not_fix"},
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	require.Len(t, doc.IgnoredMatches[0].AppliedIgnoreRules, 1)
+	rule := doc.IgnoredMatches[0].AppliedIgnoreRules[0]
+
+	assert.Equal(t, "affected", rule.FixState)
+	assert.Equal(t, "WAF mitigation in place, ticket SEC-1234", rule.ImpactStatement,
+		"actionStatement must be recoverable from the persisted IgnoreRule, not only from the transient policy Attributes")
+	assert.Equal(t, "will_not_fix", rule.Justification,
+		"response must be recoverable from the persisted IgnoreRule, not only from the transient policy Attributes")
+}
+
+// TestApplySecurityExceptions_AffectedAndNotAffectedProvenanceAreDistinguishable is a direct
+// regression test for #866's reported symptom: two affected entries with different
+// author-written actionStatement/response must not collapse into indistinguishable provenance
+// on the stored manifest.
+func TestApplySecurityExceptions_AffectedAndNotAffectedProvenanceAreDistinguishable(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-A"}}},
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-B"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "policy-a",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"status":          "affected",
+					"actionStatement": "vendor patch validated in staging, deploying next window",
+					"response":        []string{"update"},
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-A"}},
+		},
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "policy-b",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"status":          "affected",
+					"actionStatement": "compensating control: network policy blocks the affected port",
+					"response":        []string{"can_not_fix"},
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-B"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 2)
+	rules := map[string]v1beta1.IgnoreRule{}
+	for _, im := range doc.IgnoredMatches {
+		rules[im.Vulnerability.ID] = im.AppliedIgnoreRules[0]
+	}
+
+	require.Contains(t, rules, "CVE-A")
+	require.Contains(t, rules, "CVE-B")
+	assert.NotEqual(t, rules["CVE-A"].ImpactStatement, rules["CVE-B"].ImpactStatement,
+		"distinct actionStatements must not collapse into the same persisted provenance")
+	assert.Equal(t, "vendor patch validated in staging, deploying next window", rules["CVE-A"].ImpactStatement)
+	assert.Equal(t, "compensating control: network policy blocks the affected port", rules["CVE-B"].ImpactStatement)
+}
+
+// TestApplySecurityExceptions_NotAffectedUnaffectedByAffectedRepurposing pins that a
+// not_affected/fixed entry's Justification/ImpactStatement keep their ordinary meaning: the
+// repurposing buildIgnoreRules applies to affected entries must not leak into any other status.
+func TestApplySecurityExceptions_NotAffectedUnaffectedByAffectedRepurposing(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}}},
+		},
+	}
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "not-affected-policy",
+				Attributes: map[string]interface{}{
+					"sourceKind":      "SecurityException",
+					"status":          "not_affected",
+					"justification":   "vulnerable_code_not_present",
+					"impactStatement": "Vulnerable component is not loaded into the memory",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ApplySecurityExceptions(doc, exceptions, nil)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	rule := doc.IgnoredMatches[0].AppliedIgnoreRules[0]
+	assert.Equal(t, "vulnerable_code_not_present", rule.Justification)
+	assert.Equal(t, "Vulnerable component is not loaded into the memory", rule.ImpactStatement)
+}
+
 // TestApplySecurityExceptions_MatchedCountDedupesPerFinding is a regression test: two
 // SecurityException policies suppressing the same finding (by ID and by alias, say) must
 // count as one match for that sourceKind, not two, since exactly one finding was removed.

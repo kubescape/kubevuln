@@ -387,7 +387,8 @@ func buildIgnoreRules(m v1beta1.Match, matched []armotypes.VulnerabilityExceptio
 		if ns, ok := p.Attributes["sourceNamespace"].(string); ok {
 			rule.SourceNamespace = ns
 		}
-		if status, ok := p.Attributes["status"].(string); ok {
+		status, _ := p.Attributes["status"].(string)
+		if status != "" {
 			// FixState is repurposed here to carry the SecurityException's status vocabulary
 			// (not_affected/fixed/affected) rather than Grype's native fix-state vocabulary.
 			// This is safe because every reader of FixState gates on SourceKind being a
@@ -395,11 +396,30 @@ func buildIgnoreRules(m v1beta1.Match, matched []armotypes.VulnerabilityExceptio
 			// never set SourceKind, so they're unaffected.
 			rule.FixState = status
 		}
-		if just, ok := p.Attributes["justification"].(string); ok {
-			rule.Justification = just
-		}
-		if impact, ok := p.Attributes["impactStatement"].(string); ok {
-			rule.ImpactStatement = impact
+		if status == string(sev1beta1.VulnerabilityStatusAffected) {
+			// An affected entry populates actionStatement/response, not justification/
+			// impactStatement (those are the not_affected fields; shouldSuppress requires
+			// actionStatement, never justification, for an affected entry to suppress at
+			// all). IgnoreRule has no dedicated fields for either, so — mirroring the
+			// FixState repurposing above, and gated the same way on FixState=="affected"
+			// plus a SecurityException/ClusterSecurityException SourceKind — ImpactStatement
+			// carries the action statement and Justification carries the comma-joined
+			// response values. ignoredMatchAssessment (repositories/apiserver.go) is the
+			// paired reader; without this, every affected suppression exported the exact
+			// same generic action statement regardless of what its author wrote (#866).
+			if action, ok := p.Attributes["actionStatement"].(string); ok {
+				rule.ImpactStatement = action
+			}
+			if responses, ok := p.Attributes["response"].([]string); ok && len(responses) > 0 {
+				rule.Justification = strings.Join(responses, ",")
+			}
+		} else {
+			if just, ok := p.Attributes["justification"].(string); ok {
+				rule.Justification = just
+			}
+			if impact, ok := p.Attributes["impactStatement"].(string); ok {
+				rule.ImpactStatement = impact
+			}
 		}
 		rules = append(rules, rule)
 	}
@@ -421,9 +441,10 @@ func suppressingPolicies(matched []armotypes.VulnerabilityExceptionPolicy) []arm
 }
 
 // logSuppression records why a CVE disappeared from scan results: which exception object
-// matched, its scope, and the stated reason/justification. This is logged rather than stored on
-// the manifest because the filtered manifest's IgnoreRule (github.com/kubescape/storage) has no
-// fields for this provenance; see buildSuppressionAttributes for where it is captured.
+// matched, its scope, and the stated reason/justification. Some of this (sourceKind, ruleId,
+// justification/impactStatement, actionStatement/response) is also durably written onto the
+// manifest's IgnoreRule by buildIgnoreRules, directly or repurposing a field with no dedicated
+// slot; normalizedTarget and the reason string are not, and live only here.
 //
 // When recorder is non-nil, the same suppression is also recorded as a K8s Event on the
 // SecurityException/ClusterSecurityException object that caused it, so it shows up in
@@ -454,6 +475,12 @@ func logSuppression(m v1beta1.Match, matched []armotypes.VulnerabilityExceptionP
 		}
 		if impact, ok := p.Attributes["impactStatement"].(string); ok && impact != "" {
 			fields = append(fields, helpers.String("impactStatement", impact))
+		}
+		if action, ok := p.Attributes["actionStatement"].(string); ok && action != "" {
+			fields = append(fields, helpers.String("actionStatement", action))
+		}
+		if responses, ok := p.Attributes["response"].([]string); ok && len(responses) > 0 {
+			fields = append(fields, helpers.String("response", strings.Join(responses, ",")))
 		}
 		if target, ok := p.Attributes["normalizedTarget"].(string); ok && target != "" {
 			fields = append(fields, helpers.String("normalizedTarget", target))

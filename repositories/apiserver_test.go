@@ -754,8 +754,11 @@ func TestAPIServerStore_storeVEX_preservesSecurityExceptionSemantics(t *testing.
 				SourceName:      "SecurityException/default/affected",
 				SourceNamespace: "default",
 				FixState:        string(sev1beta1.VulnerabilityStatusAffected),
-				Justification:   "accepted risk",
-				ImpactStatement: "compensating controls limit exposure",
+				// For an affected entry, buildIgnoreRules repurposes Justification/ImpactStatement
+				// to carry response/actionStatement instead of their usual not_affected meaning
+				// (see adapters/v1/securityexception.go's buildIgnoreRules).
+				Justification:   "will_not_fix",
+				ImpactStatement: "Compensating controls limit exposure, reviewed by security lead",
 			}},
 		},
 	}
@@ -817,8 +820,68 @@ func TestAPIServerStore_storeVEX_preservesSecurityExceptionSemantics(t *testing.
 	assert.Equal(t, v1beta1.Status(vex.StatusAffected), got["CVE-AFFECTED"].Status)
 	assert.Empty(t, got["CVE-AFFECTED"].Justification)
 	assert.Empty(t, got["CVE-AFFECTED"].ImpactStatement)
-	assert.Equal(t, securityExceptionAcceptedRiskAction, got["CVE-AFFECTED"].ActionStatement)
-	assert.Equal(t, "justification: accepted risk; impact: compensating controls limit exposure", got["CVE-AFFECTED"].StatusNotes)
+	assert.Equal(t, "Compensating controls limit exposure, reviewed by security lead", got["CVE-AFFECTED"].ActionStatement,
+		"the author's own actionStatement must surface, not the generic securityExceptionAcceptedRiskAction fallback (#866)")
+	assert.Equal(t, "response: will_not_fix", got["CVE-AFFECTED"].StatusNotes)
+}
+
+// TestAPIServerStore_storeVEX_affectedFallsBackWithoutRepurposedProvenance guards the fallback
+// path in affectedActionStatement/affectedStatusNotes: a rule with FixState=="affected" but no
+// repurposed ImpactStatement/Justification (e.g. a manifest cached from before #866's fix, or a
+// rule some other future writer produces without populating them) must still get the generic,
+// always-valid action statement instead of an empty one.
+func TestAPIServerStore_storeVEX_affectedFallsBackWithoutRepurposedProvenance(t *testing.T) {
+	ignoredMatches := []v1beta1.IgnoredMatch{
+		{
+			Match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-AFFECTED-LEGACY", DataSource: "https://example.test/CVE-AFFECTED-LEGACY"},
+				},
+				Artifact: v1beta1.GrypePackage{PURL: "pkg:deb/debian/affected-legacy@1.0"},
+			},
+			AppliedIgnoreRules: []v1beta1.IgnoreRule{{
+				Vulnerability:   "CVE-AFFECTED-LEGACY",
+				SourceKind:      "SecurityException",
+				SourceName:      "SecurityException/default/affected-legacy",
+				SourceNamespace: "default",
+				FixState:        string(sev1beta1.VulnerabilityStatusAffected),
+			}},
+		},
+	}
+
+	cveManifest := domain.CVEManifest{
+		Name: "legacy-affected-manifest",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey: "registry.k8s.io/coredns/coredns:v1.10.1",
+		},
+		Content: &v1beta1.GrypeDocument{IgnoredMatches: ignoredMatches},
+	}
+	cveManifestFiltered := cveManifest
+	cveManifestFiltered.Content = &v1beta1.GrypeDocument{
+		IgnoredMatches: append([]v1beta1.IgnoredMatch(nil), ignoredMatches...),
+	}
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	workload := domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+		ContainerName: "anyJobContName",
+	}
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+
+	require.NoError(t, a.StoreVEX(ctx, cveManifest, cveManifestFiltered, false))
+
+	vexContainer, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(context.Background(), cveManifest.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	require.Len(t, vexContainer.Spec.Statements, 1)
+	stmt := vexContainer.Spec.Statements[0]
+	assert.Equal(t, v1beta1.Status(vex.StatusAffected), stmt.Status)
+	assert.Equal(t, securityExceptionAcceptedRiskAction, stmt.ActionStatement)
+	assert.Empty(t, stmt.StatusNotes)
 }
 
 // TestAPIServerStore_storeVEX_updateRestoresNotAffected guards against a regression where
