@@ -23,6 +23,23 @@ func TestMatchImages(t *testing.T) {
 		want     bool
 	}{
 		{name: "no patterns matches everything", patterns: nil, image: "docker.io/library/nginx:1.25", want: true},
+
+		// #834 pinned a registry-less pattern to Docker Hub. The mirror of that: a pattern
+		// that does name Docker Hub, but not in the canonical docker.io/library/... spelling,
+		// used to match nothing at all, since only the image was normalized and patterns were
+		// compared literally. All four spellings below are valid ways to write official nginx.
+		{name: "docker.io without the library namespace matches", patterns: []string{"docker.io/nginx:1.25"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "index.docker.io matches", patterns: []string{"index.docker.io/library/nginx:1.25"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "docker.io repository without namespace matches any tag", patterns: []string{"docker.io/nginx"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "docker.io without namespace matches a short image reference", patterns: []string{"docker.io/nginx:1.25"}, image: "nginx:1.25", want: true},
+		// Normalizing the pattern must not widen it. The tag and digest survive, and the
+		// registry stays the one the pattern named.
+		{name: "normalized pattern still does not match another registry", patterns: []string{"docker.io/nginx:1.25"}, image: "myreg.io/nginx:1.25", want: false},
+		{name: "normalized pattern still does not match a different tag", patterns: []string{"docker.io/nginx:1.24"}, image: "docker.io/library/nginx:1.25", want: false},
+		{name: "normalized pattern keeps its digest pin", patterns: []string{"docker.io/nginx@sha256:" + testDigest}, image: "docker.io/library/nginx:1.25", want: false},
+		// A glob is not a parseable reference, so it keeps only its literal forms.
+		{name: "registry wildcard still matches any registry", patterns: []string{"*/nginx:1.25"}, image: "myreg.io/nginx:1.25", want: true},
+		{name: "repository wildcard still works", patterns: []string{"myreg.io/*:1.25"}, image: "myreg.io/nginx:1.25", want: true},
 		{name: "non-empty patterns never match empty image", patterns: []string{"docker.io/library/nginx:*"}, image: "", want: false},
 		{name: "tag wildcard matches", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "tag wildcard matches digest suffix", patterns: []string{"docker.io/library/nginx:*"}, image: "docker.io/library/nginx:latest@sha256:" + testDigest, want: true},

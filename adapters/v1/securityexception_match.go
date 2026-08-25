@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -166,7 +167,7 @@ func expandPatternForms(p string) []string {
 			return patterns
 		}
 		patterns = append(patterns, "docker.io/library/"+p)
-		return patterns
+		return appendNormalizedPattern(patterns, p)
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
@@ -175,7 +176,35 @@ func expandPatternForms(p string) []string {
 		patterns = append(patterns, "docker.io/"+p)
 	}
 
-	return patterns
+	return appendNormalizedPattern(patterns, p)
+}
+
+// appendNormalizedPattern adds p's canonical reference form to patterns, when p is a
+// concrete reference rather than a glob.
+//
+// tools.ReferenceMatchForms normalizes the scanned image but patterns were only ever
+// matched literally, so a pattern naming Docker Hub in any spelling other than the
+// canonical docker.io/library/... one silently matched nothing: "docker.io/nginx:1.25",
+// "index.docker.io/library/nginx:1.25" and "docker.io/nginx" are all valid ways to write
+// the official nginx image, and none of them matched it. The expansions above only cover
+// patterns with no registry at all, which is the opposite case.
+//
+// A pattern containing a wildcard is not a parseable reference, so it fails here and keeps
+// only the literal forms, leaving glob behaviour untouched. Nothing widens either: the
+// canonical form carries the same tag and digest as p and pins the registry p named, so a
+// pattern still only matches the registry it asked for (#834). See #863.
+func appendNormalizedPattern(patterns []string, p string) []string {
+	named, err := reference.ParseNormalizedNamed(p)
+	if err != nil {
+		return patterns
+	}
+	canonical := named.String()
+	for _, existing := range patterns {
+		if existing == canonical {
+			return patterns
+		}
+	}
+	return append(patterns, canonical)
 }
 
 // labelSelectorMatches evaluates a standard Kubernetes label selector against a
