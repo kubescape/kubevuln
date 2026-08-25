@@ -1224,8 +1224,8 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 		assessment.status = v1beta1.Status(vex.StatusAffected)
 		assessment.justification = ""
 		assessment.impactStatement = ""
-		assessment.actionStatement = securityExceptionAcceptedRiskAction
-		assessment.statusNotes = ignoredMatchStatusNotes(rule)
+		assessment.actionStatement = affectedActionStatement(rule)
+		assessment.statusNotes = affectedStatusNotes(rule)
 	default:
 		// Any unrecognized status (including "" and NotAffected) falls back to the safe
 		// not_affected-shaped assessment.
@@ -1274,6 +1274,30 @@ func ignoredMatchStatusNotes(rule v1beta1.IgnoreRule) string {
 		parts = append(parts, "impact: "+impact)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// affectedActionStatement returns the actionStatement text a SecurityException author wrote
+// for an affected (risk-accepted) entry. adapters/v1.buildIgnoreRules repurposes
+// rule.ImpactStatement to carry it for a FixState=="affected" rule, since IgnoreRule has no
+// dedicated field and ImpactStatement is otherwise unused there (it's the not_affected field).
+// Falls back to the generic constant only for a rule with nothing in that field, which today
+// means a manifest cached from before this repurposing existed.
+func affectedActionStatement(rule v1beta1.IgnoreRule) string {
+	if action := strings.TrimSpace(rule.ImpactStatement); action != "" {
+		return action
+	}
+	return securityExceptionAcceptedRiskAction
+}
+
+// affectedStatusNotes renders the response[] a SecurityException author stated for an
+// affected entry. adapters/v1.buildIgnoreRules repurposes rule.Justification to carry the
+// comma-joined response values, for the same reason affectedActionStatement repurposes
+// ImpactStatement. Empty when the rule carries none, same as ignoredMatchStatusNotes.
+func affectedStatusNotes(rule v1beta1.IgnoreRule) string {
+	if response := strings.TrimSpace(rule.Justification); response != "" {
+		return "response: " + response
+	}
+	return ""
 }
 
 // newLocalStatement builds the VEX statement kubevuln writes for a match, in the baseline
