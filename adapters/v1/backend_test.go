@@ -1175,6 +1175,61 @@ func TestExcludeCloudCoveredPolicies(t *testing.T) {
 	}
 }
 
+// A cloud and a CRD policy can independently scope to specific packages via the
+// Attributes["subcomponents"] purl list, the same mechanism ConvertToVulnerabilityExceptionPolicies
+// uses for a CRD exception's own vuln.Subcomponents field. Naming the same CVE is not the same
+// as covering the same package, so exclusion must also account for scope (#875).
+func TestExcludeCloudCoveredPolicies_SubcomponentScope(t *testing.T) {
+	policy := func(ruleName, cve string, subcomponents interface{}) armotypes.VulnerabilityExceptionPolicy {
+		p := armotypes.VulnerabilityExceptionPolicy{
+			PortalBase:            armotypes.PortalBase{Name: ruleName},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: cve}},
+		}
+		if subcomponents != nil {
+			p.Attributes = map[string]interface{}{attrSubcomponents: subcomponents}
+		}
+		return p
+	}
+
+	tests := []struct {
+		name        string
+		crdPolicies []armotypes.VulnerabilityExceptionPolicy
+		cloud       []armotypes.VulnerabilityExceptionPolicy
+		wantLen     int
+	}{
+		{
+			name:        "disjoint packages: CRD policy scoped to a different package than cloud's survives",
+			crdPolicies: []armotypes.VulnerabilityExceptionPolicy{policy("crd-rule", "CVE-1", []string{"pkg:npm/bar"})},
+			cloud:       []armotypes.VulnerabilityExceptionPolicy{policy("cloud-rule", "CVE-1", []interface{}{"pkg:npm/foo"})},
+			wantLen:     1,
+		},
+		{
+			name:        "same package: CRD policy is dropped, matching #812's fix",
+			crdPolicies: []armotypes.VulnerabilityExceptionPolicy{policy("crd-rule", "CVE-1", []string{"pkg:npm/bar"})},
+			cloud:       []armotypes.VulnerabilityExceptionPolicy{policy("cloud-rule", "CVE-1", []interface{}{"pkg:npm/bar"})},
+			wantLen:     0,
+		},
+		{
+			name:        "unscoped cloud policy covers a scoped CRD policy for any package",
+			crdPolicies: []armotypes.VulnerabilityExceptionPolicy{policy("crd-rule", "CVE-1", []string{"pkg:npm/bar"})},
+			cloud:       []armotypes.VulnerabilityExceptionPolicy{policy("cloud-rule", "CVE-1", nil)},
+			wantLen:     0,
+		},
+		{
+			name:        "scoped cloud policy does not cover an unscoped (product-wide) CRD policy",
+			crdPolicies: []armotypes.VulnerabilityExceptionPolicy{policy("crd-rule", "CVE-1", nil)},
+			cloud:       []armotypes.VulnerabilityExceptionPolicy{policy("cloud-rule", "CVE-1", []interface{}{"pkg:npm/foo"})},
+			wantLen:     1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := excludeCloudCoveredPolicies(tt.crdPolicies, tt.cloud)
+			assert.Len(t, got, tt.wantLen)
+		})
+	}
+}
+
 func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 	// A cluster exception scoped to redis images must NOT be applied to an
 	// nginx workload — this is the fail-open regression the match logic fixes.

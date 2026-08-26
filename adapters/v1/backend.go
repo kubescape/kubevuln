@@ -340,9 +340,14 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 //
 // Reuses cveExceptionIndex's own name normalization (lower-cased CVE ID/alias) so a CRD
 // exception naming a CVE by an alias the cloud exception names by its canonical ID, or vice
-// versa, still counts as the same CVE. A CRD policy not covered by any cloud policy passes
-// through unchanged, matching the doc's separate "non-overlapping exceptions are merged"
-// clause.
+// versa, still counts as the same CVE. Coverage is then checked at the same package
+// (subcomponent) granularity scopedToSubcomponent applies at suppression time, not by CVE name
+// alone: both cloud- and CRD-derived policies can independently scope to specific packages via
+// the shared Attributes["subcomponents"] mechanism (subcomponent.go), so a cloud policy naming
+// the same CVE but scoped to a different package does not make a CRD policy redundant.
+// Excluding it anyway would silently drop suppression for the package the cloud exception never
+// covered (#875). A CRD policy not covered by any cloud policy passes through unchanged,
+// matching the doc's separate "non-overlapping exceptions are merged" clause.
 func excludeCloudCoveredPolicies(crdPolicies, cloudPolicies []armotypes.VulnerabilityExceptionPolicy) []armotypes.VulnerabilityExceptionPolicy {
 	if len(cloudPolicies) == 0 || len(crdPolicies) == 0 {
 		return crdPolicies
@@ -351,18 +356,48 @@ func excludeCloudCoveredPolicies(crdPolicies, cloudPolicies []armotypes.Vulnerab
 
 	var filtered []armotypes.VulnerabilityExceptionPolicy
 	for _, p := range crdPolicies {
-		coveredByCloud := false
-		for _, vp := range p.VulnerabilityPolicies {
-			if len(cloudIndex.byName[strings.ToLower(vp.Name)]) > 0 {
-				coveredByCloud = true
-				break
-			}
-		}
-		if !coveredByCloud {
+		if !cloudCoversPolicy(p, cloudIndex) {
 			filtered = append(filtered, p)
 		}
 	}
 	return filtered
+}
+
+// cloudCoversPolicy reports whether some cloud policy sharing one of p's CVE/alias names also
+// covers every package p's own scope names. An unscoped cloud policy applies product-wide, so
+// it covers p regardless of p's own scope; a scoped cloud policy covers p only when p's scope
+// is fully contained in it. p being unscoped itself (applying product-wide) is never covered by
+// a scoped cloud policy, since the cloud policy only accounts for part of what p suppresses.
+func cloudCoversPolicy(p armotypes.VulnerabilityExceptionPolicy, cloudIndex *cveExceptionIndex) bool {
+	pScope, pScoped := policySubcomponents(p)
+	for _, vp := range p.VulnerabilityPolicies {
+		for _, i := range cloudIndex.byName[strings.ToLower(vp.Name)] {
+			cloudScope, cloudScoped := policySubcomponents(cloudIndex.srcCVEList[i])
+			if !cloudScoped {
+				return true
+			}
+			if pScoped && purlsCoveredBy(pScope, cloudScope) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// purlsCoveredBy reports whether every purl in scope is matched by some purl in by, i.e.
+// scope's coverage is fully contained in by's. Reuses purlMatches with by's entries as the
+// pattern side and scope's as the instance side, the same direction scopedToSubcomponent
+// matches a finding's purl against an exception's stated scope.
+func purlsCoveredBy(scope, by []string) bool {
+	if len(scope) == 0 {
+		return false
+	}
+	for _, purl := range scope {
+		if !anyPURLMatches(by, purl) {
+			return false
+		}
+	}
+	return true
 }
 
 // ReportError reports the given error to the platform
