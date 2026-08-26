@@ -9,10 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/distro"
+	"github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/version"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/grype/grype/vulnerability/mock"
+	"github.com/anchore/syft/syft/cpe"
+	syftPkg "github.com/anchore/syft/syft/pkg"
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
@@ -351,4 +357,120 @@ func TestBuildTrustedVendorSet_NormalizesSlugs(t *testing.T) {
 func TestBuildTrustedVendorSet_SkipsEmpty(t *testing.T) {
 	set := buildTrustedVendorSet([]string{"", "   ", "wolfi"})
 	assert.Equal(t, map[distro.Type]bool{distro.Wolfi: true}, set)
+}
+
+func TestDefaultMatchers_CVEMatchingOffDoesNotProduceCPEMatch(t *testing.T) {
+	provider := mock.VulnerabilityProvider(
+		vulnerability.Vulnerability{
+			PackageName: "java_se",
+			Constraint: version.MustGetConstraint(
+				"< 1.8.0_401",
+				version.JVMFormat,
+			),
+			Reference: vulnerability.Reference{
+				ID:        "CVE-DEBUG-CVE-MATCHING-OFF",
+				Namespace: "nvd:cpe",
+			},
+			CPEs: []cpe.CPE{
+				cpe.Must(
+					"cpe:2.3:a:oracle:java_se:*:*:*:*:*:*:*:*",
+					"",
+				),
+			},
+		},
+	)
+
+	packages := []pkg.Package{
+		{
+			Name:    "java_se",
+			Version: "1.8.0_400",
+			Type:    syftPkg.BinaryPkg,
+			CPEs: []cpe.CPE{
+				cpe.Must(
+					"cpe:2.3:a:oracle:java_se:*:*:*:*:*:*:*:*",
+					"",
+				),
+			},
+		},
+	}
+
+	vm := grype.VulnerabilityMatcher{
+		VulnerabilityProvider: provider,
+		Matchers:              getMatchers(true),
+		NormalizeByCVE:        true,
+	}
+
+	matches, _, err := vm.FindMatches(packages, pkg.Context{})
+	require.NoError(t, err)
+
+	matchCount := 0
+	for m := range matches.Enumerate() {
+		matchCount++
+		for _, detail := range m.Details {
+			t.Logf(
+				"FOUND: CVE=%s matcher=%s type=%s",
+				m.Vulnerability.ID,
+				detail.Matcher,
+				detail.Type,
+			)
+		}
+	}
+
+	assert.Equal(t, 0, matchCount, "CVEMatchingOff must not produce CPE matches")
+}
+
+func TestDefaultMatchers_CVEMatchingOnProducesCPEMatch(t *testing.T) {
+	provider := mock.VulnerabilityProvider(
+		vulnerability.Vulnerability{
+			PackageName: "java_se",
+			Constraint: version.MustGetConstraint(
+				"< 1.8.0_401",
+				version.JVMFormat,
+			),
+			Reference: vulnerability.Reference{
+				ID:        "CVE-DEBUG-CVE-MATCHING-ON",
+				Namespace: "nvd:cpe",
+			},
+			CPEs: []cpe.CPE{
+				cpe.Must(
+					"cpe:2.3:a:oracle:java_se:*:*:*:*:*:*:*:*", ""),
+			},
+		},
+	)
+
+	packages := []pkg.Package{
+		{
+			Name:    "java_se",
+			Version: "1.8.0_400",
+			Type:    syftPkg.BinaryPkg,
+			CPEs: []cpe.CPE{
+				cpe.Must("cpe:2.3:a:oracle:java_se:*:*:*:*:*:*:*:*", ""),
+			},
+		},
+	}
+
+	vm := grype.VulnerabilityMatcher{
+		VulnerabilityProvider: provider,
+		Matchers:              getMatchers(false),
+		NormalizeByCVE:        true,
+	}
+
+	matches, _, err := vm.FindMatches(packages, pkg.Context{})
+	require.NoError(t, err)
+
+	foundCPEMatch := false
+
+	for m := range matches.Enumerate() {
+		if m.Vulnerability.ID != "CVE-DEBUG-CVE-MATCHING-ON" {
+			continue
+		}
+
+		for _, detail := range m.Details {
+			if detail.Type == "cpe-match" {
+				foundCPEMatch = true
+			}
+		}
+	}
+
+	assert.True(t, foundCPEMatch, "CVEMatchingOn must produce a CPE match for the expected CVE")
 }
