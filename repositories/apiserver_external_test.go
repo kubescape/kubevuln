@@ -11,6 +11,7 @@ import (
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/tools"
+	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/openvex/go-vex/pkg/vex"
 )
@@ -555,4 +556,96 @@ func TestIgnoredMatchAssessment_AttributesBySource(t *testing.T) {
 				"all of these are suppressions, so the status is unchanged")
 		})
 	}
+}
+
+// A match can be suppressed by more than one SecurityException/ClusterSecurityException at
+// once -- buildIgnoreRule (adapters/v1) writes one IgnoreRule per suppressing policy. An
+// affected rule always requires an explicit, author-written actionStatement to suppress at
+// all (shouldSuppress), so it must never be silently outranked by an automatic
+// not_affected/fixed rule from a different, less specific exception -- whichever order they
+// happen to be listed in.
+func TestIgnoredMatchAssessment_MultipleExceptions_AffectedTakesPrecedence(t *testing.T) {
+	match := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+		},
+	}
+	affected := v1beta1.IgnoreRule{
+		Vulnerability:   "CVE-2021-44228",
+		SourceKind:      "SecurityException",
+		SourceName:      "se/team-a/name",
+		FixState:        string(sev1beta1.VulnerabilityStatusAffected),
+		ImpactStatement: "WAF mitigation in place, ticket SEC-1234",
+		Justification:   "will_not_fix",
+	}
+	notAffected := v1beta1.IgnoreRule{
+		Vulnerability: "CVE-2021-44228",
+		SourceKind:    "ClusterSecurityException",
+		SourceName:    "cse/blanket-baseline",
+		FixState:      string(sev1beta1.VulnerabilityStatusNotAffected),
+		Justification: "vulnerable code not present",
+	}
+
+	tests := []struct {
+		name  string
+		rules []v1beta1.IgnoreRule
+	}{
+		{name: "affected listed first", rules: []v1beta1.IgnoreRule{affected, notAffected}},
+		{name: "affected listed last", rules: []v1beta1.IgnoreRule{notAffected, affected}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ignoredMatchAssessment(v1beta1.IgnoredMatch{Match: match, AppliedIgnoreRules: tt.rules})
+
+			assert.Equal(t, v1beta1.Status(vex.StatusAffected), got.status,
+				"the risk-accepted exception must win regardless of list order")
+			assert.Equal(t, "WAF mitigation in place, ticket SEC-1234", got.actionStatement,
+				"the affected exception's real actionStatement must reach the export, not the other exception's")
+			assert.Equal(t, "response: will_not_fix", got.statusNotes)
+		})
+	}
+}
+
+// Fixed also requires an explicit human decision (unlike the not_affected default), but it
+// is not itself a risk acceptance the way affected is, so affected still takes precedence
+// over it when both are present.
+func TestIgnoredMatchAssessment_MultipleExceptions_AffectedBeatsFixed(t *testing.T) {
+	match := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+		},
+	}
+	rules := []v1beta1.IgnoreRule{
+		{Vulnerability: "CVE-2021-44228", SourceKind: "ClusterSecurityException", FixState: string(sev1beta1.VulnerabilityStatusFixed)},
+		{
+			Vulnerability:   "CVE-2021-44228",
+			SourceKind:      "SecurityException",
+			FixState:        string(sev1beta1.VulnerabilityStatusAffected),
+			ImpactStatement: "Compensating control documented in runbook",
+		},
+	}
+
+	got := ignoredMatchAssessment(v1beta1.IgnoredMatch{Match: match, AppliedIgnoreRules: rules})
+
+	assert.Equal(t, v1beta1.Status(vex.StatusAffected), got.status)
+	assert.Equal(t, "Compensating control documented in runbook", got.actionStatement)
+}
+
+// With no affected rule among several matching exceptions, the first SE/CSE rule is used --
+// the same behavior as before this fix, for the case that isn't a risk-acceptance conflict.
+func TestIgnoredMatchAssessment_MultipleExceptions_NoAffected_FirstRuleWins(t *testing.T) {
+	match := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+		},
+	}
+	rules := []v1beta1.IgnoreRule{
+		{Vulnerability: "CVE-2021-44228", SourceKind: "SecurityException", Justification: "first exception's reasoning"},
+		{Vulnerability: "CVE-2021-44228", SourceKind: "ClusterSecurityException", Justification: "second exception's reasoning"},
+	}
+
+	got := ignoredMatchAssessment(v1beta1.IgnoredMatch{Match: match, AppliedIgnoreRules: rules})
+
+	assert.Equal(t, v1beta1.Justification("first exception's reasoning"), got.justification)
 }

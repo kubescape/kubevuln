@@ -1255,14 +1255,39 @@ func isOwnIgnoreRule(m v1beta1.IgnoredMatch) bool {
 	return m.AppliedIgnoreRules[0].Package == nil
 }
 
+// securityExceptionIgnoreRule can face more than one candidate: buildIgnoreRule
+// (adapters/v1) writes one IgnoreRule per suppressing policy, and it is normal for a match
+// to be suppressed by several exceptions at once -- e.g. a broad ClusterSecurityException
+// and a more specific namespaced SecurityException both matching the same CVE. Picking
+// whichever rule happens to be listed first would let an unattributed not_affected/fixed
+// rule silently outrank an affected rule's author-written actionStatement/response, purely
+// because of incidental ordering.
+//
+// An affected rule always wins when one is present: shouldSuppress requires an explicit
+// actionStatement before an affected entry can suppress at all, so it is always a deliberate,
+// specific risk acceptance -- never one this function should let a less specific rule
+// override. Among rules that agree on not being affected (or when none is), the first
+// SE/CSE rule is used, preserving prior behavior for the common single-exception case.
 func securityExceptionIgnoreRule(m v1beta1.IgnoredMatch) (v1beta1.IgnoreRule, bool) {
+	var (
+		first v1beta1.IgnoreRule
+		found bool
+	)
 	for _, rule := range m.AppliedIgnoreRules {
 		switch rule.SourceKind {
 		case "SecurityException", "ClusterSecurityException":
+		default:
+			continue
+		}
+		if !found {
+			first = rule
+			found = true
+		}
+		if strings.TrimSpace(rule.FixState) == string(sev1beta1.VulnerabilityStatusAffected) {
 			return rule, true
 		}
 	}
-	return v1beta1.IgnoreRule{}, false
+	return first, found
 }
 
 func ignoredMatchStatusNotes(rule v1beta1.IgnoreRule) string {
