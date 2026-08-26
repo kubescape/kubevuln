@@ -578,7 +578,7 @@ func defaultMatcherConfig() matcher.Config {
 			AlwaysUseCPEForStdlib:                  true,
 			AllowMainModulePseudoVersionComparison: false,
 		},
-		Stock: stock.MatcherConfig{UseCPEs: true},
+		Stock: stock.MatcherConfig{UseCPEs: false},
 	}
 }
 
