@@ -137,7 +137,7 @@ func TestHTTPController_Diagnostics(t *testing.T) {
 		{
 			name:         "not configured",
 			diagnostics:  nil,
-			expectedBody: `{"scanMode":"","sbomCreatorVersion":"","cveScannerVersion":"","cveDBVersion":"","scanTimeout":"","scannerReadinessTimeout":"","storageEnabled":false,"riskAcceptanceEnabled":false}`,
+			expectedBody: `{"scanMode":"","sbomCreatorVersion":"","cveScannerVersion":"","cveDBVersion":"","scanTimeout":"","scannerReadinessTimeout":"","storageEnabled":false,"riskAcceptanceEnabled":false,"queueDepth":0}`,
 		},
 		{
 			name: "sidecar mode with storage and risk acceptance enabled",
@@ -153,12 +153,14 @@ func TestHTTPController_Diagnostics(t *testing.T) {
 					RiskAcceptanceEnabled:   true,
 				}
 			},
-			expectedBody: `{"scanMode":"sidecar","sbomCreatorVersion":"syft-1.2.3","cveScannerVersion":"grype-4.5.6-matching-adaptive","cveDBVersion":"db-2026-08-11","scanTimeout":"5m0s","scannerReadinessTimeout":"1m0s","storageEnabled":true,"riskAcceptanceEnabled":true}`,
+			expectedBody: `{"scanMode":"sidecar","sbomCreatorVersion":"syft-1.2.3","cveScannerVersion":"grype-4.5.6-matching-adaptive","cveDBVersion":"db-2026-08-11","scanTimeout":"5m0s","scannerReadinessTimeout":"1m0s","storageEnabled":true,"riskAcceptanceEnabled":true,"queueDepth":0}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := HTTPController{diagnostics: tt.diagnostics}
+			pool := workerpool.New(1)
+			t.Cleanup(pool.Stop)
+			c := HTTPController{diagnostics: tt.diagnostics, workerPool: pool}
 			router := gin.Default()
 			path := "/v1/diagnostics"
 			router.GET(path, c.Diagnostics)
@@ -169,6 +171,38 @@ func TestHTTPController_Diagnostics(t *testing.T) {
 			assert.JSONEq(t, tt.expectedBody, w.Body.String(), w.Body.String())
 		})
 	}
+}
+
+func TestHTTPController_Diagnostics_QueueDepth(t *testing.T) {
+	pool := workerpool.New(1)
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		pool.StopWait()
+	})
+
+	pool.Submit(func() {
+		<-release // occupy the pool's single worker
+	})
+	pool.Submit(func() {
+		<-release // sits in the waiting queue behind the task above
+	})
+
+	// Give the pool a moment to actually dequeue the first task before asserting.
+	require.Eventually(t, func() bool {
+		return pool.WaitingQueueSize() > 0
+	}, time.Second, time.Millisecond)
+
+	c := HTTPController{workerPool: pool}
+	router := gin.Default()
+	router.GET("/v1/diagnostics", c.Diagnostics)
+	req, _ := http.NewRequest("GET", "/v1/diagnostics", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var got domain.Diagnostics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, 1, got.QueueDepth)
 }
 
 func TestHTTPController_ScanCVE(t *testing.T) {
