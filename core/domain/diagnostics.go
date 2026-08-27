@@ -13,6 +13,11 @@ type Diagnostics struct {
 	ScannerReadinessTimeout string `json:"scannerReadinessTimeout"`
 	StorageEnabled          bool   `json:"storageEnabled"`
 	RiskAcceptanceEnabled   bool   `json:"riskAcceptanceEnabled"`
+	// QueueDepth is the number of scan jobs currently waiting in the HTTP controller's
+	// worker pool, the same value backing the kubevuln_worker_pool_queue_depth metric
+	// (see controllers.HTTPController.WithMetrics). Surfacing it here lets operators read
+	// current backlog directly instead of having to query Prometheus.
+	QueueDepth int `json:"queueDepth"`
 }
 
 const (

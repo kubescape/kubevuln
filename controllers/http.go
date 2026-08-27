@@ -221,11 +221,14 @@ func (h HTTPController) Ready(c *gin.Context) {
 // operators can query the running configuration directly instead of inferring it
 // from logs. See domain.Diagnostics for the excluded (credential) fields.
 func (h *HTTPController) Diagnostics(c *gin.Context) {
-	if h.diagnostics == nil {
-		c.JSON(http.StatusOK, domain.Diagnostics{})
-		return
+	var d domain.Diagnostics
+	if h.diagnostics != nil {
+		d = h.diagnostics(c.Request.Context())
 	}
-	c.JSON(http.StatusOK, h.diagnostics(c.Request.Context()))
+	if h.workerPool != nil {
+		d.QueueDepth = h.workerPool.WaitingQueueSize()
+	}
+	c.JSON(http.StatusOK, d)
 }
 
 // ScanStatus reports the current lifecycle state for a previously accepted scan job.
