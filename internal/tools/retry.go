@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"math"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -15,6 +16,15 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 )
+
+// maxRetryAfterSeconds is the largest number of seconds that can be multiplied by
+// time.Second without overflowing time.Duration's underlying int64 nanosecond count. A
+// numeric Retry-After value beyond this wraps around to a negative time.Duration -- which
+// RetryWithBackoff's ceiling check never catches (a negative delay is never ">" a positive
+// ceiling) and time.After fires immediately for, turning backoff into a hot retry loop
+// against whatever is rate-limiting it. Mirrors adapters/v1/backend.go's identical guard on
+// the report-posting retry path's own Retry-After parsing (see #754, #877).
+const maxRetryAfterSeconds = math.MaxInt64 / int64(time.Second)
 
 // RetryConfig specifies configuration for retrying operations.
 type RetryConfig struct {
@@ -95,7 +105,7 @@ func ParseRetryAfter(err error) (time.Duration, bool) {
 		fields := strings.Fields(sub)
 		if len(fields) > 0 {
 			token := strings.Trim(fields[0], ";,")
-			if seconds, parseErr := strconv.Atoi(token); parseErr == nil && seconds > 0 {
+			if seconds, parseErr := strconv.ParseInt(token, 10, 64); parseErr == nil && seconds > 0 && seconds <= maxRetryAfterSeconds {
 				return time.Duration(seconds) * time.Second, true
 			}
 		}
