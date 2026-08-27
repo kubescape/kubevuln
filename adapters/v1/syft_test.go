@@ -199,6 +199,38 @@ func TestRewriteImageRef(t *testing.T) {
 			},
 			want: "quay-mirror.example.com/kubescape/kubevuln:latest",
 		},
+		{
+			// #883: index.docker.io sorts before docker.io by length, so the alias
+			// fallback used to win even though docker.io/... is docker.io's own,
+			// more specific, direct match.
+			name:     "both docker.io and index.docker.io configured: docker.io ref uses its own entry",
+			imageRef: "docker.io/library/nginx:latest",
+			proxyMap: map[string]string{
+				"docker.io":       "mirror-a.example.com",
+				"index.docker.io": "mirror-b.example.com",
+			},
+			want: "mirror-a.example.com/library/nginx:latest",
+		},
+		{
+			name:     "both docker.io and index.docker.io configured: index.docker.io ref uses its own entry",
+			imageRef: "index.docker.io/library/nginx:latest",
+			proxyMap: map[string]string{
+				"docker.io":       "mirror-a.example.com",
+				"index.docker.io": "mirror-b.example.com",
+			},
+			want: "mirror-b.example.com/library/nginx:latest",
+		},
+		{
+			// The alias must still apply when only one of the pair has a usable value:
+			// an empty index.docker.io entry does not block docker.io's alias fallback.
+			name:     "index.docker.io entry present but empty does not block the docker.io alias fallback",
+			imageRef: "index.docker.io/library/alpine:latest",
+			proxyMap: map[string]string{
+				"docker.io":       "mirror.example.com",
+				"index.docker.io": "",
+			},
+			want: "mirror.example.com/library/alpine:latest",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
