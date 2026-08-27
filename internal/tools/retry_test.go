@@ -84,6 +84,26 @@ func TestParseRetryAfter(t *testing.T) {
 	assert.Equal(t, time.Duration(0), nilErr)
 }
 
+// A numeric Retry-After large enough that seconds*time.Second overflows time.Duration's
+// int64 nanosecond range must be rejected, not silently wrapped into a negative duration
+// (#877). math.MaxInt64/int64(time.Second) is the largest value that does not overflow.
+func TestParseRetryAfter_RejectsOverflowingValue(t *testing.T) {
+	atBoundary := fmt.Sprintf("received status code 429 Retry-After: %d", maxRetryAfterSeconds)
+	dur, ok := ParseRetryAfter(errors.New(atBoundary))
+	assert.True(t, ok, "the largest non-overflowing value must still parse")
+	assert.Equal(t, time.Duration(maxRetryAfterSeconds)*time.Second, dur)
+
+	justOverBoundary := fmt.Sprintf("received status code 429 Retry-After: %d", maxRetryAfterSeconds+1)
+	dur, ok = ParseRetryAfter(errors.New(justOverBoundary))
+	assert.False(t, ok, "one past the boundary must be rejected, not wrapped")
+	assert.Equal(t, time.Duration(0), dur)
+
+	wayOverBoundary := errors.New("received status code 429 Retry-After: 10000000000")
+	dur, ok = ParseRetryAfter(wayOverBoundary)
+	assert.False(t, ok)
+	assert.Equal(t, time.Duration(0), dur)
+}
+
 func TestRetryWithBackoff_SuccessFirstAttempt(t *testing.T) {
 	calls := 0
 	config := RetryConfig{
@@ -278,6 +298,35 @@ func TestRetryWithBackoff_UnsetCeilingFallsBackToMaxWait(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Less(t, elapsed, 500*time.Millisecond, "took %s", elapsed)
+}
+
+// An overflowing Retry-After must not turn into a hot loop: ParseRetryAfter rejects it, so
+// RetryWithBackoff falls back to its normal jittered backoff instead of the wrapped negative
+// duration time.After would otherwise fire on immediately (#877).
+func TestRetryWithBackoff_OverflowingRetryAfterFallsBackToBackoff(t *testing.T) {
+	cfg := RetryConfig{
+		MaxAttempts: 3,
+		InitialWait: 20 * time.Millisecond,
+		MaxWait:     40 * time.Millisecond,
+		Backoff:     2.0,
+	}
+	rateLimited := errors.New("429 Too Many Requests, Retry-After: 10000000000")
+
+	attempts := 0
+	start := time.Now()
+	_, err := RetryWithBackoff(context.Background(), "source_resolution", cfg, IsRateLimitError,
+		func(context.Context) (int, error) {
+			attempts++
+			return 0, rateLimited
+		})
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Equal(t, cfg.MaxAttempts, attempts)
+	// Two backoff waits (20ms then 40ms, ignoring jitter) rather than two immediate retries: a
+	// hot loop from the wrapped negative duration would complete in well under a millisecond.
+	assert.GreaterOrEqual(t, elapsed, 50*time.Millisecond,
+		"an overflowing Retry-After must fall back to backoff, not fire immediately (took %s)", elapsed)
 }
 
 func TestRetryWithBackoff_NonRetryableErrorNoRetry(t *testing.T) {
