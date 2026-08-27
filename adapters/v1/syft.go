@@ -80,15 +80,25 @@ func rewriteImageRef(imageRef string, proxyMap map[string]string) string {
 		if strings.HasPrefix(imageRef, original+"/") {
 			return proxy + imageRef[len(original):]
 		}
-		// treat docker.io and index.docker.io as the same registry
-		if original == "docker.io" && strings.HasPrefix(imageRef, "index.docker.io/") {
+		// treat docker.io and index.docker.io as the same registry, but only when the
+		// spelling imageRef actually uses has no entry of its own: a configured entry for
+		// that exact spelling is a more specific match (the one "longest prefix wins"
+		// above already prefers) and must not be skipped in favor of the alias's proxy
+		// just because the alias happens to sort first by length (#883).
+		if original == "docker.io" && strings.HasPrefix(imageRef, "index.docker.io/") && !hasUsableProxy(proxyMap, "index.docker.io") {
 			return proxy + imageRef[len("index.docker.io"):]
 		}
-		if original == "index.docker.io" && strings.HasPrefix(imageRef, "docker.io/") {
+		if original == "index.docker.io" && strings.HasPrefix(imageRef, "docker.io/") && !hasUsableProxy(proxyMap, "docker.io") {
 			return proxy + imageRef[len("docker.io"):]
 		}
 	}
 	return imageRef
+}
+
+// hasUsableProxy reports whether proxyMap has a non-empty (after trimming any trailing
+// slash) proxy value configured for key.
+func hasUsableProxy(proxyMap map[string]string, key string) bool {
+	return strings.TrimRight(proxyMap[key], "/") != ""
 }
 
 func NormalizeImageID(imageID, imageTag string) string {
