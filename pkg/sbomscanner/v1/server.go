@@ -315,7 +315,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}
 
 	// Convert to SyftDocument and serialize
-	doc := syftToDomain(*syftSBOM)
+	doc, err := syftToDomain(*syftSBOM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert SBOM: %w", err)
+	}
 	docBytes, err := json.Marshal(doc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize SBOM: %w", err)
@@ -342,8 +345,9 @@ func (s *scannerServer) Health(_ context.Context, _ *pb.HealthRequest) (*pb.Heal
 }
 
 // syftToDomain converts a Syft SBOM to a v1beta1.SyftDocument.
-// This is the same logic as SyftAdapter.syftToDomain.
-func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
+// This is the same logic as SyftAdapter.syftToDomain, including its error return: this
+// used to swallow both errors and return nil, which the caller then dereferenced.
+func syftToDomain(sbomSBOM sbom.SBOM) (*v1beta1.SyftDocument, error) {
 	doc := syftjson.ToFormatModel(sbomSBOM, syftjson.EncoderConfig{
 		Pretty: false,
 		Legacy: false,
@@ -351,16 +355,16 @@ func syftToDomain(sbomSBOM sbom.SBOM) *v1beta1.SyftDocument {
 
 	b, err := json.Marshal(doc)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	var syftDoc *v1beta1.SyftDocument
 	if err := json.Unmarshal(b, &syftDoc); err != nil {
-		return nil
+		return nil, err
 	}
 	syftmeta.Reattach(syftDoc.Artifacts, doc.Artifacts)
 
-	return syftDoc
+	return syftDoc, nil
 }
 
 func packageVersion(name string) string {
