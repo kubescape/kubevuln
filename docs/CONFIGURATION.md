@@ -278,17 +278,18 @@ The main configuration file. All options can be overridden via environment varia
     "scanTimeout": {
       "type": "string",
       "default": "5m",
-      "pattern": "^[0-9]+(s|m|h)$"
+      "description": "Must be positive: LoadConfig rejects a value <= 0, so unlike the other two duration fields this pattern accepts no sign and no bare 0.",
+      "pattern": "^((?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(ns|us|µs|ms|s|m|h))+$"
     },
     "scannerReadinessTimeout": {
       "type": "string",
       "default": "60s",
-      "pattern": "^[0-9]+(s|m|h)$"
+      "pattern": "^[+-]?(0|((?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(ns|us|µs|ms|s|m|h))+)$"
     },
     "shutdownTimeout": {
       "type": "string",
       "default": "20s",
-      "pattern": "^-?[0-9]+(s|m|h)$"
+      "pattern": "^[+-]?(0|((?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(ns|us|µs|ms|s|m|h))+)$"
     },
     "storage": {
       "type": "boolean",
