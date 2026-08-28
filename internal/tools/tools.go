@@ -18,7 +18,6 @@ import (
 	"github.com/distribution/reference"
 	"github.com/gofrs/flock"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -83,20 +82,6 @@ func LabelsFromImageID(imageID string) map[string]string {
 		}
 	}
 	return labels
-}
-
-func FileContent(path string) []byte {
-	b, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil
-	}
-	return b
-}
-
-func FileToSBOM(path string) *v1beta1.SyftDocument {
-	sbom := v1beta1.SyftDocument{}
-	_ = json.Unmarshal(FileContent(path), &sbom)
-	return &sbom
 }
 
 func FileToCVEManifest(path string) domain.CVEManifest {
