@@ -22,6 +22,8 @@ import (
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/artifact"
+	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 	"github.com/gofrs/flock"
@@ -36,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"math"
 )
 
 // maxUnixSockPathLen is the largest sockaddr_un.sun_path length (including the
@@ -969,4 +972,32 @@ func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
+}
+
+func syftSBOMWithMetadata(meta interface{}) sbom.SBOM {
+	p := pkg.Package{Name: "example", Version: "1.0.0", Metadata: meta}
+	p.SetID()
+	return sbom.SBOM{
+		Artifacts:     sbom.Artifacts{Packages: pkg.NewCollection(p)},
+		Relationships: []artifact.Relationship{},
+	}
+}
+
+func TestSyftToDomain(t *testing.T) {
+	doc, err := syftToDomain(syftSBOMWithMetadata(nil))
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	require.Len(t, doc.Artifacts, 1)
+	assert.Equal(t, "example", doc.Artifacts[0].Name)
+	assert.Equal(t, "1.0.0", doc.Artifacts[0].Version)
+}
+
+// A document that cannot be serialised must be reported, not returned as a nil pointer for
+// the caller to dereference. The in-process adapter's copy of this function has always
+// returned the error; this one dropped it, and CreateSBOM then read doc.Artifacts.
+func TestSyftToDomain_ReportsMarshalFailure(t *testing.T) {
+	doc, err := syftToDomain(syftSBOMWithMetadata(map[string]interface{}{"score": math.NaN()}))
+	require.Error(t, err)
+	assert.Nil(t, doc)
+	assert.Contains(t, err.Error(), "NaN")
 }
