@@ -36,5 +36,6 @@ func Hashers(names ...string) ([]crypto.Hash, error) {
 
 func CleanDigestAlgorithmName(name string) string {
 	lower := strings.ToLower(name)
-	return strings.ReplaceAll(lower, "-", "")
+	r := strings.NewReplacer("-", "", "_", "")
+	return r.Replace(lower)
 }

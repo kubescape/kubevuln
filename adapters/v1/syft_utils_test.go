@@ -17,6 +17,9 @@ func TestCleanDigestAlgorithmName(t *testing.T) {
 		{name: "already lowercase, no hyphen", input: "md5", want: "md5"},
 		{name: "mixed case with hyphen", input: "Sha-1", want: "sha1"},
 		{name: "multiple hyphens", input: "SHA-512-256", want: "sha512256"},
+		{name: "lowercase with underscore", input: "sha_256", want: "sha256"},
+		{name: "uppercase with underscore", input: "SHA_512", want: "sha512"},
+		{name: "mixed hyphens and underscores", input: "Sha_512-256", want: "sha512256"},
 		{name: "empty string", input: "", want: ""},
 	}
 
@@ -33,6 +36,12 @@ func TestHashers(t *testing.T) {
 		got, err := Hashers("sha-256", "MD5", "Sha-1")
 		assert.NoError(t, err)
 		assert.Equal(t, []crypto.Hash{crypto.SHA256, crypto.MD5, crypto.SHA1}, got)
+	})
+
+	t.Run("underscore delimited algorithms are resolved correctly", func(t *testing.T) {
+		got, err := Hashers("sha_256", "SHA_512", "sha_384", "sha_224", "sha_1")
+		assert.NoError(t, err)
+		assert.Equal(t, []crypto.Hash{crypto.SHA256, crypto.SHA512, crypto.SHA384, crypto.SHA224, crypto.SHA1}, got)
 	})
 
 	t.Run("no names returns empty result", func(t *testing.T) {
