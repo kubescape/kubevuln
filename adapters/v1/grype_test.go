@@ -320,6 +320,105 @@ func Test_grypeAdapter_Ready_singleFlightUnderConcurrency(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent Ready() calls must not launch more than one background load")
 }
 
+// A warm-path DB update whose load never returns (an uncancellable download hung on a
+// stalled connection) must not latch g.updating true forever: updateDBBackground abandons it
+// after stuckUpdateTimeout, releases the guard, and schedules a retry, so a later Ready() can
+// launch a fresh attempt that succeeds. Before #900 the guard stayed set for the pod's
+// lifetime and no further update was ever attempted.
+func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
+	ctx := context.Background()
+	oldStore := &closeTrackingProvider{}
+	newStore := &closeTrackingProvider{}
+	stuck := make(chan struct{})
+	defer close(stuck) // let the abandoned first load unwind at test teardown
+	var calls int32
+
+	g := &GrypeAdapter{
+		store:              oldStore,
+		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
+		nextUpdateAttempt:  time.Now().Add(-time.Minute),
+		stuckUpdateTimeout: 20 * time.Millisecond,
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			if atomic.AddInt32(&calls, 1) == 1 {
+				<-stuck // first attempt models a load that never returns
+				return nil, nil, errors.New("unblocked at teardown")
+			}
+			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
+		},
+	}
+
+	// First probe launches the update; the load hangs; updateDBBackground abandons it.
+	require.True(t, g.Ready(ctx), "pod stays Ready while the stuck update is abandoned")
+	require.Eventually(t, func() bool {
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+		return !g.updating && g.updateChan == nil
+	}, 2*time.Second, 5*time.Millisecond, "a stuck warm update must be abandoned, not left latched")
+
+	g.mu.RLock()
+	assert.True(t, g.nextUpdateAttempt.After(time.Now()), "an abandoned update must schedule a bounded retry")
+	assert.Same(t, oldStore, g.store, "the existing DB keeps serving while the stuck load is abandoned")
+	g.mu.RUnlock()
+
+	// Simulate the retry delay elapsing, then the next probe: a fresh attempt runs and lands.
+	g.mu.Lock()
+	g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+	g.mu.Unlock()
+	require.True(t, g.Ready(ctx))
+	waitForNotUpdating(t, g)
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.Same(t, newStore, g.store, "a later probe must be able to launch a fresh update that lands")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "exactly one fresh attempt after the abandoned one")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the superseded store is closed once the new one is installed")
+}
+
+// A load that finally returns after updateDBBackground abandoned it as stuck must be
+// discarded, not installed: its provider is closed and g.store / g.nextUpdateAttempt are left
+// as abandonStuckUpdate set them, so a slow load cannot silently overwrite a newer one or
+// undo the retry schedule (see #900, acceptance criterion 2).
+func Test_grypeAdapter_finishUpdate_discardsAbandonedLoadResult(t *testing.T) {
+	ctx := context.Background()
+	oldStore := &closeTrackingProvider{}
+	lateStore := &closeTrackingProvider{}
+	release := make(chan struct{})
+
+	g := &GrypeAdapter{
+		store:              oldStore,
+		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
+		nextUpdateAttempt:  time.Now().Add(-time.Minute),
+		stuckUpdateTimeout: 20 * time.Millisecond,
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			<-release
+			return lateStore, &vulnerability.ProviderStatus{From: "schema:v6%3Alate"}, nil
+		},
+	}
+
+	require.True(t, g.Ready(ctx))
+	require.Eventually(t, func() bool {
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+		return !g.updating
+	}, 2*time.Second, 5*time.Millisecond)
+
+	g.mu.RLock()
+	abandonSchedule := g.nextUpdateAttempt
+	g.mu.RUnlock()
+
+	// The abandoned load now returns a perfectly good DB - too late to be trusted.
+	close(release)
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&lateStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "a load result that returns after abandonment must be closed")
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.Same(t, oldStore, g.store, "a discarded late load must not replace the active store")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&oldStore.closed), "the active store must not be closed by a discarded late load")
+	assert.Equal(t, abandonSchedule, g.nextUpdateAttempt, "a discarded late load must not touch the retry schedule")
+}
+
 // Grype's distro types are lowercase slugs compared verbatim, so a configured vendor was
 // only trusted when written exactly that way. "Wolfi", or a slug with the whitespace a JSON
 // list easily carries, went into the set as a key nothing matches, and adaptive mode quietly
