@@ -564,3 +564,82 @@ func TestLabelsFromImageID_UppercaseTagIsKept(t *testing.T) {
 		assert.Empty(t, validation.IsDNS1123Label(value), "label %q has invalid value %q", key, value)
 	}
 }
+
+// TestDeleteContents covers the property its one caller depends on: adapters/v1/grype.go
+// clears a half-written DB cache with it and then expects to install into that same
+// directory, so emptying it must not remove it.
+func TestDeleteContents(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(path.Join(dir, "file.txt"), []byte("x"), 0o600))
+	require.NoError(t, os.Mkdir(path.Join(dir, "sub"), 0o750))
+	require.NoError(t, os.WriteFile(path.Join(dir, "sub", "nested.txt"), []byte("y"), 0o600))
+	require.NoError(t, os.Mkdir(path.Join(dir, "sub", "deeper"), 0o750))
+
+	require.NoError(t, DeleteContents(dir))
+
+	info, err := os.Stat(dir)
+	require.NoError(t, err, "the directory itself must survive")
+	assert.True(t, info.IsDir())
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "files and subdirectories alike should be gone")
+}
+
+func TestDeleteContents_EmptyDirIsANoOp(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, DeleteContents(dir))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestDeleteContents_MissingDirReportsAnError(t *testing.T) {
+	err := DeleteContents(path.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+	assert.True(t, os.IsNotExist(err), "should surface the read error rather than reporting success")
+}
+
+// TestDeleteContents_LeavesSiblingsAlone checks it stays inside the directory it was given.
+// The caller passes a configured DBRootDir, so anything it deletes above that is data it was
+// never asked to touch.
+func TestDeleteContents_LeavesSiblingsAlone(t *testing.T) {
+	parent := t.TempDir()
+	target := path.Join(parent, "target")
+	sibling := path.Join(parent, "sibling")
+	require.NoError(t, os.Mkdir(target, 0o750))
+	require.NoError(t, os.Mkdir(sibling, 0o750))
+	require.NoError(t, os.WriteFile(path.Join(target, "gone.txt"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(path.Join(sibling, "kept.txt"), []byte("y"), 0o600))
+
+	require.NoError(t, DeleteContents(target))
+
+	_, err := os.Stat(path.Join(sibling, "kept.txt"))
+	assert.NoError(t, err, "a sibling directory must be untouched")
+}
+
+// TestDefault429RetryConfig pins the values governing every registry-pull retry, in both SBOM
+// paths and the scan service. They bound how long a worker is held by one rate-limited pull,
+// so a change here is a change to that ceiling and should be deliberate.
+func TestDefault429RetryConfig(t *testing.T) {
+	c := Default429RetryConfig()
+
+	assert.Equal(t, 3, c.MaxAttempts, "one initial attempt plus two retries")
+	assert.Equal(t, 500*time.Millisecond, c.InitialWait)
+	assert.Equal(t, 2*time.Second, c.MaxWait)
+	assert.Equal(t, 2.0, c.Backoff)
+	assert.Equal(t, 30*time.Second, c.MaxRetryAfter)
+
+	// MaxRetryAfter is what bounds a registry-chosen delay. Without it the ceiling would fall
+	// back to MaxWait, so the two must not be confused.
+	assert.Equal(t, 30*time.Second, c.retryAfterCeiling())
+}
+
+// FastRetryConfig sets no MaxRetryAfter, so its ceiling falls back to MaxWait. That fallback
+// is the branch retryAfterCeiling exists for.
+func TestFastRetryConfig_CeilingFallsBackToMaxWait(t *testing.T) {
+	c := FastRetryConfig()
+	assert.Zero(t, c.MaxRetryAfter)
+	assert.Equal(t, c.MaxWait, c.retryAfterCeiling())
+}
