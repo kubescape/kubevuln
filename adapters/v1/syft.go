@@ -397,12 +397,23 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	logger.L().Debug("converting SBOM",
 		helpers.String("imageID", imageID))
 	domainSBOM.Content, err = syftmeta.ToDomain(*syftSBOM)
+	if err != nil {
+		// syftmeta.ToDomain returns (nil, err) when the Syft document can't be marshalled --
+		// a package carrying a non-JSON-encodable metadata value (a float NaN/Inf, say) is
+		// enough (see #904, #894). The completion log below reads domainSBOM.Content, so
+		// return here rather than dereferencing the nil pointer it now holds.
+		logger.L().Ctx(ctx).Warning("failed to convert SBOM to domain model",
+			helpers.Error(err),
+			helpers.String("imageID", imageID))
+		domainSBOM.Status = helpersv1.Incomplete
+		return domainSBOM, fmt.Errorf("converting SBOM: %w", err)
+	}
 
 	// return SBOM
 	logger.L().Debug("returning SBOM",
 		helpers.String("imageID", imageID),
 		helpers.Int("packages", len(domainSBOM.Content.Artifacts)))
-	return domainSBOM, err
+	return domainSBOM, nil
 }
 
 // Version returns Syft's version which is used to tag SBOMs
