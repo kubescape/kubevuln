@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"encoding/json"
 	"github.com/akyoto/cache"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -5002,4 +5003,144 @@ func TestAPIServerStore_GetSecurityExceptions_ConversionFailureDegrades(t *testi
 	require.Error(t, err)
 	assert.Equal(t, int32(2), atomic.LoadInt32(&listCalls),
 		"an incomplete list must not be cached; the second call has to go back to the apiserver")
+}
+
+// asOpenVEXStatement round-trips a generated statement through JSON into go-vex's own
+// Statement type, so it can be checked with the library's rules rather than a local
+// restatement of them.
+func asOpenVEXStatement(t *testing.T, s v1beta1.Statement) vex.Statement {
+	t.Helper()
+	b, err := json.Marshal(s)
+	require.NoError(t, err)
+	var out vex.Statement
+	require.NoError(t, json.Unmarshal(b, &out))
+	return out
+}
+
+func ignoredMatchWithRule(rule v1beta1.IgnoreRule) v1beta1.IgnoredMatch {
+	return v1beta1.IgnoredMatch{
+		Match: v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2024-0001"},
+			},
+			Artifact: v1beta1.GrypePackage{Name: "pkg", Version: "1.0.0", PURL: "pkg:deb/pkg@1.0.0"},
+		},
+		AppliedIgnoreRules: []v1beta1.IgnoreRule{rule},
+	}
+}
+
+// TestGeneratedStatementsAreValidOpenVEX checks every statement shape kubevuln publishes
+// against go-vex's own Statement.Validate.
+//
+// internal/vexvalidate applies exactly these rules to documents kubevuln fetches (#878),
+// but nothing applied them to the documents it writes. The rules are easy to break from
+// here without noticing: they are mutual-exclusion rules, so adding an impact statement to
+// a fixed assessment, or an action statement to a not_affected one, produces a document
+// that decodes fine and that a strict consumer rejects.
+func TestGeneratedStatementsAreValidOpenVEX(t *testing.T) {
+	match := v1beta1.Match{
+		Vulnerability: v1beta1.Vulnerability{
+			VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+				ID:         "CVE-2024-0001",
+				DataSource: "https://example.test/CVE-2024-0001",
+			},
+			Fix: v1beta1.Fix{State: "fixed", Versions: []string{"2.0.0"}},
+		},
+		Artifact: v1beta1.GrypePackage{Name: "pkg", Version: "1.0.0", PURL: "pkg:deb/pkg@1.0.0"},
+	}
+	const imagePullable = "docker://docker.io/library/nginx@sha256:abc"
+
+	baseline := func(t *testing.T) v1beta1.Statement {
+		t.Helper()
+		s, err := newLocalStatement(match, imagePullable)
+		require.NoError(t, err)
+		return s
+	}
+
+	tests := []struct {
+		name  string
+		build func(t *testing.T) v1beta1.Statement
+	}{
+		{
+			name:  "baseline not_affected",
+			build: baseline,
+		},
+		{
+			name: "relevant finding promoted to affected",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				idx := buildLocalVexStatementIndex([]v1beta1.Statement{s})
+				doc := v1beta1.VEX{Statements: []v1beta1.Statement{s}}
+				cvep := domain.CVEManifest{Content: &v1beta1.GrypeDocument{Matches: []v1beta1.Match{match}}}
+				require.NoError(t, markRelevantVulnerabilitiesAsAffectedInVex(&doc, &cvep, idx))
+				return doc.Statements[0]
+			},
+		},
+		{
+			name: "SecurityException, default not_affected",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				applyIgnoredMatchAssessment(&s, ignoredMatchAssessment(ignoredMatchWithRule(
+					v1beta1.IgnoreRule{SourceKind: "SecurityException"})))
+				return s
+			},
+		},
+		{
+			name: "SecurityException carrying justification and impact",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				applyIgnoredMatchAssessment(&s, ignoredMatchAssessment(ignoredMatchWithRule(
+					v1beta1.IgnoreRule{
+						SourceKind:      "SecurityException",
+						Justification:   "vulnerable_code_not_present",
+						ImpactStatement: "not reachable in this deployment",
+					})))
+				return s
+			},
+		},
+		{
+			name: "SecurityException with status fixed",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				applyIgnoredMatchAssessment(&s, ignoredMatchAssessment(ignoredMatchWithRule(
+					v1beta1.IgnoreRule{
+						SourceKind:    "SecurityException",
+						FixState:      string(sev1beta1.VulnerabilityStatusFixed),
+						Justification: "already patched",
+					})))
+				return s
+			},
+		},
+		{
+			name: "SecurityException accepting risk as affected",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				applyIgnoredMatchAssessment(&s, ignoredMatchAssessment(ignoredMatchWithRule(
+					v1beta1.IgnoreRule{
+						SourceKind: "SecurityException",
+						FixState:   string(sev1beta1.VulnerabilityStatusAffected),
+					})))
+				return s
+			},
+		},
+		{
+			name: "cloud exception policy, no CRD provenance",
+			build: func(t *testing.T) v1beta1.Statement {
+				s := baseline(t)
+				applyIgnoredMatchAssessment(&s, ignoredMatchAssessment(ignoredMatchWithRule(
+					v1beta1.IgnoreRule{Vulnerability: "CVE-2024-0001"})))
+				return s
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.build(t)
+			converted := asOpenVEXStatement(t, s)
+			err := converted.Validate()
+			assert.NoError(t, err, "status=%q justification=%q impact=%q action=%q",
+				s.Status, s.Justification, s.ImpactStatement, s.ActionStatement)
+		})
+	}
 }
