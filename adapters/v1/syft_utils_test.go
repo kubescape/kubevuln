@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestCleanDigestAlgorithmName tests the normalization of various hash algorithm names including hyphens and underscores.
 func TestCleanDigestAlgorithmName(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -31,6 +32,7 @@ func TestCleanDigestAlgorithmName(t *testing.T) {
 	}
 }
 
+// TestHashers tests resolving hash algorithm names to their crypto.Hash types.
 func TestHashers(t *testing.T) {
 	t.Run("supported algorithms are resolved correctly", func(t *testing.T) {
 		got, err := Hashers("sha-256", "MD5", "Sha-1")
