@@ -102,12 +102,17 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
+			name:     "string-based UNAUTHORIZED code",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: UNAUTHORIZED: authentication required"),
+			expected: scanfailure.ReasonImageAuthFailed,
+		},
+		{
 			name:     "MANIFEST_UNKNOWN",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: MANIFEST_UNKNOWN: not found"),
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
-			name:     "NAME_UNKNOWN",
+			name:     "NAME_UNKNOWN repository not found",
 			err:      fmt.Errorf("GET https://registry.io/v2/nonexistent/manifests/latest: NAME_UNKNOWN: repository name not known to registry"),
 			expected: scanfailure.ReasonImageNotFound,
 		},
