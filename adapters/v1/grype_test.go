@@ -320,18 +320,25 @@ func Test_grypeAdapter_Ready_singleFlightUnderConcurrency(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent Ready() calls must not launch more than one background load")
 }
 
+func forceUpdateDue(g *GrypeAdapter) {
+	g.mu.Lock()
+	g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+	g.mu.Unlock()
+}
+
 // A warm-path DB update whose load never returns (an uncancellable download hung on a
 // stalled connection) must not latch g.updating true forever: updateDBBackground abandons it
-// after stuckUpdateTimeout, releases the guard, and schedules a retry, so a later Ready() can
-// launch a fresh attempt that succeeds. Before #900 the guard stayed set for the pod's
-// lifetime and no further update was ever attempted.
+// after stuckUpdateTimeout, releases the guard, and schedules a retry. A retry launched while
+// the stuck load is still running must NOT start a second concurrent load against the same DB
+// cache dir; once the stuck load's goroutine finally exits, the next retry loads and installs
+// a fresh DB. Before #900 the guard stayed set for the pod's lifetime and no further update
+// was ever attempted.
 func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 	ctx := context.Background()
 	oldStore := &closeTrackingProvider{}
 	newStore := &closeTrackingProvider{}
 	stuck := make(chan struct{})
-	defer close(stuck) // let the abandoned first load unwind at test teardown
-	var calls int32
+	var loadCalls int32
 
 	g := &GrypeAdapter{
 		store:              oldStore,
@@ -339,15 +346,15 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 		nextUpdateAttempt:  time.Now().Add(-time.Minute),
 		stuckUpdateTimeout: 20 * time.Millisecond,
 		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
-			if atomic.AddInt32(&calls, 1) == 1 {
-				<-stuck // first attempt models a load that never returns
-				return nil, nil, errors.New("unblocked at teardown")
+			if atomic.AddInt32(&loadCalls, 1) == 1 {
+				<-stuck // first load models an uncancellable download that never returns
+				return nil, nil, errors.New("unblocked later")
 			}
 			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
 		},
 	}
 
-	// First probe launches the update; the load hangs; updateDBBackground abandons it.
+	// 1. First probe launches the update; the load hangs; updateDBBackground abandons it.
 	require.True(t, g.Ready(ctx), "pod stays Ready while the stuck update is abandoned")
 	require.Eventually(t, func() bool {
 		g.mu.RLock()
@@ -360,18 +367,65 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 	assert.Same(t, oldStore, g.store, "the existing DB keeps serving while the stuck load is abandoned")
 	g.mu.RUnlock()
 
-	// Simulate the retry delay elapsing, then the next probe: a fresh attempt runs and lands.
-	g.mu.Lock()
-	g.nextUpdateAttempt = time.Now().Add(-time.Minute)
-	g.mu.Unlock()
+	// 2. A retry while the stuck load still holds loadMu must skip rather than start a second
+	//    concurrent load against the same DB cache dir, and must reschedule.
+	forceUpdateDue(g)
+	require.True(t, g.Ready(ctx))
+	require.Eventually(t, func() bool {
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+		return !g.updating
+	}, 2*time.Second, 5*time.Millisecond, "the bounced retry must reschedule")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loadCalls), "no second load runs while the stuck one holds the DB cache dir")
+	g.mu.RLock()
+	assert.Same(t, oldStore, g.store)
+	g.mu.RUnlock()
+
+	// 3. The stuck load finally exits, releasing loadMu; a retry now loads and installs.
+	close(stuck)
+	require.Eventually(t, func() bool {
+		g.mu.Lock()
+		g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+		updating := g.updating
+		g.mu.Unlock()
+		if !updating {
+			g.Ready(ctx)
+		}
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+		return g.store == newStore
+	}, 3*time.Second, 15*time.Millisecond, "once the stuck load releases loadMu, a retry installs a fresh DB")
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	assert.Equal(t, int32(2), atomic.LoadInt32(&loadCalls), "exactly one load ran after the stuck one was released")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the superseded store is closed once the new one is installed")
+}
+
+// A load that is slow but returns within stuckUpdateTimeout is installed normally: the
+// stuck-load handling and loadMu serialization must not interfere with an ordinary refresh.
+func Test_grypeAdapter_Ready_slowLoadWithinTimeoutStillInstalls(t *testing.T) {
+	ctx := context.Background()
+	oldStore := &closeTrackingProvider{}
+	newStore := &closeTrackingProvider{}
+	g := &GrypeAdapter{
+		store:              oldStore,
+		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
+		nextUpdateAttempt:  time.Now().Add(-time.Minute),
+		stuckUpdateTimeout: 500 * time.Millisecond,
+		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+			time.Sleep(40 * time.Millisecond)
+			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
+		},
+	}
+
 	require.True(t, g.Ready(ctx))
 	waitForNotUpdating(t, g)
 
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	assert.Same(t, newStore, g.store, "a later probe must be able to launch a fresh update that lands")
-	assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "exactly one fresh attempt after the abandoned one")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the superseded store is closed once the new one is installed")
+	assert.Same(t, newStore, g.store, "a slow-but-returning load must still be installed")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store is closed after the swap")
 }
 
 // A load that finally returns after updateDBBackground abandoned it as stuck must be
