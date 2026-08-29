@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestClassifySBOMError verifies that registry, scanner, and transport errors are classified into standard failure reason codes.
 func TestClassifySBOMError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -175,6 +176,7 @@ func TestClassifySBOMError(t *testing.T) {
 	}
 }
 
+// TestClassifySBOMStatus verifies non-error SBOM status string mapping to failure reason codes.
 func TestClassifySBOMStatus(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -206,6 +208,7 @@ func TestClassifySBOMStatus(t *testing.T) {
 	}
 }
 
+// TestClassifySBOMStatusWithAnnotation verifies refined status classification using SBOM annotations.
 func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
 	tests := []struct {
 		name        string
