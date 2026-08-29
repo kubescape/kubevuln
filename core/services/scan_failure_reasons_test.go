@@ -82,8 +82,37 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageAuthFailed,
 		},
 		{
+			name: "transport 404 via errors.As",
+			err: &transport.Error{
+				StatusCode: http.StatusNotFound,
+			},
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name: "wrapped transport 404",
+			err: fmt.Errorf("fetching manifest: %w", &transport.Error{
+				StatusCode: http.StatusNotFound,
+			}),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "string-based 404 Not Found",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 404 Not Found"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
 			name:     "MANIFEST_UNKNOWN",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: MANIFEST_UNKNOWN: not found"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "NAME_UNKNOWN",
+			err:      fmt.Errorf("GET https://registry.io/v2/nonexistent/manifests/latest: NAME_UNKNOWN: repository name not known to registry"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "BLOB_UNKNOWN",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/blobs/sha256:123: BLOB_UNKNOWN: blob unknown to registry"),
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{

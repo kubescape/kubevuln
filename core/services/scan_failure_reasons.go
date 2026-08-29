@@ -42,6 +42,8 @@ func classifySBOMError(err error) string {
 		case transportErr.StatusCode == http.StatusUnauthorized ||
 			transportErr.StatusCode == http.StatusForbidden:
 			return scanfailure.ReasonImageAuthFailed
+		case transportErr.StatusCode == http.StatusNotFound:
+			return scanfailure.ReasonImageNotFound
 		}
 	}
 
@@ -60,7 +62,10 @@ func classifySBOMError(err error) string {
 	switch {
 	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
-	case strings.Contains(errStr, "MANIFEST_UNKNOWN"):
+	case strings.Contains(errStr, "404 Not Found") ||
+		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
+		strings.Contains(errStr, "NAME_UNKNOWN") ||
+		strings.Contains(errStr, "BLOB_UNKNOWN"):
 		return scanfailure.ReasonImageNotFound
 	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
 	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
