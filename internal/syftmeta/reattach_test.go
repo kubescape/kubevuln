@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/anchore/syft/syft/artifact"
 	"github.com/anchore/syft/syft/format/syftjson/model"
+	"github.com/anchore/syft/syft/pkg"
+	"github.com/anchore/syft/syft/sbom"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"math"
 )
 
 func storedPackages(ids ...string) []v1beta1.SyftPackage {
@@ -128,4 +132,32 @@ func BenchmarkReattach(b *testing.B) {
 			}
 		})
 	}
+}
+
+func syftSBOMWithMetadata(meta interface{}) sbom.SBOM {
+	p := pkg.Package{Name: "example", Version: "1.0.0", Metadata: meta}
+	p.SetID()
+	return sbom.SBOM{
+		Artifacts:     sbom.Artifacts{Packages: pkg.NewCollection(p)},
+		Relationships: []artifact.Relationship{},
+	}
+}
+
+func TestToDomain(t *testing.T) {
+	doc, err := ToDomain(syftSBOMWithMetadata(nil))
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	require.Len(t, doc.Artifacts, 1)
+	assert.Equal(t, "example", doc.Artifacts[0].Name)
+	assert.Equal(t, "1.0.0", doc.Artifacts[0].Version)
+}
+
+// A document that cannot be serialised must be reported, not returned as a nil pointer for
+// the caller to dereference. The sidecar's copy of this used to drop the error and return a nil that
+// CreateSBOM then dereferenced (#893).
+func TestToDomain_ReportsMarshalFailure(t *testing.T) {
+	doc, err := ToDomain(syftSBOMWithMetadata(map[string]interface{}{"score": math.NaN()}))
+	require.Error(t, err)
+	assert.Nil(t, doc)
+	assert.Contains(t, err.Error(), "NaN")
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -395,7 +396,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// convert SBOM
 	logger.L().Debug("converting SBOM",
 		helpers.String("imageID", imageID))
-	domainSBOM.Content, err = s.syftToDomain(*syftSBOM)
+	domainSBOM.Content, err = syftmeta.ToDomain(*syftSBOM)
 
 	// return SBOM
 	logger.L().Debug("returning SBOM",
