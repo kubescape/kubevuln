@@ -1862,6 +1862,116 @@ func TestAPIServerStore_StoreCVE_mergesMetadataOnUpdate(t *testing.T) {
 	assert.Equal(t, "v2", got.Labels["l1"])
 }
 
+// #910: the fake storage clientset must reproduce kubescape/storage's handling of
+// GetOptions{ResourceVersion: resourceVersionMetadata} -- an ObjectMeta-only object, Spec and
+// Status at their zero value. The default ObjectReaction ignores GetOptions, so without this
+// createOrUpdate's conflict-retry read-modify-write and updateVEX's deliberate avoidance of
+// the option have no coverage (the exact gap that let #475 ship a summary-erasing bug).
+func TestNewFakeStorageClientset_MetadataResourceVersionReturnsMetadataOnly(t *testing.T) {
+	sbom := &v1beta1.SBOMSyft{
+		TypeMeta: metav1.TypeMeta{Kind: "SBOMSyft", APIVersion: "spdx.softwarecomposition.kubescape.io/v1beta1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "kubescape",
+			Annotations: map[string]string{"a": "1"}, Labels: map[string]string{"l": "2"},
+		},
+		Spec: v1beta1.SBOMSyftSpec{Metadata: v1beta1.SPDXMeta{Tool: v1beta1.ToolMeta{Name: "syft", Version: "v1"}}},
+	}
+	vex := &v1beta1.OpenVulnerabilityExchangeContainer{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape"},
+		Spec:       v1beta1.VEX{Statements: []v1beta1.Statement{{ID: "stmt-1"}}},
+	}
+	cs := newFakeStorageClientset(sbom, vex).SpdxV1beta1()
+	metaOpt := metav1.GetOptions{ResourceVersion: resourceVersionMetadata}
+
+	got, err := cs.SBOMSyfts("kubescape").Get(context.Background(), name, metaOpt)
+	require.NoError(t, err)
+	assert.Equal(t, name, got.Name, "metadata-only read keeps ObjectMeta")
+	assert.Equal(t, "1", got.Annotations["a"])
+	assert.Equal(t, "2", got.Labels["l"])
+	assert.Equal(t, "SBOMSyft", got.Kind, "metadata-only read keeps TypeMeta")
+	assert.Equal(t, sbom.APIVersion, got.APIVersion)
+	assert.Zero(t, got.Spec, "metadata-only read drops Spec")
+	// SBOMSyftStatus -- like every *Status type in this API -- is an empty struct today, so
+	// there is no non-zero value to seed; stripToMetadata zeroes it via the same field loop
+	// that zeroes Spec, and this assertion holds that line if the type ever gains fields.
+	assert.Zero(t, got.Status, "metadata-only read drops Status")
+
+	full, err := cs.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "syft", full.Spec.Metadata.Tool.Name, "a normal Get is unaffected")
+
+	// The OVEC case is why updateVEX must NOT use this option: it would read back a document
+	// with no statements and then merge into it.
+	gotVex, err := cs.OpenVulnerabilityExchangeContainers("kubescape").Get(context.Background(), name, metaOpt)
+	require.NoError(t, err)
+	assert.Empty(t, gotVex.Spec.Statements, "metadata-only read drops VEX statements")
+}
+
+// createOrUpdate's conflict-retry path reads the existing object metadata-only (zero Spec)
+// then Updates. Each Store* is safe only because its merge overwrites Spec wholesale; this
+// locks that in against the metadata-aware fake -- a merge that started reading existing.Spec
+// would see zero here and silently lose data (#910, #475).
+func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T) {
+	newCVE := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	newCVE.Name = name
+	newCVE.CVEDBVersion = "new-db"
+	require.Positive(t, len(newCVE.Content.Matches))
+
+	t.Run("StoreCVE", func(t *testing.T) {
+		seeded := &v1beta1.VulnerabilityManifest{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape"},
+			Spec: v1beta1.VulnerabilityManifestSpec{
+				Metadata: v1beta1.VulnerabilityManifestMeta{Tool: v1beta1.VulnerabilityManifestToolMeta{DatabaseVersion: "old-db"}},
+				Payload:  v1beta1.GrypeDocument{Matches: make([]v1beta1.Match, 999)},
+			},
+		}
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset(seeded).SpdxV1beta1())
+
+		require.NoError(t, a.StoreCVE(context.Background(), newCVE, false))
+
+		got, err := a.StorageClient.VulnerabilityManifests("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Len(t, got.Spec.Payload.Matches, len(newCVE.Content.Matches), "the conflict write must store the full new payload, not the stale seed")
+		assert.Equal(t, "new-db", got.Spec.Metadata.Tool.DatabaseVersion, "and the full new metadata")
+	})
+
+	t.Run("StoreSBOM", func(t *testing.T) {
+		seeded := &v1beta1.SBOMSyft{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape"},
+			Spec:       v1beta1.SBOMSyftSpec{Syft: v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 999)}},
+		}
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset(seeded).SpdxV1beta1())
+
+		sbom := domain.SBOM{Name: name, Content: &v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 3)}}
+		require.NoError(t, a.StoreSBOM(context.Background(), sbom, false))
+
+		got, err := a.StorageClient.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Len(t, got.Spec.Syft.Artifacts, 3, "the conflict write must store the full new SBOM payload, not the stale seed")
+	})
+
+	t.Run("StoreCVESummary", func(t *testing.T) {
+		workload := domain.ScanCommand{ImageTag: "nginx:latest", ImageSlug: name, ContainerName: "nginx"}
+		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+		ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+		seeded := &v1beta1.VulnerabilityManifestSummary{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape"},
+			Spec: v1beta1.VulnerabilityManifestSummarySpec{
+				Severities: v1beta1.SeveritySummary{Critical: v1beta1.VulnerabilityCounters{All: 987654}},
+			},
+		}
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset(seeded).SpdxV1beta1())
+
+		require.NoError(t, a.StoreCVESummary(ctx, newCVE, domain.CVEManifest{}, false))
+
+		got, err := a.StorageClient.VulnerabilityManifestSummaries("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, parseSeverities(newCVE, domain.CVEManifest{}, false), got.Spec.Severities,
+			"the conflict write must store the full recomputed summary, not merge onto the zeroed metadata read")
+	})
+}
+
 func TestAPIServerStore_GetCVE_transientError(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))

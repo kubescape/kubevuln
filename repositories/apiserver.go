@@ -74,6 +74,16 @@ const (
 	securityExceptionListCacheKeyPrefix        = "se/"
 )
 
+// resourceVersionMetadata mirrors kubescape/storage's
+// softwarecomposition.ResourceVersionMetadata. Passed as GetOptions.ResourceVersion, its
+// file-backed apiserver (pkg/registry/file/storage.go) honours it by reading only the
+// object's metadata blob from SQLite: the returned object carries its TypeMeta/ObjectMeta
+// but Spec and Status come back at their zero value. createOrUpdate's conflict-retry Get
+// uses it to avoid pulling a large payload just to read a resourceVersion, and updateVEX
+// deliberately does not (it merges into an existing Spec). The fake storage clientset used
+// in tests reproduces this behaviour, so both invariants stay under test (#910, #475).
+const resourceVersionMetadata = "metadata"
+
 // APIServerStore implements both CVERepository and SBOMRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
@@ -249,6 +259,12 @@ func newFakeStorageClientset(objects ...runtime.Object) *fakeStorageClientset {
 	}
 
 	clientset := &fakeStorageClientset{tracker: tracker}
+	// Reproduce kubescape/storage's handling of GetOptions{ResourceVersion:
+	// resourceVersionMetadata}: return the object with only its metadata populated. The
+	// default ObjectReaction ignores GetOptions and always returns the full object, which
+	// leaves createOrUpdate's conflict-retry read-modify-write, and updateVEX's deliberate
+	// avoidance of that option, without test coverage (#910, #475).
+	clientset.PrependReactor("get", "*", metadataOnlyGetReactor(tracker))
 	clientset.AddReactor("*", "*", k8stesting.ObjectReaction(tracker))
 	clientset.AddWatchReactor("*", func(action k8stesting.Action) (bool, watch.Interface, error) {
 		var opts metav1.ListOptions
@@ -263,6 +279,44 @@ func newFakeStorageClientset(objects ...runtime.Object) *fakeStorageClientset {
 	})
 
 	return clientset
+}
+
+// metadataOnlyGetReactor handles a Get carrying
+// GetOptions{ResourceVersion: resourceVersionMetadata} by returning a copy of the tracked
+// object with every field other than TypeMeta/ObjectMeta zeroed, matching what
+// kubescape/storage's file-backed apiserver serves for that option. Any other Get returns
+// handled=false so the default ObjectReaction takes over.
+func metadataOnlyGetReactor(tracker k8stesting.ObjectTracker) k8stesting.ReactionFunc {
+	return func(action k8stesting.Action) (bool, runtime.Object, error) {
+		getAction, ok := action.(k8stesting.GetActionImpl)
+		if !ok || getAction.GetOptions.ResourceVersion != resourceVersionMetadata {
+			return false, nil, nil
+		}
+		obj, err := tracker.Get(getAction.GetResource(), getAction.GetNamespace(), getAction.GetName())
+		if err != nil {
+			return true, nil, err
+		}
+		return true, stripToMetadata(obj.DeepCopyObject()), nil
+	}
+}
+
+// stripToMetadata zeroes every field of obj except its embedded TypeMeta and ObjectMeta, so
+// what remains is only what a metadata-only read returns. obj is mutated in place and
+// returned for convenience; callers pass a copy.
+func stripToMetadata(obj runtime.Object) runtime.Object {
+	v := reflect.Indirect(reflect.ValueOf(obj))
+	if v.Kind() != reflect.Struct {
+		return obj
+	}
+	for i := range v.NumField() {
+		if name := v.Type().Field(i).Name; name == "TypeMeta" || name == "ObjectMeta" {
+			continue
+		}
+		if f := v.Field(i); f.CanSet() {
+			f.Set(reflect.Zero(f.Type()))
+		}
+	}
+	return obj
 }
 
 func newFakeAPIServerStore(namespace string, storageClient spdxv1beta1.SpdxV1beta1Interface) *APIServerStore {
@@ -1073,14 +1127,15 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
 			//
-			// NOTE: this must NOT use GetOptions{ResourceVersion: "metadata"} like the
-			// sibling Store* methods do. That option returns an ObjectMeta-only object
-			// with a zero Spec in kubescape/storage's apiserver, which is safe for the
-			// siblings because they overwrite Spec wholesale. updateVEX instead merges
+			// NOTE: this must NOT use GetOptions{ResourceVersion: resourceVersionMetadata}
+			// like the sibling Store* methods do. That option returns an ObjectMeta-only
+			// object with a zero Spec in kubescape/storage's apiserver, which is safe for
+			// the siblings because they overwrite Spec wholesale. updateVEX instead merges
 			// into vexContainer.Spec.Statements, so a metadata-only read would silently
 			// drop every previously stored statement and then fail when it tries to
-			// parse the zeroed Spec.Metadata.Timestamp. The fake clientset used in tests
-			// ignores GetOptions entirely, so no test can catch a regression here.
+			// parse the zeroed Spec.Metadata.Timestamp. The fake clientset reproduces the
+			// option's real behaviour (see newFakeStorageClientset), so switching this to
+			// it fails the storeVEX_* tests instead of shipping silently.
 			var getErr error
 			vexContainer, getErr = a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, cvep.Name, metav1.GetOptions{})
 			if getErr != nil {
@@ -2109,7 +2164,7 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			}
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			existing, getErr := store.Get(ctx, name, metav1.GetOptions{ResourceVersion: "metadata"})
+			existing, getErr := store.Get(ctx, name, metav1.GetOptions{ResourceVersion: resourceVersionMetadata})
 			if getErr != nil {
 				return getErr
 			}
