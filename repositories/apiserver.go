@@ -465,19 +465,28 @@ func unstructuredFromEvent(obj interface{}) *unstructured.Unstructured {
 // never cached, so a transient apiserver hiccup self-heals on the next call instead of being
 // pinned for the TTL.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	// One shared deadline for both sequential calls below, not one each: fetchSecurityExceptions/
+	// fetchClusterSecurityExceptions each additionally bound the shared fetch they might end up
+	// running to its own 30s (see their doc comments) since that fetch can outlive this specific
+	// caller, but this caller's own wait for either one must not exceed 30s total -- otherwise a
+	// namespaced list that takes the full 30s would let the cluster-wide one that follows it take
+	// up to another 30s, doubling this call's worst case.
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	var listErrs []error
 
 	// Only list namespaced exceptions when namespace is provided
 	var exceptions []sev1beta1.SecurityException
 	if namespace != "" {
 		var err error
-		exceptions, err = a.listSecurityExceptions(ctx, namespace)
+		exceptions, err = a.listSecurityExceptions(listCtx, namespace)
 		if err != nil {
 			listErrs = append(listErrs, err)
 		}
 	}
 
-	clusterExceptions, err := a.listClusterSecurityExceptions(ctx)
+	clusterExceptions, err := a.listClusterSecurityExceptions(listCtx)
 	if err != nil {
 		listErrs = append(listErrs, err)
 	}
