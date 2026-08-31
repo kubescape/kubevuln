@@ -3192,6 +3192,173 @@ func TestAPIServerStore_GetNamespaceLabels_HonorsCallerCancellation(t *testing.T
 	require.True(t, *called, "the Get call the hook was attached to must have run")
 }
 
+// TestAPIServerStore_GetWorkloadLabels_Caches is a regression test for #919:
+// GetWorkloadLabels used to issue a fresh Get() call on every invocation, even though the
+// labels are identical for every container of the same workload -- BuildExceptionTarget
+// resolves them on every BackendAdapter.exceptionsCache miss, and that cache is keyed per
+// container, so a single ScanCP call for an N-container workload used to fan this out into N
+// Get()s for one object. A Get() call counter proves the cache collapses repeated calls for
+// the same workload into a single Get(), and that a genuinely different workload still gets
+// its own fresh lookup.
+func TestAPIServerStore_GetWorkloadLabels_Caches(t *testing.T) {
+	pod := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "mypod",
+			"namespace": "kubescape",
+			"labels":    map[string]interface{}{"app": "nginx"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), pod)
+
+	var getCalls int32
+	dynClient.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&getCalls, 1)
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	labels1, err := a.GetWorkloadLabels(context.TODO(), "kubescape", "Pod", "mypod")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"app": "nginx"}, labels1)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&getCalls))
+
+	labels2, err := a.GetWorkloadLabels(context.TODO(), "kubescape", "Pod", "mypod")
+	require.NoError(t, err)
+	assert.Equal(t, labels1, labels2)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&getCalls),
+		"a second call for the same workload should be served from cache")
+
+	_, err = a.GetWorkloadLabels(context.TODO(), "kubescape", "Pod", "other-pod")
+	require.Error(t, err, "a different, nonexistent workload is a genuine cache miss and must still be looked up")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&getCalls))
+}
+
+// TestAPIServerStore_GetWorkloadLabels_DoesNotCacheFailures guards the self-healing property
+// GetSecurityExceptions' own List() cache already relies on: a failed lookup must never
+// populate the cache, or a transient apiserver hiccup (or a workload not existing yet) would
+// be pinned as "unresolved" -- and therefore fail-closed, not applied -- for the full TTL
+// instead of self-healing on the next scan.
+func TestAPIServerStore_GetWorkloadLabels_DoesNotCacheFailures(t *testing.T) {
+	pod := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "mypod",
+			"namespace": "kubescape",
+			"labels":    map[string]interface{}{"app": "nginx"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), pod)
+
+	var calls int32
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	dynClient.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return true, nil, injectedErr
+		}
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	_, err := a.GetWorkloadLabels(context.TODO(), "kubescape", "Pod", "mypod")
+	require.Error(t, err)
+
+	labels, err := a.GetWorkloadLabels(context.TODO(), "kubescape", "Pod", "mypod")
+	require.NoError(t, err, "a failed lookup must not be cached, so the next call retries instead of replaying the failure")
+	assert.Equal(t, map[string]string{"app": "nginx"}, labels)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
+// TestAPIServerStore_GetNamespaceLabels_Caches is the namespace-scoped counterpart of
+// TestAPIServerStore_GetWorkloadLabels_Caches -- see #919.
+func TestAPIServerStore_GetNamespaceLabels_Caches(t *testing.T) {
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":   "myns",
+			"labels": map[string]interface{}{"team": "platform"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), ns)
+
+	var getCalls int32
+	dynClient.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&getCalls, 1)
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	labels1, err := a.GetNamespaceLabels(context.TODO(), "myns")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "platform"}, labels1)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&getCalls))
+
+	labels2, err := a.GetNamespaceLabels(context.TODO(), "myns")
+	require.NoError(t, err)
+	assert.Equal(t, labels1, labels2)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&getCalls),
+		"a second call for the same namespace should be served from cache")
+
+	_, err = a.GetNamespaceLabels(context.TODO(), "other-ns")
+	require.Error(t, err, "a different, nonexistent namespace is a genuine cache miss and must still be looked up")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&getCalls))
+}
+
+// TestAPIServerStore_GetNamespaceLabels_DoesNotCacheFailures is the namespace-scoped
+// counterpart of TestAPIServerStore_GetWorkloadLabels_DoesNotCacheFailures.
+func TestAPIServerStore_GetNamespaceLabels_DoesNotCacheFailures(t *testing.T) {
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":   "myns",
+			"labels": map[string]interface{}{"team": "platform"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), ns)
+
+	var calls int32
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
+	dynClient.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return true, nil, injectedErr
+		}
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	_, err := a.GetNamespaceLabels(context.TODO(), "myns")
+	require.Error(t, err)
+
+	labels, err := a.GetNamespaceLabels(context.TODO(), "myns")
+	require.NoError(t, err, "a failed lookup must not be cached, so the next call retries instead of replaying the failure")
+	assert.Equal(t, map[string]string{"team": "platform"}, labels)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
