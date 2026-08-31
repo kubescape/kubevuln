@@ -2893,9 +2893,22 @@ func TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses(t *test
 	})
 
 	const n = 20
+	var joined int32
+	allJoined := make(chan struct{})
 	var listCalls int32
+	// The reactor only ever runs inside the one goroutine singleflight picks as leader for
+	// cacheKey, so blocking it here -- until every one of the n callers has passed the
+	// (non-blocking) miss hook below -- is what actually forces genuine contention: the leader
+	// cannot finish and release the singleflight call until every other caller has had the
+	// chance to reach DoChan and join it. A hook that blocked callers itself, before any of
+	// them could reach DoChan, would only prove they all *arrived*, not that they *overlapped*
+	// -- the scheduler is free to run each one to completion before waking the next, especially
+	// on a CPU-constrained CI runner, which is exactly what let all n become their own leader
+	// despite such a hook faithfully unblocking at n. Mirrors registryauth's
+	// credentialCache.onMiss + fetch split, used the same way in #569's own test.
 	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
 		atomic.AddInt32(&listCalls, 1)
+		<-allJoined
 		return false, nil, nil
 	})
 
@@ -2904,18 +2917,10 @@ func TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses(t *test
 		Namespace:                  "kubescape",
 		securityExceptionListCache: cache.New(time.Minute),
 	}
-
-	var joined int32
-	allJoined := make(chan struct{})
-	// Blocking every caller here until all n have arrived is a hard guarantee that every one
-	// of them is genuinely contending for the same key once released, not a timing-based
-	// approximation -- mirrors registryauth's credentialCache.onMiss, used the same way for
-	// the identical problem in #569's own test.
 	a.securityExceptionCacheMissHook = func() {
 		if atomic.AddInt32(&joined, 1) == n {
 			close(allJoined)
 		}
-		<-allJoined
 	}
 
 	var wg sync.WaitGroup
@@ -2947,9 +2952,16 @@ func TestAPIServerStore_ListClusterSecurityExceptions_CoalescesConcurrentMisses(
 	})
 
 	const n = 20
+	var joined int32
+	allJoined := make(chan struct{})
 	var listCalls int32
+	// See TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses for why the
+	// blocking lives in the reactor (which only the singleflight leader ever reaches), not in
+	// the miss hook (which every caller reaches, and must not block, or none of them can ever
+	// race each other into DoChan).
 	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
 		atomic.AddInt32(&listCalls, 1)
+		<-allJoined
 		return false, nil, nil
 	})
 
@@ -2958,14 +2970,10 @@ func TestAPIServerStore_ListClusterSecurityExceptions_CoalescesConcurrentMisses(
 		Namespace:                  "kubescape",
 		securityExceptionListCache: cache.New(time.Minute),
 	}
-
-	var joined int32
-	allJoined := make(chan struct{})
 	a.securityExceptionCacheMissHook = func() {
 		if atomic.AddInt32(&joined, 1) == n {
 			close(allJoined)
 		}
-		<-allJoined
 	}
 
 	var wg sync.WaitGroup

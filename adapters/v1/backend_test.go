@@ -178,14 +178,21 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 // a cache hit already uses ("there is nothing new to report this call") -- this asserts exactly
 // one of the n callers sees the real (non-nil ExpiredBySource) stats.
 //
-// exceptionsCacheMissHook blocks every one of the n callers' cache misses until all of them
-// have arrived, so none can proceed into the singleflight group until every one of them is
-// genuinely contending for the same key -- a hard guarantee, not a timing-based approximation
-// of concurrency.
+// getCVEExceptionsFunc only ever runs inside the one goroutine singleflight picks as leader
+// for the cache key, so blocking it -- until every one of the n callers has passed the
+// (non-blocking) exceptionsCacheMissHook below -- is what actually forces genuine contention:
+// the leader cannot finish and release the singleflight call until every other caller has had
+// the chance to reach DoChan and join it. A hook that blocked callers itself, before any of
+// them could reach DoChan, would only prove they all *arrived*, not that they *overlapped* --
+// the scheduler is free to run each one to completion before waking the next, especially on a
+// CPU-constrained CI runner. Mirrors registryauth's credentialCache.onMiss + fetch split, used
+// the same way in #569's own test.
 func TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses(t *testing.T) {
 	expired := metav1.NewTime(time.Now().Add(-time.Hour))
 	const n = 20
 
+	var joined int32
+	allJoined := make(chan struct{})
 	var crdCalls, backendCalls int32
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
 		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
@@ -203,16 +210,13 @@ func TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses(t *testing.T)
 	})
 	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		atomic.AddInt32(&backendCalls, 1)
+		<-allJoined
 		return nil, nil
 	}
-
-	var joined int32
-	allJoined := make(chan struct{})
 	a.exceptionsCacheMissHook = func() {
 		if atomic.AddInt32(&joined, 1) == n {
 			close(allJoined)
 		}
-		<-allJoined
 	}
 
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")

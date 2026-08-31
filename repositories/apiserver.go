@@ -514,7 +514,20 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 // non-nil, incomplete items) or a hard failure is expected to be left uncached by fetch, and
 // that contract, including the (possibly non-nil) items returned alongside a non-nil error,
 // carries through unchanged to every caller sharing the coalesced result.
+//
+// ctx is checked before DoChan, not just raced against it afterward: fetch runs detached from
+// ctx, so once DoChan starts it as this key's leader it keeps running its own full 30s window
+// regardless of whether this particular caller could still use the result. GetSecurityExceptions
+// calls this twice sequentially against one shared listCtx, so the common way to hit this is the
+// namespaced call alone consuming that whole budget -- without this check, the cluster-wide call
+// right after it would still start (and, absent another caller already racing that key, become
+// leader for) a List() nothing can use, against an apiserver that just demonstrated it's slow.
 func coalescedSecurityExceptionList[T any](ctx context.Context, group *singleflight.Group, cacheKey string, fetch func(context.Context) (T, error)) (T, error) {
+	if err := ctx.Err(); err != nil {
+		var zero T
+		return zero, err
+	}
+
 	ch := group.DoChan(cacheKey, func() (interface{}, error) {
 		return fetch(context.WithoutCancel(ctx))
 	})
