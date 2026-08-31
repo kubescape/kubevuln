@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestClassifySBOMError verifies that registry, scanner, and transport errors are classified into standard failure reason codes.
 func TestClassifySBOMError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -82,8 +83,37 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageAuthFailed,
 		},
 		{
+			name: "transport 404 via errors.As",
+			err: &transport.Error{
+				StatusCode: http.StatusNotFound,
+			},
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name: "wrapped transport 404",
+			err: fmt.Errorf("fetching manifest: %w", &transport.Error{
+				StatusCode: http.StatusNotFound,
+			}),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "string-based 404 Not Found",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 404 Not Found"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
 			name:     "MANIFEST_UNKNOWN",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: MANIFEST_UNKNOWN: not found"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "NAME_UNKNOWN",
+			err:      fmt.Errorf("GET https://registry.io/v2/nonexistent/manifests/latest: NAME_UNKNOWN: repository name not known to registry"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "BLOB_UNKNOWN",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/blobs/sha256:123: BLOB_UNKNOWN: blob unknown to registry"),
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
@@ -146,6 +176,7 @@ func TestClassifySBOMError(t *testing.T) {
 	}
 }
 
+// TestClassifySBOMStatus verifies non-error SBOM status string mapping to failure reason codes.
 func TestClassifySBOMStatus(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -177,6 +208,7 @@ func TestClassifySBOMStatus(t *testing.T) {
 	}
 }
 
+// TestClassifySBOMStatusWithAnnotation verifies refined status classification using SBOM annotations.
 func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
 	tests := []struct {
 		name        string
