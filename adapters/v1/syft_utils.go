@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// supportedHashAlgorithms returns the list of hash algorithms supported by Syft.
 func supportedHashAlgorithms() []crypto.Hash {
 	return []crypto.Hash{
 		crypto.MD5,
@@ -17,6 +18,7 @@ func supportedHashAlgorithms() []crypto.Hash {
 	}
 }
 
+// Hashers converts algorithm name strings into their corresponding crypto.Hash objects.
 func Hashers(names ...string) ([]crypto.Hash, error) {
 	hashByName := make(map[string]crypto.Hash)
 	for _, h := range supportedHashAlgorithms() {
@@ -34,7 +36,9 @@ func Hashers(names ...string) ([]crypto.Hash, error) {
 	return hashers, nil
 }
 
+// CleanDigestAlgorithmName normalizes a hash algorithm name by lowercasing and stripping hyphens and underscores.
 func CleanDigestAlgorithmName(name string) string {
 	lower := strings.ToLower(name)
-	return strings.ReplaceAll(lower, "-", "")
+	r := strings.NewReplacer("-", "", "_", "")
+	return r.Replace(lower)
 }
