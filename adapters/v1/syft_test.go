@@ -30,6 +30,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,8 +59,7 @@ func Test_syftAdapter_transformations(t *testing.T) {
 	sbom := toSyftModel(d)
 
 	// Convert to domain.sbom
-	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false, nil)
-	domainSBOM, err := s.syftToDomain(*sbom)
+	domainSBOM, err := syftmeta.ToDomain(*sbom)
 	require.NoError(t, err)
 
 	// compare file with domain.sbom

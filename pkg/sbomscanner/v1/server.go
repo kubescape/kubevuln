@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	"github.com/anchore/syft/syft/format/syftjson"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
@@ -57,7 +55,7 @@ type scannerServer struct {
 // NewScannerServer creates a new gRPC scanner server.
 func NewScannerServer() pb.SBOMScannerServer {
 	return &scannerServer{
-		version: packageVersion("github.com/anchore/syft"),
+		version: tools.PackageVersion("github.com/anchore/syft"),
 	}
 }
 
@@ -315,7 +313,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}
 
 	// Convert to SyftDocument and serialize
-	doc, err := syftToDomain(*syftSBOM)
+	doc, err := syftmeta.ToDomain(*syftSBOM)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert SBOM: %w", err)
 	}
@@ -342,39 +340,4 @@ func (s *scannerServer) Health(_ context.Context, _ *pb.HealthRequest) (*pb.Heal
 		Version: s.version,
 		Ready:   true,
 	}, nil
-}
-
-// syftToDomain converts a Syft SBOM to a v1beta1.SyftDocument.
-// This is the same logic as SyftAdapter.syftToDomain, including its error return: this
-// used to swallow both errors and return nil, which the caller then dereferenced.
-func syftToDomain(sbomSBOM sbom.SBOM) (*v1beta1.SyftDocument, error) {
-	doc := syftjson.ToFormatModel(sbomSBOM, syftjson.EncoderConfig{
-		Pretty: false,
-		Legacy: false,
-	})
-
-	b, err := json.Marshal(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	var syftDoc *v1beta1.SyftDocument
-	if err := json.Unmarshal(b, &syftDoc); err != nil {
-		return nil, err
-	}
-	syftmeta.Reattach(syftDoc.Artifacts, doc.Artifacts)
-
-	return syftDoc, nil
-}
-
-func packageVersion(name string) string {
-	bi, ok := debug.ReadBuildInfo()
-	if ok {
-		for _, dep := range bi.Deps {
-			if dep.Path == name {
-				return dep.Version
-			}
-		}
-	}
-	return "unknown"
 }
