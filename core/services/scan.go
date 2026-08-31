@@ -120,7 +120,7 @@ func credentialsFingerprint(workload domain.ScanCommand) string {
 	h := sha256.New()
 	for _, cred := range workload.CredentialsList {
 		// codeql[go/weak-crypto, go/weak-password-hashing]
-		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n",
+		fmt.Fprintf(h, "%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s\n", //nolint:errcheck // hash.Hash.Write never returns an error
 			len(cred.Username), cred.Username,
 			len(cred.Password), cred.Password,
 			len(cred.Auth), cred.Auth,
