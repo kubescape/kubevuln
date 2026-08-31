@@ -56,9 +56,11 @@ type BackendAdapter struct {
 	// identical problem — see #916. Zero value is ready to use.
 	exceptionsGroup singleflight.Group
 	// exceptionsCacheMissHook, if set, is called synchronously by every cacheable caller that
-	// reaches an exceptionsCache miss, before it joins exceptionsGroup. Tests use it as a
-	// deterministic barrier to prove real concurrent contention on a miss, instead of a
-	// timing-based sleep — mirrors registryauth's credentialCache.onMiss.
+	// reaches an exceptionsCache miss, immediately after it registers with exceptionsGroup --
+	// not before, which would let a descheduled caller be counted as "joined" before it
+	// actually had. Tests use it as a deterministic barrier to prove real concurrent
+	// contention on a miss, instead of a timing-based sleep — mirrors registryauth's
+	// credentialCache.onMiss.
 	exceptionsCacheMissHook func()
 	httpClient              httputils.IHttpClient
 }
@@ -286,10 +288,6 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 			return cached.(domain.CVEExceptions), domain.ExceptionStats{}, nil
 		}
 	}
-	if a.exceptionsCacheMissHook != nil {
-		a.exceptionsCacheMissHook()
-	}
-
 	// Concurrent callers sharing cacheKey (e.g. the same container reached through both
 	// ScanCP and ScanCVE close together) are collapsed into a single fetch via
 	// exceptionsGroup, instead of each independently repeating the backend call and the CRD
@@ -302,6 +300,15 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		ran = true
 		return a.fetchCVEExceptions(context.WithoutCancel(ctx), workload, namespace, cacheKey, cacheable)
 	})
+	// Fired after DoChan, not before: this caller has now actually registered with
+	// exceptionsGroup for cacheKey (as leader or as a joiner of an already in-flight call).
+	// Firing any earlier would let a caller be descheduled between that earlier point and its
+	// real DoChan call, so a test barrier gated on it would only prove every caller had
+	// *reached* this function, not that every one of them had *joined* the same singleflight
+	// call.
+	if a.exceptionsCacheMissHook != nil {
+		a.exceptionsCacheMissHook()
+	}
 
 	select {
 	case res := <-ch:

@@ -110,9 +110,11 @@ type APIServerStore struct {
 	securityExceptionGroup singleflight.Group
 
 	// securityExceptionCacheMissHook, if set, is called synchronously by every caller that
-	// reaches a securityExceptionListCache miss, before it joins securityExceptionGroup. Tests
-	// use it as a deterministic barrier to prove real concurrent contention on a miss, instead
-	// of a timing-based sleep — mirrors registryauth's credentialCache.onMiss.
+	// reaches a securityExceptionListCache miss, immediately after it registers with
+	// securityExceptionGroup (see coalescedSecurityExceptionList's onRegistered param) — not
+	// before, which would let a descheduled caller be counted as "joined" before it actually
+	// had. Tests use it as a deterministic barrier to prove real concurrent contention on a
+	// miss, instead of a timing-based sleep — mirrors registryauth's credentialCache.onMiss.
 	securityExceptionCacheMissHook func()
 
 	securityExceptionInformerStop context.CancelFunc
@@ -522,7 +524,17 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 // namespaced call alone consuming that whole budget -- without this check, the cluster-wide call
 // right after it would still start (and, absent another caller already racing that key, become
 // leader for) a List() nothing can use, against an apiserver that just demonstrated it's slow.
-func coalescedSecurityExceptionList[T any](ctx context.Context, group *singleflight.Group, cacheKey string, fetch func(context.Context) (T, error)) (T, error) {
+//
+// onRegistered, if non-nil, is called synchronously by every caller immediately after its own
+// DoChan call returns -- i.e. once it has actually registered with group for cacheKey, whether
+// as leader or as a joiner of an already in-flight call. It exists purely for tests: firing it
+// any earlier (e.g. before DoChan, at the outer cache-miss check) would let a caller be
+// descheduled between that earlier point and its actual DoChan call, so a test barrier gated on
+// it would only prove every caller had *reached* this function, not that every one of them had
+// *joined* the same singleflight call -- the leader could finish and be forgotten by group in
+// between, leaving a still-descheduled caller to start a fresh, ungrouped call once it finally
+// resumes.
+func coalescedSecurityExceptionList[T any](ctx context.Context, group *singleflight.Group, cacheKey string, onRegistered func(), fetch func(context.Context) (T, error)) (T, error) {
 	if err := ctx.Err(); err != nil {
 		var zero T
 		return zero, err
@@ -531,6 +543,9 @@ func coalescedSecurityExceptionList[T any](ctx context.Context, group *singlefli
 	ch := group.DoChan(cacheKey, func() (interface{}, error) {
 		return fetch(context.WithoutCancel(ctx))
 	})
+	if onRegistered != nil {
+		onRegistered()
+	}
 
 	select {
 	case res := <-ch:
@@ -552,10 +567,7 @@ func (a *APIServerStore) listSecurityExceptions(ctx context.Context, namespace s
 			return cached.([]sev1beta1.SecurityException), nil
 		}
 	}
-	if a.securityExceptionCacheMissHook != nil {
-		a.securityExceptionCacheMissHook()
-	}
-	return coalescedSecurityExceptionList(ctx, &a.securityExceptionGroup, cacheKey,
+	return coalescedSecurityExceptionList(ctx, &a.securityExceptionGroup, cacheKey, a.securityExceptionCacheMissHook,
 		func(fetchCtx context.Context) ([]sev1beta1.SecurityException, error) {
 			return a.fetchSecurityExceptions(fetchCtx, cacheKey, namespace)
 		})
@@ -636,11 +648,8 @@ func (a *APIServerStore) listClusterSecurityExceptions(ctx context.Context) ([]s
 			return cached.([]sev1beta1.ClusterSecurityException), nil
 		}
 	}
-	if a.securityExceptionCacheMissHook != nil {
-		a.securityExceptionCacheMissHook()
-	}
 	return coalescedSecurityExceptionList(ctx, &a.securityExceptionGroup, clusterSecurityExceptionListCacheKey,
-		a.fetchClusterSecurityExceptions)
+		a.securityExceptionCacheMissHook, a.fetchClusterSecurityExceptions)
 }
 
 // fetchClusterSecurityExceptions is listClusterSecurityExceptions' cache-miss path, run by
