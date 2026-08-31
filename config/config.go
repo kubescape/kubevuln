@@ -167,6 +167,19 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("scanTimeout must be positive, got %s", config.ScanTimeout)
 	}
 
+	// Both limits are compared with a strict > against a measured size, so a non-positive
+	// value does not mean "unlimited": it means every image or SBOM exceeds it. maxSBOMSize
+	// at 0 classifies every SBOM TooLarge, so no CVEs are ever reported and the cluster reads
+	// as clean. Failing startup is the fail-closed answer for a scanner, and matches
+	// scanTimeout above rather than maxQueueDepth, whose 0 genuinely means unbounded because
+	// nothing compares against it.
+	if config.MaxImageSize <= 0 {
+		return Config{}, fmt.Errorf("maxImageSize must be positive, got %d", config.MaxImageSize)
+	}
+	if config.MaxSBOMSize <= 0 {
+		return Config{}, fmt.Errorf("maxSBOMSize must be positive, got %d", config.MaxSBOMSize)
+	}
+
 	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
 	// the legacy useDefaultMatchers boolean is set, derive the mode from it

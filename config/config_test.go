@@ -406,3 +406,52 @@ func TestLoadBackendServicesConfig_NoAPIURL_SurfacesClusterDataError(t *testing.
 		assert.Contains(t, err.Error(), "no service configuration")
 	})
 }
+
+// TestLoadConfigRejectsNonPositiveSizeLimits covers the guard on the two size limits.
+//
+// Both are compared with a strict > against a measured size, so 0 does not mean unlimited,
+// it means everything exceeds the limit. maxSBOMSize at 0 classifies every SBOM TooLarge,
+// so no CVEs are reported at all and a cluster reads as clean. That is the failure mode
+// worth failing startup over rather than accepting silently.
+func TestLoadConfigRejectsNonPositiveSizeLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"maxSBOMSize zero", `{"maxSBOMSize": 0}`, "maxSBOMSize must be positive"},
+		{"maxSBOMSize negative", `{"maxSBOMSize": -1}`, "maxSBOMSize must be positive"},
+		{"maxImageSize zero", `{"maxImageSize": 0}`, "maxImageSize must be positive"},
+		{"maxImageSize negative", `{"maxImageSize": -100}`, "maxImageSize must be positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(tt.body), 0o600))
+			viper.Reset()
+			_, err := LoadConfig(dir)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+// The defaults must still load, so the guard cannot be satisfied by rejecting everything.
+func TestLoadConfigAcceptsDefaultSizeLimits(t *testing.T) {
+	viper.Reset()
+	c, err := LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Positive(t, c.MaxImageSize)
+	assert.Positive(t, c.MaxSBOMSize)
+}
+
+// maxQueueDepth's 0 genuinely means unbounded, because nothing compares a measured value
+// against it. Pinned here so the new guard is not later extended to it by analogy.
+func TestLoadConfigStillAcceptsZeroMaxQueueDepth(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "clusterData.json"), []byte(`{"maxQueueDepth": 0}`), 0o600))
+	viper.Reset()
+	c, err := LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Zero(t, c.MaxQueueDepth)
+}
