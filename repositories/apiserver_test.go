@@ -5587,3 +5587,39 @@ func TestGeneratedStatementsAreValidOpenVEX(t *testing.T) {
 		})
 	}
 }
+
+// A scan that finds nothing still stores a VEX document. Statements has no omitempty, so a
+// nil slice serialises "statements": null, where go-vex's own vex.New() emits []. See #923.
+func TestAPIServerStore_StoreVEX_EmptyDocumentUsesAnArray(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+
+	clean := domain.CVEManifest{Name: name, Content: &v1beta1.GrypeDocument{}}
+	require.NoError(t, a.StoreVEX(context.TODO(), clean, clean, false))
+
+	stored, err := clientset.SpdxV1beta1().OpenVulnerabilityExchangeContainers("kubescape").
+		Get(context.TODO(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Empty(t, stored.Spec.Statements, "a clean image asserts nothing")
+	assert.NotNil(t, stored.Spec.Statements, "but the slice must be empty, not nil")
+
+	b, err := json.Marshal(stored.Spec)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"statements":[]`)
+	assert.NotContains(t, string(b), `"statements":null`)
+}
+
+// The canonical hash must not distinguish a nil slice from an empty one, or switching to an
+// empty one would re-hash every stored document and bump its version for no real change.
+func TestCalculateVexCanonicalHash_NilAndEmptyStatementsAgree(t *testing.T) {
+	md := v1beta1.Metadata{
+		Context:   "https://openvex.dev/ns/v0.2.0",
+		Author:    "kubescape.io",
+		Timestamp: "2026-01-01T00:00:00Z",
+	}
+	nilHash, err := calculateVexCanonicalHash(v1beta1.VEX{Metadata: md})
+	require.NoError(t, err)
+	emptyHash, err := calculateVexCanonicalHash(v1beta1.VEX{Metadata: md, Statements: []v1beta1.Statement{}})
+	require.NoError(t, err)
+	assert.Equal(t, nilHash, emptyHash)
+}

@@ -1752,6 +1752,10 @@ func (a *APIServerStore) createVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	// Calculate VEX
 	vexDoc := v1beta1.VEX{
+		// Explicitly empty rather than nil: Statements has no omitempty, so a scan that
+		// found nothing would otherwise serialise "statements": null. go-vex's own
+		// vex.New() emits [], and a consumer expecting an array should get one. See #923.
+		Statements: []v1beta1.Statement{},
 		Metadata: v1beta1.Metadata{
 			Context:     "https://openvex.dev/ns/v0.2.0",
 			Author:      "kubescape.io",
@@ -2228,9 +2232,9 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		return result, domain.ErrOutdatedSBOM
 	}
 	result := domain.SBOM{
-		Name:               name,
-		Annotations:        manifest.Annotations,
-		Labels:             manifest.Labels,
+		Name:        name,
+		Annotations: manifest.Annotations,
+		Labels:      manifest.Labels,
 		// The manifest's own recorded version, not the caller's requested SBOMCreatorVersion:
 		// semver.Compare treats build-metadata differences as equal, so the two can still
 		// differ as strings even when the check above passes.
