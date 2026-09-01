@@ -62,10 +62,17 @@ func classifySBOMError(err error) string {
 	switch {
 	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
+	case strings.Contains(errStr, "UNAUTHORIZED"):
+		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
+		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
+		return scanfailure.ReasonImageAuthFailed
 	case strings.Contains(errStr, "404 Not Found") ||
 		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
 		strings.Contains(errStr, "NAME_UNKNOWN") ||
 		strings.Contains(errStr, "BLOB_UNKNOWN"):
+		// NAME_UNKNOWN: repository does not exist (distinct from MANIFEST_UNKNOWN: unknown
+		// tag/digest on an existing repo). Same "not found" bucket since armoapi-go has no
+		// dedicated reason.
 		return scanfailure.ReasonImageNotFound
 	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
 	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
