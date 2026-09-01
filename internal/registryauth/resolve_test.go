@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/stretchr/testify/assert"
@@ -81,4 +82,66 @@ func TestResolveSource_PassesOtherErrorsStraightBack(t *testing.T) {
 
 	require.ErrorIs(t, err, boom)
 	assert.Equal(t, 1, attempts)
+}
+
+// TestResolveSource_DoesNotFallBackToAnonymousOnNonAuthErrorFromCredentialedRetry is a
+// regression test for #921: a credentialed retry that fails for a reason other than 401 (here,
+// a 429) must not trigger a further, doomed-to-fail anonymous retry. The registry was never
+// rejecting the request for being unauthenticated, so dropping credentials cannot fix it, and
+// the real error must be returned as-is rather than masked as an authorization failure.
+func TestResolveSource_DoesNotFallBackToAnonymousOnNonAuthErrorFromCredentialedRetry(t *testing.T) {
+	origGCPCredsFn := GCPCredsFn
+	defer func() { GCPCredsFn = origGCPCredsFn; ResetCaches() }()
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "tok"}, time.Now().Add(time.Hour), nil
+	}
+
+	rateLimited := errors.New("429 Too Many Requests")
+	var credentialsSeen []int
+	get := func(_ context.Context, _ string, opts *image.RegistryOptions) (fakeSource, error) {
+		credentialsSeen = append(credentialsSeen, len(opts.Credentials))
+		if len(opts.Credentials) == 0 {
+			return fakeSource{}, errors.New("401 Unauthorized")
+		}
+		return fakeSource{}, rateLimited
+	}
+
+	_, err := ResolveSource(context.Background(), "in_process", get,
+		"gcr.io/project/image:tag", "gcr.io/project/image:tag", image.RegistryOptions{})
+
+	require.ErrorIs(t, err, rateLimited, "the credentialed retry's real error must come back, not be masked as unauthorized")
+	assert.Equal(t, []int{0, 1}, credentialsSeen, "no third, anonymous attempt should follow a non-401 error from the credentialed retry")
+}
+
+// TestResolveSource_FallsBackToAnonymousWhenCredentialedRetryAlsoGets401 guards the behavior
+// the #921 fix must preserve: credentials that are outright refused (401 again, not some other
+// error) still fall back to anonymous access, exactly as ResolveSource's own doc comment
+// describes.
+func TestResolveSource_FallsBackToAnonymousWhenCredentialedRetryAlsoGets401(t *testing.T) {
+	origGCPCredsFn := GCPCredsFn
+	defer func() { GCPCredsFn = origGCPCredsFn; ResetCaches() }()
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "refused-token"}, time.Now().Add(time.Hour), nil
+	}
+
+	// Both the initial no-credentials attempt and the eventual anonymous retry pass zero
+	// credentials, so the fixture distinguishes them by call order rather than credential
+	// count: the first two attempts (no credentials, then the refused credentials) both fail
+	// with 401, and only the third (anonymous, after the credentialed retry is also refused)
+	// succeeds.
+	var credentialsSeen []int
+	get := func(_ context.Context, ref string, opts *image.RegistryOptions) (fakeSource, error) {
+		credentialsSeen = append(credentialsSeen, len(opts.Credentials))
+		if len(credentialsSeen) < 3 {
+			return fakeSource{}, errors.New("401 Unauthorized")
+		}
+		return fakeSource{ref: ref}, nil
+	}
+
+	src, err := ResolveSource(context.Background(), "in_process", get,
+		"gcr.io/project/image:tag", "gcr.io/project/image:tag", image.RegistryOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "gcr.io/project/image:tag", src.ref)
+	assert.Equal(t, []int{0, 1, 0}, credentialsSeen, "a credentialed retry refused again must still fall back to anonymous")
 }
