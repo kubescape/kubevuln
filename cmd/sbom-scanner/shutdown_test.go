@@ -20,9 +20,13 @@ type blockingScanner struct {
 	release chan struct{}
 }
 
-func (b *blockingScanner) Health(context.Context, *pb.HealthRequest) (*pb.HealthResponse, error) {
+func (b *blockingScanner) Health(ctx context.Context, _ *pb.HealthRequest) (*pb.HealthResponse, error) {
 	close(b.started)
-	<-b.release
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return &pb.HealthResponse{Ready: true}, nil
 }
 

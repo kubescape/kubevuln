@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"slices"
+	"sync"
 
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
@@ -30,6 +31,7 @@ type sbomID struct {
 
 // MemoryStore implements both CVERepository and SBOMRepository with in-memory storage (maps) to be used for tests
 type MemoryStore struct {
+	mu           sync.RWMutex
 	aps          map[apID]v1beta1.ContainerProfile
 	cveManifests map[cveID]domain.CVEManifest
 	cveSummaries map[cveID]domain.CVEManifest
@@ -49,6 +51,8 @@ var _ ports.SBOMRepository = (*MemoryStore)(nil)
 // SBOMStores reports how many times StoreSBOM was called, so a test can tell an SBOM that
 // was written from one that was only read back.
 func (m *MemoryStore) SBOMStores() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.sbomStores
 }
 
@@ -76,6 +80,8 @@ func (m *MemoryStore) GetContainerProfile(ctx context.Context, namespace string,
 		Namespace: namespace,
 		Name:      name,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.aps[id]; ok {
 		return value, nil
 	}
@@ -94,6 +100,8 @@ func (m *MemoryStore) StoreContainerProfile(ctx context.Context, ap v1beta1.Cont
 		Namespace: ap.Namespace,
 		Name:      ap.Name,
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.aps[id] = ap
 	return nil
 }
@@ -113,6 +121,8 @@ func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVES
 		CVEScannerVersion:  CVEScannerVersion,
 		CVEDBVersion:       CVEDBVersion,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.cveManifests[id]; ok {
 		return value, nil
 	}
@@ -148,6 +158,8 @@ func (m *MemoryStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, _ bo
 		CVEScannerVersion:  cve.CVEScannerVersion,
 		CVEDBVersion:       cve.CVEDBVersion,
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.cveManifests[id] = cve
 	return nil
 }
@@ -175,6 +187,9 @@ func (m *MemoryStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifes
 		CVEDBVersion:       cve.CVEDBVersion,
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if withRelevancy {
 		idSumm := cveID{
 			Name:               cvep.Name,
@@ -198,19 +213,25 @@ func (m *MemoryStore) StoreCVESummaryStub(ctx context.Context, status string) er
 		return domain.ErrMockError
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.summaryStubs = append(m.summaryStubs, status)
 	return nil
 }
 
 // CVESummaryStubs returns the statuses passed to StoreCVESummaryStub, for tests
 func (m *MemoryStore) CVESummaryStubs() []string {
-	return m.summaryStubs
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return slices.Clone(m.summaryStubs)
 }
 
 // CVESummaries returns every manifest handed to StoreCVESummary, so a test can check which
 // one a scan flow summarised without wrapping the repository to intercept the call. Sorted
 // so the result does not depend on Go's randomised map iteration order.
 func (m *MemoryStore) CVESummaries() []domain.CVEManifest {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make([]domain.CVEManifest, 0, len(m.cveSummaries))
 	for _, cve := range m.cveSummaries {
 		out = append(out, cve)
@@ -239,6 +260,8 @@ func (m *MemoryStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion stri
 		Name:               name,
 		SBOMCreatorVersion: SBOMCreatorVersion,
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if value, ok := m.sboms[id]; ok {
 		if value.Content == nil {
 			// APIServerStore always reads back a document (Content: &manifest.Spec.Syft),
@@ -257,8 +280,6 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) e
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.StoreSBOM")
 	defer span.End()
 
-	m.sbomStores++
-
 	if m.storeError {
 		return domain.ErrMockError
 	}
@@ -267,6 +288,9 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) e
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sbomStores++
 	m.sboms[id] = sbom
 	return nil
 }
@@ -279,6 +303,8 @@ func (m *MemoryStore) DeleteSBOM(ctx context.Context, name string) error {
 		return domain.ErrMockError
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id := range m.sboms {
 		if id.Name == name {
 			delete(m.sboms, id)
