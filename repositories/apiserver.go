@@ -75,6 +75,21 @@ const (
 	securityExceptionListCacheKeyPrefix        = "se/"
 )
 
+// labelsCacheCleaningInterval/TTL bound how stale the workload/namespace labels
+// GetWorkloadLabels/GetNamespaceLabels read can be. Unlike securityExceptionListCache, this data
+// has no informer behind it to invalidate on change (a label edit is rare and not otherwise
+// latency-sensitive here), so the TTL alone bounds staleness — same 30s value, for the same
+// reason: close enough to live, while still collapsing a burst of Get()s for the same object
+// into one. Without this cache, a single ScanCP call for an N-container workload issues N
+// identical Get()s for that one workload's labels (BuildExceptionTarget resolves them on every
+// exceptionsCache miss, and that cache is keyed per container, not per workload) — see #919.
+const (
+	labelsCacheCleaningInterval   = 30 * time.Second
+	labelsCacheTTL                = 30 * time.Second
+	workloadLabelsCacheKeyPrefix  = "wl/"
+	namespaceLabelsCacheKeyPrefix = "ns/"
+)
+
 // resourceVersionMetadata mirrors kubescape/storage's
 // softwarecomposition.ResourceVersionMetadata. Passed as GetOptions.ResourceVersion, its
 // file-backed apiserver (pkg/registry/file/storage.go) honours it by reading only the
@@ -95,6 +110,10 @@ type APIServerStore struct {
 	// nil is safe (falls back to always listing, e.g. in tests that construct APIServerStore
 	// literals directly instead of through the constructors below).
 	securityExceptionListCache *cache.Cache
+
+	// labelsCache caches GetWorkloadLabels'/GetNamespaceLabels' Get() results; nil is safe,
+	// same as securityExceptionListCache above.
+	labelsCache *cache.Cache
 
 	// securityExceptionCacheEntries backs the compare-and-swap that keeps a List() in flight
 	// when a CRD change invalidates its cache key from silently re-populating the cache with
@@ -238,6 +257,7 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 		DynamicClient:              dynClient,
 		Namespace:                  namespace,
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
+		labelsCache:                cache.New(labelsCacheCleaningInterval),
 	}
 	store.enableSecurityExceptionCacheInvalidation(context.Background())
 	return store, nil
@@ -348,6 +368,7 @@ func newFakeAPIServerStore(namespace string, storageClient spdxv1beta1.SpdxV1bet
 		}),
 		Namespace:                  namespace,
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
+		labelsCache:                cache.New(labelsCacheCleaningInterval),
 	}
 }
 
@@ -707,10 +728,25 @@ func (a *APIServerStore) fetchClusterSecurityExceptions(ctx context.Context) ([]
 // workload is not found, nil labels are returned (the selector then matches
 // nothing, i.e. the exception is not applied — the safe default for a
 // suppression feature).
+//
+// Served from labelsCache when a fresh entry exists: the labels are the same for every
+// container of the same workload, but BuildExceptionTarget resolves them on every
+// exceptionsCache miss (BackendAdapter.exceptionsCache is keyed per container, not per
+// workload), so without this a single ScanCP call for an N-container workload issues N
+// identical Get()s for one object's labels — see #919. A failed lookup (including NotFound)
+// is never cached, so it self-heals on the next call instead of pinning "unresolved" (and
+// therefore fail-closed/not-applied) for the TTL.
 func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
 	if namespace == "" || kind == "" || name == "" {
 		return nil, nil
 	}
+	cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
+	if a.labelsCache != nil {
+		if cached, ok := a.labelsCache.Get(cacheKey); ok {
+			return cached.(map[string]string), nil
+		}
+	}
+
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
@@ -724,15 +760,29 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// could not be resolved.
 		return nil, err
 	}
-	return obj.GetLabels(), nil
+	labels := obj.GetLabels()
+	if a.labelsCache != nil {
+		a.labelsCache.Set(cacheKey, labels, labelsCacheTTL)
+	}
+	return labels, nil
 }
 
 // GetNamespaceLabels resolves the labels of a namespace so that a
 // ClusterSecurityException's match.namespaceSelector can be evaluated.
+//
+// Served from labelsCache when a fresh entry exists, and a failed lookup is never cached —
+// see GetWorkloadLabels, which this mirrors.
 func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (map[string]string, error) {
 	if name == "" {
 		return nil, nil
 	}
+	cacheKey := namespaceLabelsCacheKeyPrefix + name
+	if a.labelsCache != nil {
+		if cached, ok := a.labelsCache.Get(cacheKey); ok {
+			return cached.(map[string]string), nil
+		}
+	}
+
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
@@ -741,7 +791,11 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 		// GetWorkloadLabels).
 		return nil, err
 	}
-	return obj.GetLabels(), nil
+	labels := obj.GetLabels()
+	if a.labelsCache != nil {
+		a.labelsCache.Set(cacheKey, labels, labelsCacheTTL)
+	}
+	return labels, nil
 }
 
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
