@@ -235,6 +235,7 @@ The main configuration file. All options can be overridden via environment varia
     },
     "maxImageSize": {
       "type": "integer",
+      "minimum": 1,
       "default": 536870912
     },
     "maxQueueDepth": {
@@ -243,6 +244,7 @@ The main configuration file. All options can be overridden via environment varia
     },
     "maxSBOMSize": {
       "type": "integer",
+      "minimum": 1,
       "default": 20971520
     },
     "namespace": {
