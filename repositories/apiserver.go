@@ -30,6 +30,7 @@ import (
 	"github.com/openvex/go-vex/pkg/vex"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -100,6 +101,21 @@ type APIServerStore struct {
 	// its now-stale result afterward — see securityExceptionCacheEntry's doc comment and #733.
 	// Zero value (empty sync.Map) is ready to use, so this needs no constructor initialization.
 	securityExceptionCacheEntries sync.Map // cacheKey (string) -> *securityExceptionCacheEntry
+
+	// securityExceptionGroup deduplicates concurrent callers that miss
+	// securityExceptionListCache for the same key: without it, every one of them repeats the
+	// same List() call instead of sharing the result of whichever one actually runs it. Same
+	// pattern registryauth's credentialCache (#569) and scan.go's SBOM creation (#642) already
+	// use for the identical problem — see #916. Zero value is ready to use.
+	securityExceptionGroup singleflight.Group
+
+	// securityExceptionCacheMissHook, if set, is called synchronously by every caller that
+	// reaches a securityExceptionListCache miss, immediately after it registers with
+	// securityExceptionGroup (see coalescedSecurityExceptionList's onRegistered param) — not
+	// before, which would let a descheduled caller be counted as "joined" before it actually
+	// had. Tests use it as a deterministic barrier to prove real concurrent contention on a
+	// miss, instead of a timing-based sleep — mirrors registryauth's credentialCache.onMiss.
+	securityExceptionCacheMissHook func()
 
 	securityExceptionInformerStop context.CancelFunc
 }
@@ -451,6 +467,12 @@ func unstructuredFromEvent(obj interface{}) *unstructured.Unstructured {
 // never cached, so a transient apiserver hiccup self-heals on the next call instead of being
 // pinned for the TTL.
 func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+	// One shared deadline for both sequential calls below, not one each: fetchSecurityExceptions/
+	// fetchClusterSecurityExceptions each additionally bound the shared fetch they might end up
+	// running to its own 30s (see their doc comments) since that fetch can outlive this specific
+	// caller, but this caller's own wait for either one must not exceed 30s total -- otherwise a
+	// namespaced list that takes the full 30s would let the cluster-wide one that follows it take
+	// up to another 30s, doubling this call's worst case.
 	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -460,13 +482,13 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	var exceptions []sev1beta1.SecurityException
 	if namespace != "" {
 		var err error
-		exceptions, err = a.listSecurityExceptions(ctx, listCtx, namespace)
+		exceptions, err = a.listSecurityExceptions(listCtx, namespace)
 		if err != nil {
 			listErrs = append(listErrs, err)
 		}
 	}
 
-	clusterExceptions, err := a.listClusterSecurityExceptions(ctx, listCtx)
+	clusterExceptions, err := a.listClusterSecurityExceptions(listCtx)
 	if err != nil {
 		listErrs = append(listErrs, err)
 	}
@@ -474,21 +496,111 @@ func (a *APIServerStore) GetSecurityExceptions(ctx context.Context, namespace st
 	return exceptions, clusterExceptions, stderrors.Join(listErrs...)
 }
 
+// coalescedSecurityExceptionList runs fetch — a List()+convert step for one
+// SecurityException/ClusterSecurityException scope — deduplicated against every other
+// concurrent caller racing the same cacheKey via group, so only one of them actually calls
+// fetch; the rest share its result. Same pattern registryauth's credentialCache (#569) and
+// scan.go's SBOM creation (#642) already use for the identical duplicate-work problem — see
+// #916.
+//
+// fetch runs on a context detached from any one particular caller's cancellation/deadline
+// (context.WithoutCancel), mirroring credentialCache.get: one caller's ctx canceling must not
+// abort the shared fetch out from under every other caller racing the same key. Each caller
+// instead races the shared result against its own ctx in the select below, so a caller whose
+// own ctx is canceled while waiting on someone else's fetch returns promptly without affecting
+// that fetch or any other waiter.
+//
+// fetch owns writing a successful result back to its cache itself — it runs at most once per
+// coalesced burst, so that write can't race a sibling call's write for the same key the way it
+// would if every caller wrote its own copy back. A partial result (a non-nil error alongside
+// non-nil, incomplete items) or a hard failure is expected to be left uncached by fetch, and
+// that contract, including the (possibly non-nil) items returned alongside a non-nil error,
+// carries through unchanged to every caller sharing the coalesced result.
+//
+// ctx is checked before DoChan, not just raced against it afterward: fetch runs detached from
+// ctx, so once DoChan starts it as this key's leader it keeps running its own full 30s window
+// regardless of whether this particular caller could still use the result. GetSecurityExceptions
+// calls this twice sequentially against one shared listCtx, so the common way to hit this is the
+// namespaced call alone consuming that whole budget -- without this check, the cluster-wide call
+// right after it would still start (and, absent another caller already racing that key, become
+// leader for) a List() nothing can use, against an apiserver that just demonstrated it's slow.
+//
+// onRegistered, if non-nil, is called synchronously by every caller immediately after its own
+// DoChan call returns -- i.e. once it has actually registered with group for cacheKey, whether
+// as leader or as a joiner of an already in-flight call. It exists purely for tests: firing it
+// any earlier (e.g. before DoChan, at the outer cache-miss check) would let a caller be
+// descheduled between that earlier point and its actual DoChan call, so a test barrier gated on
+// it would only prove every caller had *reached* this function, not that every one of them had
+// *joined* the same singleflight call -- the leader could finish and be forgotten by group in
+// between, leaving a still-descheduled caller to start a fresh, ungrouped call once it finally
+// resumes.
+func coalescedSecurityExceptionList[T any](ctx context.Context, group *singleflight.Group, cacheKey string, onRegistered func(), fetch func(context.Context) (T, error)) (T, error) {
+	if err := ctx.Err(); err != nil {
+		var zero T
+		return zero, err
+	}
+
+	ch := group.DoChan(cacheKey, func() (interface{}, error) {
+		return fetch(context.WithoutCancel(ctx))
+	})
+	if onRegistered != nil {
+		onRegistered()
+	}
+
+	select {
+	case res := <-ch:
+		return res.Val.(T), res.Err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	}
+}
+
 // listSecurityExceptions returns the namespaced SecurityExceptions for namespace, from
-// securityExceptionListCache when a fresh entry exists. The write back to the cache after a
-// List() is conditional on no invalidation having raced it (see trySetSecurityExceptionCache) -
-// without that, a List() started just before a SecurityException change in namespace would
-// silently re-populate the cache with the pre-change result after the informer had already
-// evicted it — see #733.
-func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, namespace string) ([]sev1beta1.SecurityException, error) {
+// securityExceptionListCache when a fresh entry exists, otherwise via
+// coalescedSecurityExceptionList so concurrent callers racing the same cache-miss share one
+// List() instead of each repeating it (see #916).
+func (a *APIServerStore) listSecurityExceptions(ctx context.Context, namespace string) ([]sev1beta1.SecurityException, error) {
 	cacheKey := securityExceptionListCacheKeyPrefix + namespace
-	var seenGeneration uint64
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(cacheKey); ok {
 			return cached.([]sev1beta1.SecurityException), nil
 		}
+	}
+	return coalescedSecurityExceptionList(ctx, &a.securityExceptionGroup, cacheKey, a.securityExceptionCacheMissHook,
+		func(fetchCtx context.Context) ([]sev1beta1.SecurityException, error) {
+			return a.fetchSecurityExceptions(fetchCtx, cacheKey, namespace)
+		})
+}
+
+// fetchSecurityExceptions is listSecurityExceptions' cache-miss path, run by
+// coalescedSecurityExceptionList at most once per coalesced burst of concurrent callers
+// sharing cacheKey: it re-checks the cache first (a sibling call for cacheKey, no longer
+// in flight by the time this one started, may have already populated it — mirroring
+// credentialCache.get's own re-check for the same reason), then List()s and converts
+// namespace's SecurityExceptions, and — on full success — writes the result back to
+// securityExceptionListCache, conditional on no invalidation having raced it (see
+// trySetSecurityExceptionCache) — without that, a List() started just before a
+// SecurityException change in namespace would silently re-populate the cache with the
+// pre-change result after the informer had already evicted it — see #733.
+//
+// ctx is already detached from any one particular caller (context.WithoutCancel, applied by
+// coalescedSecurityExceptionList); this bounds it with its own 30s timeout, matching
+// GetSecurityExceptions' previous shared listCtx.
+func (a *APIServerStore) fetchSecurityExceptions(ctx context.Context, cacheKey, namespace string) ([]sev1beta1.SecurityException, error) {
+	if a.securityExceptionListCache != nil {
+		if cached, ok := a.securityExceptionListCache.Get(cacheKey); ok {
+			return cached.([]sev1beta1.SecurityException), nil
+		}
+	}
+
+	var seenGeneration uint64
+	if a.securityExceptionListCache != nil {
 		seenGeneration = a.beginSecurityExceptionCacheRefresh(cacheKey)
 	}
+
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	seList, err := a.DynamicClient.Resource(securityExceptionGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
 	if err != nil {
@@ -525,18 +637,38 @@ func (a *APIServerStore) listSecurityExceptions(ctx, listCtx context.Context, na
 }
 
 // listClusterSecurityExceptions returns every ClusterSecurityException in the cluster, from
-// securityExceptionListCache when a fresh entry exists. The result is the same regardless of
-// which workload/namespace triggered the call, so it is cached under a single cluster-wide key.
-// The write back to the cache after a List() is conditional on no invalidation having raced it -
-// see listSecurityExceptions' and trySetSecurityExceptionCache's doc comments, and #733.
-func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
-	var seenGeneration uint64
+// securityExceptionListCache when a fresh entry exists, otherwise via
+// coalescedSecurityExceptionList so concurrent callers racing the same cache-miss share one
+// List() instead of each repeating it (see #916). The result is the same regardless of which
+// workload/namespace triggered the call, so it is cached — and coalesced — under a single
+// cluster-wide key.
+func (a *APIServerStore) listClusterSecurityExceptions(ctx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
 	if a.securityExceptionListCache != nil {
 		if cached, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey); ok {
 			return cached.([]sev1beta1.ClusterSecurityException), nil
 		}
+	}
+	return coalescedSecurityExceptionList(ctx, &a.securityExceptionGroup, clusterSecurityExceptionListCacheKey,
+		a.securityExceptionCacheMissHook, a.fetchClusterSecurityExceptions)
+}
+
+// fetchClusterSecurityExceptions is listClusterSecurityExceptions' cache-miss path, run by
+// coalescedSecurityExceptionList at most once per coalesced burst — see fetchSecurityExceptions
+// and #733, #916, which this mirrors for the cluster-wide scope.
+func (a *APIServerStore) fetchClusterSecurityExceptions(ctx context.Context) ([]sev1beta1.ClusterSecurityException, error) {
+	if a.securityExceptionListCache != nil {
+		if cached, ok := a.securityExceptionListCache.Get(clusterSecurityExceptionListCacheKey); ok {
+			return cached.([]sev1beta1.ClusterSecurityException), nil
+		}
+	}
+
+	var seenGeneration uint64
+	if a.securityExceptionListCache != nil {
 		seenGeneration = a.beginSecurityExceptionCacheRefresh(clusterSecurityExceptionListCacheKey)
 	}
+
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	cseList, err := a.DynamicClient.Resource(clusterSecurityExceptionGVR).List(listCtx, metav1.ListOptions{})
 	if err != nil {
@@ -557,7 +689,7 @@ func (a *APIServerStore) listClusterSecurityExceptions(ctx, listCtx context.Cont
 		clusterExceptions = append(clusterExceptions, cse)
 	}
 
-	// See listSecurityExceptions: a dropped exception is an incomplete set, reported and
+	// See fetchSecurityExceptions: a dropped exception is an incomplete set, reported and
 	// left uncached the same way a failed List() is.
 	if len(convErrs) > 0 {
 		return clusterExceptions, stderrors.Join(convErrs...)

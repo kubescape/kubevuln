@@ -168,6 +168,154 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 	assert.Equal(t, 2, calls, "a different workload should not hit the cache")
 }
 
+// TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses is the regression test for
+// #916: concurrent callers sharing a cache key (the same workload/container/image reached
+// through more than one scan path close together, e.g. ScanCP and ScanCVE) must collapse into
+// a single backend fetch and CRD lookup instead of each independently repeating both.
+//
+// Only the caller whose own closure actually ran the fetch reports the real ExceptionStats;
+// every other caller sharing the coalesced result reports the zero value, the same convention
+// a cache hit already uses ("there is nothing new to report this call") -- this asserts exactly
+// one of the n callers sees the real (non-nil ExpiredBySource) stats.
+//
+// getCVEExceptionsFunc only ever runs inside the one goroutine singleflight picks as leader
+// for the cache key, so blocking it -- until every one of the n callers has passed the
+// (non-blocking) exceptionsCacheMissHook below -- is what actually forces genuine contention:
+// the leader cannot finish and release the singleflight call until every other caller has had
+// the chance to reach DoChan and join it. A hook that blocked callers itself, before any of
+// them could reach DoChan, would only prove they all *arrived*, not that they *overlapped* --
+// the scheduler is free to run each one to completion before waking the next, especially on a
+// CPU-constrained CI runner. Mirrors registryauth's credentialCache.onMiss + fetch split, used
+// the same way in #569's own test.
+func TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses(t *testing.T) {
+	expired := metav1.NewTime(time.Now().Add(-time.Hour))
+	const n = 20
+
+	var joined int32
+	allJoined := make(chan struct{})
+	var crdCalls, backendCalls int32
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &testSecurityExceptionRepo{
+		getSecurityExceptions: func(context.Context, string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
+			atomic.AddInt32(&crdCalls, 1)
+			return []sev1beta1.SecurityException{{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "namespace-ns"},
+				Spec: sev1beta1.SecurityExceptionSpec{
+					ExpiresAt: &expired,
+					Vulnerabilities: []sev1beta1.VulnerabilityException{
+						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-EXPIRED"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+					},
+				},
+			}}, nil, nil
+		},
+	})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		atomic.AddInt32(&backendCalls, 1)
+		<-allJoined
+		return nil, nil
+	}
+	a.exceptionsCacheMissHook = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
+
+	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
+
+	var wg sync.WaitGroup
+	stats := make([]domain.ExceptionStats, n)
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, stats[i], errs[i] = a.GetCVEExceptions(ctx)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "call %d", i)
+	}
+	assert.Equal(t, int32(1), atomic.LoadInt32(&backendCalls),
+		"N concurrent misses for the same cache key must share a single backend fetch")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&crdCalls),
+		"N concurrent misses for the same cache key must share a single CRD lookup")
+
+	realStats := 0
+	for i, s := range stats {
+		if s.ExpiredBySource != nil {
+			realStats++
+			assert.Equal(t, 1, s.ExpiredBySource["SecurityException"], "call %d", i)
+		}
+	}
+	assert.Equal(t, 1, realStats,
+		"only the caller whose own closure ran the fetch should report non-zero stats; every other caller shares the zero value, like a cache hit")
+}
+
+// TestBackendAdapter_GetCVEExceptions_CallerCancellationDoesNotAbortSharedFetch is a
+// regression test for #916: GetCVEExceptions' fetch is now shared across every concurrent
+// caller racing the same cache-miss key (see exceptionsGroup), so one caller's ctx canceling
+// while waiting on someone else's in-flight fetch must not abort that fetch or affect any other
+// waiter -- only that one caller's own wait ends early, with its own ctx error.
+func TestBackendAdapter_GetCVEExceptions_CallerCancellationDoesNotAbortSharedFetch(t *testing.T) {
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
+	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		close(fetchStarted)
+		<-releaseFetch
+		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	}
+	baseCtx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-c/namespace-ns/deployment-d",
+		ContainerName: "container",
+	})
+
+	// leader: starts the fetch and blocks in it until releaseFetch closes.
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		_, _, err := a.GetCVEExceptions(baseCtx)
+		assert.NoError(t, err)
+	}()
+
+	select {
+	case <-fetchStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetch never reached the point where it should be in flight")
+	}
+
+	// follower: joins the same in-flight fetch, then has its own ctx canceled.
+	followerCtx, cancel := context.WithCancel(baseCtx)
+	followerDone := make(chan error, 1)
+	go func() {
+		_, _, err := a.GetCVEExceptions(followerCtx)
+		followerDone <- err
+	}()
+
+	cancel()
+
+	select {
+	case err := <-followerDone:
+		require.ErrorIs(t, err, context.Canceled, "a canceled follower must return promptly with its own ctx error")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the canceled follower never returned")
+	}
+
+	select {
+	case <-leaderDone:
+		t.Fatal("the leader must not have completed yet -- it is still blocked in the fetch")
+	default:
+	}
+
+	close(releaseFetch)
+	select {
+	case <-leaderDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the leader never returned after the fetch was released")
+	}
+}
+
 // TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry is a regression test:
 // ConvertToVulnerabilityExceptionPolicies only checks an exception's expiresAt on a cache
 // miss, so a cache entry that outlives the CRD exception it was built from would keep

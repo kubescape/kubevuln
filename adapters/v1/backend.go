@@ -34,6 +34,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/singleflight"
 )
 
 type BackendAdapter struct {
@@ -46,7 +47,22 @@ type BackendAdapter struct {
 	accessKey             string
 	securityExceptionRepo ports.SecurityExceptionRepository
 	exceptionsCache       *cache.Cache
-	httpClient            httputils.IHttpClient
+	// exceptionsGroup deduplicates concurrent GetCVEExceptions callers that miss
+	// exceptionsCache for the same cacheKey (the same workload/container/image reached
+	// through more than one scan path close together): without it, each of them repeats the
+	// same backend HTTP call and CRD lookup instead of sharing the result of whichever one
+	// actually runs it. Same pattern registryauth's credentialCache (#569) and this
+	// package's GetSecurityExceptions layer (repositories/apiserver.go) already use for the
+	// identical problem — see #916. Zero value is ready to use.
+	exceptionsGroup singleflight.Group
+	// exceptionsCacheMissHook, if set, is called synchronously by every cacheable caller that
+	// reaches an exceptionsCache miss, immediately after it registers with exceptionsGroup --
+	// not before, which would let a descheduled caller be counted as "joined" before it
+	// actually had. Tests use it as a deterministic barrier to prove real concurrent
+	// contention on a miss, instead of a timing-based sleep — mirrors registryauth's
+	// credentialCache.onMiss.
+	exceptionsCacheMissHook func()
+	httpClient              httputils.IHttpClient
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -246,8 +262,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
 	// Registry scans carry no Wlid (registryScanCommandToScanCommand never sets
 	// it), which would otherwise collapse every scanned image onto the same
-	// cache key ("<accountID>/////"). Skip caching entirely for them rather than
-	// let unrelated images share exceptions.
+	// cache key ("<accountID>/////"). Skip caching -- and the deduplication below,
+	// which shares the same key -- entirely for them rather than let unrelated
+	// images share exceptions.
 	cacheable := workload.Wlid != ""
 	cacheKey := strings.Join([]string{
 		a.clusterConfig.AccountID,
@@ -259,14 +276,80 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		workload.ImageTagNormalized,
 	}, "/")
 
-	if cacheable && a.exceptionsCache != nil {
+	if !cacheable {
+		result, err := a.fetchCVEExceptions(ctx, workload, namespace, cacheKey, cacheable)
+		return result.exceptions, result.stats, err
+	}
+
+	if a.exceptionsCache != nil {
 		if cached, ok := a.exceptionsCache.Get(cacheKey); ok {
 			// A cache hit skips CRD re-evaluation entirely, so there is nothing new to
 			// report this call; the zero value is correct, not a missing measurement.
 			return cached.(domain.CVEExceptions), domain.ExceptionStats{}, nil
 		}
 	}
+	// Concurrent callers sharing cacheKey (e.g. the same container reached through both
+	// ScanCP and ScanCVE close together) are collapsed into a single fetch via
+	// exceptionsGroup, instead of each independently repeating the backend call and the CRD
+	// lookup — see #916. The fetch runs detached from this particular caller's
+	// cancellation/deadline (context.WithoutCancel), the same reason
+	// repositories/apiserver.go's coalescedSecurityExceptionList does: it may end up serving
+	// callers other than this one, so it must not be tied to this one's ctx.
+	ran := false
+	ch := a.exceptionsGroup.DoChan(cacheKey, func() (interface{}, error) {
+		ran = true
+		return a.fetchCVEExceptions(context.WithoutCancel(ctx), workload, namespace, cacheKey, cacheable)
+	})
+	// Fired after DoChan, not before: this caller has now actually registered with
+	// exceptionsGroup for cacheKey (as leader or as a joiner of an already in-flight call).
+	// Firing any earlier would let a caller be descheduled between that earlier point and its
+	// real DoChan call, so a test barrier gated on it would only prove every caller had
+	// *reached* this function, not that every one of them had *joined* the same singleflight
+	// call.
+	if a.exceptionsCacheMissHook != nil {
+		a.exceptionsCacheMissHook()
+	}
 
+	select {
+	case res := <-ch:
+		result := res.Val.(cveExceptionsFetchResult)
+		stats := result.stats
+		if !ran {
+			// This caller shared another goroutine's fetch and triggered no CRD
+			// re-evaluation of its own -- the same reason a cache hit above reports
+			// the zero value.
+			stats = domain.ExceptionStats{}
+		}
+		return result.exceptions, stats, res.Err
+	case <-ctx.Done():
+		return nil, domain.ExceptionStats{}, ctx.Err()
+	}
+}
+
+// cveExceptionsFetchResult is the outcome one un-deduplicated GetCVEExceptions cache miss
+// computes: the merged exception list plus the stats describing the CRD-based exceptions that
+// computation found (see ConvertToVulnerabilityExceptionPolicies' crdStats).
+type cveExceptionsFetchResult struct {
+	exceptions domain.CVEExceptions
+	stats      domain.ExceptionStats
+}
+
+// fetchCVEExceptions is GetCVEExceptions' cache-miss path: fetch cloud-side exceptions via
+// getCVEExceptionsFunc, merge in CRD-based SecurityException/ClusterSecurityException policies
+// via GetSecurityExceptions, and -- unless the result is uncacheable -- write it back to
+// exceptionsCache under cacheKey. When cacheable is true, this runs at most once per coalesced
+// burst of concurrent GetCVEExceptions callers sharing cacheKey (see GetCVEExceptions and
+// #916), which is why the cache write lives here rather than in every caller; when cacheable is
+// false (a registry scan, which has no per-workload identity to key on), GetCVEExceptions calls
+// this directly, uncoalesced, exactly as before this existed.
+//
+// A non-nil error with a zero-value result means the cloud exceptions fetch itself failed. A
+// degraded result (a CRD list error, or an unresolved object/namespace selector) is signalled
+// by returning domain.ErrExceptionsDegraded alongside a populated but deliberately uncached
+// result: GetCVEExceptions' caller (ScanService.applyExceptionsToManifest) still needs that
+// partial list, but a coalesced degraded result must not be read back from the cache during
+// exceptionsCacheTTL by a caller that didn't compute it.
+func (a *BackendAdapter) fetchCVEExceptions(ctx context.Context, workload domain.ScanCommand, namespace, cacheKey string, cacheable bool) (cveExceptionsFetchResult, error) {
 	designator := identifiers.PortalDesignator{
 		DesignatorType: identifiers.DesignatorAttribute,
 		Attributes: map[string]string{
@@ -281,7 +364,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 
 	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
-		return nil, domain.ExceptionStats{}, err
+		return cveExceptionsFetchResult{}, err
 	}
 
 	// Merge CRD-based exceptions
@@ -313,20 +396,22 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		}
 	}
 
+	result := cveExceptionsFetchResult{exceptions: domain.CVEExceptions(vulnExceptionList), stats: stats}
+
 	// A non-positive TTL means a policy has already expired by the time we're about to
 	// cache it (e.g. lost a race with its own expiresAt between conversion and this
 	// point). akyoto/cache only reaps entries on its cleaning-interval sweep, not the
 	// instant their TTL elapses, so a Set with ttl<=0 would still be readable as a cache
 	// hit until the next sweep -- skip the write entirely rather than rely on that.
 	if ttl := cacheTTLFor(vulnExceptionList, exceptionsCacheTTL); cacheable && a.exceptionsCache != nil && ttl > 0 {
-		a.exceptionsCache.Set(cacheKey, domain.CVEExceptions(vulnExceptionList), ttl)
+		a.exceptionsCache.Set(cacheKey, result.exceptions, ttl)
 	}
 
 	if degraded {
-		return vulnExceptionList, stats, domain.ErrExceptionsDegraded
+		return result, domain.ErrExceptionsDegraded
 	}
 
-	return vulnExceptionList, stats, nil
+	return result, nil
 }
 
 // excludeCloudCoveredPolicies drops CRD-derived policies that cover a CVE the cloud-fetched

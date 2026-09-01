@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2871,6 +2872,191 @@ func TestAPIServerStore_GetSecurityExceptions_DoesNotCacheListFailures(t *testin
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
+// TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses is the regression test
+// for #916: concurrent callers racing the same namespaced cache-miss key must share a single
+// List() call instead of every one of them independently repeating it. #510's cache alone only
+// collapses List() calls spread out over time (repeated calls within the TTL); it does nothing
+// for N callers that all miss the same key at once, which scanConcurrency > 1 makes routine --
+// every securityExceptionListCacheTTL (30s) window, and on every real SecurityException CRD
+// change, since invalidation forces every in-flight scan into the same miss window together.
+//
+// This calls listSecurityExceptions directly (rather than through GetSecurityExceptions, which
+// also calls listClusterSecurityExceptions afterward) so securityExceptionCacheMissHook's
+// barrier -- every one of the n callers blocks in it until all n have arrived -- only has to
+// count one hook hit per caller: GetSecurityExceptions' two calls are sequential within one
+// goroutine, so a hook that blocks synchronously would only ever see the first of each
+// goroutine's two hits before that goroutine stalls, and could never reach a threshold sized
+// for both.
+func TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR: "SecurityExceptionList",
+	})
+
+	const n = 20
+	var joined int32
+	allJoined := make(chan struct{})
+	var listCalls int32
+	// The reactor only ever runs inside the one goroutine singleflight picks as leader for
+	// cacheKey, so blocking it here -- until every one of the n callers has passed the
+	// (non-blocking) miss hook below -- is what actually forces genuine contention: the leader
+	// cannot finish and release the singleflight call until every other caller has had the
+	// chance to reach DoChan and join it. A hook that blocked callers itself, before any of
+	// them could reach DoChan, would only prove they all *arrived*, not that they *overlapped*
+	// -- the scheduler is free to run each one to completion before waking the next, especially
+	// on a CPU-constrained CI runner, which is exactly what let all n become their own leader
+	// despite such a hook faithfully unblocking at n. Mirrors registryauth's
+	// credentialCache.onMiss + fetch split, used the same way in #569's own test.
+	dynClient.PrependReactor("list", "securityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&listCalls, 1)
+		<-allJoined
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+	a.securityExceptionCacheMissHook = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = a.listSecurityExceptions(context.Background(), "ns-a")
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "call %d", i)
+	}
+	assert.Equal(t, int32(1), atomic.LoadInt32(&listCalls),
+		"N concurrent misses for the same namespace must share a single List() call")
+}
+
+// TestAPIServerStore_ListClusterSecurityExceptions_CoalescesConcurrentMisses is the
+// cluster-scoped counterpart of the test above. It matters more in practice than the
+// namespaced case: clusterSecurityExceptionListCacheKey is a single key shared by every
+// namespace's scans in the process, so a miss window here is contended by the whole process'
+// concurrent scan volume, not just one namespace's.
+func TestAPIServerStore_ListClusterSecurityExceptions_CoalescesConcurrentMisses(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	const n = 20
+	var joined int32
+	allJoined := make(chan struct{})
+	var listCalls int32
+	// See TestAPIServerStore_ListSecurityExceptions_CoalescesConcurrentMisses for why the
+	// blocking lives in the reactor (which only the singleflight leader ever reaches), not in
+	// the miss hook (which every caller reaches, and must not block, or none of them can ever
+	// race each other into DoChan).
+	dynClient.PrependReactor("list", "clustersecurityexceptions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&listCalls, 1)
+		<-allJoined
+		return false, nil, nil
+	})
+
+	a := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+	a.securityExceptionCacheMissHook = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = a.listClusterSecurityExceptions(context.Background())
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "call %d", i)
+	}
+	assert.Equal(t, int32(1), atomic.LoadInt32(&listCalls),
+		"N concurrent misses for the cluster-wide list must share a single List() call")
+}
+
+// TestAPIServerStore_GetSecurityExceptions_CallerCancellationDoesNotAbortSharedFetch is a
+// regression test for #916: GetSecurityExceptions' underlying List() calls are now shared
+// across every concurrent caller racing the same cache-miss key (see
+// coalescedSecurityExceptionList), so one caller's ctx canceling must not cancel the List()
+// call out from under every other caller sharing it -- only that one caller's own wait ends
+// early, with its own ctx error. Before #916 this asserted the opposite (that cancellation did
+// propagate to the List() call): with only one caller ever running "the" call, that was
+// correct; sharing a call across callers means it can no longer belong to any single one of
+// them.
+func TestAPIServerStore_GetSecurityExceptions_CallerCancellationDoesNotAbortSharedFetch(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
+
+	listInFlight := make(chan struct{})
+	releaseList := make(chan struct{})
+	var listCtx context.Context
+	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
+		clusterSecurityExceptionGVR: {
+			ResourceInterface: dynClient.Resource(clusterSecurityExceptionGVR),
+			hook: func(ctx context.Context) {
+				listCtx = ctx
+				close(listInFlight)
+				<-releaseList
+			},
+		},
+	}
+
+	a := &APIServerStore{DynamicClient: wrapped, Namespace: "kubescape"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := a.GetSecurityExceptions(ctx, "kubescape")
+		done <- err
+	}()
+
+	select {
+	case <-listInFlight:
+	case <-time.After(5 * time.Second):
+		t.Fatal("List() never reached the point where it should be in flight")
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled, "a caller whose own ctx is canceled must return promptly with its own ctx error")
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetSecurityExceptions never returned after its own ctx was canceled")
+	}
+
+	select {
+	case <-listCtx.Done():
+		t.Error("the shared List() call must not be canceled by one caller's ctx cancellation")
+	default:
+	}
+
+	close(releaseList) // let the still-running fetch finish so it doesn't leak past the test
+}
+
 // TestAPIServerStore_ListSecurityExceptions_DoesNotRepopulateAfterRacingInvalidation is a
 // regression test for #733: enableSecurityExceptionCacheInvalidation evicts a cache key as soon
 // as its CRD changes, but a List() already in flight for that key when the change lands used to
@@ -3135,26 +3321,6 @@ func requireHookObservesCancellation(t *testing.T, cancel func()) (hook func(ctx
 		cancel()
 		assert.ErrorIs(t, ctx.Err(), context.Canceled, "canceling the caller's ctx must cancel the ctx passed to the K8s API call")
 	}, &calledFlag
-}
-
-func TestAPIServerStore_GetSecurityExceptions_HonorsCallerCancellation(t *testing.T) {
-	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
-		securityExceptionGVR:        "SecurityExceptionList",
-		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
-	})
-	wrapped := &ctxCapturingDynamicClient{Interface: dynClient}
-	a := &APIServerStore{DynamicClient: wrapped, Namespace: "kubescape"}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	hook, called := requireHookObservesCancellation(t, cancel)
-	wrapped.resources = map[schema.GroupVersionResource]*ctxCapturingResource{
-		clusterSecurityExceptionGVR: {ResourceInterface: dynClient.Resource(clusterSecurityExceptionGVR), hook: hook},
-	}
-
-	_, _, err := a.GetSecurityExceptions(ctx, "kubescape")
-	require.NoError(t, err)
-	require.True(t, *called, "the List call the hook was attached to must have run")
 }
 
 func TestAPIServerStore_GetWorkloadLabels_HonorsCallerCancellation(t *testing.T) {
