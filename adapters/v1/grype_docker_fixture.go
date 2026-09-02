@@ -91,6 +91,7 @@ func startGrypeOfflineDBContainer(ctx context.Context) (port string, terminate f
 
 	mappedPort, err := container.MappedPort(ctx, "8080")
 	if err != nil {
+		_ = container.Terminate(ctx)
 		return "", terminate, err
 	}
 
