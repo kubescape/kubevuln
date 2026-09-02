@@ -259,7 +259,6 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 		securityExceptionListCache: cache.New(securityExceptionListCacheCleaningInterval),
 		labelsCache:                cache.New(labelsCacheCleaningInterval),
 	}
-	store.enableSecurityExceptionCacheInvalidation(context.Background())
 	return store, nil
 }
 
@@ -376,7 +375,10 @@ func NewFakeAPIServerStorage(namespace string, objects ...runtime.Object) *APISe
 	return newFakeAPIServerStore(namespace, newFakeStorageClientset(objects...).SpdxV1beta1())
 }
 
-func (a *APIServerStore) enableSecurityExceptionCacheInvalidation(ctx context.Context) {
+// EnableSecurityExceptionCacheInvalidation starts background informers to invalidate cached
+// SecurityExceptions and ClusterSecurityExceptions when changes occur on the cluster.
+// It should only be called when riskAcceptance integration is actively enabled.
+func (a *APIServerStore) EnableSecurityExceptionCacheInvalidation(ctx context.Context) {
 	if a == nil || a.DynamicClient == nil || a.securityExceptionListCache == nil || a.securityExceptionInformerStop != nil {
 		return
 	}

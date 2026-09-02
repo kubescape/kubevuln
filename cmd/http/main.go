@@ -107,6 +107,7 @@ func main() {
 	riskAcceptanceActive := isRiskAcceptanceActive(storage, c.RiskAcceptance)
 	if riskAcceptanceActive {
 		seRepo = storage
+		storage.EnableSecurityExceptionCacheInvalidation(ctx)
 		logger.L().Info("SecurityException CRD integration enabled")
 
 		// Event recording is best-effort: a confirmed suppression is always logged
