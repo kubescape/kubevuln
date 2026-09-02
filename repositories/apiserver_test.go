@@ -5623,3 +5623,65 @@ func TestCalculateVexCanonicalHash_NilAndEmptyStatementsAgree(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, nilHash, emptyHash)
 }
+
+func TestAPIServerStore_EnableSecurityExceptionCacheInvalidation(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	store := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	assert.Nil(t, store.securityExceptionInformerStop, "informer stop func must be nil before enabling")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store.EnableSecurityExceptionCacheInvalidation(ctx)
+	assert.NotNil(t, store.securityExceptionInformerStop, "informer stop func must be set after enabling")
+
+	// Replace the stop function with a sentinel to verify that subsequent calls do not overwrite it.
+	var sentinelCalled bool
+	store.securityExceptionInformerStop = func() {
+		sentinelCalled = true
+	}
+
+	// Enabling again should be a no-op and not overwrite the stop func
+	store.EnableSecurityExceptionCacheInvalidation(ctx)
+	store.securityExceptionInformerStop()
+	assert.True(t, sentinelCalled, "subsequent calls must not overwrite existing stop func")
+}
+
+func TestAPIServerStore_EnableSecurityExceptionCacheInvalidation_Concurrent(t *testing.T) {
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	})
+
+	store := &APIServerStore{
+		DynamicClient:              dynClient,
+		Namespace:                  "kubescape",
+		securityExceptionListCache: cache.New(time.Minute),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			store.EnableSecurityExceptionCacheInvalidation(ctx)
+		}()
+	}
+	wg.Wait()
+
+	assert.NotNil(t, store.securityExceptionInformerStop, "informer stop func must be set after concurrent enable calls")
+}
+
+
