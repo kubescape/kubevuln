@@ -152,9 +152,14 @@ func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
 	waitForNotUpdating(t, g)
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Same(t, newStore, g.store, "the new provider from loadDB must be installed as the active store")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store must be closed exactly once after the swap")
+	g.mu.RUnlock()
+
+	// finishUpdate closes the superseded store after releasing the guard, so give that a
+	// moment to land instead of racing it right after waitForNotUpdating returns.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the previous store must be closed exactly once after the swap")
 	assert.Equal(t, int32(0), atomic.LoadInt32(&newStore.closed), "the newly installed store must not be closed")
 }
 
@@ -200,10 +205,15 @@ func Test_grypeAdapter_Ready_treatsStatusErrorAsFailure(t *testing.T) {
 	require.False(t, g.Ready(ctx))
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Nil(t, g.store, "a load whose status carries an error must not be installed as the active store")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&badStore.closed), "the unusable store must be closed rather than leaked")
 	assert.True(t, g.nextUpdateAttempt.Before(time.Now().Add(6*time.Minute)), "must schedule a short retry, not the 24h success interval")
+	g.mu.RUnlock()
+
+	// Ready() unblocks as soon as the guard is released, which finishUpdate does before
+	// closing the rejected store, so give the close a moment to land rather than racing it.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&badStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the unusable store must be closed rather than leaked")
 }
 
 // Concurrent readiness probes racing Ready() while an update is in flight must not launch a
@@ -316,9 +326,12 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 	}, 3*time.Second, 15*time.Millisecond, "once the stuck load releases loadMu, a retry installs a fresh DB")
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Equal(t, int32(2), atomic.LoadInt32(&loadCalls), "exactly one load ran after the stuck one was released")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the superseded store is closed once the new one is installed")
+	g.mu.RUnlock()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the superseded store is closed once the new one is installed")
 }
 
 // A load that is slow but returns within stuckUpdateTimeout is installed normally: the
@@ -342,9 +355,12 @@ func Test_grypeAdapter_Ready_slowLoadWithinTimeoutStillInstalls(t *testing.T) {
 	waitForNotUpdating(t, g)
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Same(t, newStore, g.store, "a slow-but-returning load must still be installed")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store is closed after the swap")
+	g.mu.RUnlock()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the previous store is closed after the swap")
 }
 
 // A load that finally returns after updateDBBackground abandoned it as stuck must be
