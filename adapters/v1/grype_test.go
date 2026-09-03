@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -19,11 +18,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability/mock"
 	"github.com/anchore/syft/syft/cpe"
 	syftPkg "github.com/anchore/syft/syft/pkg"
-	"github.com/google/uuid"
-	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
-	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
