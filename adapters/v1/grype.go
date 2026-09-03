@@ -152,11 +152,11 @@ func buildTrustedVendorSet(vendors []string) map[distro.Type]bool {
 // port mapping, ...) -- should check for it with errors.Is.
 //
 // The Docker-container-backed grype-DB fixture that returns this (NewGrypeAdapterFixedDB
-// and friends) lives in grype_docker_fixture.go, gated behind the !nodockerfixture build
-// tag so its testcontainers-go/docker/docker dependency never reaches the production binary
-// (see #929) -- but the sentinel stays here, ungated, since grype_test.go and
-// core/services/scan_test.go both need to check errors.Is(err, ErrDockerUnavailable)
-// regardless of that tag.
+// and friends) lives in grype_docker_fixture.go, gated behind the dockerfixture build tag
+// so its testcontainers-go/docker/docker dependency never reaches the production binary
+// by default (see #929) -- but the sentinel stays here, ungated, since tests in grype_test.go
+// and core/services/scan_test.go both need to check errors.Is(err, ErrDockerUnavailable)
+// regardless of build tags.
 var ErrDockerUnavailable = errors.New("container runtime unavailable")
 
 func (g *GrypeAdapter) dbVersionLocked() string {

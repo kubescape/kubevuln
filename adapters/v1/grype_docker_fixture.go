@@ -1,19 +1,14 @@
-//go:build !nodockerfixture
+//go:build dockerfixture
 
 // NewGrypeAdapterFixedDB and its helpers below spin up a real, pinned grype-DB container via
-// testcontainers-go so grype_test.go and core/services/scan_test.go can exercise GrypeAdapter
-// against a real vulnerability DB instead of the network. They exist only for tests -- no
-// production code path calls them -- but living in an ordinary .go file meant
-// testcontainers-go's own dependency tree (github.com/docker/docker and friends) was compiled
-// into the production kubevuln binary regardless, carrying whatever CVEs that tree currently
-// has for a binary that can never actually reach them (see #929; contrast with #854, which is
-// a genuinely reachable one).
+// testcontainers-go so integration tests can exercise GrypeAdapter against a real vulnerability
+// DB instead of the network. They exist only for tests -- no production code path calls them.
 //
-// The !nodockerfixture build tag keeps this file part of the default build -- go test ./...
-// (as CI already runs it, unchanged) still compiles and runs these tests exactly as before --
-// while make build and the Dockerfiles pass -tags nodockerfixture specifically for the
-// binaries that ship, excluding this file (and therefore testcontainers-go) from them. See
-// Makefile's build target and build/Dockerfile.
+// The dockerfixture build tag makes this fixture opt-in -- an untagged production build (`go build
+// ./cmd/http`) or dependency check (`go list -deps ./cmd/http/...`) excludes this file and its
+// testcontainers-go/docker/docker dependencies by default (see #929). Tests requiring the real
+// Docker container fixture carry the `dockerfixture` build tag and are run via `go test -tags
+// dockerfixture ./...` (or `make test`).
 package v1
 
 import (

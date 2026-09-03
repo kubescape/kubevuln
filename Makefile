@@ -6,16 +6,15 @@ TAG=v0.0.0
 
 .PHONY: build test vet lint lint-all verify verify-image govulncheck
 
-# nodockerfixture excludes adapters/v1/grype_docker_fixture.go's testcontainers-go-backed
-# grype-DB test fixture from the shipped binary -- `go test` (below, untagged) still compiles
-# and runs it exactly as before. See #929: without this, testcontainers-go's own docker/docker
-# dependency was shipped in a binary that never actually calls it, keeping the binary's
-# govulncheck scan permanently red over CVEs it can never reach.
+# The dockerfixture build tag makes adapters/v1's testcontainers-go-backed grype-DB fixture opt-in.
+# Production builds (`build` target below, untagged) exclude testcontainers-go and its
+# docker/docker dependencies by default (see #929). Tests requiring the real Docker DB container
+# pass -tags dockerfixture.
 build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags nodockerfixture -o $(BINARY_NAME) cmd/http/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
 
 test:
-	go test ./...
+	go test -tags dockerfixture ./...
 
 vet:
 	go vet ./...

@@ -24,9 +24,8 @@ import (
 // adapters/v1/grype_docker_fixture.go) must never be linked into the production kubevuln
 // binary. Nothing in cmd/http calls it, but its testcontainers-go/docker/docker dependency
 // used to be compiled in regardless -- carrying whatever CVEs that tree currently has for a
-// binary that can never actually reach them. This shells out to `go list -deps` with the same
-// -tags nodockerfixture the Makefile's build target and the Dockerfiles use, and asserts
-// neither package shows up in the resolved import graph.
+// binary that can never actually reach them. Because the fixture is gated behind the `dockerfixture`
+// build tag, an untagged `go list -deps .` must exclude both packages by default.
 func TestProductionBuildExcludesDockerFixture(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
@@ -40,8 +39,8 @@ func TestProductionBuildExcludesDockerFixture(t *testing.T) {
 	defer cancel()
 	// "." resolves relative to this test's own package directory (cmd/http), which is the
 	// package go test sets as the working directory.
-	out, err := exec.CommandContext(ctx, goBin, "list", "-tags", "nodockerfixture", "-deps", ".").CombinedOutput()
-	require.NoError(t, err, "go list -deps -tags nodockerfixture failed: %s", out)
+	out, err := exec.CommandContext(ctx, goBin, "list", "-deps", ".").CombinedOutput()
+	require.NoError(t, err, "go list -deps failed: %s", out)
 
 	deps := string(out)
 	assert.NotContains(t, deps, "github.com/testcontainers/testcontainers-go",
