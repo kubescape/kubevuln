@@ -38,8 +38,10 @@ func TestProductionBuildExcludesDockerFixture(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	// "." resolves relative to this test's own package directory (cmd/http), which is the
-	// package go test sets as the working directory.
-	out, err := exec.CommandContext(ctx, goBin, "list", "-deps", ".").CombinedOutput()
+	// package go test sets as the working directory. Target the exact production Linux build.
+	cmd := exec.CommandContext(ctx, goBin, "list", "-deps", ".")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "go list -deps failed: %s", out)
 
 	deps := string(out)
