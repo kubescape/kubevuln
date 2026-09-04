@@ -1,0 +1,59 @@
+{
+  "document": {
+    "category": "csaf_vex",
+    "csaf_version": "2.0",
+    "title": "Mixed format regression test",
+    "publisher": {
+      "category": "vendor",
+      "name": "kubevuln",
+      "namespace": "example.com"
+    },
+    "tracking": {
+      "current_release_date": "2026-01-01T00:00:00Z",
+      "id": "https://example.com/csaf/mixed-format-test",
+      "initial_release_date": "2026-01-01T00:00:00Z",
+      "revision_history": [
+        {
+          "date": "2026-01-01T00:00:00Z",
+          "number": "1",
+          "summary": "Initial release"
+        }
+      ],
+      "status": "final",
+      "version": "1"
+    }
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "product_name",
+        "name": "libcrypto3",
+        "product": {
+          "product_id": "LIBCRYPTO3-3.0.8-r3",
+          "name": "libcrypto3",
+          "product_identification_helper": {
+            "purl": "pkg:apk/alpine/libcrypto3@3.0.8-r3"
+          }
+        }
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2023-3817",
+      "flags": [
+        {
+          "label": "vulnerable_code_not_present",
+          "product_ids": [
+            "LIBCRYPTO3-3.0.8-r3"
+          ]
+        }
+      ],
+      "product_status": {
+        "known_not_affected": [
+          "LIBCRYPTO3-3.0.8-r3"
+        ]
+      }
+    }
+  ]
+}
