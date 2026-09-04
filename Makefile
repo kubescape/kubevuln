@@ -6,11 +6,15 @@ TAG=v0.0.0
 
 .PHONY: build test vet lint lint-all verify verify-image govulncheck
 
+# The dockerfixture build tag makes adapters/v1's testcontainers-go-backed grype-DB fixture opt-in.
+# Production builds (`build` target below, untagged) exclude testcontainers-go and its
+# docker/docker dependencies by default (see #929). Tests requiring the real Docker DB container
+# pass -tags dockerfixture.
 build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
 
 test:
-	go test ./...
+	go test -tags dockerfixture ./...
 
 vet:
 	go vet ./...

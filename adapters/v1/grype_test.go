@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -19,90 +18,10 @@ import (
 	"github.com/anchore/grype/grype/vulnerability/mock"
 	"github.com/anchore/syft/syft/cpe"
 	syftPkg "github.com/anchore/syft/syft/pkg"
-	"github.com/google/uuid"
-	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
-	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func Test_grypeAdapter_DBVersion(t *testing.T) {
-	ctx := context.TODO()
-	g, terminate, err := NewGrypeAdapterFixedDB()
-	if errors.Is(err, ErrDockerUnavailable) {
-		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
-	}
-	require.NoError(t, err)
-	defer terminate()
-	g.Ready(ctx) // need to call ready to load the DB
-	version := g.DBVersion(ctx)
-	assert.Equal(t, "8947f666e75c337773be86e0c6f7f4739c7549184aa994ae6236d5dbe666523b", version)
-}
-
-func fileToSBOM(path string) *v1beta1.SyftDocument {
-	sbom := v1beta1.SyftDocument{}
-	_ = json.Unmarshal(fileContent(path), &sbom)
-	return &sbom
-}
-
-func Test_grypeAdapter_ScanSBOM(t *testing.T) {
-	tests := []struct {
-		name    string
-		sbom    domain.SBOM
-		format  string
-		wantErr bool
-	}{
-		{
-			name: "valid SBOM produces well-formed vulnerability list",
-			sbom: domain.SBOM{
-				Name:               "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
-				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/alpine-sbom.json"),
-			},
-			format: "testdata/alpine-cve.format.json",
-		},
-		{
-			name: "filtered SBOM",
-			sbom: domain.SBOM{
-				Name:               "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
-				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/nginx-filtered-sbom.json"),
-			},
-			format: "testdata/nginx-filtered-cve.format.json",
-		},
-	}
-	g, terminate, err := NewGrypeAdapterFixedDB()
-	if errors.Is(err, ErrDockerUnavailable) {
-		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
-	}
-	require.NoError(t, err)
-	defer terminate()
-	ctx := context.TODO()
-	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
-	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
-	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-	g.Ready(ctx) // need to call ready to load the DB
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := g.ScanSBOM(ctx, tt.sbom)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ScanSBOM() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			content, err := json.Marshal(got.Content)
-			//os.WriteFile(tt.format, content, 0644)
-			require.NoError(t, err)
-			ja := jsonassert.New(t)
-			ja.Assert(string(content), string(fileContent(tt.format)))
-			// observability: adapter runs in CVEMatchingOn here (non-trusted scan),
-			// so the mode is annotated but the vendor-trusted flag is not.
-			assert.Equal(t, string(config.CVEMatchingOn), got.Annotations[CVEMatchingModeMetadataKey])
-			assert.NotContains(t, got.Annotations, VendorTrustedMatchMetadataKey)
-		})
-	}
-}
 
 func Test_grypeAdapter_Version(t *testing.T) {
 	g := NewGrypeAdapter("", config.CVEMatchingOn, nil)
@@ -233,9 +152,14 @@ func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
 	waitForNotUpdating(t, g)
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Same(t, newStore, g.store, "the new provider from loadDB must be installed as the active store")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store must be closed exactly once after the swap")
+	g.mu.RUnlock()
+
+	// finishUpdate closes the superseded store after releasing the guard, so give that a
+	// moment to land instead of racing it right after waitForNotUpdating returns.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the previous store must be closed exactly once after the swap")
 	assert.Equal(t, int32(0), atomic.LoadInt32(&newStore.closed), "the newly installed store must not be closed")
 }
 
@@ -281,10 +205,15 @@ func Test_grypeAdapter_Ready_treatsStatusErrorAsFailure(t *testing.T) {
 	require.False(t, g.Ready(ctx))
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Nil(t, g.store, "a load whose status carries an error must not be installed as the active store")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&badStore.closed), "the unusable store must be closed rather than leaked")
 	assert.True(t, g.nextUpdateAttempt.Before(time.Now().Add(6*time.Minute)), "must schedule a short retry, not the 24h success interval")
+	g.mu.RUnlock()
+
+	// Ready() unblocks as soon as the guard is released, which finishUpdate does before
+	// closing the rejected store, so give the close a moment to land rather than racing it.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&badStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the unusable store must be closed rather than leaked")
 }
 
 // Concurrent readiness probes racing Ready() while an update is in flight must not launch a
@@ -397,9 +326,12 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 	}, 3*time.Second, 15*time.Millisecond, "once the stuck load releases loadMu, a retry installs a fresh DB")
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Equal(t, int32(2), atomic.LoadInt32(&loadCalls), "exactly one load ran after the stuck one was released")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the superseded store is closed once the new one is installed")
+	g.mu.RUnlock()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the superseded store is closed once the new one is installed")
 }
 
 // A load that is slow but returns within stuckUpdateTimeout is installed normally: the
@@ -423,9 +355,12 @@ func Test_grypeAdapter_Ready_slowLoadWithinTimeoutStillInstalls(t *testing.T) {
 	waitForNotUpdating(t, g)
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 	assert.Same(t, newStore, g.store, "a slow-but-returning load must still be installed")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&oldStore.closed), "the previous store is closed after the swap")
+	g.mu.RUnlock()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&oldStore.closed) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the previous store is closed after the swap")
 }
 
 // A load that finally returns after updateDBBackground abandoned it as stuck must be

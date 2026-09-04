@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -16,6 +18,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestProductionBuildExcludesDockerFixture is a regression test for #929: adapters/v1's
+// Docker-container-backed grype-DB test fixture (NewGrypeAdapterFixedDB and friends, in
+// adapters/v1/grype_docker_fixture.go) must never be linked into the production kubevuln
+// binary. Nothing in cmd/http calls it, but its testcontainers-go/docker/docker dependency
+// used to be compiled in regardless -- carrying whatever CVEs that tree currently has for a
+// binary that can never actually reach them. Because the fixture is gated behind the `dockerfixture`
+// build tag, an untagged `go list -deps .` must exclude both packages by default.
+func TestProductionBuildExcludesDockerFixture(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+
+	// go list -deps walks the whole module graph; on a cold build cache this can take well
+	// over a minute, so the bound here is generous rather than tight -- it exists only to
+	// stop a genuinely hung process, not to race a normal resolution.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	// "." resolves relative to this test's own package directory (cmd/http), which is the
+	// package go test sets as the working directory. Target the exact production Linux build.
+	cmd := exec.CommandContext(ctx, goBin, "list", "-deps", ".")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "go list -deps failed: %s", out)
+
+	deps := string(out)
+	assert.NotContains(t, deps, "github.com/testcontainers/testcontainers-go",
+		"the production build must not link the Docker-container-backed grype test fixture")
+	assert.NotContains(t, deps, "github.com/docker/docker/client",
+		"the production build must not link docker/docker/client (currently carries unfixed CVEs, see #929)")
+}
 
 func TestIsRiskAcceptanceActive(t *testing.T) {
 	storage := repositories.NewFakeAPIServerStorage("kubescape")
