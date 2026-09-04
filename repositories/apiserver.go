@@ -949,7 +949,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		manifest.Spec.Payload = *cve.Content
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifests(a.Namespace),
-		"CVE manifest", cve.Name, &manifest,
+		"CVE manifest", cve.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
 		func(existing *v1beta1.VulnerabilityManifest) {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
@@ -1172,7 +1172,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 		},
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),
-		"CVE summary manifest", manifest.Name, &manifest,
+		"CVE summary manifest", manifest.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
 		func(existing *v1beta1.VulnerabilityManifestSummary) {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
@@ -2294,20 +2294,38 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 		manifest.Annotations = map[string]string{}
 	}
 	manifest.Annotations[helpersv1.StatusMetadataKey] = sbom.Status // for the moment stored as an annotation
+
+	// sbom.Content == nil (e.g. a TooLarge verdict) carries no document, so manifest.Spec.Syft
+	// is the zero value here. createOrUpdate's default GetOptions{ResourceVersion:
+	// resourceVersionMetadata} reads Spec back as zero regardless of what is actually stored
+	// (see its doc comment), so it cannot be used to tell "nothing stored yet" apart from "a
+	// real document is already stored" - a real Get is required so the merge below can check
+	// existing.Spec.Syft.Artifacts before deciding whether to zero it out (#938). When Content
+	// is non-nil this call is going to overwrite Spec unconditionally either way, so the
+	// cheaper metadata-only Get is used as before.
+	getOpts := metav1.GetOptions{ResourceVersion: resourceVersionMetadata}
+	if sbom.Content == nil {
+		getOpts = metav1.GetOptions{}
+	}
+
 	if isFiltered {
 		filtered := convertToFilteredSBOM(&manifest)
-		return createOrUpdate(ctx, a.StorageClient.SBOMSyftFiltereds(a.Namespace), "filtered SBOM", sbom.Name, filtered,
+		return createOrUpdate(ctx, a.StorageClient.SBOMSyftFiltereds(a.Namespace), "filtered SBOM", sbom.Name, filtered, getOpts,
 			func(existing *v1beta1.SBOMSyftFiltered) {
 				existing.Annotations = mergeMaps(existing.Annotations, filtered.Annotations)
 				existing.Labels = mergeMaps(existing.Labels, filtered.Labels)
-				existing.Spec = filtered.Spec
+				if sbom.Content != nil || len(existing.Spec.Syft.Artifacts) == 0 {
+					existing.Spec = filtered.Spec
+				}
 			})
 	}
-	return createOrUpdate(ctx, a.StorageClient.SBOMSyfts(a.Namespace), "SBOM", sbom.Name, &manifest,
+	return createOrUpdate(ctx, a.StorageClient.SBOMSyfts(a.Namespace), "SBOM", sbom.Name, &manifest, getOpts,
 		func(existing *v1beta1.SBOMSyft) {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
-			existing.Spec = manifest.Spec
+			if sbom.Content != nil || len(existing.Spec.Syft.Artifacts) == 0 {
+				existing.Spec = manifest.Spec
+			}
 		})
 }
 
@@ -2350,11 +2368,19 @@ type objectStore[T any] interface {
 // the retry, against a freshly read object each time, since a conflict means someone else
 // wrote in between and the merge has to happen again on top of that.
 //
+// getOpts controls how that freshly read object is fetched. Most callers pass
+// GetOptions{ResourceVersion: resourceVersionMetadata} because their merge overwrites Spec
+// wholesale regardless of what was there before, so pulling the real (possibly large) payload
+// first would be wasted work. A caller whose merge needs to inspect the existing Spec to
+// decide whether to overwrite it (see StoreSBOM's nil-Content case, #938) must pass a real
+// GetOptions{} instead - metadata-only would read back a zero Spec no matter what is actually
+// stored, making that inspection meaningless.
+//
 // kind names the object in the logs and errors ("SBOM", "filtered SBOM").
 // extra are appended to every log line this emits, for callers that carry an additional
 // field on them. name is the object's own name and is what the Get inside the retry uses,
 // so it is the one thing every line here reports about which object is meant.
-func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, merge func(existing T), extra ...helpers.IDetails) error {
+func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T), extra ...helpers.IDetails) error {
 	_, err := store.Create(ctx, obj, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -2364,7 +2390,7 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			}
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			existing, getErr := store.Get(ctx, name, metav1.GetOptions{ResourceVersion: resourceVersionMetadata})
+			existing, getErr := store.Get(ctx, name, getOpts)
 			if getErr != nil {
 				return getErr
 			}
