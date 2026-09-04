@@ -1974,6 +1974,89 @@ func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T)
 	})
 }
 
+// StoreSBOM's merge closure historically overwrote Spec wholesale on every update,
+// including when the incoming sbom.Content is nil (the TooLarge verdict, stored by
+// scan.go as a status-only marker per its own comment). Against a name that already
+// held a real, previously generated SBOM, that wholesale overwrite silently replaced
+// the real document with an empty one, permanently losing it (#938).
+func TestAPIServerStore_StoreSBOM_PreservesExistingDocumentWhenIncomingHasNone(t *testing.T) {
+	t.Run("unfiltered", func(t *testing.T) {
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset().SpdxV1beta1())
+
+		real := domain.SBOM{
+			Name:    name,
+			Content: &v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 500)},
+		}
+		require.NoError(t, a.StoreSBOM(context.Background(), real, false))
+
+		tooLarge := domain.SBOM{Name: name, Content: nil, Status: helpersv1.TooLarge}
+		require.NoError(t, a.StoreSBOM(context.Background(), tooLarge, false))
+
+		got, err := a.StorageClient.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Len(t, got.Spec.Syft.Artifacts, 500, "a nil-Content store must not erase a previously stored real SBOM")
+		assert.Equal(t, helpersv1.TooLarge, got.Annotations[helpersv1.StatusMetadataKey],
+			"the TooLarge verdict must still be recorded so getSBOM's staleness re-check keeps working")
+	})
+
+	t.Run("filtered", func(t *testing.T) {
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset().SpdxV1beta1())
+
+		real := domain.SBOM{
+			Name:    name,
+			Content: &v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 500)},
+		}
+		require.NoError(t, a.StoreSBOM(context.Background(), real, true))
+
+		tooLarge := domain.SBOM{Name: name, Content: nil, Status: helpersv1.TooLarge}
+		require.NoError(t, a.StoreSBOM(context.Background(), tooLarge, true))
+
+		got, err := a.StorageClient.SBOMSyftFiltereds("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Len(t, got.Spec.Syft.Artifacts, 500, "a nil-Content filtered store must not erase a previously stored real filtered SBOM")
+	})
+
+	// A real document can legitimately have zero artifacts (an image with no detected
+	// packages). The fix must not use artifact count as a proxy for "is there something
+	// real here" -- doing so would let a later TooLarge store zero out this document's
+	// tool/report metadata too, which getSBOM's version check then reads back as a
+	// mismatch. sbom.Content == nil must mean "leave Spec alone", full stop.
+	t.Run("preserves a real document that legitimately has zero artifacts", func(t *testing.T) {
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset().SpdxV1beta1())
+
+		real := domain.SBOM{
+			Name:               name,
+			SBOMCreatorVersion: "syft-1.2.3",
+			Content:            &v1beta1.SyftDocument{Artifacts: []v1beta1.SyftPackage{}},
+		}
+		require.NoError(t, a.StoreSBOM(context.Background(), real, false))
+
+		tooLarge := domain.SBOM{Name: name, Content: nil, Status: helpersv1.TooLarge}
+		require.NoError(t, a.StoreSBOM(context.Background(), tooLarge, false))
+
+		got, err := a.StorageClient.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "syft-1.2.3", got.Spec.Metadata.Tool.Version,
+			"a nil-Content store must not clear a real document's tool/report metadata, even when it has zero artifacts")
+	})
+
+	// A real SBOM replacing another real SBOM must still fully overwrite Spec, not merge
+	// onto it -- this is the existing, already-covered behavior the fix must not regress.
+	t.Run("real replacing real still overwrites in full", func(t *testing.T) {
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset().SpdxV1beta1())
+
+		first := domain.SBOM{Name: name, Content: &v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 999)}}
+		require.NoError(t, a.StoreSBOM(context.Background(), first, false))
+
+		second := domain.SBOM{Name: name, Content: &v1beta1.SyftDocument{Artifacts: make([]v1beta1.SyftPackage, 3)}}
+		require.NoError(t, a.StoreSBOM(context.Background(), second, false))
+
+		got, err := a.StorageClient.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Len(t, got.Spec.Syft.Artifacts, 3, "a real SBOM must still fully replace a previous real SBOM")
+	})
+}
+
 func TestAPIServerStore_GetCVE_transientError(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
