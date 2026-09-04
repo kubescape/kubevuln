@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
-	"github.com/kubescape/kubevuln/internal/tools/adapters"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
