@@ -2299,10 +2299,10 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	// is the zero value here. createOrUpdate's default GetOptions{ResourceVersion:
 	// resourceVersionMetadata} reads Spec back as zero regardless of what is actually stored
 	// (see its doc comment), so it cannot be used to tell "nothing stored yet" apart from "a
-	// real document is already stored" - a real Get is required so the merge below can check
-	// existing.Spec.Syft.Artifacts before deciding whether to zero it out (#938). When Content
-	// is non-nil this call is going to overwrite Spec unconditionally either way, so the
-	// cheaper metadata-only Get is used as before.
+	// real document is already stored" - a real Get is required so the merge below can leave
+	// Spec untouched instead of zeroing it out (#938). When Content is non-nil this call is
+	// going to overwrite Spec unconditionally either way, so the cheaper metadata-only Get is
+	// used as before.
 	getOpts := metav1.GetOptions{ResourceVersion: resourceVersionMetadata}
 	if sbom.Content == nil {
 		getOpts = metav1.GetOptions{}
@@ -2314,7 +2314,10 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 			func(existing *v1beta1.SBOMSyftFiltered) {
 				existing.Annotations = mergeMaps(existing.Annotations, filtered.Annotations)
 				existing.Labels = mergeMaps(existing.Labels, filtered.Labels)
-				if sbom.Content != nil || len(existing.Spec.Syft.Artifacts) == 0 {
+				// A nil sbom.Content has nothing to replace whatever Spec is already
+				// stored with - leave it alone rather than zeroing it, regardless of
+				// whether that existing Spec happens to carry any artifacts.
+				if sbom.Content != nil {
 					existing.Spec = filtered.Spec
 				}
 			})
@@ -2323,7 +2326,8 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 		func(existing *v1beta1.SBOMSyft) {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
-			if sbom.Content != nil || len(existing.Spec.Syft.Artifacts) == 0 {
+			// Same reasoning as the filtered path above.
+			if sbom.Content != nil {
 				existing.Spec = manifest.Spec
 			}
 		})

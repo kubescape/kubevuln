@@ -2016,6 +2016,30 @@ func TestAPIServerStore_StoreSBOM_PreservesExistingDocumentWhenIncomingHasNone(t
 		assert.Len(t, got.Spec.Syft.Artifacts, 500, "a nil-Content filtered store must not erase a previously stored real filtered SBOM")
 	})
 
+	// A real document can legitimately have zero artifacts (an image with no detected
+	// packages). The fix must not use artifact count as a proxy for "is there something
+	// real here" -- doing so would let a later TooLarge store zero out this document's
+	// tool/report metadata too, which getSBOM's version check then reads back as a
+	// mismatch. sbom.Content == nil must mean "leave Spec alone", full stop.
+	t.Run("preserves a real document that legitimately has zero artifacts", func(t *testing.T) {
+		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset().SpdxV1beta1())
+
+		real := domain.SBOM{
+			Name:               name,
+			SBOMCreatorVersion: "syft-1.2.3",
+			Content:            &v1beta1.SyftDocument{Artifacts: []v1beta1.SyftPackage{}},
+		}
+		require.NoError(t, a.StoreSBOM(context.Background(), real, false))
+
+		tooLarge := domain.SBOM{Name: name, Content: nil, Status: helpersv1.TooLarge}
+		require.NoError(t, a.StoreSBOM(context.Background(), tooLarge, false))
+
+		got, err := a.StorageClient.SBOMSyfts("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "syft-1.2.3", got.Spec.Metadata.Tool.Version,
+			"a nil-Content store must not clear a real document's tool/report metadata, even when it has zero artifacts")
+	})
+
 	// A real SBOM replacing another real SBOM must still fully overwrite Spec, not merge
 	// onto it -- this is the existing, already-covered behavior the fix must not regress.
 	t.Run("real replacing real still overwrites in full", func(t *testing.T) {
