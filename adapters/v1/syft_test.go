@@ -30,6 +30,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -259,6 +260,40 @@ func Test_syftAdapter_CreateSBOM_TimeoutContext(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, helpersv1.Incomplete, sbom.Status)
+}
+
+// Test_syftAdapter_CreateSBOM_AlreadyCanceledContextNeverReachesRegistry guards the
+// pullSem-acquisition race a plain "select on the semaphore vs. ctxWithTimeout.Done()" leaves
+// open: when the semaphore is uncontended, an already-canceled (or already-expired) context can
+// still win the acquire case, since select does not prefer one ready case over another. Without
+// re-checking ctxWithTimeout right after acquiring, CreateSBOM would then proceed into a real
+// registry pull with a context already known to be dead, only to fail once
+// registryauth.ResolveSource itself notices - wasted work Test_syftAdapter_CreateSBOM_
+// CanceledContext/TimeoutContext above cannot detect, since they assert only the returned
+// error/status, not whether the registry was ever actually contacted.
+func Test_syftAdapter_CreateSBOM_AlreadyCanceledContextNeverReachesRegistry(t *testing.T) {
+	var requestReceived atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// scanTimeout is intentionally generous: pullSem is uncontended here, so any observed
+	// cancellation comes from the caller's own already-canceled ctx, not from scanTimeout.
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before CreateSBOM is even called
+
+	_, err = adapter.CreateSBOM(ctx, "test", "", u.Host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.False(t, requestReceived.Load(),
+		"an already-canceled context must never reach the registry, even when pullSem is uncontended")
 }
 
 // activeScanLockPathForTest must match internal/tools' own unexported activeScanLockPath(os.TempDir()):
@@ -532,6 +567,158 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 	}
 	secondRes := <-secondResult
 	require.NoError(t, secondRes.err)
+}
+
+// Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem is a regression test for
+// #941: acquiring pullSem used to be a bare, unbounded sync.Mutex.Lock() with no timeout or
+// context check. Once one call's abandoned goroutine holds it forever - a corrupt archive, a
+// cataloguer bug, or a stalled local filesystem, none of which Syft's cataloguers can be
+// cancelled out of - every future CreateSBOM call in the process blocked on that Lock()
+// indefinitely, with no liveness/readiness signal to ever recover the pod.
+//
+// Unlike Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout, whose first
+// call's abandoned goroutine eventually releases pullSem, this test's first call never releases
+// it at all, modeling the permanently-stuck case #941 describes. The second call must still
+// return (Incomplete, nil error) within its own scanTimeout budget instead of hanging forever.
+//
+// It also covers #941's acceptance criterion 4: the second call's give-up must be observable
+// as its own metrics.FallbackCategoryPullSemaphore series, distinct from the generic
+// FallbackCategorySizeClassification/FallbackStrategyIncomplete series every other timeout path
+// in CreateSBOM already emits - see internal/metrics.TestRecordScanFallback_
+// PullSemaphoreCategoryIsDistinctFromSizeClassification for the metrics-package-level half of
+// that guarantee.
+func Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	host := mockRegistryImage(t)
+
+	firstStarted := make(chan struct{})
+	blockForever := make(chan struct{}) // deliberately never closed
+	secondStarted := make(chan struct{})
+
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	var calls atomic.Int32
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-blockForever
+			return &sbom.SBOM{}, nil // unreachable: this goroutine never returns
+		}
+		close(secondStarted)
+		return &sbom.SBOM{}, nil
+	}
+
+	// scanTimeout is deliberately a few seconds, not sub-second: it must comfortably cover the
+	// first call's real (if local) HTTP source resolution against mockRegistryImage, so that
+	// call reaches createSBOMFn - and therefore firstStarted - instead of timing out during
+	// resolution itself on a loaded machine, before ever holding pullSem.
+	adapter := NewSyftAdapter(2*time.Second, 1<<30, 1<<30, false, nil)
+
+	type createSBOMResult struct {
+		domainSBOM domain.SBOM
+		err        error
+	}
+
+	firstResult := make(chan createSBOMResult, 1)
+	go func() {
+		domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+		firstResult <- createSBOMResult{domainSBOM, err}
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first call's stand-in Syft never started")
+	}
+
+	var firstRes createSBOMResult
+	select {
+	case firstRes = <-firstResult:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first CreateSBOM call never returned once its deadline elapsed")
+	}
+	require.NoError(t, firstRes.err)
+	assert.Equal(t, helpersv1.Incomplete, firstRes.domainSBOM.Status)
+	// The first call's abandoned goroutine is now permanently blocked in createSBOMFn - it will
+	// never close blockForever - so it holds pullSem forever.
+
+	start := time.Now()
+	secondDomainSBOM, secondErr := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+	elapsed := time.Since(start)
+
+	require.NoError(t, secondErr)
+	assert.Equal(t, helpersv1.Incomplete, secondDomainSBOM.Status,
+		"a second call must degrade to Incomplete instead of hanging forever when pullSem is held by a permanently stuck previous scan")
+	// A generous multiple of scanTimeout (2s), not a tight bound: the point is proving this
+	// call gives up at all instead of hanging forever (which would instead hit go test's own
+	// -timeout), not pinning the exact wait down to the second on a possibly loaded machine.
+	assert.Less(t, elapsed, 10*time.Second,
+		"the second call must give up waiting for pullSem within its own scanTimeout budget instead of blocking indefinitely")
+
+	select {
+	case <-secondStarted:
+		t.Fatal("second call must never reach cataloging while pullSem is permanently held")
+	default:
+	}
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+	body := w.Body.String()
+	assert.Contains(t, body,
+		`kubevuln_scan_fallbacks_total{category="pull_semaphore",component="in_process",outcome="classified",strategy="incomplete"} 1`,
+		"a stuck-pullSem give-up must be recorded under its own pull_semaphore category, not folded into size_classification")
+}
+
+// Test_syftAdapter_CreateSBOM_CanceledWhileWaitingForStuckPullSem covers the other half of
+// #941's fix: a caller that cancels its own context while waiting for a permanently-stuck
+// pullSem must see that cancellation immediately, as context.Canceled, rather than only being
+// released once the adapter's own (much longer) scanTimeout elapses.
+func Test_syftAdapter_CreateSBOM_CanceledWhileWaitingForStuckPullSem(t *testing.T) {
+	host := mockRegistryImage(t)
+
+	firstStarted := make(chan struct{})
+	blockForever := make(chan struct{}) // deliberately never closed
+
+	orig := createSBOMFn
+	defer func() { createSBOMFn = orig }()
+	var calls atomic.Int32
+	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-blockForever
+			return &sbom.SBOM{}, nil // unreachable
+		}
+		return &sbom.SBOM{}, nil
+	}
+
+	// A scanTimeout much longer than the cancellation below proves cancellation is honored on
+	// its own, not merely because scanTimeout happened to also elapse.
+	adapter := NewSyftAdapter(10*time.Second, 1<<30, 1<<30, false, nil)
+
+	go func() {
+		_, _ = adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first call's stand-in Syft never started")
+	}
+	// pullSem is now held by the first call's still-running goroutine; the second call below
+	// contends on acquiring it.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	start := time.Now()
+	_, err := adapter.CreateSBOM(ctx, "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "a caller-cancelled wait for pullSem must surface as context.Canceled")
+	assert.Less(t, elapsed, 2*time.Second, "cancellation must be honored immediately, not only once scanTimeout (10s) elapses")
 }
 
 // archRegistryVariant is one platform-specific manifest+config+layer served by

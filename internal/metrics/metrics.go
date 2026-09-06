@@ -28,6 +28,13 @@ const (
 	FallbackCategoryRegistryAuth       = "registry_auth"
 	FallbackCategoryPlatform           = "platform"
 	FallbackCategorySizeClassification = "size_classification"
+	// FallbackCategoryPullSemaphore marks a scan that gave up waiting to acquire
+	// SyftAdapter's pull/cataloging semaphore (see adapters/v1/syft.go), distinct from the
+	// generic FallbackCategorySizeClassification/FallbackStrategyIncomplete series every
+	// other timeout path already emits: a sustained rate here specifically means a previous
+	// scan's uncancellable Syft goroutine is holding the semaphore, not that pulls or
+	// cataloging themselves are merely slow (#941).
+	FallbackCategoryPullSemaphore = "pull_semaphore"
 
 	FallbackStrategyAnonymous        = "anonymous"
 	FallbackStrategyECR              = "ecr"

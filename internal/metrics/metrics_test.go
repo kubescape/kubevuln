@@ -41,6 +41,30 @@ func TestNewAndHandler(t *testing.T) {
 	assert.True(t, strings.Contains(body, `kubevuln_temp_dir_sweep_removed_total{component="in_process"} 3`), body)
 }
 
+// TestRecordScanFallback_PullSemaphoreCategoryIsDistinctFromSizeClassification is a
+// regression test for #941's acceptance criterion 4: SyftAdapter.CreateSBOM (see
+// adapters/v1/syft.go) records FallbackCategoryPullSemaphore, not the generic
+// FallbackCategorySizeClassification every other timeout path already uses, when it gives up
+// waiting for a pull semaphore a previous scan is still holding. Asserting the two render as
+// separate series (rather than only that the pull_semaphore label value exists at all) is what
+// actually gives operators the ability to alert on "another scan is stuck" apart from an
+// ordinary slow pull/cataloging pass.
+func TestRecordScanFallback_PullSemaphoreCategoryIsDistinctFromSizeClassification(t *testing.T) {
+	m, err := New()
+	require.NoError(t, err)
+
+	RecordScanFallback(context.Background(), ComponentInProcess,
+		FallbackCategoryPullSemaphore, FallbackStrategyIncomplete, FallbackOutcomeClassified)
+	RecordScanFallback(context.Background(), ComponentInProcess,
+		FallbackCategorySizeClassification, FallbackStrategyIncomplete, FallbackOutcomeClassified)
+
+	body := scrape(t, m)
+	assert.Contains(t, body,
+		`kubevuln_scan_fallbacks_total{category="pull_semaphore",component="in_process",outcome="classified",strategy="incomplete"} 1`)
+	assert.Contains(t, body,
+		`kubevuln_scan_fallbacks_total{category="size_classification",component="in_process",outcome="classified",strategy="incomplete"} 1`)
+}
+
 func TestRecordTempDirSweep_ZeroOrNegativeRemovedIsANoOp(t *testing.T) {
 	m, err := New()
 	require.NoError(t, err)

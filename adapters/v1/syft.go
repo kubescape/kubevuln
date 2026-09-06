@@ -41,10 +41,14 @@ var createSBOMFn = syft.CreateSBOM
 
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
-	maxImageSize      int64
-	maxSBOMSize       int
-	proxyRegistryMap  map[string]string
-	pullMutex         sync.Mutex
+	maxImageSize     int64
+	maxSBOMSize      int
+	proxyRegistryMap map[string]string
+	// pullSem is a capacity-1 semaphore guarding pulls/cataloging (see CreateSBOM): acquired
+	// by sending into it, released by receiving from it. Unlike a sync.Mutex, acquiring it can
+	// be bounded with a select against a context, which is what lets CreateSBOM give up on a
+	// wedged previous scan instead of blocking forever (#941).
+	pullSem           chan struct{}
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
 }
@@ -59,6 +63,7 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 		maxImageSize:      maxImageSize,
 		maxSBOMSize:       maxSBOMSize,
 		proxyRegistryMap:  proxyRegistryMap,
+		pullSem:           make(chan struct{}, 1),
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
 	}
@@ -190,35 +195,65 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	//nolint:staticcheck // stereoscope expects string key image.MaxImageSize
 	ctxWithSize := context.WithValue(ctxWithTimeout, image.MaxImageSize, s.maxImageSize)
 	// ensure no parallel pulls: syft.GetSource (inside registryauth.ResolveSource) is what
-	// actually downloads image layers to local disk (via stereoscope), so pullMutex must
-	// guard it too, not just cataloging - otherwise a second CreateSBOM call can download a
-	// full image concurrently with a still-running "abandoned" download left behind by a first
-	// call that already timed out (#687).
-	// Ownership of the unlock transfers to the dl.Run closure below once source resolution
-	// succeeds; every early-return branch between here and there must unlock for itself.
-	// The warning below is armed *before* Lock() and fired by its own timer, not checked after
-	// Lock() returns: sync.Mutex.Lock never returns until the prior holder releases it, so a
-	// post-acquisition check can only ever report a wait that already ended - it would stay
-	// silent for the exact case it exists to catch, a previous cataloguing goroutine hung
-	// indefinitely (createSBOMFn/Syft's cataloguers do not observe cancellation - see the
-	// dl.Run comment below). That's an accepted tradeoff, not a bug: there is no watchdog that
-	// force-releases the mutex, so a sufficiently pathological image (corrupt archive,
-	// cataloguer bug, stalled local FS) can keep it held indefinitely. This log line is the
-	// operator-visible signal for that case, since neither the liveness nor readiness probe
-	// currently reflects it.
-	var longWaitWarning *time.Timer
-	if s.scanTimeout > 0 {
-		longWaitWarning = time.AfterFunc(s.scanTimeout, func() {
-			logger.L().Ctx(ctx).Warning("waiting unusually long to acquire pullMutex; a previous scan may be stuck",
+	// actually downloads image layers to local disk (via stereoscope), so pullSem must guard
+	// it too, not just cataloging - otherwise a second CreateSBOM call can download a full
+	// image concurrently with a still-running "abandoned" download left behind by a first call
+	// that already timed out (#687).
+	// Ownership of the release transfers to the dl.Run closure below once source resolution
+	// succeeds; every early-return branch between here and there must release for itself.
+	//
+	// The acquire is bounded by ctxWithTimeout rather than unconditional: Syft's cataloguers do
+	// not observe cancellation (see the dl.Run comment below), so a sufficiently pathological
+	// image (corrupt archive, cataloguer bug, stalled local FS) can hold pullSem indefinitely.
+	// Waiting for it without a bound would let that single stuck scan permanently wedge every
+	// future CreateSBOM call in the process - with no liveness/readiness signal to ever recover
+	// it, since ScanService.Ready only reflects the CVE scanner (#941). Giving up once
+	// ctxWithTimeout expires keeps this call's own timeout budget meaningful, the same way every
+	// other phase of this function already degrades on timeout, instead of hanging forever
+	// behind a semaphore that may never come free.
+	//
+	// pullSemTimeoutResult classifies ctxWithTimeout's error: DeadlineExceeded degrades to
+	// Incomplete, anything else (caller cancellation) is returned as-is. Only the
+	// DeadlineExceeded case - a genuinely contended acquire - is logged as "a previous scan may
+	// be stuck" and recorded under its own FallbackCategoryPullSemaphore, not the generic
+	// FallbackCategorySizeClassification/FallbackStrategyIncomplete series every other timeout
+	// branch in this function already emits: operators need to tell "gave up waiting for a
+	// semaphore a previous scan is still holding" apart from an ordinary slow pull or
+	// cataloging pass, since the former means some other scan is stuck, not this one (#941).
+	// Caller cancellation implies nothing about any other scan, so it gets its own message
+	// instead of the same "stuck" wording, which would send an operator diagnosing #941 looking
+	// for a wedged semaphore that was never actually contended.
+	pullSemTimeoutResult := func(err error) (domain.SBOM, error) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger.L().Ctx(ctx).Warning("gave up waiting to acquire the pull semaphore; a previous scan may be stuck",
 				helpers.String("imageID", imageID))
-		})
+			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPullSemaphore, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
+			domainSBOM.Status = helpersv1.Incomplete
+			return domainSBOM, nil
+		}
+		logger.L().Ctx(ctx).Debug("scan context ended before the pull semaphore was acquired",
+			helpers.String("imageID", imageID))
+		return domainSBOM, err
 	}
-	s.pullMutex.Lock()
-	if longWaitWarning != nil {
-		longWaitWarning.Stop()
+	if err := ctxWithTimeout.Err(); err != nil {
+		return pullSemTimeoutResult(err)
 	}
-	pullMutexUnlockOnce := sync.Once{}
-	unlockPullMutex := func() { pullMutexUnlockOnce.Do(s.pullMutex.Unlock) }
+	select {
+	case s.pullSem <- struct{}{}:
+		// select's two cases can both be ready at once - e.g. ctxWithTimeout expiring the same
+		// instant pullSem happens to be free - and select does not prefer one deterministically.
+		// Re-check here so a dead context is degraded the same way regardless of which case
+		// fired, instead of silently proceeding into a real registry pull that would only fail
+		// moments later inside registryauth.ResolveSource.
+		if err := ctxWithTimeout.Err(); err != nil {
+			<-s.pullSem
+			return pullSemTimeoutResult(err)
+		}
+	case <-ctxWithTimeout.Done():
+		return pullSemTimeoutResult(ctxWithTimeout.Err())
+	}
+	pullSemReleaseOnce := sync.Once{}
+	releasePullSem := func() { pullSemReleaseOnce.Do(func() { <-s.pullSem }) }
 
 	// Registered before the pull, not just cataloguing: registryauth.ResolveSource below is
 	// what actually creates the stereoscope temp dir and downloads image layers into it, and
@@ -226,7 +261,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// -- in this process or the sidecar's, which shares the same os.TempDir() -- deleting the
 	// directory out from under a still-in-progress pull (see #796). Ownership of ending it
 	// transfers to the dl.Run closure below once source resolution succeeds, the same way
-	// pullMutex's unlock does; every early-return branch between here and there must end it
+	// pullSem's release does; every early-return branch between here and there must end it
 	// for itself.
 	endTempDirUseOnce := sync.Once{}
 	endTempDirUseFn := tools.BeginActiveTempDirUse(os.TempDir())
@@ -254,7 +289,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			helpers.String("imageID", imageID))
 		domainSBOM.Status = helpersv1.Incomplete
 		endActiveTempDirUse()
-		unlockPullMutex()
+		releasePullSem()
 		return domainSBOM, nil
 	case err != nil && (errors.Is(err, image.ErrImageTooLarge) || strings.Contains(err.Error(), image.ErrImageTooLarge.Error())):
 		metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyImageTooLarge, metrics.FallbackOutcomeClassified)
@@ -265,12 +300,12 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		domainSBOM.Annotations[domain.StatusReasonAnnotationKey] = domain.ReasonImageTooLarge
 		domainSBOM.Annotations[domain.MaxImageSizeAnnotationKey] = fmt.Sprintf("%d", s.maxImageSize)
 		endActiveTempDirUse()
-		unlockPullMutex()
+		releasePullSem()
 		return domainSBOM, nil
 	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
 		domainSBOM.Status = helpersv1.Unauthorize
 		endActiveTempDirUse()
-		unlockPullMutex()
+		releasePullSem()
 		return domainSBOM, err
 	case err != nil:
 		// Requested-but-unavailable platforms surface here as *image.ErrPlatformMismatch
@@ -282,7 +317,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPlatform, metrics.FallbackStrategyPlatformMismatch, metrics.FallbackOutcomeFailed)
 		}
 		endActiveTempDirUse()
-		unlockPullMutex()
+		releasePullSem()
 		return domainSBOM, err
 	}
 
@@ -300,18 +335,18 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// Buffered so a goroutine abandoned by the deadline can always publish and exit, even
 	// when nobody is left to receive.
 	generated := make(chan *sbom.SBOM, 1)
-	// pullMutex is already held (see the Lock() before syft.GetSource above), covering source
-	// resolution too. Unlock here, not via a defer at the top of CreateSBOM: this closure can
-	// outlive CreateSBOM's own return (see the comment below), so unlocking when CreateSBOM
+	// pullSem is already held (see the acquire before syft.GetSource above), covering source
+	// resolution too. Released here, not via a defer at the top of CreateSBOM: this closure can
+	// outlive CreateSBOM's own return (see the comment below), so releasing when CreateSBOM
 	// returns would let a subsequent CreateSBOM call start pulling/cataloging while this
 	// one is still running against disk, defeating the "ensure no parallel pulls" purpose
-	// of pullMutex on exactly the timeout path most likely to correlate with disk
-	// pressure. Unlocking only once this closure actually finishes - promptly on success
-	// or failure, late if the deadline fired first - is what makes pullMutex serialize the
+	// of pullSem on exactly the timeout path most likely to correlate with disk
+	// pressure. Releasing only once this closure actually finishes - promptly on success
+	// or failure, late if the deadline fired first - is what makes pullSem serialize the
 	// disk-touching work itself, not just the synchronous portion of the call.
 	dl := deadline.New(s.scanTimeout)
 	err = dl.Run(func(stopper <-chan struct{}) error {
-		defer unlockPullMutex()
+		defer releasePullSem()
 		defer endActiveTempDirUse()
 		// make sure we clean the temp dir
 		defer func(src source.Source) {
