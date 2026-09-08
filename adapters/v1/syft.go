@@ -212,22 +212,17 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	// other phase of this function already degrades on timeout, instead of hanging forever
 	// behind a semaphore that may never come free.
 	//
-	// pullSemTimeoutResult classifies ctxWithTimeout's error: DeadlineExceeded degrades to
-	// Incomplete, anything else (caller cancellation) is returned as-is. Only the
-	// DeadlineExceeded case - a genuinely contended acquire - is logged as "a previous scan may
-	// be stuck" and recorded under its own FallbackCategoryPullSemaphore, not the generic
-	// FallbackCategorySizeClassification/FallbackStrategyIncomplete series every other timeout
-	// branch in this function already emits: operators need to tell "gave up waiting for a
-	// semaphore a previous scan is still holding" apart from an ordinary slow pull or
-	// cataloging pass, since the former means some other scan is stuck, not this one (#941).
-	// Caller cancellation implies nothing about any other scan, so it gets its own message
-	// instead of the same "stuck" wording, which would send an operator diagnosing #941 looking
-	// for a wedged semaphore that was never actually contended.
-	pullSemTimeoutResult := func(err error) (domain.SBOM, error) {
+	// contextAlreadyDeadResult handles ctxWithTimeout being done before pullSem was ever
+	// genuinely contended: either it was already dead before the select was even entered, or it
+	// ended in the race between an uncontended acquire (pullSem was free) and ctxWithTimeout
+	// expiring at that same instant. Neither says anything about pullSem itself - the acquire
+	// either never happened or happened immediately - so DeadlineExceeded here is classified the
+	// same ordinary way every other resolution-phase timeout in this function already is
+	// (FallbackCategorySizeClassification), matching what would have happened moments later
+	// inside registryauth.ResolveSource with the same dead context anyway.
+	contextAlreadyDeadResult := func(err error) (domain.SBOM, error) {
 		if errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Ctx(ctx).Warning("gave up waiting to acquire the pull semaphore; a previous scan may be stuck",
-				helpers.String("imageID", imageID))
-			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPullSemaphore, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
+			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategorySizeClassification, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
 			domainSBOM.Status = helpersv1.Incomplete
 			return domainSBOM, nil
 		}
@@ -235,8 +230,28 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			helpers.String("imageID", imageID))
 		return domainSBOM, err
 	}
+	// pullSemStuckResult handles ctxWithTimeout ending while this call was genuinely blocked
+	// waiting for pullSem - the select's <-ctxWithTimeout.Done() case fired because pullSem was
+	// actually held by another, still-running scan. This is the only case that means "a previous
+	// scan may be stuck", so it is the only one logged and recorded that way, under its own
+	// FallbackCategoryPullSemaphore rather than the generic
+	// FallbackCategorySizeClassification/FallbackStrategyIncomplete series (#941 acceptance
+	// criterion 4). A caller-side cancellation reaching this branch did still find pullSem
+	// contended, so it is logged distinctly from contextAlreadyDeadResult's cancellation case.
+	pullSemStuckResult := func(err error) (domain.SBOM, error) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			logger.L().Ctx(ctx).Warning("gave up waiting to acquire the pull semaphore; a previous scan may be stuck",
+				helpers.String("imageID", imageID))
+			metrics.RecordScanFallback(ctx, metrics.ComponentInProcess, metrics.FallbackCategoryPullSemaphore, metrics.FallbackStrategyIncomplete, metrics.FallbackOutcomeClassified)
+			domainSBOM.Status = helpersv1.Incomplete
+			return domainSBOM, nil
+		}
+		logger.L().Ctx(ctx).Debug("scan context canceled while waiting for the pull semaphore held by another scan",
+			helpers.String("imageID", imageID))
+		return domainSBOM, err
+	}
 	if err := ctxWithTimeout.Err(); err != nil {
-		return pullSemTimeoutResult(err)
+		return contextAlreadyDeadResult(err)
 	}
 	select {
 	case s.pullSem <- struct{}{}:
@@ -244,13 +259,14 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// instant pullSem happens to be free - and select does not prefer one deterministically.
 		// Re-check here so a dead context is degraded the same way regardless of which case
 		// fired, instead of silently proceeding into a real registry pull that would only fail
-		// moments later inside registryauth.ResolveSource.
+		// moments later inside registryauth.ResolveSource. pullSem was free, so this is still
+		// contextAlreadyDeadResult, not genuine contention.
 		if err := ctxWithTimeout.Err(); err != nil {
 			<-s.pullSem
-			return pullSemTimeoutResult(err)
+			return contextAlreadyDeadResult(err)
 		}
 	case <-ctxWithTimeout.Done():
-		return pullSemTimeoutResult(ctxWithTimeout.Err())
+		return pullSemStuckResult(ctxWithTimeout.Err())
 	}
 	pullSemReleaseOnce := sync.Once{}
 	releasePullSem := func() { pullSemReleaseOnce.Do(func() { <-s.pullSem }) }

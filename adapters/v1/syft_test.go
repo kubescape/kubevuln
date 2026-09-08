@@ -296,6 +296,44 @@ func Test_syftAdapter_CreateSBOM_AlreadyCanceledContextNeverReachesRegistry(t *t
 		"an already-canceled context must never reach the registry, even when pullSem is uncontended")
 }
 
+// Test_syftAdapter_CreateSBOM_AlreadyExpiredContextDoesNotRecordPullSemaphoreMetric is a
+// regression test for a follow-up on #941/#942: contextAlreadyDeadResult (the pre-acquire check,
+// and the post-acquire race check against an uncontended pullSem) must not be misclassified as
+// pull-semaphore contention. An already-expired context racing a free pullSem never actually
+// waits for it - the acquire either never happens or succeeds immediately - so it must degrade
+// the same ordinary way every other resolution-phase timeout in CreateSBOM already does
+// (FallbackCategorySizeClassification), and must never increment FallbackCategoryPullSemaphore,
+// which is reserved for pullSemStuckResult - a call that genuinely blocked because another scan
+// was holding the semaphore.
+func Test_syftAdapter_CreateSBOM_AlreadyExpiredContextDoesNotRecordPullSemaphoreMetric(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	<-ctx.Done() // wait for the deadline to actually pass before calling CreateSBOM
+
+	// scanTimeout is intentionally generous and pullSem is uncontended (no other call is in
+	// flight): any Incomplete result here comes from the caller's own already-expired ctx, not
+	// from scanTimeout elapsing or from real semaphore contention.
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+
+	domainSBOM, err := adapter.CreateSBOM(ctx, "test", "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501", "library/alpine:latest", domain.RegistryOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, helpersv1.Incomplete, domainSBOM.Status)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, req)
+	body := w.Body.String()
+	assert.NotContains(t, body, `category="pull_semaphore"`,
+		"an already-expired context racing a free pullSem is not semaphore contention and must not be recorded as such")
+	assert.Contains(t, body,
+		`kubevuln_scan_fallbacks_total{category="size_classification",component="in_process",outcome="classified",strategy="incomplete"} 1`,
+		"it must instead be classified the same ordinary way every resolution-phase timeout already is")
+}
+
 // activeScanLockPathForTest must match internal/tools' own unexported activeScanLockPath(os.TempDir()):
 // same directory (os.TempDir(), which BeginActiveTempDirUse is always called with here and in
 // pkg/sbomscanner/v1), same filename. There is no exported way to ask tools for this path, so it
