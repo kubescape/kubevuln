@@ -759,6 +759,41 @@ func Test_syftAdapter_CreateSBOM_CanceledWhileWaitingForStuckPullSem(t *testing.
 	assert.Less(t, elapsed, 2*time.Second, "cancellation must be honored immediately, not only once scanTimeout (10s) elapses")
 }
 
+// Test_pullSemWasContended covers the other side of the nondeterministic-select race
+// documented at the call sites in CreateSBOM: ctxWithTimeout.Done() firing does not by itself
+// mean pullSem was actually held by another scan, since select does not prefer either ready
+// case deterministically when both are ready at once. pullSemWasContended's non-blocking
+// acquire attempt must tell a genuinely held pullSem apart from one that just happened to be
+// free at that same instant, and must leave a free pullSem free again afterward.
+func Test_pullSemWasContended(t *testing.T) {
+	t.Run("free pullSem is not contended, and is left free", func(t *testing.T) {
+		pullSem := make(chan struct{}, 1)
+
+		assert.False(t, pullSemWasContended(pullSem))
+
+		select {
+		case pullSem <- struct{}{}:
+			<-pullSem
+		default:
+			t.Fatal("pullSemWasContended must release the semaphore it non-blockingly acquired, leaving it free")
+		}
+	})
+
+	t.Run("held pullSem is contended", func(t *testing.T) {
+		pullSem := make(chan struct{}, 1)
+		pullSem <- struct{}{} // held by a stand-in "other scan"
+
+		assert.True(t, pullSemWasContended(pullSem))
+
+		// still held afterward: pullSemWasContended must not have touched it.
+		select {
+		case pullSem <- struct{}{}:
+			t.Fatal("pullSemWasContended must not release a pullSem it did not itself acquire")
+		default:
+		}
+	})
+}
+
 // archRegistryVariant is one platform-specific manifest+config+layer served by
 // mockMultiArchRegistry below.
 type archRegistryVariant struct {

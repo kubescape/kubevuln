@@ -138,6 +138,22 @@ func NormalizeImageID(imageID, imageTag string) string {
 	return tag.Context().String() + "@" + imageID
 }
 
+// pullSemWasContended settles, once a wait for pullSem has ended via ctxWithTimeout.Done()
+// rather than a successful acquire, whether pullSem was genuinely held by another scan at
+// that instant or was actually free - select does not prefer either ready case
+// deterministically, so Done() firing alongside a free pullSem is possible and does not by
+// itself mean pullSem was contended. A non-blocking acquire attempt distinguishes the two: if
+// it succeeds, pullSem was free, so it is released immediately and false is returned.
+func pullSemWasContended(pullSem chan struct{}) bool {
+	select {
+	case pullSem <- struct{}{}:
+		<-pullSem
+		return false
+	default:
+		return true
+	}
+}
+
 // CreateSBOM creates an SBOM for a given imageID, restrict parallelism to prevent disk space issues,
 // a timeout prevents the process from hanging for too long.
 // Format is syft JSON and the resulting SBOM is tagged with the Syft version.
@@ -266,6 +282,15 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 			return contextAlreadyDeadResult(err)
 		}
 	case <-ctxWithTimeout.Done():
+		// Same nondeterministic-select race as above, from the other side: pullSem may have
+		// been free at the same instant ctxWithTimeout expired, and select chose this case
+		// anyway. A non-blocking acquire attempt settles which actually happened - if it
+		// succeeds, pullSem was never contended, so release it immediately and degrade the
+		// same ordinary way as contextAlreadyDeadResult instead of warning about a stuck
+		// semaphore that was never actually held by anyone.
+		if !pullSemWasContended(s.pullSem) {
+			return contextAlreadyDeadResult(ctxWithTimeout.Err())
+		}
 		return pullSemStuckResult(ctxWithTimeout.Err())
 	}
 	pullSemReleaseOnce := sync.Once{}
