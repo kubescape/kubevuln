@@ -41,7 +41,7 @@ type BackendAdapter struct {
 	eventReceiverRestURL  string
 	apiServerRestURL      string
 	clusterConfig         pkgcautils.ClusterConfig
-	getCVEExceptionsFunc  func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+	getCVEExceptionsFunc  func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 	httpPostFunc          func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
 	sendStatusFunc        func(*backendClientV1.BaseReportSender, string, bool)
 	accessKey             string
@@ -362,7 +362,7 @@ func (a *BackendAdapter) fetchCVEExceptions(ctx context.Context, workload domain
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
+	vulnExceptionList, err := a.getCVEExceptionsFunc(ctx, a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
 		return cveExceptionsFetchResult{}, err
 	}

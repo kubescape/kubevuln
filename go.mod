@@ -32,10 +32,10 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/kinbiko/jsonassert v1.2.0
-	github.com/kubescape/backend v0.0.40
+	github.com/kubescape/backend v0.0.51
 	github.com/kubescape/go-logger v0.0.33
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.302
+	github.com/kubescape/storage v0.0.305
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.7
 	github.com/package-url/packageurl-go v0.1.3

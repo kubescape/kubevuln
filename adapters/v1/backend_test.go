@@ -79,7 +79,7 @@ func scanContext(wlid, containerName, image string) context.Context {
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
-		getCVEExceptionsFunc func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
+		getCVEExceptionsFunc func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
 		clusterConfig        armometadata.ClusterConfig
 	}
 	tests := []struct {
@@ -139,7 +139,7 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 	calls := 0
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		calls++
 		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
 	}
@@ -208,7 +208,7 @@ func TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses(t *testing.T)
 			}}, nil, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		atomic.AddInt32(&backendCalls, 1)
 		<-allJoined
 		return nil, nil
@@ -261,7 +261,7 @@ func TestBackendAdapter_GetCVEExceptions_CallerCancellationDoesNotAbortSharedFet
 	fetchStarted := make(chan struct{})
 	releaseFetch := make(chan struct{})
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		close(fetchStarted)
 		<-releaseFetch
 		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
@@ -339,7 +339,7 @@ func TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry(t *testing
 			}}, nil, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		return nil, nil
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
@@ -367,7 +367,7 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy(t *tes
 	calls := 0
 	past := time.Now().Add(-1 * time.Hour)
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		calls++
 		return []armotypes.VulnerabilityExceptionPolicy{{ExpirationDate: &past}}, nil
 	}
@@ -398,7 +398,7 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 			}}, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		return nil, nil
 	}
 
@@ -427,7 +427,7 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 			}}, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		return nil, nil
 	}
 
@@ -447,7 +447,7 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 			return nil, nil, errors.New("boom")
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		calls++
 		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
 	}
@@ -478,7 +478,7 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *tes
 
 	calls := 0
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", store)
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		calls++
 		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
 	}
@@ -512,7 +512,7 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 			return nil, errors.New("lookup failed")
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 		calls++
 		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
 	}
@@ -624,7 +624,7 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				getCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 					return tt.exceptions, nil
 				},
 				httpPostFunc:          httpPostFunc,
@@ -688,7 +688,7 @@ func TestBackendAdapter_SubmitCVE_RelevancySubset(t *testing.T) {
 	}
 
 	a := &BackendAdapter{
-		getCVEExceptionsFunc: func(s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
 		},
 		httpPostFunc:          httpPostFunc,
@@ -1197,7 +1197,7 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return cloudPolicies, nil
 		},
 		securityExceptionRepo: mockRepo,
@@ -1248,7 +1248,7 @@ func TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return cloudPolicies, nil
 		},
 		securityExceptionRepo: mockRepo,
@@ -1396,7 +1396,7 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
 		},
 		securityExceptionRepo: mockRepo,
@@ -1603,7 +1603,7 @@ func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{},
-		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
 		},
 		httpPostFunc:          httpPostFunc,
@@ -1645,7 +1645,7 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	backend := &BackendAdapter{
 		clusterConfig:         armometadata.ClusterConfig{},
 		securityExceptionRepo: &testSecurityExceptionRepo{},
-		getCVEExceptionsFunc: func(string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
 			return nil, nil
 		},
 		sendStatusFunc: func(*beClientV1.BaseReportSender, string, bool) {},
