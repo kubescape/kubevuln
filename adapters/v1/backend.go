@@ -128,10 +128,7 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 }
 
 func (a *BackendAdapter) getBackendClient() BackendClient {
-	if a.backendClient != nil {
-		return a.backendClient
-	}
-	return &defaultBackendClient{}
+	return a.backendClient
 }
 
 func (a *BackendAdapter) WithBackendClient(client BackendClient) *BackendAdapter {
@@ -341,7 +338,7 @@ type cveExceptionsFetchResult struct {
 }
 
 // fetchCVEExceptions is GetCVEExceptions' cache-miss path: fetch cloud-side exceptions via
-// getCVEExceptionsFunc, merge in CRD-based SecurityException/ClusterSecurityException policies
+// BackendClient.GetCVEExceptions, merge in CRD-based SecurityException/ClusterSecurityException policies
 // via GetSecurityExceptions, and -- unless the result is uncacheable -- write it back to
 // exceptionsCache under cacheKey. When cacheable is true, this runs at most once per coalesced
 // burst of concurrent GetCVEExceptions callers sharing cacheKey (see GetCVEExceptions and
