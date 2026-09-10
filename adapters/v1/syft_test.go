@@ -1007,7 +1007,11 @@ func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
 
 func Test_SyftAdapter_WithCataloger(t *testing.T) {
 	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
-	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, adapter.getCataloger())
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, adapter.cataloger)
+
+	// Passing nil does not overwrite existing cataloger
+	adapter = adapter.WithCataloger(nil)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, adapter.cataloger)
 
 	called := false
 	custom := syftsource.SBOMCatalogerFunc(func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
@@ -1016,8 +1020,8 @@ func Test_SyftAdapter_WithCataloger(t *testing.T) {
 	})
 
 	adapter = adapter.WithCataloger(custom)
-	assert.NotNil(t, adapter.getCataloger())
+	assert.NotNil(t, adapter.cataloger)
 
-	_, _ = adapter.getCataloger().CreateSBOM(context.Background(), nil, nil)
+	_, _ = adapter.cataloger.CreateSBOM(context.Background(), nil, nil)
 	assert.True(t, called)
 }

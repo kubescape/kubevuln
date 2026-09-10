@@ -967,3 +967,22 @@ func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
 }
+
+func Test_WithCataloger(t *testing.T) {
+	srv := NewScannerServer().(*scannerServer)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, srv.cataloger)
+
+	// Passing nil does not overwrite existing cataloger
+	WithCataloger(nil)(srv)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, srv.cataloger)
+
+	called := false
+	custom := syftsource.SBOMCatalogerFunc(func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		called = true
+		return &sbom.SBOM{}, nil
+	})
+	WithCataloger(custom)(srv)
+	assert.NotNil(t, srv.cataloger)
+	_, _ = srv.cataloger.CreateSBOM(context.Background(), nil, nil)
+	assert.True(t, called)
+}

@@ -55,15 +55,10 @@ type ServerOption func(*scannerServer)
 // WithCataloger configures a custom SBOMCataloger for the scanner server.
 func WithCataloger(cataloger syftsource.SBOMCataloger) ServerOption {
 	return func(s *scannerServer) {
-		s.cataloger = cataloger
+		if cataloger != nil {
+			s.cataloger = cataloger
+		}
 	}
-}
-
-func (s *scannerServer) getCataloger() syftsource.SBOMCataloger {
-	if s.cataloger != nil {
-		return s.cataloger
-	}
-	return syftsource.DefaultSBOMCataloger{}
 }
 
 // NewScannerServer creates a new gRPC scanner server.
@@ -272,7 +267,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		// the handler reads. It keeps its result local and publishes it on a channel,
 		// which the handler only receives from once dl.Run has reported success.
 		created, createErr := tools.RetryWithBackoff(context.Background(), "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (*sbom.SBOM, error) {
-			return s.getCataloger().CreateSBOM(retryCtx, src, cfg)
+			return s.cataloger.CreateSBOM(retryCtx, src, cfg)
 		})
 		if createErr != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", createErr)

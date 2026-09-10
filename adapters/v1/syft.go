@@ -69,15 +69,10 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 
 // WithCataloger sets a custom SBOMCataloger for SyftAdapter.
 func (s *SyftAdapter) WithCataloger(cataloger syftsource.SBOMCataloger) *SyftAdapter {
-	s.cataloger = cataloger
-	return s
-}
-
-func (s *SyftAdapter) getCataloger() syftsource.SBOMCataloger {
-	if s.cataloger != nil {
-		return s.cataloger
+	if cataloger != nil {
+		s.cataloger = cataloger
 	}
-	return syftsource.DefaultSBOMCataloger{}
+	return s
 }
 
 func rewriteImageRef(imageRef string, proxyMap map[string]string) string {
@@ -430,7 +425,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// therefore not touch any variable the caller reads. Keep the result local and publish
 		// it on the channel, which is only received from once dl.Run reports success.
 		created, createErr := tools.RetryWithBackoff(ctxWithSize, "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (*sbom.SBOM, error) {
-			return s.getCataloger().CreateSBOM(retryCtx, src, cfg)
+			return s.cataloger.CreateSBOM(retryCtx, src, cfg)
 		})
 		if createErr != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", createErr)
