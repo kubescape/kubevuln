@@ -131,7 +131,7 @@ func (a *BackendAdapter) postResults(
 		return err
 	}
 
-	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
+	resp, err := a.getBackendClient().HttpPost(ctx, a.getHTTPClient(), urlBase.String(), a.getRequestHeaders(), payload, 60*time.Second)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "429") || strings.Contains(errStr, "Too Many Requests") {
