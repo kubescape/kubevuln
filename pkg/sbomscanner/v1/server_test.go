@@ -30,6 +30,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/registryauth"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/stretchr/testify/assert"
@@ -64,7 +65,7 @@ func newTestSocketPath(t *testing.T) string {
 	return sock
 }
 
-func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
+func startTestServer(t *testing.T, opts ...ServerOption) (pb.SBOMScannerClient, func()) {
 	t.Helper()
 	sock := newTestSocketPath(t)
 
@@ -75,7 +76,7 @@ func startTestServer(t *testing.T) (pb.SBOMScannerClient, func()) {
 		grpc.MaxRecvMsgSize(MaxgRPCMessageSize),
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
-	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
+	pb.RegisterSBOMScannerServer(srv, NewScannerServer(opts...))
 	go func() {
 		// Serve returns ErrServerStopped on the graceful Stop below; nothing else to do
 		// with it here, but ignoring it silently is what errcheck flags.
@@ -853,15 +854,13 @@ func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
 	// Stand in for Syft: outlive the deadline, then return a result exactly as the real
 	// cataloguer would once it finishes naturally.
 	finished := make(chan struct{})
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		time.Sleep(1500 * time.Millisecond)
 		defer close(finished)
 		return &sbom.SBOM{}, nil
-	}
+	})
 
-	client, cleanup := startTestServer(t)
+	client, cleanup := startTestServer(t, WithCataloger(cataloger))
 	defer cleanup()
 
 	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
@@ -887,7 +886,7 @@ func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
 	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the late write must not affect the response")
 }
 
-func TestCreateSBOM_Exhausted429RateLimitFromCreateSBOMFn(t *testing.T) {
+func TestCreateSBOM_Exhausted429RateLimitFromCataloger(t *testing.T) {
 	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
 	require.NoError(t, err)
 
@@ -921,13 +920,11 @@ func TestCreateSBOM_Exhausted429RateLimitFromCreateSBOMFn(t *testing.T) {
 	u, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		return nil, &transport.Error{StatusCode: http.StatusTooManyRequests}
-	}
+	})
 
-	client, cleanup := startTestServer(t)
+	client, cleanup := startTestServer(t, WithCataloger(cataloger))
 	defer cleanup()
 
 	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
@@ -969,4 +966,23 @@ func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
+}
+
+func Test_WithCataloger(t *testing.T) {
+	srv := NewScannerServer().(*scannerServer)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, srv.cataloger)
+
+	// Passing nil does not overwrite existing cataloger
+	WithCataloger(nil)(srv)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, srv.cataloger)
+
+	called := false
+	custom := syftsource.SBOMCatalogerFunc(func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		called = true
+		return &sbom.SBOM{}, nil
+	})
+	WithCataloger(custom)(srv)
+	assert.NotNil(t, srv.cataloger)
+	_, _ = srv.cataloger.CreateSBOM(context.Background(), nil, nil)
+	assert.True(t, called)
 }
