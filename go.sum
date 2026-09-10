@@ -870,6 +870,8 @@ github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/kubescape/backend v0.0.40 h1:nwQ74sbtuvwkzewS3axf6pIA6C6v+X4e4AzLuvVvoxI=
 github.com/kubescape/backend v0.0.40/go.mod h1:cMEGP8cXUZgY89YU4GRBGIla9HZW7grZsUtlCwvZgAE=
+github.com/kubescape/backend v0.0.51 h1:tmiKleQ9/IQs5LEipAGSvJq2JZspcs8f0cFlejmve+Y=
+github.com/kubescape/backend v0.0.51/go.mod h1:8MqQJ3h5vU6SjtOsNbGLFzY5Ay7QADtCPiq4mZEcBIc=
 github.com/kubescape/go-logger v0.0.33 h1:Gn+HhDsudPoyxW70e2zQehlg9wPrNchOuJrHFGWdDtc=
 github.com/kubescape/go-logger v0.0.33/go.mod h1:Alj7JBQ8/WCxbXe8Ura6ZheSRK45E0p21M3xeqedX90=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
@@ -880,6 +882,8 @@ github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/storage v0.0.302 h1:iMWxoqo5Qz9WOLjOSGJanfxqdfI7jPoYmccyVT2pNTc=
 github.com/kubescape/storage v0.0.302/go.mod h1:d/1hqWPda2clsjx2wmQgysnB5dThIo3rDKP7RWx+v+M=
+github.com/kubescape/storage v0.0.305 h1:Ofuoi3V6OW/7CApr7yuzYlcBQP0flBDY2zRzXs3N3Ls=
+github.com/kubescape/storage v0.0.305/go.mod h1:d/1hqWPda2clsjx2wmQgysnB5dThIo3rDKP7RWx+v+M=
 github.com/kubescape/syft v1.32.0-ks.2 h1:xdUksUmKEyyVKsTfJDYW8Z5HawVJtelsUolPOsWtDx0=
 github.com/kubescape/syft v1.32.0-ks.2/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
