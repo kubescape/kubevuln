@@ -128,7 +128,10 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 }
 
 func (a *BackendAdapter) getBackendClient() BackendClient {
-	return a.backendClient
+	if a.backendClient != nil {
+		return a.backendClient
+	}
+	return &defaultBackendClient{}
 }
 
 func (a *BackendAdapter) WithBackendClient(client BackendClient) *BackendAdapter {
