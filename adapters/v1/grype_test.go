@@ -108,10 +108,10 @@ func Test_grypeAdapter_NonBlockingReady(t *testing.T) {
 		store:             oldStore,
 		dbStatus:          &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
 		nextUpdateAttempt: time.Now().Add(24 * time.Hour),
-		loadDB: func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			<-blockLoad
 			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew-checksum"}, nil
-		},
+		}),
 	}
 
 	// Initial check with valid DB returns ready immediately
@@ -172,10 +172,10 @@ func Test_grypeAdapter_Ready_backsOffAfterFailedColdStart(t *testing.T) {
 	ctx := context.Background()
 	var calls int32
 	g := &GrypeAdapter{
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			atomic.AddInt32(&calls, 1)
 			return nil, nil, errors.New("network down")
-		},
+		}),
 	}
 
 	for i := 0; i < 5; i++ {
@@ -197,9 +197,9 @@ func Test_grypeAdapter_Ready_treatsStatusErrorAsFailure(t *testing.T) {
 	statusErr := errors.New("corrupt db")
 	badStore := &closeTrackingProvider{}
 	g := &GrypeAdapter{
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			return badStore, &vulnerability.ProviderStatus{Error: statusErr}, nil
-		},
+		}),
 	}
 
 	require.False(t, g.Ready(ctx))
@@ -227,11 +227,11 @@ func Test_grypeAdapter_Ready_singleFlightUnderConcurrency(t *testing.T) {
 		store:             &mockProvider{},
 		dbStatus:          &vulnerability.ProviderStatus{From: "schema:v6%3Atest-checksum"},
 		nextUpdateAttempt: time.Now().Add(-time.Minute),
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			atomic.AddInt32(&calls, 1)
 			<-blockLoad
 			return &mockProvider{}, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
-		},
+		}),
 	}
 
 	var wg sync.WaitGroup
@@ -274,13 +274,13 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
 		nextUpdateAttempt:  time.Now().Add(-time.Minute),
 		stuckUpdateTimeout: 20 * time.Millisecond,
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			if atomic.AddInt32(&loadCalls, 1) == 1 {
 				<-stuck // first load models an uncancellable download that never returns
 				return nil, nil, errors.New("unblocked later")
 			}
 			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
-		},
+		}),
 	}
 
 	// 1. First probe launches the update; the load hangs; updateDBBackground abandons it.
@@ -345,10 +345,10 @@ func Test_grypeAdapter_Ready_slowLoadWithinTimeoutStillInstalls(t *testing.T) {
 		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
 		nextUpdateAttempt:  time.Now().Add(-time.Minute),
 		stuckUpdateTimeout: 500 * time.Millisecond,
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			time.Sleep(40 * time.Millisecond)
 			return newStore, &vulnerability.ProviderStatus{From: "schema:v6%3Anew"}, nil
-		},
+		}),
 	}
 
 	require.True(t, g.Ready(ctx))
@@ -378,10 +378,10 @@ func Test_grypeAdapter_finishUpdate_discardsAbandonedLoadResult(t *testing.T) {
 		dbStatus:           &vulnerability.ProviderStatus{From: "schema:v6%3Aold"},
 		nextUpdateAttempt:  time.Now().Add(-time.Minute),
 		stuckUpdateTimeout: 20 * time.Millisecond,
-		loadDB: func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		dbLoader: VulnerabilityDBLoaderFunc(func(distribution.Config, installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
 			<-release
 			return lateStore, &vulnerability.ProviderStatus{From: "schema:v6%3Alate"}, nil
-		},
+		}),
 	}
 
 	require.True(t, g.Ready(ctx))
@@ -561,4 +561,21 @@ func TestDefaultMatchers_CVEMatchingOnProducesCPEMatch(t *testing.T) {
 	}
 
 	assert.True(t, foundCPEMatch, "CVEMatchingOn must produce a CPE match for the expected CVE")
+}
+
+func Test_GrypeAdapter_WithDBLoader(t *testing.T) {
+	g := NewGrypeAdapter("https://example.com/listing.json", config.CVEMatchingOff, nil)
+	assert.IsType(t, DefaultVulnerabilityDBLoader{}, g.getDBLoader())
+
+	called := false
+	customLoader := VulnerabilityDBLoaderFunc(func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+		called = true
+		return nil, nil, nil
+	})
+
+	g = g.WithDBLoader(customLoader)
+	assert.NotNil(t, g.getDBLoader())
+
+	_, _, _ = g.getDBLoader().LoadDB(distribution.Config{}, installation.Config{})
+	assert.True(t, called)
 }
