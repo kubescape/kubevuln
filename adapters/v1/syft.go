@@ -35,10 +35,6 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-// createSBOMFn is an indirection over syft.CreateSBOM so the deadline handling in
-// CreateSBOM can be unit-tested without cataloguing a real image.
-var createSBOMFn = syft.CreateSBOM
-
 // SyftAdapter implements SBOMCreator from ports using Syft's API
 type SyftAdapter struct {
 	maxImageSize     int64
@@ -51,6 +47,7 @@ type SyftAdapter struct {
 	pullSem           chan struct{}
 	scanTimeout       time.Duration
 	scanEmbeddedSBOMs bool
+	cataloger         syftsource.SBOMCataloger
 }
 
 const digestDelim = "@"
@@ -66,7 +63,21 @@ func NewSyftAdapter(scanTimeout time.Duration, maxImageSize int64, maxSBOMSize i
 		pullSem:           make(chan struct{}, 1),
 		scanTimeout:       scanTimeout,
 		scanEmbeddedSBOMs: scanEmbeddedSBOMs,
+		cataloger:         syftsource.DefaultSBOMCataloger{},
 	}
+}
+
+// WithCataloger sets a custom SBOMCataloger for SyftAdapter.
+func (s *SyftAdapter) WithCataloger(cataloger syftsource.SBOMCataloger) *SyftAdapter {
+	s.cataloger = cataloger
+	return s
+}
+
+func (s *SyftAdapter) getCataloger() syftsource.SBOMCataloger {
+	if s.cataloger != nil {
+		return s.cataloger
+	}
+	return syftsource.DefaultSBOMCataloger{}
 }
 
 func rewriteImageRef(imageRef string, proxyMap map[string]string) string {
@@ -419,7 +430,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// therefore not touch any variable the caller reads. Keep the result local and publish
 		// it on the channel, which is only received from once dl.Run reports success.
 		created, createErr := tools.RetryWithBackoff(ctxWithSize, "sbom_generation", tools.Default429RetryConfig(), tools.IsRateLimitError, func(retryCtx context.Context) (*sbom.SBOM, error) {
-			return createSBOMFn(retryCtx, src, cfg)
+			return s.getCataloger().CreateSBOM(retryCtx, src, cfg)
 		})
 		if createErr != nil {
 			return fmt.Errorf("failed to generate SBOM: %w", createErr)

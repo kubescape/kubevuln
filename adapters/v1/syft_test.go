@@ -32,6 +32,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/syftmeta"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -488,15 +489,13 @@ func Test_syftAdapter_CreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.
 	host := mockRegistryImage(t)
 
 	finished := make(chan struct{})
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		time.Sleep(1500 * time.Millisecond)
 		defer close(finished)
 		return &sbom.SBOM{}, nil
-	}
+	})
 
-	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil)
+	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil).WithCataloger(cataloger)
 	domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
 
 	require.NoError(t, err)
@@ -526,10 +525,8 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 	firstAbandonedGoroutineFinished := make(chan struct{})
 	secondStarted := make(chan struct{})
 
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
 	var calls atomic.Int32
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		if calls.Add(1) == 1 {
 			close(firstStarted)
 			<-releaseFirst
@@ -538,9 +535,9 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 		}
 		close(secondStarted)
 		return &sbom.SBOM{}, nil
-	}
+	})
 
-	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil)
+	adapter := NewSyftAdapter(1*time.Second, 1<<30, 1<<30, false, nil).WithCataloger(cataloger)
 
 	type createSBOMResult struct {
 		domainSBOM domain.SBOM
@@ -635,10 +632,8 @@ func Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem(t *tes
 	blockForever := make(chan struct{}) // deliberately never closed
 	secondStarted := make(chan struct{})
 
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
 	var calls atomic.Int32
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		if calls.Add(1) == 1 {
 			close(firstStarted)
 			<-blockForever
@@ -646,13 +641,13 @@ func Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem(t *tes
 		}
 		close(secondStarted)
 		return &sbom.SBOM{}, nil
-	}
+	})
 
 	// scanTimeout is deliberately a few seconds, not sub-second: it must comfortably cover the
 	// first call's real (if local) HTTP source resolution against mockRegistryImage, so that
 	// call reaches createSBOMFn - and therefore firstStarted - instead of timing out during
 	// resolution itself on a loaded machine, before ever holding pullSem.
-	adapter := NewSyftAdapter(2*time.Second, 1<<30, 1<<30, false, nil)
+	adapter := NewSyftAdapter(2*time.Second, 1<<30, 1<<30, false, nil).WithCataloger(cataloger)
 
 	type createSBOMResult struct {
 		domainSBOM domain.SBOM
@@ -720,21 +715,19 @@ func Test_syftAdapter_CreateSBOM_CanceledWhileWaitingForStuckPullSem(t *testing.
 	firstStarted := make(chan struct{})
 	blockForever := make(chan struct{}) // deliberately never closed
 
-	orig := createSBOMFn
-	defer func() { createSBOMFn = orig }()
 	var calls atomic.Int32
-	createSBOMFn = func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, _ *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
 		if calls.Add(1) == 1 {
 			close(firstStarted)
 			<-blockForever
 			return &sbom.SBOM{}, nil // unreachable
 		}
 		return &sbom.SBOM{}, nil
-	}
+	})
 
 	// A scanTimeout much longer than the cancellation below proves cancellation is honored on
 	// its own, not merely because scanTimeout happened to also elapse.
-	adapter := NewSyftAdapter(10*time.Second, 1<<30, 1<<30, false, nil)
+	adapter := NewSyftAdapter(10*time.Second, 1<<30, 1<<30, false, nil).WithCataloger(cataloger)
 
 	go func() {
 		_, _ = adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest", domain.RegistryOptions{InsecureUseHTTP: true})
@@ -1010,4 +1003,21 @@ func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
 	mu.Lock()
 	assert.GreaterOrEqual(t, attempts, 2, "expected at least 2 manifest request attempts due to 429 retry")
 	mu.Unlock()
+}
+
+func Test_SyftAdapter_WithCataloger(t *testing.T) {
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, adapter.getCataloger())
+
+	called := false
+	custom := syftsource.SBOMCatalogerFunc(func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		called = true
+		return &sbom.SBOM{}, nil
+	})
+
+	adapter = adapter.WithCataloger(custom)
+	assert.NotNil(t, adapter.getCataloger())
+
+	_, _ = adapter.getCataloger().CreateSBOM(context.Background(), nil, nil)
+	assert.True(t, called)
 }
