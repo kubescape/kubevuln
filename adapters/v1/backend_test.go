@@ -892,6 +892,10 @@ func TestParseImageManifest(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, imageManifest)
+				require.Len(t, imageManifest.Layers, 17)
+				for order, layer := range imageManifest.Layers {
+					assert.Equal(t, order, layer.LayerOrder)
+				}
 			}
 		})
 	}
