@@ -109,13 +109,17 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 	return g
 }
 
-// WithDBLoader configures a custom VulnerabilityDBLoader.
+// WithDBLoader configures a custom VulnerabilityDBLoader. It should be called during initialization before background operations start.
 func (g *GrypeAdapter) WithDBLoader(loader VulnerabilityDBLoader) *GrypeAdapter {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.dbLoader = loader
 	return g
 }
 
 func (g *GrypeAdapter) getDBLoader() VulnerabilityDBLoader {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	if g.dbLoader != nil {
 		return g.dbLoader
 	}
@@ -248,8 +252,6 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context, ch chan struct{})
 	hasExistingDB := g.store != nil
 	g.mu.RUnlock()
 
-	// dbLoader is set once at construction or via WithDBLoader and never reassigned afterwards, so reading it
-	// here without g.mu is safe even though every other field on GrypeAdapter is guarded.
 	loader := g.getDBLoader()
 
 	done := make(chan struct{})
