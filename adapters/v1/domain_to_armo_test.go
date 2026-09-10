@@ -167,6 +167,15 @@ func Test_parseLayersPayload(t *testing.T) {
 		wantErr bool
 	}{
 		{
+			name: "missing config",
+			want: map[string]containerscan.ESLayer{},
+		},
+		{
+			name:    "malformed config",
+			target:  source.ImageMetadata{RawConfig: []byte(`{`)},
+			wantErr: true,
+		},
+		{
 			name: "Test parseLayersPayload",
 			target: source.ImageMetadata{
 				RawConfig: config,
@@ -209,6 +218,7 @@ func Test_parseLayersPayload(t *testing.T) {
 func Test_layerOrder_consistentBetweenManifestAndVulnerabilities(t *testing.T) {
 	config := containerRegistryV1.ConfigFile{
 		History: []containerRegistryV1.History{
+			{CreatedBy: "ENV BASE=1", EmptyLayer: true},
 			{CreatedBy: "FROM base", EmptyLayer: false},
 			{CreatedBy: "ENV FOO=bar", EmptyLayer: true},
 			{CreatedBy: "LABEL x=y", EmptyLayer: true},
@@ -243,6 +253,11 @@ func Test_layerOrder_consistentBetweenManifestAndVulnerabilities(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
+	require.Len(t, imageManifest.Layers, 6)
+	require.Len(t, layerMap, 2)
+	assert.Equal(t, 1, layerMap[imageMetadata.Layers[0].Digest].LayerOrder)
+	assert.Equal(t, 4, layerMap[imageMetadata.Layers[1].Digest].LayerOrder)
+	assert.Equal(t, imageMetadata.Layers[0].Digest, layerMap[imageMetadata.Layers[1].Digest].ParentLayerHash)
 	checked := 0
 	for _, layer := range imageManifest.Layers {
 		if layer.LayerHash == "" {
@@ -255,6 +270,100 @@ func Test_layerOrder_consistentBetweenManifestAndVulnerabilities(t *testing.T) {
 		checked++
 	}
 	assert.Equal(t, 2, checked, "expected to check both real layers")
+
+	document := layeredDocument(imageMetadata.Layers[1].Digest)
+	document.Source.Target = targetBytes
+	ctx := context.WithValue(t.Context(), domain.WorkloadKey{}, domain.ScanCommand{})
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, "scan-history-orders")
+	results, err := DomainToArmo(ctx, document, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Layers, 1)
+	assert.Equal(t, 4, results[0].Layers[0].LayerOrder)
+	assert.Equal(t, imageMetadata.Layers[1].Digest, results[0].IntroducedInLayer)
+}
+
+func TestParseImageManifest_IncompleteLayerMetadata(t *testing.T) {
+	history := []containerRegistryV1.History{
+		{CreatedBy: "ENV BASE=1", EmptyLayer: true},
+		{CreatedBy: "ADD base"},
+		{CreatedBy: "LABEL x=y", EmptyLayer: true},
+		{CreatedBy: "RUN install"},
+		{CreatedBy: "CMD app", EmptyLayer: true},
+	}
+	diffIDs := []containerRegistryV1.Hash{
+		{Algorithm: "sha256", Hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Algorithm: "sha256", Hex: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	}
+	layers := []source.LayerMetadata{
+		{Digest: diffIDs[0].String(), Size: 100},
+		{Digest: diffIDs[1].String(), Size: 200},
+	}
+	for _, tt := range []struct {
+		name    string
+		history []containerRegistryV1.History
+		layers  []source.LayerMetadata
+		diffIDs []containerRegistryV1.Hash
+	}{
+		{"complete", history, layers, diffIDs},
+		{"missing raw layers", history, nil, diffIDs},
+		{"truncated raw layers", history, layers[:1], diffIDs},
+		{"truncated diff IDs", history, layers, diffIDs[:1]},
+		{"metadata only", []containerRegistryV1.History{history[0], history[2], history[4]}, nil, nil},
+		{"no history", nil, layers, diffIDs},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			config := containerRegistryV1.ConfigFile{
+				History: tt.history,
+				RootFS:  containerRegistryV1.RootFS{DiffIDs: tt.diffIDs},
+			}
+			for i := range config.History {
+				config.History[i].Created = containerRegistryV1.Time{Time: time.Unix(int64(i), 0).UTC()}
+			}
+			rawConfig, err := json.Marshal(config)
+			require.NoError(t, err)
+			metadata := source.ImageMetadata{RawConfig: rawConfig, Layers: tt.layers}
+			target, err := json.Marshal(metadata)
+			require.NoError(t, err)
+			manifest, err := ParseImageManifest(&v1beta1.GrypeDocument{Source: &v1beta1.Source{Target: target}})
+			require.NoError(t, err)
+			require.Len(t, manifest.Layers, len(tt.history))
+			byOrder := make(map[int]containerscan.ESLayer)
+			for i, layer := range manifest.Layers {
+				byOrder[layer.LayerOrder] = layer
+				assert.Equal(t, i, layer.LayerOrder)
+				assert.Equal(t, config.History[i].CreatedBy, layer.CreatedBy)
+				assert.Equal(t, &config.History[i].Created.Time, layer.CreatedTime)
+			}
+			assert.Len(t, byOrder, len(tt.history), "order-keyed consumers retain the complete history")
+			payload, err := parseLayersPayload(metadata)
+			require.NoError(t, err)
+			if len(tt.history) == 0 || tt.history[1].EmptyLayer {
+				assert.Empty(t, payload)
+				for _, layer := range manifest.Layers {
+					assert.Empty(t, layer.LayerHash)
+					assert.Zero(t, layer.Size)
+				}
+				return
+			}
+			for physical, order := range []int{1, 3} {
+				if physical < len(tt.layers) {
+					assert.Equal(t, tt.layers[physical].Digest, manifest.Layers[order].LayerHash)
+					assert.EqualValues(t, tt.layers[physical].Size, manifest.Layers[order].Size)
+				} else {
+					assert.Empty(t, manifest.Layers[order].LayerHash)
+					assert.Zero(t, manifest.Layers[order].Size)
+				}
+				if physical < len(tt.diffIDs) {
+					layer, ok := payload[tt.diffIDs[physical].String()]
+					require.True(t, ok)
+					assert.Equal(t, order, layer.LayerOrder)
+				}
+			}
+			assert.Len(t, payload, len(tt.diffIDs))
+		})
+	}
 }
 
 func Test_suggestedVersion(t *testing.T) {
@@ -458,11 +567,7 @@ func Test_domainToArmo_introducedInLayer(t *testing.T) {
 	}
 }
 
-// LayerOrder is what correlates a vulnerability, which carries the order parseLayersPayload
-// assigned, with the layer in the manifest that produced it. That only works if one order
-// names one layer. Metadata-only history entries used to be stamped with layerIndex, which
-// is the order of the next real layer, so on nginx six ENV/LABEL/CMD entries and the RUN
-// layer after them all came out as order 1.
+// An order-keyed consumer must retain every build step, including metadata-only entries.
 func TestParseImageManifest_LayerOrderNamesOneLayer(t *testing.T) {
 	rawConfig := []byte(`{
 	  "architecture":"amd64","os":"linux",
@@ -489,16 +594,12 @@ func TestParseImageManifest_LayerOrderNamesOneLayer(t *testing.T) {
 	require.Len(t, im.Layers, 4, "every history entry is still reported")
 
 	seen := map[int]int{}
-	for _, l := range im.Layers {
-		if l.LayerHash == "" {
-			assert.Equal(t, metadataOnlyLayerOrder, l.LayerInfo.LayerOrder,
-				"a metadata-only entry must not claim a layer's order")
-			continue
-		}
+	for i, l := range im.Layers {
+		assert.Equal(t, i, l.LayerOrder)
 		seen[l.LayerInfo.LayerOrder]++
 	}
-	assert.Equal(t, map[int]int{0: 1, 1: 1}, seen,
-		"each real layer holds its own order, numbered from zero")
+	assert.Equal(t, map[int]int{0: 1, 1: 1, 2: 1, 3: 1}, seen,
+		"every history entry must have a distinct chronological order")
 }
 
 // TestDomainToArmo_IsFixedAgreesWithFixes pins the two "is there a fix?" answers a single

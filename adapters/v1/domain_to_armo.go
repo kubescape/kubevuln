@@ -331,12 +331,14 @@ func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.E
 	}
 
 	listLayers := make([]containerscan.ESLayer, 0)
+	// Retain full build-step orders while pairing only physical layers with DiffIDs.
 	for i := range jsonConfig.History {
 
 		if !jsonConfig.History[i].EmptyLayer {
 			listLayers = append(listLayers, containerscan.ESLayer{LayerInfo: &containerscan.LayerInfo{
 				CreatedBy:   jsonConfig.History[i].CreatedBy,
 				CreatedTime: &jsonConfig.History[i].Created.Time,
+				LayerOrder:  i,
 			},
 			})
 		}
@@ -345,7 +347,6 @@ func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.E
 		listLayers[i].LayerHash = jsonConfig.RootFS.DiffIDs[i].String()
 		if i > 0 {
 			listLayers[i].ParentLayerHash = jsonConfig.RootFS.DiffIDs[i-1].String()
-			listLayers[i].LayerInfo.LayerOrder = i
 		}
 		layerMap[listLayers[i].LayerHash] = listLayers[i]
 	}
@@ -364,11 +365,6 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 	return coordinates
 
 }
-
-// metadataOnlyLayerOrder marks a history entry that produced no layer (ENV, LABEL, CMD and
-// the like). Real layers are numbered from zero, so there is no in-range value that means
-// "not a layer"; a negative one says so without colliding with any of them.
-const metadataOnlyLayerOrder = -1
 
 func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
 	if grypeDocument == nil || grypeDocument.Source == nil {
@@ -393,23 +389,10 @@ func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.Im
 		Layers:       []containerscan.ESLayer{},
 	}
 
-	// LayerOrder counts real, layer-producing history entries only, matching
-	// parseLayersPayload's indexing (which builds the layerMap DomainToArmo attaches to
-	// each vulnerability). History also contains metadata-only entries (ENV, LABEL, CMD,
-	// etc.) that don't produce a layer; counting those too, as the raw loop index would,
-	// gives every real layer a different LayerOrder here than in the vulnerability report
-	// for the same layer hash, breaking any lookup that correlates the two by LayerOrder.
-	// A metadata-only entry has no layer, so it gets metadataOnlyLayerOrder rather than a
-	// real one. Stamping it with layerIndex, as this used to, handed it the order of the
-	// next real layer, which is the one thing LayerOrder must not do: on the nginx image
-	// six ENV/LABEL/CMD entries and the RUN layer they precede all came out as order 1, so
-	// the lookup this exists to serve returned seven entries for one layer.
+	// Every history entry has a unique chronological order, matching parseLayersPayload.
+	// Metadata-only steps consume an order but no physical layer hash or size.
 	layerIndex := 0
-	for _, historyLayer := range config.History {
-		order := metadataOnlyLayerOrder
-		if !historyLayer.EmptyLayer {
-			order = layerIndex
-		}
+	for order, historyLayer := range config.History {
 		layerInfo := containerscan.ESLayer{
 			LayerInfo: &containerscan.LayerInfo{
 				CreatedBy:   historyLayer.CreatedBy,
@@ -417,9 +400,11 @@ func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.Im
 				LayerOrder:  order,
 			},
 		}
-		if !historyLayer.EmptyLayer && layerIndex < len(rawManifest.Layers) {
-			layerInfo.LayerHash = rawManifest.Layers[layerIndex].Digest
-			layerInfo.Size = rawManifest.Layers[layerIndex].Size
+		if !historyLayer.EmptyLayer {
+			if layerIndex < len(rawManifest.Layers) {
+				layerInfo.LayerHash = rawManifest.Layers[layerIndex].Digest
+				layerInfo.Size = rawManifest.Layers[layerIndex].Size
+			}
 			layerIndex++
 		}
 		imageManifest.Layers = append(imageManifest.Layers, layerInfo)
