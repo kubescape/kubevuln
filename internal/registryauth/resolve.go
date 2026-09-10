@@ -2,10 +2,13 @@ package registryauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/internal/metrics"
@@ -18,19 +21,33 @@ type Getter[T any] func(ctx context.Context, ref string, opts *image.RegistryOpt
 
 // isAuthDenied reports whether err is a registry rejecting the request as unauthenticated or
 // unauthorized -- the two outcomes credentials (ours, or none at all) can actually change.
-// Matches the same bucket core/services/scan_failure_reasons.go's classifySBOMError already
-// uses for the identical distinction (401 vs. 403 both mean "the registry looked at who's
-// asking and said no", where a 429/5xx/timeout means something else went wrong that swapping
-// credentials cannot fix).
 func isAuthDenied(err error) bool {
-	return err != nil && (strings.Contains(err.Error(), "401 Unauthorized") || strings.Contains(err.Error(), "403 Forbidden"))
+	if err == nil {
+		return false
+	}
+	var terr *transport.Error
+	if errors.As(err, &terr) {
+		return terr.StatusCode == http.StatusUnauthorized || terr.StatusCode == http.StatusForbidden
+	}
+	// The pinned stereoscope formats registry errors with %+v, losing their type.
+	// Structured OCI diagnostics omit HTTP status text, so recognize their codes too.
+	message := err.Error()
+	if strings.Contains(message, "401 Unauthorized") || strings.Contains(message, "403 Forbidden") {
+		return true
+	}
+	for _, code := range []string{"DENIED:", "UNAUTHORIZED:"} {
+		if strings.HasPrefix(message, code) || strings.Contains(message, ": "+code) || strings.Contains(message, "; "+code) {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveSource pulls imageID, falling back in order when the pull fails:
 //
 //   - MANIFEST_UNKNOWN, which a registry returns for a digest it does not hold, is retried
 //     against imageTag.
-//   - 401 Unauthorized is retried with credentials from the provider matching the reference
+//   - Authentication rejection is retried with credentials from the provider matching the reference
 //     (ECR, GCP), and then, if that provider has none or its credentials are refused too,
 //     without credentials at all. A registry that rejects our credentials may still serve
 //     the image anonymously.
@@ -57,7 +74,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 		src, err = get(ctx, pullRef, &opts)
 	}
 
-	if err != nil && strings.Contains(err.Error(), "401 Unauthorized") {
+	if isAuthDenied(err) {
 		usedFallback = true
 		unauthorizedErr := err
 		if provider, ok := For(pullRef); ok {
@@ -89,7 +106,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 		// eventual error permanently mislabels whatever actually went wrong as "unauthorized"
 		// (via unauthorizedErr below). When no provider matched or its credentials were
 		// unavailable, err is untouched here and still holds the original auth-denied error
-		// from line 50 (or the MANIFEST_UNKNOWN retry above it), so this check doesn't change
+		// from the initial pull (or the MANIFEST_UNKNOWN retry above it), so this check doesn't change
 		// that path's existing behavior. See #921.
 		if isAuthDenied(err) {
 			logger.L().Debug("retrying without credentials",
