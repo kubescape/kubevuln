@@ -160,7 +160,7 @@ func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 // a cache hit already uses ("there is nothing new to report this call") -- this asserts exactly
 // one of the n callers sees the real (non-nil ExpiredBySource) stats.
 //
-// getCVEExceptionsFunc only ever runs inside the one goroutine singleflight picks as leader
+// BackendClient.GetCVEExceptions only ever runs inside the one goroutine singleflight picks as leader
 // for the cache key, so blocking it -- until every one of the n callers has passed the
 // (non-blocking) exceptionsCacheMissHook below -- is what actually forces genuine contention:
 // the leader cannot finish and release the singleflight call until every other caller has had
@@ -974,7 +974,7 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 			if err := a.SendStatus(ctx, tt.step); (err != nil) != tt.wantErr {
 				t.Errorf("SendStatus() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			assert.True(t, called, "sendStatusFunc was never invoked")
+			assert.True(t, called, "SendStatus was never invoked")
 		})
 	}
 }

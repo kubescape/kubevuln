@@ -146,7 +146,7 @@ func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
 	return http.DefaultClient
 }
 
-// httpPostWithContext is the default httpPostFunc. Unlike httputils.HttpPostWithRetry (which
+// httpPostWithContext is the default HttpPost implementation. Unlike httputils.HttpPostWithRetry (which
 // binds context.Background() to the request and retries on a plain, non-cancellable
 // backoff.Retry loop), it threads the caller's ctx through the request AND the retry loop, so
 // cancelling ctx aborts both an in-flight attempt and any further retries promptly instead of
