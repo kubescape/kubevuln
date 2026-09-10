@@ -2082,14 +2082,22 @@ func (p *recordingPlatform) SendStatus(context.Context, int) error { return nil 
 
 // countingCVERepository wraps a CVERepository and counts StoreCVE calls, so tests can assert a
 // cached manifest was (or wasn't) rewritten without depending on the stored content alone.
+// It also records every StoreCVESummary call's manifest name, so tests can observe summary
+// rewrites that the in-memory store itself does not persist as objects.
 type countingCVERepository struct {
 	ports.CVERepository
-	storeCVECalls int
+	storeCVECalls        int
+	storeCVESummaryNames []string
 }
 
 func (c *countingCVERepository) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
 	c.storeCVECalls++
 	return c.CVERepository.StoreCVE(ctx, cve, withRelevancy)
+}
+
+func (c *countingCVERepository) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
+	c.storeCVESummaryNames = append(c.storeCVESummaryNames, cve.Name)
+	return c.CVERepository.StoreCVESummary(ctx, cve, cvep, withRelevancy)
 }
 
 // fakeCVEScanner is a CVEScanner whose ScanSBOM output is fully controlled, used to exercise the
@@ -2234,6 +2242,42 @@ func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsRewrite(t *testing.
 	require.NoError(t, err)
 	require.Len(t, stored.Content.IgnoredMatches, 1)
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
+}
+
+// TestScanService_ScanCVE_CacheHitRewritesSummaryRef is the reproducer for
+// issue #944: one workload upgrades its image A -> B while B's CVE manifest
+// is already cached (e.g. another workload scanned B first) and no security
+// exceptions changed. The workload's summary (keyed by kind-name-container,
+// not by image) must be rewritten to reference manifest B; before the fix
+// the summary write is skipped entirely on this path, leaving the summary
+// dangling at the deleted manifest A.
+func TestScanService_ScanCVE_CacheHitRewritesSummaryRef(t *testing.T) {
+	platform := &recordingPlatform{}
+	inner := repositories.NewMemoryStorage(false, false)
+	counting := &countingCVERepository{CVERepository: inner}
+	s, sbomVer, cveVer, cveDBVer, _ := newScanCVETestService(t, platform, counting, nil)
+	// Warm the cache with B's manifest, as if another workload already
+	// scanned the upgraded image. No summary is written for our workload.
+	seedCachedCVEManifest(t, inner, "imageSlugB", sbomVer, cveVer, cveDBVer, context.TODO(), &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{matchForTest("CVE-B")},
+	})
+
+	// Now scan our workload after its image upgrade to B; exceptions unchanged.
+	workload := domain.ScanCommand{
+		ImageSlug:     "imageSlugB",
+		ContainerName: "kube-proxy",
+		ImageHash:     "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137",
+		Wlid:          "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy",
+	}
+	ctx, err := s.ValidateScanCVE(context.TODO(), workload)
+	require.NoError(t, err)
+	require.NoError(t, s.ScanCVE(ctx))
+
+	assert.Zero(t, counting.storeCVECalls, "an unchanged exception set must not rewrite the cached manifest")
+	require.NotEmpty(t, counting.storeCVESummaryNames,
+		"a cache hit must still rewrite the summary ref to the scanned manifest")
+	assert.Equal(t, "imageSlugB", counting.storeCVESummaryNames[len(counting.storeCVESummaryNames)-1],
+		"summary must reference the new manifest after an image upgrade")
 }
 
 func TestScanService_ScanCVE_CacheHit_ExceptionFetchFailureDoesNotWipe(t *testing.T) {

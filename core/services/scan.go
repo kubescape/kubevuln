@@ -726,6 +726,11 @@ func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest
 // document — subject to the removal-safety rule below. publishVEX lets ScanCP opt
 // out: it republishes VEX later itself, once relevancy-filtered results are also
 // available, using the exceptionsComplete this call returns.
+//
+// The CVE summary is rewritten on every call under the same safety rule,
+// even when suppressions are unchanged: the summary is keyed by workload,
+// not by image, so a workload image upgrade must re-point it at the new
+// manifest rather than dangle at the old one (see #944).
 func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool) {
 	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
@@ -733,25 +738,21 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 
 	if s.storage {
 		curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-		if !maps.Equal(prevIgnored, curIgnored) {
-			// Persist additions freely, but never persist removals when the
-			// exception set is incomplete: a transient SecurityException CRD
-			// list failure must not look like a deletion and wipe suppression
-			// from the stored manifest.
-			hasRemovals := false
-			for k := range prevIgnored {
-				if _, ok := curIgnored[k]; !ok {
-					hasRemovals = true
-					break
-				}
+		// Persist additions freely, but never persist removals when the
+		// exception set is incomplete: a transient SecurityException CRD
+		// list failure must not look like a deletion and wipe suppression
+		// from the stored manifest.
+		hasRemovals := false
+		for k := range prevIgnored {
+			if _, ok := curIgnored[k]; !ok {
+				hasRemovals = true
+				break
 			}
-			if exceptionsComplete || !hasRemovals {
+		}
+		if exceptionsComplete || !hasRemovals {
+			if !maps.Equal(prevIgnored, curIgnored) {
 				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
 					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", imageSlug))
-				}
-				if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
 						helpers.String("imageSlug", imageSlug))
 				}
 				// The stored manifest just changed, so the VEX document describing it is
@@ -768,6 +769,16 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 				if publishVEX && exceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
 				}
+			}
+			// The summary is keyed by workload, not by image: always rewrite
+			// it from the cached manifest so a workload image upgrade
+			// re-points the summary at the new manifest instead of dangling
+			// at the old one. This stays inside the removal-safety gate
+			// above so a degraded exception fetch never persists a weakened
+			// summary.
+			if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+				logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
+					helpers.String("imageSlug", imageSlug))
 			}
 		}
 	}
