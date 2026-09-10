@@ -886,7 +886,7 @@ func TestCreateSBOM_TimeoutDoesNotRaceWithAbandonedSyft(t *testing.T) {
 	assert.Equal(t, helpersv1.Incomplete, resp.Status, "the late write must not affect the response")
 }
 
-func TestCreateSBOM_Exhausted429RateLimitFromCreateSBOMFn(t *testing.T) {
+func TestCreateSBOM_Exhausted429RateLimitFromCataloger(t *testing.T) {
 	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
 	require.NoError(t, err)
 

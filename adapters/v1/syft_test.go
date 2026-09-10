@@ -566,7 +566,7 @@ func Test_syftAdapter_CreateSBOM_SerializesWithAbandonedGoroutineAfterTimeout(t 
 	require.NoError(t, firstRes.err)
 	assert.Equal(t, helpersv1.Incomplete, firstRes.domainSBOM.Status)
 	// CreateSBOM has returned Incomplete, but its abandoned goroutine is still blocked in
-	// createSBOMFn, holding pullMutex.
+	// the cataloger, holding pullMutex.
 
 	secondReturned := make(chan struct{})
 	secondResult := make(chan createSBOMResult, 1)
@@ -645,7 +645,7 @@ func Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem(t *tes
 
 	// scanTimeout is deliberately a few seconds, not sub-second: it must comfortably cover the
 	// first call's real (if local) HTTP source resolution against mockRegistryImage, so that
-	// call reaches createSBOMFn - and therefore firstStarted - instead of timing out during
+	// call reaches the cataloger - and therefore firstStarted - instead of timing out during
 	// resolution itself on a loaded machine, before ever holding pullSem.
 	adapter := NewSyftAdapter(2*time.Second, 1<<30, 1<<30, false, nil).WithCataloger(cataloger)
 
@@ -674,7 +674,7 @@ func Test_syftAdapter_CreateSBOM_GivesUpWaitingForPermanentlyStuckPullSem(t *tes
 	}
 	require.NoError(t, firstRes.err)
 	assert.Equal(t, helpersv1.Incomplete, firstRes.domainSBOM.Status)
-	// The first call's abandoned goroutine is now permanently blocked in createSBOMFn - it will
+	// The first call's abandoned goroutine is now permanently blocked in the cataloger - it will
 	// never close blockForever - so it holds pullSem forever.
 
 	start := time.Now()
