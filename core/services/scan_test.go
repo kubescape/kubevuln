@@ -2236,6 +2236,266 @@ func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsRewrite(t *testing.
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
 
+// A cache hit belongs to an image, but the summary belongs to a workload/container.
+// Use the API-server repository so replacing that stable summary (including its
+// references and counts) is tested, not just a StoreCVESummary invocation.
+func TestScanService_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
+	for _, flow := range []string{"ScanCVE", "ScanRegistry"} {
+		for _, tc := range []struct {
+			name              string
+			missingSummary    bool
+			sameImage         bool
+			zeroFindings      bool
+			suppressed        bool
+			deletedException  bool
+			missingRelevancy  bool
+			outdatedRelevancy bool
+			exceptionErr      error
+		}{
+			{name: "upgraded image"},
+			{name: "missing summary", missingSummary: true},
+			{name: "zero findings", zeroFindings: true},
+			{name: "unchanged exception", suppressed: true},
+			{name: "same image preserves relevancy", sameImage: true},
+			{name: "same image missing relevancy", sameImage: true, missingRelevancy: true},
+			{name: "same image outdated relevancy", sameImage: true, outdatedRelevancy: true},
+			{name: "changed exceptions invalidate relevancy", sameImage: true, suppressed: true, deletedException: true},
+			{name: "failed exceptions preserve stored counts", suppressed: true, exceptionErr: errors.New("exception lookup failed")},
+			{name: "degraded exceptions preserve stored counts", suppressed: true, exceptionErr: domain.ErrExceptionsDegraded},
+			{name: "degraded exceptions preserve same-image relevancy", sameImage: true, suppressed: true, exceptionErr: domain.ErrExceptionsDegraded},
+		} {
+			t.Run(flow+"/"+tc.name, func(t *testing.T) {
+				platform := &recordingPlatform{getExceptionsErr: tc.exceptionErr}
+				if tc.suppressed && !tc.deletedException && tc.exceptionErr == nil {
+					platform.exceptions = exceptionPolicyForTest("CVE-A")
+				}
+				repo := repositories.NewFakeAPIServerStorage("custom-storage")
+				counting := &countingCVERepository{CVERepository: repo}
+				s, sbomVer, cveVer, dbVer, ctx := newScanCVETestService(t, platform, counting, nil)
+				ctx = addTimestamp(ctx)
+				critical := matchForTest("CVE-A")
+				critical.Vulnerability.Severity = domain.CriticalSeverity
+				high := matchForTest("CVE-B")
+				high.Vulnerability.Severity = domain.HighSeverity
+				current := domain.CVEManifest{
+					Name: "imageSlug", SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+					Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
+					Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{high}},
+				}
+				if tc.zeroFindings {
+					current.Content.Matches = nil
+				}
+				if tc.suppressed {
+					ignored := ignoredMatchForTest("CVE-A")
+					ignored.Match = critical
+					current.Content.IgnoredMatches = []v1beta1.IgnoredMatch{ignored}
+				}
+				relevant := current
+				relevant.Name = "runtime-findings"
+				relevant.Content = &v1beta1.GrypeDocument{Matches: []v1beta1.Match{high}}
+				if tc.outdatedRelevancy {
+					relevant.CVEDBVersion = "old-db"
+				}
+				if !tc.missingRelevancy {
+					require.NoError(t, repo.StoreCVE(ctx, relevant, true))
+				}
+				if !tc.missingSummary {
+					previous := current
+					if !tc.sameImage {
+						previous.Name = "previous-image"
+						previous.Content = &v1beta1.GrypeDocument{Matches: []v1beta1.Match{critical}}
+					}
+					require.NoError(t, repo.StoreCVESummary(ctx, previous, relevant, true))
+					// Simulate a summary written before the namespace-reference fix.
+					legacy, err := repo.GetCVESummary(ctx)
+					require.NoError(t, err)
+					legacy.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Namespace = "kube-system"
+					legacy.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Namespace = "kube-system"
+					_, err = repo.StorageClient.VulnerabilityManifestSummaries("kube-system").Update(ctx, legacy, metav1.UpdateOptions{})
+					require.NoError(t, err)
+				}
+				require.NoError(t, repo.StoreCVE(ctx, current, false))
+				// No old image manifest exists. The new image must be a real cache hit.
+				cached, err := repo.GetCVE(ctx, current.Name, sbomVer, cveVer, dbVer)
+				require.NoError(t, err)
+				require.NotNil(t, cached.Content)
+				if flow == "ScanRegistry" {
+					require.NoError(t, s.ScanRegistry(ctx))
+				} else {
+					require.NoError(t, s.ScanCVE(ctx))
+				}
+				summary, err := repo.GetCVESummary(ctx)
+				require.NoError(t, err)
+				require.NotNil(t, summary)
+				assert.Equal(t, "daemonset-kube-proxy-kube-proxy", summary.Name)
+				assert.Equal(t, "kube-system", summary.Namespace)
+				ref := summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj
+				assert.Equal(t, current.Name, ref.Name)
+				assert.Equal(t, "custom-storage", ref.Namespace)
+				assert.Equal(t, "vulnerabilitymanifests", ref.Kind)
+				_, err = repo.StorageClient.VulnerabilityManifests(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+				require.NoError(t, err, "the published reference must resolve")
+				wantHigh := int64(1)
+				if tc.zeroFindings {
+					wantHigh = 0
+				}
+				wantCritical := int64(0)
+				if tc.deletedException {
+					wantCritical = 1
+				}
+				assert.Equal(t, wantHigh, summary.Spec.Severities.High.All)
+				assert.Equal(t, wantCritical, summary.Spec.Severities.Critical.All)
+				if tc.sameImage && !tc.missingRelevancy && !tc.outdatedRelevancy && !tc.deletedException {
+					assert.Equal(t, int64(1), summary.Spec.Severities.High.Relevant)
+					relevantRef := summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj
+					assert.Equal(t, relevant.Name, relevantRef.Name)
+					assert.Equal(t, "custom-storage", relevantRef.Namespace)
+				} else {
+					assert.Empty(t, summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name)
+					assert.Zero(t, summary.Spec.Severities.High.Relevant)
+				}
+				if !tc.deletedException {
+					assert.Zero(t, counting.storeCVECalls, "refreshing a summary must not rewrite an unchanged manifest")
+				}
+				require.Len(t, platform.submitted, 1)
+				if tc.suppressed {
+					assert.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-A", "backend still receives unfiltered findings")
+				}
+			})
+		}
+	}
+}
+
+type summaryTestScanner struct {
+	fakeCVEScanner
+	names []string
+}
+
+func (s *summaryTestScanner) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	s.names = append(s.names, sbom.Name)
+	cve, err := s.fakeCVEScanner.ScanSBOM(ctx, sbom)
+	cve.Annotations = sbom.Annotations
+	cve.Labels = sbom.Labels
+	for i := range cve.Content.Matches {
+		cve.Content.Matches[i].Vulnerability.Severity = domain.HighSeverity
+	}
+	return cve, err
+}
+
+func TestScanService_ScanCP_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
+	repo := repositories.NewFakeAPIServerStorage("custom-storage")
+	scanner := &summaryTestScanner{}
+	s, sbomVer, cveVer, dbVer, ctx := newScanCVETestService(t, &recordingPlatform{}, repo, scanner)
+	workload := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	const imageTag = "k8s.gcr.io/kube-proxy:v1.24.3"
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString("apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+	slug, err := names.ImageInfoToSlug(tools.NormalizeReference(imageTag), workload.ImageHash)
+	require.NoError(t, err)
+	workload.ImageSlug = slug
+	workload.Args = map[string]interface{}{domain.ArgsName: "profile", domain.ArgsNamespace: "kube-system"}
+	ctx = addTimestamp(enrichContext(ctx, workload, s.Version()))
+	s.relevancyProvider = stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		Wlid: workload.Wlid, ImageTag: imageTag, ImageID: workload.ImageHash,
+		ContainerName: workload.ContainerName, InstanceID: instanceID,
+		RelevantFiles: mapset.NewSet[string](), Labels: map[string]string{}, Completion: helpersv1.Full,
+	}}}
+	high := matchForTest("CVE-B")
+	high.Vulnerability.Severity = domain.HighSeverity
+	cve := domain.CVEManifest{
+		Name: slug, SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+		Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
+		Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{high}},
+	}
+	previous := cve
+	previous.Name = "previous-image"
+	require.NoError(t, repo.StoreCVESummary(ctx, previous, domain.CVEManifest{}, false))
+	require.NoError(t, repo.StoreCVE(ctx, cve, false))
+	require.NoError(t, s.ScanCP(ctx))
+	summary, err := repo.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	runtimeName, err := instanceID.GetSlug(false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{runtimeName}, scanner.names, "only the relevancy SBOM needs matching on a cache hit")
+	assert.Equal(t, slug, summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name)
+	assert.Equal(t, runtimeName, summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name)
+	assert.Equal(t, "custom-storage", summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Namespace)
+	assert.Equal(t, "custom-storage", summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Namespace)
+	assert.Equal(t, int64(1), summary.Spec.Severities.High.All)
+	assert.Equal(t, int64(2), summary.Spec.Severities.High.Relevant)
+	_, err = repo.StorageClient.VulnerabilityManifests("custom-storage").Get(ctx, runtimeName, metav1.GetOptions{})
+	require.NoError(t, err)
+	// A later image-only cache hit must retain the runtime result ScanCP just stored.
+	require.NoError(t, s.ScanCVE(ctx))
+	after, err := repo.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	assert.Equal(t, summary.Spec, after.Spec)
+}
+
+type cachedSummaryFailureRepository struct {
+	ports.CVERepository
+	failure string
+	writes  int
+}
+
+func (r *cachedSummaryFailureRepository) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
+	if r.failure == "summary lookup" {
+		return nil, domain.ErrMockError
+	}
+	return r.CVERepository.GetCVESummary(ctx)
+}
+
+func (r *cachedSummaryFailureRepository) GetCVE(ctx context.Context, name, sbomVersion, scannerVersion, dbVersion string) (domain.CVEManifest, error) {
+	if r.failure == "relevancy lookup" && name == "runtime" {
+		return domain.CVEManifest{}, domain.ErrMockError
+	}
+	return r.CVERepository.GetCVE(ctx, name, sbomVersion, scannerVersion, dbVersion)
+}
+
+func (r *cachedSummaryFailureRepository) StoreCVESummary(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool) error {
+	r.writes++
+	if r.failure == "summary write" {
+		return domain.ErrMockError
+	}
+	return r.CVERepository.StoreCVESummary(ctx, cve, cvep, withRelevancy)
+}
+
+func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
+	for _, failure := range []string{"summary lookup", "relevancy lookup", "summary write"} {
+		t.Run(failure, func(t *testing.T) {
+			inner := repositories.NewFakeAPIServerStorage("kubescape")
+			repo := &cachedSummaryFailureRepository{CVERepository: inner, failure: failure}
+			platform := &recordingPlatform{}
+			s, sbomVer, cveVer, dbVer, ctx := newScanCVETestService(t, platform, repo, nil)
+			ctx = addTimestamp(ctx)
+			cve := domain.CVEManifest{
+				Name: "imageSlug", SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+				Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
+				Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{matchForTest("CVE-A")}},
+			}
+			cvep := cve
+			cvep.Name = "runtime"
+			require.NoError(t, inner.StoreCVE(ctx, cve, false))
+			require.NoError(t, inner.StoreCVE(ctx, cvep, true))
+			require.NoError(t, inner.StoreCVESummary(ctx, cve, cvep, true))
+			before, err := inner.GetCVESummary(ctx)
+			require.NoError(t, err)
+			require.NoError(t, s.ScanCVE(ctx))
+			after, err := inner.GetCVESummary(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "a transient failure must not discard existing relevancy")
+			if failure == "summary write" {
+				assert.Equal(t, 1, repo.writes)
+			} else {
+				assert.Zero(t, repo.writes)
+			}
+			assert.Len(t, platform.submitted, 1, "summary storage is best effort")
+		})
+	}
+}
+
 func TestScanService_ScanCVE_CacheHit_ExceptionFetchFailureDoesNotWipe(t *testing.T) {
 	platform := &recordingPlatform{getExceptionsErr: errors.New("backend unreachable")}
 	repo := repositories.NewMemoryStorage(false, false)

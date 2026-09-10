@@ -123,10 +123,8 @@ func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVES
 // StoreCVESummary recorded, because building a real VulnerabilityManifestSummary here would
 // mean duplicating parseSeverities and parseVulnerabilitiesComponents in the test double.
 //
-// Nothing depends on it: the CVERepository port declares GetCVESummary, but no production
-// caller has existed since the cache-hit "store the summary only if it does not exist"
-// check was replaced with an unconditional re-store. Tests wanting to know what a scan flow
-// handed to the summary write should use CVESummaries.
+// Cache-hit tests needing an existing workload summary should use APIServerStore's
+// fake client. Tests inspecting only summary writes can use CVESummaries.
 func (m *MemoryStore) GetCVESummary(ctx context.Context) (*v1beta1.VulnerabilityManifestSummary, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVESummary")
 	defer span.End()

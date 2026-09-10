@@ -719,21 +719,26 @@ func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest
 // Returns the input cve with suppressed matches restored (so SubmitCVE/StoreVEX
 // receive the same unfiltered data a cache miss would produce, matching every
 // caller's existing use of the mutated cve.Content after this call), the freshly
-// filtered copy, and whether the exception set used to filter it was known-complete.
+// storage-safe filtered copy, and whether the exception set was known-complete.
+// A partial exception fetch cannot remove suppressions from that filtered copy.
 //
 // When storage is enabled and the filtered result's suppressions actually changed,
 // persists the updated manifest and, if publishVEX is true, republishes its VEX
 // document — subject to the removal-safety rule below. publishVEX lets ScanCP opt
 // out: it republishes VEX later itself, once relevancy-filtered results are also
 // available, using the exceptionsComplete this call returns.
+// The workload summary is refreshed even when the image manifest is unchanged:
+// another workload may have populated the image cache before this workload upgraded.
 func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool) {
+	cachedCve := cve
 	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
 	filteredCve, exceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
 
 	if s.storage {
 		curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
-		if !maps.Equal(prevIgnored, curIgnored) {
+		preserveRelevancy := maps.Equal(prevIgnored, curIgnored)
+		if !preserveRelevancy {
 			// Persist additions freely, but never persist removals when the
 			// exception set is incomplete: a transient SecurityException CRD
 			// list failure must not look like a deletion and wipe suppression
@@ -750,10 +755,6 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
 						helpers.String("imageSlug", imageSlug))
 				}
-				if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", imageSlug))
-				}
 				// The stored manifest just changed, so the VEX document describing it is
 				// now stale. Republish it, but only from a known-complete exception set,
 				// the same rule the cache-miss path follows.
@@ -768,11 +769,47 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 				if publishVEX && exceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
 				}
+			} else {
+				// Summaries must describe the suppressions we retained in storage,
+				// including ScanCP's later summary with freshly computed relevancy.
+				filteredCve = cachedCve
+				preserveRelevancy = true
 			}
 		}
+		s.refreshCachedCVESummary(ctx, filteredCve, imageSlug, preserveRelevancy)
 	}
 
 	return cve, filteredCve, exceptionsComplete
+}
+
+// refreshCachedCVESummary updates the workload's reference and counts without
+// discarding valid runtime findings from an earlier scan of the same image.
+func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CVEManifest, imageSlug string, preserveRelevancy bool) {
+	var cvep domain.CVEManifest
+	if preserveRelevancy {
+		summary, err := s.cveRepository.GetCVESummary(ctx)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("getting cached CVE summary", helpers.Error(err),
+				helpers.String("imageSlug", imageSlug))
+			return // A failed read must not be treated as absent relevancy.
+		}
+		if summary != nil && summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name == cve.Name {
+			if name := summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name; name != "" {
+				// GetCVE checks scanner/database versions and uses the configured
+				// storage namespace, repairing legacy workload-namespace references.
+				cvep, err = s.cveRepository.GetCVE(ctx, name, cve.SBOMCreatorVersion, cve.CVEScannerVersion, cve.CVEDBVersion)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("getting cached relevancy CVE", helpers.Error(err),
+						helpers.String("imageSlug", imageSlug))
+					return
+				}
+			}
+		}
+	}
+	if err := s.cveRepository.StoreCVESummary(ctx, cve, cvep, cvep.Content != nil); err != nil {
+		logger.L().Ctx(ctx).Warning("storing cached CVE summary", helpers.Error(err),
+			helpers.String("imageSlug", imageSlug))
+	}
 }
 
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
@@ -1020,6 +1057,7 @@ func filterSBOM(sbom domain.SBOM, instanceID instanceidhandler.IInstanceID, wlid
 		Name: name,
 		Annotations: map[string]string{
 			helpersv1.CompletionMetadataKey:    completion,
+			helpersv1.ToolVersionMetadataKey:   sbom.SBOMCreatorVersion,
 			helpersv1.ContainerNameMetadataKey: labels[helpersv1.ContainerNameMetadataKey],
 			helpersv1.ImageIDMetadataKey:       sbom.Annotations[helpersv1.ImageIDMetadataKey],
 			helpersv1.ImageTagMetadataKey:      sbom.Annotations[helpersv1.ImageTagMetadataKey],
