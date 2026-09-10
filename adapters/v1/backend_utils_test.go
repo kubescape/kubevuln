@@ -787,7 +787,9 @@ func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				httpPostFunc:  httpPostFunc,
+				backendClient: &MockBackendClient{
+					HttpPostFunc: httpPostFunc,
+				},
 			}
 			report.Vulnerabilities = []containerscan.CommonContainerVulnerabilityResult{}
 			actualNextPartNum, err := a.sendSummaryAndVulnerabilities(ctx, report, "", tc.totalVulnerabilities, "1234", tc.firstVulnerabilitiesChunk, errChan, sendWG)

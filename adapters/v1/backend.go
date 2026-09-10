@@ -41,9 +41,7 @@ type BackendAdapter struct {
 	eventReceiverRestURL  string
 	apiServerRestURL      string
 	clusterConfig         pkgcautils.ClusterConfig
-	getCVEExceptionsFunc  func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-	httpPostFunc          func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error)
-	sendStatusFunc        func(*backendClientV1.BaseReportSender, string, bool)
+	backendClient         BackendClient
 	accessKey             string
 	securityExceptionRepo ports.SecurityExceptionRepository
 	exceptionsCache       *cache.Cache
@@ -111,13 +109,9 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 		clusterConfig: pkgcautils.ClusterConfig{
 			AccountID: accountID,
 		},
-		eventReceiverRestURL: eventReceiverRestURL,
-		apiServerRestURL:     apiServerRestURL,
-		getCVEExceptionsFunc: backendClientV1.GetCVEExceptionByDesignator,
-		httpPostFunc:         httpPostWithContext,
-		sendStatusFunc: func(sender *backendClientV1.BaseReportSender, status string, sendReport bool) {
-			sender.SendStatus(status, sendReport) // TODO - update this function to use from kubescape/backend
-		},
+		eventReceiverRestURL:  eventReceiverRestURL,
+		apiServerRestURL:      apiServerRestURL,
+		backendClient:         &defaultBackendClient{},
 		accessKey:             accessKey,
 		securityExceptionRepo: seRepo,
 		exceptionsCache:       cache.New(exceptionsCacheCleaningInterval),
@@ -131,6 +125,18 @@ func NewBackendAdapter(accountID, apiServerRestURL, eventReceiverRestURL, access
 			},
 		},
 	}
+}
+
+func (a *BackendAdapter) getBackendClient() BackendClient {
+	if a.backendClient != nil {
+		return a.backendClient
+	}
+	return &defaultBackendClient{}
+}
+
+func (a *BackendAdapter) WithBackendClient(client BackendClient) *BackendAdapter {
+	a.backendClient = client
+	return a
 }
 
 func (a *BackendAdapter) getHTTPClient() httputils.IHttpClient {
@@ -362,7 +368,7 @@ func (a *BackendAdapter) fetchCVEExceptions(ctx context.Context, workload domain
 		},
 	}
 
-	vulnExceptionList, err := a.getCVEExceptionsFunc(ctx, a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
+	vulnExceptionList, err := a.getBackendClient().GetCVEExceptions(ctx, a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
 	if err != nil {
 		return cveExceptionsFetchResult{}, err
 	}
@@ -513,7 +519,7 @@ func (a *BackendAdapter) ReportError(ctx context.Context, err error) error {
 	// constructor upstream in kubescape/backend. Tracked separately (#450) rather than silently
 	// left unaddressed.
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
-	a.sendStatusFunc(sender, sysreport.JobFailed, true)
+	a.getBackendClient().SendStatus(sender, sysreport.JobFailed, true)
 	return nil
 }
 
@@ -565,7 +571,7 @@ func (a *BackendAdapter) ReportScanFailure(ctx context.Context, failureCase scan
 	}
 
 	url := fmt.Sprintf("%s/k8s/v2/scanFailure", a.eventReceiverRestURL)
-	resp, err := a.httpPostFunc(ctx, a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
+	resp, err := a.getBackendClient().HttpPost(ctx, a.getHTTPClient(), url, a.getRequestHeaders(), payload, 30*time.Second)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to send scan failure report",
 			helpers.Error(err),
@@ -602,7 +608,7 @@ func (a *BackendAdapter) SendStatus(ctx context.Context, step int) error {
 	// NOTE: see the same comment on ReportError above — this call has the same ctx-cancellation
 	// gap for the same reason.
 	sender := backendClientV1.NewBaseReportSender(a.eventReceiverRestURL, a.getHTTPClient(), a.getRequestHeaders(), report)
-	a.sendStatusFunc(sender, statuses[step], true)
+	a.getBackendClient().SendStatus(sender, statuses[step], true)
 	return nil
 }
 

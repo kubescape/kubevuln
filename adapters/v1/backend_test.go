@@ -79,8 +79,8 @@ func scanContext(wlid, containerName, image string) context.Context {
 
 func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 	type fields struct {
-		getCVEExceptionsFunc func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error)
-		clusterConfig        armometadata.ClusterConfig
+		backendClient BackendClient
+		clusterConfig armometadata.ClusterConfig
 	}
 	tests := []struct {
 		fields   fields
@@ -94,32 +94,12 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 			workload: false,
 			wantErr:  true,
 		},
-		/*{
-			name:     "error get exceptions",
-			workload: true,
-			fields: fields{
-				getCVEExceptionsFunc: func(s string, designator *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-					return nil, fmt.Errorf("error")
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name:     "no exception",
-			workload: true,
-			fields: fields{
-				getCVEExceptionsFunc: func(s string, designator *identifiers.PortalDesignator) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-					return []armotypes.VulnerabilityExceptionPolicy{}, nil
-				},
-			},
-			want: []armotypes.VulnerabilityExceptionPolicy{},
-		},*/
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &BackendAdapter{
 				clusterConfig:         tt.fields.clusterConfig,
-				getCVEExceptionsFunc:  tt.fields.getCVEExceptionsFunc,
+				backendClient:         tt.fields.backendClient,
 				securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
@@ -139,9 +119,11 @@ func TestBackendAdapter_GetCVEExceptions(t *testing.T) {
 func TestBackendAdapter_GetCVEExceptions_Caches(t *testing.T) {
 	calls := 0
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		calls++
-		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			calls++
+			return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+		},
 	}
 	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
 		Wlid:          "wlid://cluster-c/namespace-ns/deployment-d",
@@ -208,10 +190,12 @@ func TestBackendAdapter_GetCVEExceptions_CoalescesConcurrentMisses(t *testing.T)
 			}}, nil, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		atomic.AddInt32(&backendCalls, 1)
-		<-allJoined
-		return nil, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			atomic.AddInt32(&backendCalls, 1)
+			<-allJoined
+			return nil, nil
+		},
 	}
 	a.exceptionsCacheMissHook = func() {
 		if atomic.AddInt32(&joined, 1) == n {
@@ -261,10 +245,12 @@ func TestBackendAdapter_GetCVEExceptions_CallerCancellationDoesNotAbortSharedFet
 	fetchStarted := make(chan struct{})
 	releaseFetch := make(chan struct{})
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		close(fetchStarted)
-		<-releaseFetch
-		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			close(fetchStarted)
+			<-releaseFetch
+			return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+		},
 	}
 	baseCtx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
 		Wlid:          "wlid://cluster-c/namespace-ns/deployment-d",
@@ -339,8 +325,10 @@ func TestBackendAdapter_GetCVEExceptions_CacheDoesNotOutliveCRDExpiry(t *testing
 			}}, nil, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		return nil, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
@@ -367,9 +355,11 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheAlreadyExpiredPolicy(t *tes
 	calls := 0
 	past := time.Now().Add(-1 * time.Hour)
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", &repositories.NoOpSecurityExceptionRepository{})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		calls++
-		return []armotypes.VulnerabilityExceptionPolicy{{ExpirationDate: &past}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			calls++
+			return []armotypes.VulnerabilityExceptionPolicy{{ExpirationDate: &past}}, nil
+		},
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
@@ -398,8 +388,10 @@ func TestBackendAdapter_GetCVEExceptions_ImageScopedCRDPoliciesUseDistinctCacheE
 			}}, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		return nil, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
 	}
 
 	nginx, _, err := a.GetCVEExceptions(scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25"))
@@ -427,8 +419,10 @@ func TestBackendAdapter_GetCVEExceptions_RegistryScansDoNotShareExceptionResults
 			}}, nil
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		return nil, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			return nil, nil
+		},
 	}
 
 	nginx, _, err := a.GetCVEExceptions(scanContext("", "", "docker.io/library/nginx:1.25"))
@@ -447,9 +441,11 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenCRDLookupFails(t *testi
 			return nil, nil, errors.New("boom")
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		calls++
-		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			calls++
+			return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+		},
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
@@ -478,9 +474,11 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheWhenRealCRDListFails(t *tes
 
 	calls := 0
 	a := NewBackendAdapter("account", "apiServer", "eventReceiver", "", store)
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		calls++
-		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			calls++
+			return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+		},
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
@@ -512,9 +510,11 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 			return nil, errors.New("lookup failed")
 		},
 	})
-	a.getCVEExceptionsFunc = func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-		calls++
-		return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+	a.backendClient = &MockBackendClient{
+		GetCVEExceptionsFunc: func(_ context.Context, _ string, _ string, _ *identifiers.PortalDesignator, _ map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+			calls++
+			return []armotypes.VulnerabilityExceptionPolicy{{}}, nil
+		},
 	}
 	ctx := scanContext("wlid://cluster-c/namespace-ns/deployment-d", "container", "docker.io/library/nginx:1.25")
 
@@ -624,10 +624,12 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 			}
 			a := &BackendAdapter{
 				clusterConfig: armometadata.ClusterConfig{},
-				getCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-					return tt.exceptions, nil
+				backendClient: &MockBackendClient{
+					GetCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+						return tt.exceptions, nil
+					},
+					HttpPostFunc: httpPostFunc,
 				},
-				httpPostFunc:          httpPostFunc,
 				securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 			}
 			ctx := context.TODO()
@@ -688,10 +690,12 @@ func TestBackendAdapter_SubmitCVE_RelevancySubset(t *testing.T) {
 	}
 
 	a := &BackendAdapter{
-		getCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return nil, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(_ context.Context, s, a string, designator *identifiers.PortalDesignator, headers map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return nil, nil
+			},
+			HttpPostFunc: httpPostFunc,
 		},
-		httpPostFunc:          httpPostFunc,
 		securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 	}
 	ctx := context.TODO()
@@ -918,9 +922,7 @@ func TestNewBackendAdapter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := NewBackendAdapter(tt.args.accountID, tt.args.apiServerRestURL, tt.args.eventReceiverRestURL, "", &repositories.NoOpSecurityExceptionRepository{})
-			// need to nil functions to compare
-			got.httpPostFunc = nil
-			got.getCVEExceptionsFunc = nil
+			got.backendClient = nil
 			got.securityExceptionRepo = nil
 			assert.NotEqual(t, got, tt.want)
 		})
@@ -959,9 +961,11 @@ func TestBackendAdapter_SendStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var called bool
 			a := &BackendAdapter{
-				sendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
-					called = true
-					assert.Equal(t, tt.wantStatus, s)
+				backendClient: &MockBackendClient{
+					SendStatusFunc: func(sender *beClientV1.BaseReportSender, s string, b bool) {
+						called = true
+						assert.Equal(t, tt.wantStatus, s)
+					},
 				},
 			}
 			ctx := context.TODO()
@@ -997,7 +1001,7 @@ func TestBackendAdapter_ReportScanFailure_WorkloadScan(t *testing.T) {
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://localhost:8080",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
-		httpPostFunc:         mockHTTP,
+		backendClient:        &MockBackendClient{HttpPostFunc: mockHTTP},
 		accessKey:            "test-key",
 	}
 
@@ -1044,7 +1048,7 @@ func TestBackendAdapter_ReportScanFailure_RegistryScan(t *testing.T) {
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://localhost:8080",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
-		httpPostFunc:         mockHTTP,
+		backendClient:        &MockBackendClient{HttpPostFunc: mockHTTP},
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
@@ -1085,7 +1089,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPError(t *testing.T) {
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://localhost:8080",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
-		httpPostFunc:         mockHTTP,
+		backendClient:        &MockBackendClient{HttpPostFunc: mockHTTP},
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
@@ -1109,7 +1113,7 @@ func TestBackendAdapter_ReportScanFailure_HTTPNon2xx(t *testing.T) {
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://localhost:8080",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
-		httpPostFunc:         mockHTTP,
+		backendClient:        &MockBackendClient{HttpPostFunc: mockHTTP},
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
@@ -1137,7 +1141,7 @@ func TestBackendAdapter_ReportScanFailure_NilError(t *testing.T) {
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://localhost:8080",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
-		httpPostFunc:         mockHTTP,
+		backendClient:        &MockBackendClient{HttpPostFunc: mockHTTP},
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
@@ -1197,8 +1201,10 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return cloudPolicies, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return cloudPolicies, nil
+			},
 		},
 		securityExceptionRepo: mockRepo,
 	}
@@ -1215,12 +1221,6 @@ func TestGetCVEExceptions_MergesCRDExceptions(t *testing.T) {
 	assert.Empty(t, stats.ExpiredBySource, "nothing expired in this scenario")
 }
 
-// TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD is the regression test for #812:
-// docs/security-exception-design.md documents that when both a cloud and a CRD exception
-// cover the same CVE on the same workload, the cloud exception's status/metadata are used and
-// the conflicting CRD exception is ignored. GetCVEExceptions used to append CRD policies
-// unconditionally, so a CVE covered by both sources reached the caller (and, downstream, the
-// manifest's IgnoreRule provenance and the exceptions_matched_total metric) twice.
 func TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD(t *testing.T) {
 	cloudPolicies := []armotypes.VulnerabilityExceptionPolicy{
 		{
@@ -1236,9 +1236,7 @@ func TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "crd-rule", Namespace: "default"},
 				Spec: sev1beta1.SecurityExceptionSpec{
 					Vulnerabilities: []sev1beta1.VulnerabilityException{
-						// Same CVE the cloud already covers.
 						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2024-0001"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
-						// Not covered by cloud: must still come through.
 						{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2024-0002"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
 					},
 				},
@@ -1248,8 +1246,10 @@ func TestGetCVEExceptions_CloudExceptionTakesPrecedenceOverCRD(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return cloudPolicies, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return cloudPolicies, nil
+			},
 		},
 		securityExceptionRepo: mockRepo,
 	}
@@ -1396,8 +1396,10 @@ func TestGetCVEExceptions_ScopesCRDByMatch(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{AccountID: "test-account"},
-		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return nil, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return nil, nil
+			},
 		},
 		securityExceptionRepo: mockRepo,
 	}
@@ -1439,10 +1441,6 @@ func TestBackendAdapter_HTTPClientReuse(t *testing.T) {
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
 		eventReceiverRestURL: "http://example.invalid",
 		httpClient:           stub,
-		httpPostFunc:         httpPostWithContext,
-		sendStatusFunc: func(sender *beClientV1.BaseReportSender, status string, sendReport bool) {
-			sender.SendStatus(status, sendReport)
-		},
 	}
 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
@@ -1535,7 +1533,6 @@ func TestBackendAdapter_PostResultsAbortsPromptlyOnCtxCancellation(t *testing.T)
 	a := &BackendAdapter{
 		eventReceiverRestURL: "http://example.invalid",
 		httpClient:           client,
-		httpPostFunc:         httpPostWithContext,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1562,7 +1559,6 @@ func TestBackendAdapter_ReportScanFailureAbortsPromptlyOnCtxCancellation(t *test
 		eventReceiverRestURL: "http://example.invalid",
 		clusterConfig:        armometadata.ClusterConfig{AccountID: "test-account"},
 		httpClient:           client,
-		httpPostFunc:         httpPostWithContext,
 	}
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
 		Wlid:               "wlid://cluster-prod/namespace-default/deployment-nginx",
@@ -1603,10 +1599,12 @@ func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
 
 	a := &BackendAdapter{
 		clusterConfig: armometadata.ClusterConfig{},
-		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return nil, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return nil, nil
+			},
+			HttpPostFunc: httpPostFunc,
 		},
-		httpPostFunc:          httpPostFunc,
 		securityExceptionRepo: &repositories.NoOpSecurityExceptionRepository{},
 	}
 	ctx := context.TODO()
@@ -1645,12 +1643,14 @@ func TestSubmitCVE_NoPanicOnNonStringArgs(t *testing.T) {
 	backend := &BackendAdapter{
 		clusterConfig:         armometadata.ClusterConfig{},
 		securityExceptionRepo: &testSecurityExceptionRepo{},
-		getCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
-			return nil, nil
-		},
-		sendStatusFunc: func(*beClientV1.BaseReportSender, string, bool) {},
-		httpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+		backendClient: &MockBackendClient{
+			GetCVEExceptionsFunc: func(context.Context, string, string, *identifiers.PortalDesignator, map[string]string) ([]armotypes.VulnerabilityExceptionPolicy, error) {
+				return nil, nil
+			},
+			SendStatusFunc: func(*beClientV1.BaseReportSender, string, bool) {},
+			HttpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+			},
 		},
 	}
 	ctx := context.WithValue(context.Background(), domain.TimestampKey{}, int64(123456))
@@ -1739,8 +1739,10 @@ func TestHttpPostWithContext_EmptyResponseBody(t *testing.T) {
 // TestBackendAdapter_PostResults_429RateLimitLogging verifies that postResults detects 429 rate-limiting errors and logs vendor guidance.
 func TestBackendAdapter_PostResults_429RateLimitLogging(t *testing.T) {
 	backend := &BackendAdapter{
-		httpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
-			return nil, fmt.Errorf("received status code: 429, body: quota exceeded")
+		backendClient: &MockBackendClient{
+			HttpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+				return nil, fmt.Errorf("received status code: 429, body: quota exceeded")
+			},
 		},
 	}
 
