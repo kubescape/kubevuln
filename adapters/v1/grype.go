@@ -48,12 +48,6 @@ const (
 	VendorTrustedMatchMetadataKey = "kubescape.io/vendor-trusted-match"
 )
 
-type loadDBFunc func(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error)
-
-func defaultLoadDB(distCfg distribution.Config, installCfg installation.Config) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
-	return grype.LoadVulnerabilityDB(distCfg, installCfg, true)
-}
-
 const (
 	// defaultStuckUpdateTimeout is how long updateDBBackground waits for a single
 	// grype.LoadVulnerabilityDB call before giving up on it. The call takes no context and
@@ -93,7 +87,7 @@ type GrypeAdapter struct {
 	// stuckUpdateTimeout overrides defaultStuckUpdateTimeout. Set only by tests, which
 	// cannot wait out the 15-minute production value; zero means use the default.
 	stuckUpdateTimeout time.Duration
-	loadDB             loadDBFunc
+	dbLoader           VulnerabilityDBLoader
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -110,9 +104,22 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
-		loadDB:         defaultLoadDB,
+		dbLoader:       DefaultVulnerabilityDBLoader{},
 	}
 	return g
+}
+
+// WithDBLoader configures a custom VulnerabilityDBLoader.
+func (g *GrypeAdapter) WithDBLoader(loader VulnerabilityDBLoader) *GrypeAdapter {
+	g.dbLoader = loader
+	return g
+}
+
+func (g *GrypeAdapter) getDBLoader() VulnerabilityDBLoader {
+	if g.dbLoader != nil {
+		return g.dbLoader
+	}
+	return DefaultVulnerabilityDBLoader{}
 }
 
 // buildTrustedVendorSet maps configured vendor slugs to Grype distro types.
@@ -241,12 +248,9 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context, ch chan struct{})
 	hasExistingDB := g.store != nil
 	g.mu.RUnlock()
 
-	// loadDB is set once at construction and never reassigned afterwards, so reading it
+	// dbLoader is set once at construction or via WithDBLoader and never reassigned afterwards, so reading it
 	// here without g.mu is safe even though every other field on GrypeAdapter is guarded.
-	loadFn := g.loadDB
-	if loadFn == nil {
-		loadFn = defaultLoadDB
-	}
+	loader := g.getDBLoader()
 
 	done := make(chan struct{})
 	go func() {
@@ -254,7 +258,7 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context, ch chan struct{})
 
 		if !g.loadMu.TryLock() {
 			// A previous load - almost always one abandoned as stuck - is still running
-			// against installCfg.DBRootDir. Running loadFn now would race grype's
+			// against installCfg.DBRootDir. Running loader.LoadDB now would race grype's
 			// delete-then-rename of the active DB directory. Skip and reschedule; the
 			// retry gets the lock once that goroutine finally exits.
 			logger.L().Ctx(ctx).Warning("grype DB update skipped: a previous load is still in flight against the DB cache dir",
@@ -278,7 +282,7 @@ func (g *GrypeAdapter) updateDBBackground(ctx context.Context, ch chan struct{})
 				helpers.Error(err),
 				helpers.String("dbRootDir", g.installCfg.DBRootDir))
 		}
-		store, dbStatus, err := loadFn(g.distCfg, g.installCfg)
+		store, dbStatus, err := loader.LoadDB(g.distCfg, g.installCfg)
 		g.finishUpdate(ctx, ch, hasExistingDB, store, dbStatus, err)
 	}()
 

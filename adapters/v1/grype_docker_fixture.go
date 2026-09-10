@@ -116,7 +116,7 @@ func NewGrypeAdapterFixedDBWithMatchers(matchingMode config.CVEMatchingMode, tru
 		},
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
-		loadDB:         defaultLoadDB,
+		dbLoader:       DefaultVulnerabilityDBLoader{},
 	}
 	return g, terminate, nil
 }
