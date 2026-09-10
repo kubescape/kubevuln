@@ -1168,7 +1168,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 		},
 		Spec: v1beta1.VulnerabilityManifestSummarySpec{
 			Severities:      parseSeverities(cve, cvep, withRelevancy),
-			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, workloadNamespace, withRelevancy),
+			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, a.Namespace, withRelevancy),
 		},
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),

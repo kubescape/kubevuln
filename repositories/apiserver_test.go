@@ -363,6 +363,46 @@ func TestAPIServerStore_parseVulnerabilitiesComponents(t *testing.T) {
 	assert.Equal(t, res.WorkloadVulnerabilitiesObj.Namespace, namespace)
 }
 
+func TestAPIServerStore_StoreCVESummary_ReferencesStorageNamespace(t *testing.T) {
+	for _, workloadNamespace := range []string{"application", "custom-storage", ""} {
+		t.Run(workloadNamespace, func(t *testing.T) {
+			a := NewFakeAPIServerStorage("custom-storage")
+			workload := domain.ScanCommand{ImageSlug: "image", ContainerName: "app"}
+			if workloadNamespace != "" {
+				workload.Wlid = "wlid://cluster-test/namespace-" + workloadNamespace + "/deployment-app"
+			}
+			ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1))
+			cve := domain.CVEManifest{Name: "image", Content: &v1beta1.GrypeDocument{}}
+			cvep := domain.CVEManifest{Name: "runtime", Content: &v1beta1.GrypeDocument{}}
+			require.NoError(t, a.StoreCVE(ctx, cve, false))
+			require.NoError(t, a.StoreCVE(ctx, cvep, true))
+			// Exercise both creation and the existing-object update path.
+			for _, withRelevancy := range []bool{false, true} {
+				require.NoError(t, a.StoreCVESummary(ctx, cve, cvep, withRelevancy))
+				summary, err := a.GetCVESummary(ctx)
+				require.NoError(t, err)
+				require.NotNil(t, summary)
+				wantNamespace := workloadNamespace
+				if wantNamespace == "" {
+					wantNamespace = a.Namespace
+				}
+				assert.Equal(t, wantNamespace, summary.Namespace)
+				ref := summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj
+				assert.Equal(t, a.Namespace, ref.Namespace)
+				_, err = a.StorageClient.VulnerabilityManifests(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+				require.NoError(t, err)
+				if withRelevancy {
+					ref = summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj
+					assert.Equal(t, a.Namespace, ref.Namespace)
+					_, err = a.StorageClient.VulnerabilityManifests(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
+}
+
 // func TestAPIServerStore_storeCVESummary(t *testing.T) {
 // 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 // 	a := NewFakeAPIServerStorage("namespace")
@@ -5766,5 +5806,3 @@ func TestAPIServerStore_EnableSecurityExceptionCacheInvalidation_Concurrent(t *t
 
 	assert.NotNil(t, store.securityExceptionInformerStop, "informer stop func must be set after concurrent enable calls")
 }
-
-
