@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,6 +56,9 @@ func main() {
 		logger.L().Info("credentials loaded",
 			helpers.Int("accessKeyLength", len(credentials.AccessKey)),
 			helpers.Int("accountLength", len(credentials.Account)))
+	}
+	if credentials.Account, err = resolveAccountID(credentials.Account, c.AccountID, c.KeepLocal); err != nil {
+		logger.L().Ctx(ctx).Fatal("account identifier error", helpers.Error(err))
 	}
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
@@ -279,4 +283,27 @@ func main() {
 // it seRepo falls back to NoOpSecurityExceptionRepository regardless of the flag.
 func isRiskAcceptanceActive(storage *repositories.APIServerStore, riskAcceptance bool) bool {
 	return storage != nil && riskAcceptance
+}
+
+// resolveAccountID picks the account identifier every backend report and CVE-exception
+// lookup is sent with, preferring credentialsAccount (from /etc/credentials/account,
+// normally a mounted Secret) and falling back to configAccountID (clusterData.json's
+// accountID field / ACCOUNTID env var) when that's empty. The fallback is what makes
+// that documented config field do anything at all: nothing else in this binary reads it
+// (see #957).
+//
+// It returns an error when keepLocal is false and neither source produced a value.
+// Without a real account identifier, every backend report would silently carry an
+// empty customerGUID instead of kubevuln failing to start the way
+// docs/CONFIGURATION.md's "required field" already promises. keepLocal mode never
+// talks to the backend, so it's the only case that doesn't need one.
+func resolveAccountID(credentialsAccount, configAccountID string, keepLocal bool) (string, error) {
+	accountID := credentialsAccount
+	if accountID == "" {
+		accountID = configAccountID
+	}
+	if accountID == "" && !keepLocal {
+		return "", fmt.Errorf("no account identifier configured: set /etc/credentials/account (normally mounted from a Secret), accountID in clusterData.json, or the ACCOUNTID environment variable -- or set keepLocal to run without reporting to the backend")
+	}
+	return accountID, nil
 }
