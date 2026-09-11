@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	grypeversion "github.com/anchore/grype/grype/version"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -287,14 +288,31 @@ func linkToVuln(id string) string {
 // for several maintained branches in any order), so the whole slice must be scanned
 // rather than trusting the first qualifying entry.
 //
-// If current is not a version, the first entry is returned, since there is nothing to
-// compare against. If current is a version but no entry in versions is greater than it,
-// "" is returned rather than falling back to versions[0]; versions[0] could be older
-// than current, which would suggest a downgrade.
-func suggestedVersion(current string, versions []string) string {
+// artifactType selects how versions are compared: apk, deb and rpm package versions
+// (e.g. an epoch-prefixed "1:2.3.4-1", or an Alpine "-r10" release revision) are not
+// semver and are compared with Grype's own format-aware comparator instead - the same
+// one Grype's own presenter uses to sort fix versions (models.NewVulnerability, via
+// sortVersions). Generic semver comparison below is otherwise unchanged for every other
+// ecosystem.
+//
+// If current is not a version in the chosen comparator, the first entry is returned,
+// since there is nothing to compare against. If current is a version but no entry in
+// versions is greater than it, "" is returned rather than falling back to versions[0];
+// versions[0] could be older than current, which would suggest a downgrade (#844).
+func suggestedVersion(current string, versions []string, artifactType v1beta1.SyftType) string {
 	if len(versions) == 0 {
 		return ""
 	}
+
+	if format, ok := distroPackageVersionFormat(artifactType); ok {
+		if v, resolved := nearestDistroFix(current, versions, format); resolved {
+			return v
+		}
+		// current doesn't parse even as its own ecosystem's version, so there is
+		// nothing distro-aware to compare against either; fall through to the
+		// same "nothing to compare against" behaviour as any other unparseable case.
+	}
+
 	c, err := semver.NewVersion(current)
 	if err != nil {
 		return versions[0]
@@ -316,6 +334,51 @@ func suggestedVersion(current string, versions []string) string {
 		}
 	}
 	return nearestStr
+}
+
+// distroPackageVersionFormat reports the Grype version format matching artifactType's
+// own (non-semver) version scheme, for the OS package ecosystems where that scheme is
+// known to disagree with generic semver: an apk/deb/rpm version can carry an epoch
+// prefix that plain semver rejects outright, or a release revision (e.g. "-r10") that
+// semver's prerelease-identifier rules order lexically rather than numerically. Every
+// other ecosystem returns false and keeps using suggestedVersion's semver comparison.
+func distroPackageVersionFormat(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
+	switch format := grypeversion.ParseFormat(string(artifactType)); format {
+	case grypeversion.ApkFormat, grypeversion.DebFormat, grypeversion.RpmFormat:
+		return format, true
+	default:
+		return grypeversion.UnknownFormat, false
+	}
+}
+
+// nearestDistroFix returns the smallest version in versions that is strictly greater
+// than current, comparing both under format instead of generic semver. The second
+// return value is false only when current itself fails to parse under format, meaning
+// there is nothing to compare against at all; a candidate that fails to parse is simply
+// skipped, same as the semver path.
+func nearestDistroFix(current string, versions []string, format grypeversion.Format) (string, bool) {
+	c := grypeversion.New(current, format)
+	if err := c.Validate(); err != nil {
+		return "", false
+	}
+
+	var nearest *grypeversion.Version
+	var nearestStr string
+	for _, raw := range versions {
+		v := grypeversion.New(raw, format)
+		cmp, err := c.Compare(v)
+		if err != nil || cmp >= 0 {
+			continue
+		}
+		if nearest == nil {
+			nearest, nearestStr = v, raw
+			continue
+		}
+		if nc, err := nearest.Compare(v); err == nil && nc > 0 {
+			nearest, nearestStr = v, raw
+		}
+	}
+	return nearestStr, true
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {

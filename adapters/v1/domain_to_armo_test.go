@@ -368,10 +368,11 @@ func TestParseImageManifest_IncompleteLayerMetadata(t *testing.T) {
 
 func Test_suggestedVersion(t *testing.T) {
 	tests := []struct {
-		name     string
-		current  string
-		versions []string
-		want     string
+		name         string
+		current      string
+		versions     []string
+		artifactType v1beta1.SyftType
+		want         string
 	}{
 		{
 			name:     "Test with empty versions",
@@ -434,10 +435,64 @@ func Test_suggestedVersion(t *testing.T) {
 			versions: []string{"not-a-version", "also-not-a-version"},
 			want:     "",
 		},
+		{
+			// #955: an epoch-prefixed dpkg/rpm version (e.g. after an epoch bump) is not
+			// valid semver, so it used to fail to parse and fall back to versions[0]
+			// unconditionally - suggesting this very downgrade. Grype's own deb comparator
+			// understands the epoch and must not suggest going backwards.
+			name:         "deb epoch: no version above current returns empty, never a downgrade",
+			current:      "1:1.2.11.dfsg-2ubuntu1.2",
+			versions:     []string{"1:1.2.11.dfsg-2ubuntu1.1"},
+			artifactType: "deb",
+			want:         "",
+		},
+		{
+			name:         "deb epoch: a real newer fix across an epoch is still found",
+			current:      "1:1.2.11.dfsg-2ubuntu1.1",
+			versions:     []string{"1:1.2.11.dfsg-2ubuntu1.3", "1:1.2.11.dfsg-2ubuntu1.2"},
+			artifactType: "deb",
+			want:         "1:1.2.11.dfsg-2ubuntu1.2",
+		},
+		{
+			// rpm versions carry the same epoch:version-release shape as deb.
+			name:         "rpm epoch: no version above current returns empty, never a downgrade",
+			current:      "1:1.12.8-26.el8",
+			versions:     []string{"1:1.12.8-25.el8"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// #955: Alpine apk release revisions ("-rN") are numeric, but generic semver
+			// treats them as prerelease identifiers and orders "-r10" before "-r9"
+			// lexically, hiding a real, newer fix. Grype's own apk comparator orders them
+			// numerically.
+			name:         "apk revision: a real newer fix at a two-digit revision is found",
+			current:      "3.4.7-r9",
+			versions:     []string{"3.4.7-r10"},
+			artifactType: "apk",
+			want:         "3.4.7-r10",
+		},
+		{
+			name:         "apk revision: nearest of several revisions is picked, not the first",
+			current:      "3.4.7-r9",
+			versions:     []string{"3.4.7-r99", "3.4.7-r10"},
+			artifactType: "apk",
+			want:         "3.4.7-r10",
+		},
+		{
+			// artifactType alone doesn't force the distro path if the version itself
+			// still fails to parse under it: falls through to the generic "nothing to
+			// compare against" fallback, same as an empty current.
+			name:         "apk artifact with an unparseable current falls back to the first entry",
+			current:      "not-a-version",
+			versions:     []string{"1.0.0", "2.0.0"},
+			artifactType: "apk",
+			want:         "1.0.0",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions))
+			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
 		})
 	}
 }
