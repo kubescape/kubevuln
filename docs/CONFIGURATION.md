@@ -677,7 +677,8 @@ Some configuration is validated at runtime:
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `load config error` | Missing or invalid `clusterData.json` | Check file exists and is valid JSON |
-| `missing required field` | Required field not set | Add `clusterName`, and either mount `/etc/credentials/account` or set `accountID` (unless `keepLocal` is `true`) |
+| `missing required field` | Required field not set | Add `clusterName` |
+| `account identifier error` | No usable account identifier and `keepLocal` is `false` | Mount `/etc/credentials/account`, or set `accountID`/`ACCOUNTID`, or set `keepLocal: true` |
 | `invalid duration` | Invalid `scanTimeout` format | Use format like `5m`, `1h`, `300s` |
 
 ---
