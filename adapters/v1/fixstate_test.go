@@ -97,6 +97,30 @@ func TestHasKnownFix(t *testing.T) {
 			wantVersion: unknownFixVersion,
 		},
 		{
+			// #955: a deb package's installed version carries an epoch after a bump
+			// (e.g. util-linux, iptables), which is not valid semver. Before the fix,
+			// this fell through to an unguarded versions[0] and could suggest the very
+			// downgrade #844 was meant to prevent.
+			name: "deb epoch version reports unknown, never a downgrade",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "1:1.2.11.dfsg-2ubuntu1.2", Type: "deb"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"1:1.2.11.dfsg-2ubuntu1.1"}}},
+			},
+			wantFixed:   true,
+			wantVersion: unknownFixVersion,
+		},
+		{
+			// #955: Alpine two-digit release revisions sort lexically under generic
+			// semver ("-r10" < "-r9"), hiding a real, newer fix.
+			name: "apk revision picks the real newer fix, not unknown",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "3.4.7-r9", Type: "apk"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"3.4.7-r10"}}},
+			},
+			wantFixed:   true,
+			wantVersion: "3.4.7-r10",
+		},
+		{
 			// The #449 shape: Grype reports no fix, but the CPE range is bounded above.
 			name: "upper-bounded CPE constraint implies a fix",
 			match: v1beta1.Match{
