@@ -38,7 +38,7 @@ func hasKnownFix(m v1beta1.Match) (bool, string) {
 		// "no fix" one, and reporting it as "unknown" is what keeps the two meanings
 		// apart: an empty version here would say no fix is known, which is the opposite
 		// of the true this returns alongside it. See #858.
-		if v := suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions); v != "" {
+		if v := suggestedVersion(m.Artifact.Version, m.Vulnerability.Fix.Versions, m.Artifact.Type); v != "" {
 			return true, v
 		}
 		return true, unknownFixVersion

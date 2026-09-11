@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	grypeversion "github.com/anchore/grype/grype/version"
+	syftPkg "github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -287,14 +290,34 @@ func linkToVuln(id string) string {
 // for several maintained branches in any order), so the whole slice must be scanned
 // rather than trusting the first qualifying entry.
 //
-// If current is not a version, the first entry is returned, since there is nothing to
-// compare against. If current is a version but no entry in versions is greater than it,
-// "" is returned rather than falling back to versions[0]; versions[0] could be older
-// than current, which would suggest a downgrade.
-func suggestedVersion(current string, versions []string) string {
+// artifactType selects how versions are compared: for every ecosystem where Grype
+// itself defines a format-aware comparator distinct from semver - apk, deb, rpm (e.g.
+// an epoch-prefixed "1:2.3.4-1", or an Alpine "-r10" release revision), Maven, Python
+// (PEP 440), RubyGems, Portage, Go modules, Windows KB and Bitnami - versions are
+// compared with that same comparator instead, the one Grype's own presenter uses to
+// sort fix versions (models.NewVulnerability, via sortVersions). Generic semver
+// comparison below is otherwise unchanged for every other ecosystem (npm, NuGet, and
+// the other ecosystems that are already semver or close enough to it).
+//
+// If current is not a version in the chosen comparator, the first entry is returned,
+// since there is nothing to compare against. If current is a version but no entry in
+// versions is greater than it, "" is returned rather than falling back to versions[0];
+// versions[0] could be older than current, which would suggest a downgrade (#844).
+//
+// For a recognized ecosystem, current failing to parse under its own comparator never
+// falls through to the semver path below: semver was never meant to parse that
+// ecosystem's versions either, and guessing versions[0] through it would reintroduce
+// the same unproven-remediation problem this function exists to avoid, just one layer
+// removed.
+func suggestedVersion(current string, versions []string, artifactType v1beta1.SyftType) string {
 	if len(versions) == 0 {
 		return ""
 	}
+
+	if format, ok := versionFormatForArtifact(artifactType); ok {
+		return nearestDistroFix(current, versions, format)
+	}
+
 	c, err := semver.NewVersion(current)
 	if err != nil {
 		return versions[0]
@@ -316,6 +339,217 @@ func suggestedVersion(current string, versions []string) string {
 		}
 	}
 	return nearestStr
+}
+
+// versionFormatForArtifact reports the Grype version format matching the ecosystem of
+// the artifact a match was found in, for every ecosystem where Grype defines a
+// format-aware comparator distinct from generic semver. Every other ecosystem returns
+// false and keeps using suggestedVersion's semver comparison.
+//
+// This maps directly from the syft package type on the artifact (see
+// github.com/anchore/syft/syft/pkg.Type), mirroring how Grype's own
+// grype/pkg.VersionFormat resolves a match's comparator, rather than routing
+// artifactType through grypeversion.ParseFormat. ParseFormat matches format *names*
+// ("maven", "go", "kb"), but several syft package types are spelled differently from
+// Grype's own format name for that ecosystem - "java-archive", "go-module", "msrc-kb" -
+// so a name-based lookup silently misses them and falls through to the unguarded
+// semver comparison this function exists to avoid (#960).
+//
+// JVM installations (Grype's JVMFormat) are a metadata-based sub-case of the same
+// java-archive syft type used for ordinary Java library dependencies, distinguished by
+// package metadata that isn't carried on v1beta1.GrypePackage; java-archive is mapped
+// to MavenFormat unconditionally here, which is Grype's own format for the vast
+// majority of java-archive matches.
+func versionFormatForArtifact(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
+	switch syftPkg.Type(artifactType) {
+	case syftPkg.ApkPkg:
+		return grypeversion.ApkFormat, true
+	case syftPkg.DebPkg:
+		return grypeversion.DebFormat, true
+	case syftPkg.RpmPkg:
+		return grypeversion.RpmFormat, true
+	case syftPkg.JavaPkg:
+		return grypeversion.MavenFormat, true
+	case syftPkg.PythonPkg:
+		return grypeversion.PythonFormat, true
+	case syftPkg.GemPkg:
+		return grypeversion.GemFormat, true
+	case syftPkg.PortagePkg:
+		return grypeversion.PortageFormat, true
+	case syftPkg.GoModulePkg:
+		return grypeversion.GolangFormat, true
+	case syftPkg.KbPkg:
+		return grypeversion.KBFormat, true
+	case syftPkg.BitnamiPkg:
+		return grypeversion.BitnamiFormat, true
+	default:
+		return grypeversion.UnknownFormat, false
+	}
+}
+
+// nearestDistroFix returns the smallest version in versions that is strictly greater
+// than current, comparing both under format instead of generic semver. "" is returned
+// both when current itself fails to parse under format (nothing to compare against) and
+// when no candidate qualifies; a candidate that fails to parse, or that rpmSafeToCompare
+// rejects, is simply skipped rather than treated as disqualifying the whole result.
+func nearestDistroFix(current string, versions []string, format grypeversion.Format) string {
+	c := grypeversion.New(current, format)
+	if err := c.Validate(); err != nil {
+		return ""
+	}
+
+	var nearest *grypeversion.Version
+	var nearestStr string
+	for _, raw := range versions {
+		if format == grypeversion.RpmFormat && !rpmSafeToCompare(current, raw) {
+			continue
+		}
+		v := grypeversion.New(raw, format)
+		cmp, err := c.Compare(v)
+		if err != nil || cmp >= 0 {
+			continue
+		}
+		if nearest == nil {
+			nearest, nearestStr = v, raw
+			continue
+		}
+		if format == grypeversion.RpmFormat && !rpmSafeToCompare(nearestStr, raw) {
+			continue
+		}
+		if nc, err := nearest.Compare(v); err == nil && nc > 0 {
+			nearest, nearestStr = v, raw
+		}
+	}
+	return nearestStr
+}
+
+// rpmSafeToCompare reports whether a and b can be safely ordered by Grype's RPM
+// comparator (github.com/anchore/grype/grype/version, rpmVersion.compare). That
+// comparator is a deliberately pragmatic vulnerability-matching tool, not a spec-compliant
+// one, and its shortcuts can turn "not proven to be an upgrade" into "accepted as one":
+//
+//  1. It only compares epochs when both sides carry one explicitly, skipping the
+//     comparison entirely otherwise -- rather than treating a missing epoch as 0, which is
+//     what RPM itself specifies. A current version with an explicit higher epoch (e.g.
+//     "1:0") can therefore be judged older than a candidate that merely omits its epoch
+//     (e.g. "1"), when the candidate is actually the same release or older.
+//  2. Its tokenizer has no notion of "^" (RPM's post-release/snapshot marker) at all: the
+//     caret is silently dropped and the digits around it are compared as an ordinary
+//     numeric segment, which can rank a caret-tagged snapshot above the release that
+//     actually supersedes it (e.g. "1.0^20250611" over "1.0.1").
+//  3. When one version string tokenizes into strictly more alphanumeric segments than the
+//     other and every extra segment is literally "0", it treats the two versions as equal
+//     and falls through to comparing releases alone -- rather than what real RPM/librpm
+//     does, which is to treat the version with the extra segment as newer regardless of
+//     release. "1.0-1" therefore outranks "1-2" under real RPM (the release never even
+//     gets compared), but Grype calls "1-2" the upgrade.
+//
+// Reimplementing spec-compliant RPM version comparison here would trade one hazard for
+// another -- a hand-rolled comparator error would be just as capable of shipping a wrong
+// remediation. Since suggestedVersion's contract is "never suggest an unproven upgrade,"
+// the conservative answer for any of these shapes is to treat the pair as impossible to
+// order safely, so the caller skips that candidate rather than trusting Grype's relaxed
+// result.
+func rpmSafeToCompare(a, b string) bool {
+	if strings.Contains(a, "^") || strings.Contains(b, "^") {
+		return false
+	}
+	if rpmHasExplicitEpoch(a) != rpmHasExplicitEpoch(b) {
+		return false
+	}
+	return !rpmVersionsDifferOnlyByTrailingZeros(rpmVersionPart(a), rpmVersionPart(b))
+}
+
+// rpmHasExplicitEpoch reports whether raw carries an "epoch:" prefix, mirroring how
+// Grype's own rpmVersion parser (splitEpochFromVersion) detects one: split once on ":"
+// and treat a first field present as the epoch.
+func rpmHasExplicitEpoch(raw string) bool {
+	return strings.Contains(raw, ":")
+}
+
+// rpmVersionPart returns raw's version component alone -- without any epoch prefix or
+// release suffix -- mirroring how Grype's own rpmVersion parser (newRpmVersion) splits
+// one: strip "epoch:" if present, then take everything before the first "-".
+func rpmVersionPart(raw string) string {
+	if _, after, ok := strings.Cut(raw, ":"); ok {
+		raw = after
+	}
+	version, _, _ := strings.Cut(raw, "-")
+	return version
+}
+
+// rpmAlnumSegment matches the same three token kinds Grype's own RPM version comparator
+// tokenizes a version string into (github.com/anchore/grype/grype/version, alphanumPattern):
+// a run of letters, a run of digits, or a literal "~". Everything else (".", "+", etc.) is a
+// separator and is dropped, exactly as Grype's own FindAllString-based tokenizing drops it.
+var rpmAlnumSegment = regexp.MustCompile(`[a-zA-Z]+|[0-9]+|~`)
+
+// rpmVersionsDifferOnlyByTrailingZeros reports whether a and b tokenize (by
+// rpmAlnumSegment) to a common prefix followed by one side having extra segments that are
+// all zero-valued -- the shape Grype's compareRpmVersions treats as "equal" instead of
+// "the side with the extra segment is newer." Both the prefix comparison and the
+// all-zero check are numeric-aware (leading zeros trimmed before comparing digit runs),
+// matching Grype's own segment comparison: a prefix pair Grype would judge numerically
+// equal (e.g. "01" and "1") must be recognized as equal here too, or this shape slips
+// past rpmSafeToCompare's guard as a false negative -- the opposite of "skip when
+// unsure" (#961).
+func rpmVersionsDifferOnlyByTrailingZeros(a, b string) bool {
+	segsA := rpmAlnumSegment.FindAllString(a, -1)
+	segsB := rpmAlnumSegment.FindAllString(b, -1)
+	if len(segsA) == len(segsB) {
+		return false
+	}
+	shorter, longer := segsA, segsB
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	for i := range shorter {
+		if !rpmSegmentsEqual(shorter[i], longer[i]) {
+			return false
+		}
+	}
+	for _, seg := range longer[len(shorter):] {
+		if !rpmSegmentIsZero(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+// rpmSegmentsEqual reports whether a and b are the same rpmAlnumSegment token. Digit
+// runs are compared numerically (leading zeros trimmed), since Grype's own tokenizer
+// does the same; a letter run or "~" has no notion of a leading zero and is compared as
+// a plain string.
+func rpmSegmentsEqual(a, b string) bool {
+	na, aIsDigits := trimLeadingZeros(a)
+	nb, bIsDigits := trimLeadingZeros(b)
+	if aIsDigits && bIsDigits {
+		return na == nb
+	}
+	return a == b
+}
+
+// rpmSegmentIsZero reports whether seg is a digit run whose numeric value is zero (e.g.
+// "0" or "00"). A letter run or "~" is never zero-valued.
+func rpmSegmentIsZero(seg string) bool {
+	trimmed, isDigits := trimLeadingZeros(seg)
+	return isDigits && trimmed == "0"
+}
+
+// trimLeadingZeros reports s with its leading zeros stripped (leaving a single "0" for
+// an all-zero run), along with whether s is a run of digits at all. A non-digit s (a
+// letter run, or "~") is returned unchanged with ok false.
+func trimLeadingZeros(s string) (trimmed string, ok bool) {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return s, false
+		}
+	}
+	trimmed = strings.TrimLeft(s, "0")
+	if trimmed == "" {
+		trimmed = "0"
+	}
+	return trimmed, true
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {

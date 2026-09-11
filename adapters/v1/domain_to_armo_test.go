@@ -8,6 +8,7 @@ import (
 
 	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 
+	grypeversion "github.com/anchore/grype/grype/version"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -368,10 +369,11 @@ func TestParseImageManifest_IncompleteLayerMetadata(t *testing.T) {
 
 func Test_suggestedVersion(t *testing.T) {
 	tests := []struct {
-		name     string
-		current  string
-		versions []string
-		want     string
+		name         string
+		current      string
+		versions     []string
+		artifactType v1beta1.SyftType
+		want         string
 	}{
 		{
 			name:     "Test with empty versions",
@@ -434,10 +436,367 @@ func Test_suggestedVersion(t *testing.T) {
 			versions: []string{"not-a-version", "also-not-a-version"},
 			want:     "",
 		},
+		{
+			// #955: an epoch-prefixed dpkg/rpm version (e.g. after an epoch bump) is not
+			// valid semver, so it used to fail to parse and fall back to versions[0]
+			// unconditionally - suggesting this very downgrade. Grype's own deb comparator
+			// understands the epoch and must not suggest going backwards.
+			name:         "deb epoch: no version above current returns empty, never a downgrade",
+			current:      "1:1.2.11.dfsg-2ubuntu1.2",
+			versions:     []string{"1:1.2.11.dfsg-2ubuntu1.1"},
+			artifactType: "deb",
+			want:         "",
+		},
+		{
+			name:         "deb epoch: a real newer fix across an epoch is still found",
+			current:      "1:1.2.11.dfsg-2ubuntu1.1",
+			versions:     []string{"1:1.2.11.dfsg-2ubuntu1.3", "1:1.2.11.dfsg-2ubuntu1.2"},
+			artifactType: "deb",
+			want:         "1:1.2.11.dfsg-2ubuntu1.2",
+		},
+		{
+			// rpm versions carry the same epoch:version-release shape as deb.
+			name:         "rpm epoch: no version above current returns empty, never a downgrade",
+			current:      "1:1.12.8-26.el8",
+			versions:     []string{"1:1.12.8-25.el8"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// #955: Alpine apk release revisions ("-rN") are numeric, but generic semver
+			// treats them as prerelease identifiers and orders "-r10" before "-r9"
+			// lexically, hiding a real, newer fix. Grype's own apk comparator orders them
+			// numerically.
+			name:         "apk revision: a real newer fix at a two-digit revision is found",
+			current:      "3.4.7-r9",
+			versions:     []string{"3.4.7-r10"},
+			artifactType: "apk",
+			want:         "3.4.7-r10",
+		},
+		{
+			name:         "apk revision: nearest of several revisions is picked, not the first",
+			current:      "3.4.7-r9",
+			versions:     []string{"3.4.7-r99", "3.4.7-r10"},
+			artifactType: "apk",
+			want:         "3.4.7-r10",
+		},
+		{
+			// A recognized distro artifact whose current version fails to parse under its
+			// own ecosystem's comparator must not fall through to semver and guess
+			// versions[0]: semver was never meant to parse an apk version either, and
+			// "not-a-version" gives no proof any of these candidates is actually newer.
+			name:         "apk artifact with an unparseable current returns empty, not the first entry",
+			current:      "not-a-version",
+			versions:     []string{"1.0.0", "2.0.0"},
+			artifactType: "apk",
+			want:         "",
+		},
+		{
+			// Grype's RPM comparator only compares epochs when both sides carry one
+			// explicitly, instead of treating a missing epoch as 0 per RPM's own spec. A
+			// current version with an explicit higher epoch can therefore be judged older
+			// than a candidate that merely omits its epoch, even though the candidate is
+			// really the same or an older release: "1" compares as newer than "1:0" by
+			// version string alone once epochs are skipped. This must not be trusted as a
+			// real upgrade.
+			name:         "rpm mixed epoch presence is not trusted as an upgrade",
+			current:      "1:0",
+			versions:     []string{"1"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// Grype's RPM tokenizer has no notion of "^" (RPM's post-release/snapshot
+			// marker): the caret is dropped and the surrounding digits are compared as an
+			// ordinary numeric segment, so "1.0^20250611" ranks above "1.0.1" even though
+			// RPM itself orders a caret-tagged snapshot below the release that supersedes
+			// it. This must not be trusted as a real upgrade either.
+			name:         "rpm caret release is not trusted as an upgrade",
+			current:      "1.0.1",
+			versions:     []string{"1.0^20250611"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// The epoch/caret guards must not reject ordinary RPM comparisons: same
+			// epoch-presence on both sides, no caret, is unaffected.
+			name:         "rpm ordinary comparison is unaffected by the safety guards",
+			current:      "1:1.12.8-25.el8",
+			versions:     []string{"1:1.12.8-27.el8", "1:1.12.8-26.el8"},
+			artifactType: "rpm",
+			want:         "1:1.12.8-26.el8",
+		},
+		{
+			// Grype's RPM comparator treats "1.0" and "1" as equal versions (an extra
+			// trailing "0" segment is ignored) and falls through to comparing releases
+			// alone, so it calls "1:1-2" newer than "1:1.0-1". Real RPM/librpm does not:
+			// the version with the extra segment ("1.0") outranks the shorter one
+			// regardless of release, so "1:1.0-1" is actually the newer of the two and
+			// "1:1-2" must not be suggested as an upgrade for it.
+			name:         "rpm trailing-zero version segment is not trusted as an upgrade",
+			current:      "1:1.0-1",
+			versions:     []string{"1:1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// Same shape without an epoch on either side, confirming the guard applies
+			// independently of rpmHasExplicitEpoch.
+			name:         "rpm trailing-zero version segment without an epoch is not trusted",
+			current:      "1.0-1",
+			versions:     []string{"1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// The trailing-zero guard must reject only the candidate with the mismatched
+			// segment count, not the whole comparison: "1.0-3" has the same version shape
+			// as current and is a real, higher release.
+			name:         "rpm trailing-zero guard skips only the mismatched candidate",
+			current:      "1.0-1",
+			versions:     []string{"1-2", "1.0-3"},
+			artifactType: "rpm",
+			want:         "1.0-3",
+		},
+		{
+			// #961: same trailing-zero shape as above, but with a leading zero in the
+			// shared prefix ("1.01.0" vs "1.1"). Grype's own comparator trims the
+			// leading zero, judges the two versions equal, and falls through to
+			// comparing releases alone ("-2" over "-1") - exactly the relaxation
+			// rpmSafeToCompare exists to guard against. Before #961's fix to
+			// rpmVersionsDifferOnlyByTrailingZeros, the leading zero defeated the
+			// guard's own shape check, so this candidate was wrongly trusted.
+			name:         "rpm trailing-zero guard is not defeated by a leading zero in the prefix",
+			current:      "1.01.0-1",
+			versions:     []string{"1.1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// #960: java-archive (Maven) versions commonly carry a non-numeric
+			// qualifier like "RELEASE" or "Final", which generic semver rejects
+			// outright. Before #960, this fell through to the unguarded semver
+			// fallback and returned versions[0] regardless of order - a possible
+			// downgrade. Grype's own Maven comparator understands the qualifier.
+			name:         "java-archive: a real newer fix is found despite a non-semver qualifier",
+			current:      "5.3.21.RELEASE",
+			versions:     []string{"5.3.20.RELEASE", "5.3.25.RELEASE"},
+			artifactType: "java-archive",
+			want:         "5.3.25.RELEASE",
+		},
+		{
+			name:         "java-archive: no version above current returns empty, never a downgrade",
+			current:      "5.3.25.RELEASE",
+			versions:     []string{"5.3.20.RELEASE", "5.3.21.RELEASE"},
+			artifactType: "java-archive",
+			want:         "",
+		},
+		{
+			// #960: PEP 440 pre/post-release suffixes ("rc1", ".post1") aren't valid
+			// semver either.
+			name:         "python: a real newer fix is found despite a PEP 440 pre-release suffix",
+			current:      "1.2.3rc1",
+			versions:     []string{"1.2.0", "1.2.3"},
+			artifactType: "python",
+			want:         "1.2.3",
+		},
+		{
+			name:         "python: no version above current returns empty, never a downgrade",
+			current:      "2.0.0.post1",
+			versions:     []string{"1.9.0", "2.0.0"},
+			artifactType: "python",
+			want:         "",
+		},
+		{
+			// #960: RubyGems pre-release suffixes ("pre1") aren't valid semver either.
+			name:         "gem: a real newer fix is found despite a non-semver pre-release suffix",
+			current:      "1.2.3.pre1",
+			versions:     []string{"1.2.0", "1.2.3"},
+			artifactType: "gem",
+			want:         "1.2.3",
+		},
+		{
+			// #960: Gentoo/Portage "-rN" revisions are numeric, but generic semver
+			// treats them as prerelease identifiers ordered lexically, the same
+			// class of bug #955 fixed for apk's "-rN" revisions.
+			name:         "portage: a real newer fix at a higher revision is found",
+			current:      "1.2.3-r1",
+			versions:     []string{"1.2.3-r0", "1.2.3-r2"},
+			artifactType: "portage",
+			want:         "1.2.3-r2",
+		},
+		{
+			// #960: syft reports Go modules as "go-module", which does not match
+			// grypeversion.ParseFormat's "go"/"golang" name-based cases - the exact
+			// mismatch that left this ecosystem on the unguarded semver fallback.
+			name:         "go-module: a real newer fix is found",
+			current:      "v1.2.3",
+			versions:     []string{"v1.2.0", "v1.2.4"},
+			artifactType: "go-module",
+			want:         "v1.2.4",
+		},
+		{
+			// #960: Bitnami packages append a package-only revision after the
+			// upstream version (e.g. "-1", "-2") that never addresses a
+			// vulnerability by itself, since it repackages the exact same upstream
+			// source; Grype's own Bitnami comparator deliberately ignores it, so a
+			// revision-only difference must not be suggested as a fix.
+			name:         "bitnami: a revision-only difference is not trusted as an upgrade",
+			current:      "1.2.3-1",
+			versions:     []string{"1.2.3-2"},
+			artifactType: "bitnami",
+			want:         "",
+		},
+		{
+			// #960: syft reports Windows updates as "msrc-kb", which does not match
+			// grypeversion.ParseFormat's "kb" case. Grype's own KB comparator only
+			// supports exact-match identity (KB numbers aren't sequential, so a
+			// larger number is not a "newer" one) - it can never prove a candidate
+			// is an upgrade, so no version is ever suggested for this ecosystem.
+			name:         "msrc-kb: never suggests a fix, since KB numbers cannot be ordered",
+			current:      "5028185",
+			versions:     []string{"5028184", "5028186"},
+			artifactType: "msrc-kb",
+			want:         "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions))
+			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
+		})
+	}
+}
+
+func Test_versionFormatForArtifact(t *testing.T) {
+	tests := []struct {
+		name         string
+		artifactType v1beta1.SyftType
+		wantFormat   grypeversion.Format
+		wantOk       bool
+	}{
+		{name: "apk", artifactType: "apk", wantFormat: grypeversion.ApkFormat, wantOk: true},
+		{name: "deb", artifactType: "deb", wantFormat: grypeversion.DebFormat, wantOk: true},
+		{name: "rpm", artifactType: "rpm", wantFormat: grypeversion.RpmFormat, wantOk: true},
+		{
+			// #960: this is the syft type string for ordinary Java library
+			// dependencies. It does not match grypeversion.ParseFormat's "maven"
+			// case, which is why routing through ParseFormat missed it entirely.
+			name:         "java-archive maps to Maven",
+			artifactType: "java-archive",
+			wantFormat:   grypeversion.MavenFormat,
+			wantOk:       true,
+		},
+		{name: "python maps to Python (PEP 440)", artifactType: "python", wantFormat: grypeversion.PythonFormat, wantOk: true},
+		{name: "gem maps to Gem", artifactType: "gem", wantFormat: grypeversion.GemFormat, wantOk: true},
+		{name: "portage maps to Portage", artifactType: "portage", wantFormat: grypeversion.PortageFormat, wantOk: true},
+		{
+			// #960: this is the syft type string for Go modules. It does not match
+			// grypeversion.ParseFormat's "go"/"golang" case either.
+			name:         "go-module maps to Golang",
+			artifactType: "go-module",
+			wantFormat:   grypeversion.GolangFormat,
+			wantOk:       true,
+		},
+		{
+			// #960: this is the syft type string for Windows updates. It does not
+			// match grypeversion.ParseFormat's "kb" case.
+			name:         "msrc-kb maps to KB",
+			artifactType: "msrc-kb",
+			wantFormat:   grypeversion.KBFormat,
+			wantOk:       true,
+		},
+		{name: "bitnami maps to Bitnami", artifactType: "bitnami", wantFormat: grypeversion.BitnamiFormat, wantOk: true},
+		{
+			name:         "an ecosystem with no dedicated Grype comparator falls back to semver",
+			artifactType: "npm",
+			wantFormat:   grypeversion.UnknownFormat,
+			wantOk:       false,
+		},
+		{
+			name:         "empty artifact type falls back to semver",
+			artifactType: "",
+			wantFormat:   grypeversion.UnknownFormat,
+			wantOk:       false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format, ok := versionFormatForArtifact(tt.artifactType)
+			assert.Equal(t, tt.wantFormat, format)
+			assert.Equal(t, tt.wantOk, ok)
+		})
+	}
+}
+
+// Test_rpmSafeToCompare exercises the guard in isolation, independent of
+// suggestedVersion's candidate-selection logic.
+func Test_rpmSafeToCompare(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "neither side has an epoch", a: "1.12.8-25.el8", b: "1.12.8-26.el8", want: true},
+		{name: "both sides have an epoch", a: "1:1.12.8-25.el8", b: "1:1.12.8-26.el8", want: true},
+		{name: "a has an epoch, b does not", a: "1:0", b: "1", want: false},
+		{name: "b has an epoch, a does not", a: "1", b: "1:0", want: false},
+		{name: "caret in a", a: "1.0^20250611", b: "1.0.1", want: false},
+		{name: "caret in b", a: "1.0.1", b: "1.0^20250611", want: false},
+		{name: "caret in both", a: "1.0^1", b: "1.0^2", want: false},
+		{name: "trailing zero version segment, with epoch", a: "1:1.0-1", b: "1:1-2", want: false},
+		{name: "trailing zero version segment, without epoch", a: "1.0-1", b: "1-2", want: false},
+		{name: "matching version shape is unaffected", a: "1.0-1", b: "1.0-3", want: true},
+		{
+			// #961: a leading zero in the shared prefix ("01" vs "1") used to defeat
+			// the trailing-zero shape check by comparing segments as raw strings, so
+			// this pair was (wrongly) judged safe to compare.
+			name: "trailing zero version segment hidden behind a leading zero in the prefix",
+			a:    "1.01.0-1",
+			b:    "1.1-2",
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, rpmSafeToCompare(tt.a, tt.b))
+		})
+	}
+}
+
+func Test_rpmVersionsDifferOnlyByTrailingZeros(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "b has an extra all-zero segment", a: "1", b: "1.0", want: true},
+		{name: "a has an extra all-zero segment", a: "1.0", b: "1", want: true},
+		{name: "extra segment is non-zero", a: "1", b: "1.1", want: false},
+		{name: "common prefix differs", a: "2", b: "1.0", want: false},
+		{name: "equal segment counts", a: "1.0", b: "1.0", want: false},
+		{name: "multiple trailing zero segments", a: "1", b: "1.0.0", want: true},
+		{
+			// A leading zero in the shared prefix ("01" vs "1") must not defeat the
+			// shape check: Grype's own tokenizer trims it and treats the two as the
+			// same digit run, so this function must recognize the shape too, or the
+			// pair slips past rpmSafeToCompare's guard as a false negative.
+			name: "leading zero in the shared prefix is recognized as equal",
+			a:    "1.01.0",
+			b:    "1.1",
+			want: true,
+		},
+		{
+			name: "extra segment with a leading zero is still recognized as zero",
+			a:    "1",
+			b:    "1.00",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, rpmVersionsDifferOnlyByTrailingZeros(tt.a, tt.b))
 		})
 	}
 }
