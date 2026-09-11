@@ -480,19 +480,79 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "3.4.7-r10",
 		},
 		{
-			// artifactType alone doesn't force the distro path if the version itself
-			// still fails to parse under it: falls through to the generic "nothing to
-			// compare against" fallback, same as an empty current.
-			name:         "apk artifact with an unparseable current falls back to the first entry",
+			// A recognized distro artifact whose current version fails to parse under its
+			// own ecosystem's comparator must not fall through to semver and guess
+			// versions[0]: semver was never meant to parse an apk version either, and
+			// "not-a-version" gives no proof any of these candidates is actually newer.
+			name:         "apk artifact with an unparseable current returns empty, not the first entry",
 			current:      "not-a-version",
 			versions:     []string{"1.0.0", "2.0.0"},
 			artifactType: "apk",
-			want:         "1.0.0",
+			want:         "",
+		},
+		{
+			// Grype's RPM comparator only compares epochs when both sides carry one
+			// explicitly, instead of treating a missing epoch as 0 per RPM's own spec. A
+			// current version with an explicit higher epoch can therefore be judged older
+			// than a candidate that merely omits its epoch, even though the candidate is
+			// really the same or an older release: "1" compares as newer than "1:0" by
+			// version string alone once epochs are skipped. This must not be trusted as a
+			// real upgrade.
+			name:         "rpm mixed epoch presence is not trusted as an upgrade",
+			current:      "1:0",
+			versions:     []string{"1"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// Grype's RPM tokenizer has no notion of "^" (RPM's post-release/snapshot
+			// marker): the caret is dropped and the surrounding digits are compared as an
+			// ordinary numeric segment, so "1.0^20250611" ranks above "1.0.1" even though
+			// RPM itself orders a caret-tagged snapshot below the release that supersedes
+			// it. This must not be trusted as a real upgrade either.
+			name:         "rpm caret release is not trusted as an upgrade",
+			current:      "1.0.1",
+			versions:     []string{"1.0^20250611"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// The epoch/caret guards must not reject ordinary RPM comparisons: same
+			// epoch-presence on both sides, no caret, is unaffected.
+			name:         "rpm ordinary comparison is unaffected by the safety guards",
+			current:      "1:1.12.8-25.el8",
+			versions:     []string{"1:1.12.8-27.el8", "1:1.12.8-26.el8"},
+			artifactType: "rpm",
+			want:         "1:1.12.8-26.el8",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
+		})
+	}
+}
+
+// Test_rpmSafeToCompare exercises the guard in isolation, independent of
+// suggestedVersion's candidate-selection logic.
+func Test_rpmSafeToCompare(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "neither side has an epoch", a: "1.12.8-25.el8", b: "1.12.8-26.el8", want: true},
+		{name: "both sides have an epoch", a: "1:1.12.8-25.el8", b: "1:1.12.8-26.el8", want: true},
+		{name: "a has an epoch, b does not", a: "1:0", b: "1", want: false},
+		{name: "b has an epoch, a does not", a: "1", b: "1:0", want: false},
+		{name: "caret in a", a: "1.0^20250611", b: "1.0.1", want: false},
+		{name: "caret in b", a: "1.0.1", b: "1.0^20250611", want: false},
+		{name: "caret in both", a: "1.0^1", b: "1.0^2", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, rpmSafeToCompare(tt.a, tt.b))
 		})
 	}
 }

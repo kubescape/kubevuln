@@ -299,18 +299,19 @@ func linkToVuln(id string) string {
 // since there is nothing to compare against. If current is a version but no entry in
 // versions is greater than it, "" is returned rather than falling back to versions[0];
 // versions[0] could be older than current, which would suggest a downgrade (#844).
+//
+// For a recognized distro ecosystem, current failing to parse under its own comparator
+// never falls through to the semver path below: semver was never meant to parse that
+// ecosystem's versions either, and guessing versions[0] through it would reintroduce
+// the same unproven-remediation problem this function exists to avoid, just one layer
+// removed.
 func suggestedVersion(current string, versions []string, artifactType v1beta1.SyftType) string {
 	if len(versions) == 0 {
 		return ""
 	}
 
 	if format, ok := distroPackageVersionFormat(artifactType); ok {
-		if v, resolved := nearestDistroFix(current, versions, format); resolved {
-			return v
-		}
-		// current doesn't parse even as its own ecosystem's version, so there is
-		// nothing distro-aware to compare against either; fall through to the
-		// same "nothing to compare against" behaviour as any other unparseable case.
+		return nearestDistroFix(current, versions, format)
 	}
 
 	c, err := semver.NewVersion(current)
@@ -352,19 +353,22 @@ func distroPackageVersionFormat(artifactType v1beta1.SyftType) (grypeversion.For
 }
 
 // nearestDistroFix returns the smallest version in versions that is strictly greater
-// than current, comparing both under format instead of generic semver. The second
-// return value is false only when current itself fails to parse under format, meaning
-// there is nothing to compare against at all; a candidate that fails to parse is simply
-// skipped, same as the semver path.
-func nearestDistroFix(current string, versions []string, format grypeversion.Format) (string, bool) {
+// than current, comparing both under format instead of generic semver. "" is returned
+// both when current itself fails to parse under format (nothing to compare against) and
+// when no candidate qualifies; a candidate that fails to parse, or that rpmSafeToCompare
+// rejects, is simply skipped rather than treated as disqualifying the whole result.
+func nearestDistroFix(current string, versions []string, format grypeversion.Format) string {
 	c := grypeversion.New(current, format)
 	if err := c.Validate(); err != nil {
-		return "", false
+		return ""
 	}
 
 	var nearest *grypeversion.Version
 	var nearestStr string
 	for _, raw := range versions {
+		if format == grypeversion.RpmFormat && !rpmSafeToCompare(current, raw) {
+			continue
+		}
 		v := grypeversion.New(raw, format)
 		cmp, err := c.Compare(v)
 		if err != nil || cmp >= 0 {
@@ -374,11 +378,49 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 			nearest, nearestStr = v, raw
 			continue
 		}
+		if format == grypeversion.RpmFormat && !rpmSafeToCompare(nearestStr, raw) {
+			continue
+		}
 		if nc, err := nearest.Compare(v); err == nil && nc > 0 {
 			nearest, nearestStr = v, raw
 		}
 	}
-	return nearestStr, true
+	return nearestStr
+}
+
+// rpmSafeToCompare reports whether a and b can be safely ordered by Grype's RPM
+// comparator (github.com/anchore/grype/grype/version, rpmVersion.compare). That
+// comparator is a deliberately pragmatic vulnerability-matching tool, not a spec-compliant
+// one, and two of its shortcuts can turn "not proven to be an upgrade" into "accepted as
+// one":
+//
+//  1. It only compares epochs when both sides carry one explicitly, skipping the
+//     comparison entirely otherwise -- rather than treating a missing epoch as 0, which is
+//     what RPM itself specifies. A current version with an explicit higher epoch (e.g.
+//     "1:0") can therefore be judged older than a candidate that merely omits its epoch
+//     (e.g. "1"), when the candidate is actually the same release or older.
+//  2. Its tokenizer has no notion of "^" (RPM's post-release/snapshot marker) at all: the
+//     caret is silently dropped and the digits around it are compared as an ordinary
+//     numeric segment, which can rank a caret-tagged snapshot above the release that
+//     actually supersedes it (e.g. "1.0^20250611" over "1.0.1").
+//
+// Reimplementing spec-compliant RPM version comparison here would trade one hazard for
+// another -- a hand-rolled comparator error would be just as capable of shipping a wrong
+// remediation. Since suggestedVersion's contract is "never suggest an unproven upgrade,"
+// the conservative answer for either shape is to treat the pair as impossible to order
+// safely, so the caller skips that candidate rather than trusting Grype's relaxed result.
+func rpmSafeToCompare(a, b string) bool {
+	if strings.Contains(a, "^") || strings.Contains(b, "^") {
+		return false
+	}
+	return rpmHasExplicitEpoch(a) == rpmHasExplicitEpoch(b)
+}
+
+// rpmHasExplicitEpoch reports whether raw carries an "epoch:" prefix, mirroring how
+// Grype's own rpmVersion parser (splitEpochFromVersion) detects one: split once on ":"
+// and treat a first field present as the epoch.
+func rpmHasExplicitEpoch(raw string) bool {
+	return strings.Contains(raw, ":")
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {
