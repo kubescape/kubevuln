@@ -486,13 +486,13 @@ var rpmAlnumSegment = regexp.MustCompile(`[a-zA-Z]+|[0-9]+|~`)
 
 // rpmVersionsDifferOnlyByTrailingZeros reports whether a and b tokenize (by
 // rpmAlnumSegment) to a common prefix followed by one side having extra segments that are
-// all literally "0" -- the shape Grype's compareRpmVersions treats as "equal" instead of
-// "the side with the extra segment is newer." The common prefix is compared as plain
-// strings rather than replicating Grype's own numeric-aware segment comparison (which
-// trims leading zeros before comparing digit runs); a prefix pair that Grype would judge
-// equal but that differs as raw strings (e.g. "01" and "1") is therefore reported as not
-// matching this shape, which only makes this function's caller more conservative, never
-// less -- consistent with rpmSafeToCompare's "skip when unsure" contract.
+// all zero-valued -- the shape Grype's compareRpmVersions treats as "equal" instead of
+// "the side with the extra segment is newer." Both the prefix comparison and the
+// all-zero check are numeric-aware (leading zeros trimmed before comparing digit runs),
+// matching Grype's own segment comparison: a prefix pair Grype would judge numerically
+// equal (e.g. "01" and "1") must be recognized as equal here too, or this shape slips
+// past rpmSafeToCompare's guard as a false negative -- the opposite of "skip when
+// unsure" (#961).
 func rpmVersionsDifferOnlyByTrailingZeros(a, b string) bool {
 	segsA := rpmAlnumSegment.FindAllString(a, -1)
 	segsB := rpmAlnumSegment.FindAllString(b, -1)
@@ -504,16 +504,52 @@ func rpmVersionsDifferOnlyByTrailingZeros(a, b string) bool {
 		shorter, longer = longer, shorter
 	}
 	for i := range shorter {
-		if shorter[i] != longer[i] {
+		if !rpmSegmentsEqual(shorter[i], longer[i]) {
 			return false
 		}
 	}
 	for _, seg := range longer[len(shorter):] {
-		if seg != "0" {
+		if !rpmSegmentIsZero(seg) {
 			return false
 		}
 	}
 	return true
+}
+
+// rpmSegmentsEqual reports whether a and b are the same rpmAlnumSegment token. Digit
+// runs are compared numerically (leading zeros trimmed), since Grype's own tokenizer
+// does the same; a letter run or "~" has no notion of a leading zero and is compared as
+// a plain string.
+func rpmSegmentsEqual(a, b string) bool {
+	na, aIsDigits := trimLeadingZeros(a)
+	nb, bIsDigits := trimLeadingZeros(b)
+	if aIsDigits && bIsDigits {
+		return na == nb
+	}
+	return a == b
+}
+
+// rpmSegmentIsZero reports whether seg is a digit run whose numeric value is zero (e.g.
+// "0" or "00"). A letter run or "~" is never zero-valued.
+func rpmSegmentIsZero(seg string) bool {
+	trimmed, isDigits := trimLeadingZeros(seg)
+	return isDigits && trimmed == "0"
+}
+
+// trimLeadingZeros reports s with its leading zeros stripped (leaving a single "0" for
+// an all-zero run), along with whether s is a run of digits at all. A non-digit s (a
+// letter run, or "~") is returned unchanged with ok false.
+func trimLeadingZeros(s string) (trimmed string, ok bool) {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return s, false
+		}
+	}
+	trimmed = strings.TrimLeft(s, "0")
+	if trimmed == "" {
+		trimmed = "0"
+	}
+	return trimmed, true
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {

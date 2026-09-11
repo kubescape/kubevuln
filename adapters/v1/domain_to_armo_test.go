@@ -559,6 +559,20 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "1.0-3",
 		},
 		{
+			// #961: same trailing-zero shape as above, but with a leading zero in the
+			// shared prefix ("1.01.0" vs "1.1"). Grype's own comparator trims the
+			// leading zero, judges the two versions equal, and falls through to
+			// comparing releases alone ("-2" over "-1") - exactly the relaxation
+			// rpmSafeToCompare exists to guard against. Before #961's fix to
+			// rpmVersionsDifferOnlyByTrailingZeros, the leading zero defeated the
+			// guard's own shape check, so this candidate was wrongly trusted.
+			name:         "rpm trailing-zero guard is not defeated by a leading zero in the prefix",
+			current:      "1.01.0-1",
+			versions:     []string{"1.1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
 			// #960: java-archive (Maven) versions commonly carry a non-numeric
 			// qualifier like "RELEASE" or "Final", which generic semver rejects
 			// outright. Before #960, this fell through to the unguarded semver
@@ -733,6 +747,15 @@ func Test_rpmSafeToCompare(t *testing.T) {
 		{name: "trailing zero version segment, with epoch", a: "1:1.0-1", b: "1:1-2", want: false},
 		{name: "trailing zero version segment, without epoch", a: "1.0-1", b: "1-2", want: false},
 		{name: "matching version shape is unaffected", a: "1.0-1", b: "1.0-3", want: true},
+		{
+			// #961: a leading zero in the shared prefix ("01" vs "1") used to defeat
+			// the trailing-zero shape check by comparing segments as raw strings, so
+			// this pair was (wrongly) judged safe to compare.
+			name: "trailing zero version segment hidden behind a leading zero in the prefix",
+			a:    "1.01.0-1",
+			b:    "1.1-2",
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -754,6 +777,22 @@ func Test_rpmVersionsDifferOnlyByTrailingZeros(t *testing.T) {
 		{name: "common prefix differs", a: "2", b: "1.0", want: false},
 		{name: "equal segment counts", a: "1.0", b: "1.0", want: false},
 		{name: "multiple trailing zero segments", a: "1", b: "1.0.0", want: true},
+		{
+			// A leading zero in the shared prefix ("01" vs "1") must not defeat the
+			// shape check: Grype's own tokenizer trims it and treats the two as the
+			// same digit run, so this function must recognize the shape too, or the
+			// pair slips past rpmSafeToCompare's guard as a false negative.
+			name: "leading zero in the shared prefix is recognized as equal",
+			a:    "1.01.0",
+			b:    "1.1",
+			want: true,
+		},
+		{
+			name: "extra segment with a leading zero is still recognized as zero",
+			a:    "1",
+			b:    "1.00",
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
