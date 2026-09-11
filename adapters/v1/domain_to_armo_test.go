@@ -525,6 +525,38 @@ func Test_suggestedVersion(t *testing.T) {
 			artifactType: "rpm",
 			want:         "1:1.12.8-26.el8",
 		},
+		{
+			// Grype's RPM comparator treats "1.0" and "1" as equal versions (an extra
+			// trailing "0" segment is ignored) and falls through to comparing releases
+			// alone, so it calls "1:1-2" newer than "1:1.0-1". Real RPM/librpm does not:
+			// the version with the extra segment ("1.0") outranks the shorter one
+			// regardless of release, so "1:1.0-1" is actually the newer of the two and
+			// "1:1-2" must not be suggested as an upgrade for it.
+			name:         "rpm trailing-zero version segment is not trusted as an upgrade",
+			current:      "1:1.0-1",
+			versions:     []string{"1:1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// Same shape without an epoch on either side, confirming the guard applies
+			// independently of rpmHasExplicitEpoch.
+			name:         "rpm trailing-zero version segment without an epoch is not trusted",
+			current:      "1.0-1",
+			versions:     []string{"1-2"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// The trailing-zero guard must reject only the candidate with the mismatched
+			// segment count, not the whole comparison: "1.0-3" has the same version shape
+			// as current and is a real, higher release.
+			name:         "rpm trailing-zero guard skips only the mismatched candidate",
+			current:      "1.0-1",
+			versions:     []string{"1-2", "1.0-3"},
+			artifactType: "rpm",
+			want:         "1.0-3",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -549,10 +581,34 @@ func Test_rpmSafeToCompare(t *testing.T) {
 		{name: "caret in a", a: "1.0^20250611", b: "1.0.1", want: false},
 		{name: "caret in b", a: "1.0.1", b: "1.0^20250611", want: false},
 		{name: "caret in both", a: "1.0^1", b: "1.0^2", want: false},
+		{name: "trailing zero version segment, with epoch", a: "1:1.0-1", b: "1:1-2", want: false},
+		{name: "trailing zero version segment, without epoch", a: "1.0-1", b: "1-2", want: false},
+		{name: "matching version shape is unaffected", a: "1.0-1", b: "1.0-3", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, rpmSafeToCompare(tt.a, tt.b))
+		})
+	}
+}
+
+func Test_rpmVersionsDifferOnlyByTrailingZeros(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "b has an extra all-zero segment", a: "1", b: "1.0", want: true},
+		{name: "a has an extra all-zero segment", a: "1.0", b: "1", want: true},
+		{name: "extra segment is non-zero", a: "1", b: "1.1", want: false},
+		{name: "common prefix differs", a: "2", b: "1.0", want: false},
+		{name: "equal segment counts", a: "1.0", b: "1.0", want: false},
+		{name: "multiple trailing zero segments", a: "1", b: "1.0.0", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, rpmVersionsDifferOnlyByTrailingZeros(tt.a, tt.b))
 		})
 	}
 }

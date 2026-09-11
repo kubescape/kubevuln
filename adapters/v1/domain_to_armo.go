@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -391,8 +392,7 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 // rpmSafeToCompare reports whether a and b can be safely ordered by Grype's RPM
 // comparator (github.com/anchore/grype/grype/version, rpmVersion.compare). That
 // comparator is a deliberately pragmatic vulnerability-matching tool, not a spec-compliant
-// one, and two of its shortcuts can turn "not proven to be an upgrade" into "accepted as
-// one":
+// one, and its shortcuts can turn "not proven to be an upgrade" into "accepted as one":
 //
 //  1. It only compares epochs when both sides carry one explicitly, skipping the
 //     comparison entirely otherwise -- rather than treating a missing epoch as 0, which is
@@ -403,17 +403,27 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 //     caret is silently dropped and the digits around it are compared as an ordinary
 //     numeric segment, which can rank a caret-tagged snapshot above the release that
 //     actually supersedes it (e.g. "1.0^20250611" over "1.0.1").
+//  3. When one version string tokenizes into strictly more alphanumeric segments than the
+//     other and every extra segment is literally "0", it treats the two versions as equal
+//     and falls through to comparing releases alone -- rather than what real RPM/librpm
+//     does, which is to treat the version with the extra segment as newer regardless of
+//     release. "1.0-1" therefore outranks "1-2" under real RPM (the release never even
+//     gets compared), but Grype calls "1-2" the upgrade.
 //
 // Reimplementing spec-compliant RPM version comparison here would trade one hazard for
 // another -- a hand-rolled comparator error would be just as capable of shipping a wrong
 // remediation. Since suggestedVersion's contract is "never suggest an unproven upgrade,"
-// the conservative answer for either shape is to treat the pair as impossible to order
-// safely, so the caller skips that candidate rather than trusting Grype's relaxed result.
+// the conservative answer for any of these shapes is to treat the pair as impossible to
+// order safely, so the caller skips that candidate rather than trusting Grype's relaxed
+// result.
 func rpmSafeToCompare(a, b string) bool {
 	if strings.Contains(a, "^") || strings.Contains(b, "^") {
 		return false
 	}
-	return rpmHasExplicitEpoch(a) == rpmHasExplicitEpoch(b)
+	if rpmHasExplicitEpoch(a) != rpmHasExplicitEpoch(b) {
+		return false
+	}
+	return !rpmVersionsDifferOnlyByTrailingZeros(rpmVersionPart(a), rpmVersionPart(b))
 }
 
 // rpmHasExplicitEpoch reports whether raw carries an "epoch:" prefix, mirroring how
@@ -421,6 +431,55 @@ func rpmSafeToCompare(a, b string) bool {
 // and treat a first field present as the epoch.
 func rpmHasExplicitEpoch(raw string) bool {
 	return strings.Contains(raw, ":")
+}
+
+// rpmVersionPart returns raw's version component alone -- without any epoch prefix or
+// release suffix -- mirroring how Grype's own rpmVersion parser (newRpmVersion) splits
+// one: strip "epoch:" if present, then take everything before the first "-".
+func rpmVersionPart(raw string) string {
+	if _, after, ok := strings.Cut(raw, ":"); ok {
+		raw = after
+	}
+	version, _, _ := strings.Cut(raw, "-")
+	return version
+}
+
+// rpmAlnumSegment matches the same three token kinds Grype's own RPM version comparator
+// tokenizes a version string into (github.com/anchore/grype/grype/version, alphanumPattern):
+// a run of letters, a run of digits, or a literal "~". Everything else (".", "+", etc.) is a
+// separator and is dropped, exactly as Grype's own FindAllString-based tokenizing drops it.
+var rpmAlnumSegment = regexp.MustCompile(`[a-zA-Z]+|[0-9]+|~`)
+
+// rpmVersionsDifferOnlyByTrailingZeros reports whether a and b tokenize (by
+// rpmAlnumSegment) to a common prefix followed by one side having extra segments that are
+// all literally "0" -- the shape Grype's compareRpmVersions treats as "equal" instead of
+// "the side with the extra segment is newer." The common prefix is compared as plain
+// strings rather than replicating Grype's own numeric-aware segment comparison (which
+// trims leading zeros before comparing digit runs); a prefix pair that Grype would judge
+// equal but that differs as raw strings (e.g. "01" and "1") is therefore reported as not
+// matching this shape, which only makes this function's caller more conservative, never
+// less -- consistent with rpmSafeToCompare's "skip when unsure" contract.
+func rpmVersionsDifferOnlyByTrailingZeros(a, b string) bool {
+	segsA := rpmAlnumSegment.FindAllString(a, -1)
+	segsB := rpmAlnumSegment.FindAllString(b, -1)
+	if len(segsA) == len(segsB) {
+		return false
+	}
+	shorter, longer := segsA, segsB
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	for i := range shorter {
+		if shorter[i] != longer[i] {
+			return false
+		}
+	}
+	for _, seg := range longer[len(shorter):] {
+		if seg != "0" {
+			return false
+		}
+	}
+	return true
 }
 
 func parseLayersPayload(target source.ImageMetadata) (map[string]containerscan.ESLayer, error) {
