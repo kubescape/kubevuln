@@ -9,6 +9,9 @@ It [scans container images for vulnerabilities](https://www.armosec.io/blog/code
 To build kubevuln with its dependencies run: `make`
 
 ## Configuration
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the current, complete configuration reference (environment variables, `clusterData.json` schema, and validation). The example below predates it and doesn't reflect current field names.
+
 1. Load config file using the `CONFIG` environment variable
 
    `export CONFIG=path/to/clusterData.json`

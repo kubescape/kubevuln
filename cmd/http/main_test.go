@@ -93,6 +93,53 @@ func TestIsRiskAcceptanceActive(t *testing.T) {
 	}
 }
 
+// TestResolveAccountID is the regression test for #957: clusterData.json's accountID
+// field used to be dead code (nothing read Config.AccountID), so setting it had no
+// effect, and a missing real account identifier (/etc/credentials/account) never
+// stopped startup despite docs/CONFIGURATION.md documenting both as required.
+func TestResolveAccountID(t *testing.T) {
+	tests := []struct {
+		name               string
+		credentialsAccount string
+		configAccountID    string
+		keepLocal          bool
+		want               string
+		wantErr            bool
+	}{
+		{
+			name:               "credentials file wins over the config fallback",
+			credentialsAccount: "from-credentials-file",
+			configAccountID:    "from-cluster-data",
+			want:               "from-credentials-file",
+		},
+		{
+			name:            "config fallback is used when the credentials file has none",
+			configAccountID: "from-cluster-data",
+			want:            "from-cluster-data",
+		},
+		{
+			name:      "keepLocal tolerates no account identifier at all",
+			keepLocal: true,
+			want:      "",
+		},
+		{
+			name:    "no account identifier and not keepLocal fails",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveAccountID(tt.credentialsAccount, tt.configAccountID, tt.keepLocal)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestScan(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -160,8 +160,12 @@ The main configuration file. All options can be overridden via environment varia
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `accountID` | string | Account identifier for backend services |
 | `clusterName` | string | Name of the Kubernetes cluster |
+
+Unless `keepLocal` is `true`, kubevuln also needs an account identifier for the backend it
+reports to. Prefer `/etc/credentials/account` (see [Credentials Configuration](#credentials-configuration))
+over `accountID` here: `accountID` (and `ACCOUNTID`) is only a fallback, used when the
+credentials file has none. If neither source has one, startup fails.
 
 #### Scanning Options
 
@@ -215,11 +219,11 @@ The main configuration file. All options can be overridden via environment varia
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["accountID", "clusterName"],
+  "required": ["clusterName"],
   "properties": {
     "accountID": {
       "type": "string",
-      "description": "Account identifier"
+      "description": "Account identifier fallback, used only when /etc/credentials/account has none. Not required when that file supplies one, or when keepLocal is true."
     },
     "clusterName": {
       "type": "string",
@@ -404,6 +408,11 @@ Place credentials in `/etc/credentials/`:
 ├── account    # Account ID
 └── accessKey  # Access key for backend authentication
 ```
+
+`account` is the primary source of the account identifier kubevuln reports to the backend
+with; `accountID` in `clusterData.json` (or `ACCOUNTID` in the environment) is only used as
+a fallback when this file has none. Unless `keepLocal` is `true`, one of the two must
+resolve to a non-empty value or startup fails.
 
 ### Registry Credentials
 
@@ -653,8 +662,8 @@ SCANCONCURRENCY=8 CONFIG_DIR=/config ./kubevuln
 Kubevuln validates configuration at startup. Invalid configuration will prevent the service from starting.
 
 Required fields:
-- `accountID` (when `keepLocal` is `false`)
 - `clusterName`
+- an account identifier (when `keepLocal` is `false`): `/etc/credentials/account`, falling back to `accountID`/`ACCOUNTID`
 
 ### Runtime Validation
 
@@ -668,7 +677,8 @@ Some configuration is validated at runtime:
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `load config error` | Missing or invalid `clusterData.json` | Check file exists and is valid JSON |
-| `missing required field` | Required field not set | Add `accountID` and `clusterName` |
+| `missing required field` | Required field not set | Add `clusterName` |
+| `account identifier error` | No usable account identifier and `keepLocal` is `false` | Mount `/etc/credentials/account`, or set `accountID`/`ACCOUNTID`, or set `keepLocal: true` |
 | `invalid duration` | Invalid `scanTimeout` format | Use format like `5m`, `1h`, `300s` |
 
 ---
