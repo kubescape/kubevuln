@@ -10,6 +10,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	grypeversion "github.com/anchore/grype/grype/version"
+	syftPkg "github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -289,20 +290,22 @@ func linkToVuln(id string) string {
 // for several maintained branches in any order), so the whole slice must be scanned
 // rather than trusting the first qualifying entry.
 //
-// artifactType selects how versions are compared: apk, deb and rpm package versions
-// (e.g. an epoch-prefixed "1:2.3.4-1", or an Alpine "-r10" release revision) are not
-// semver and are compared with Grype's own format-aware comparator instead - the same
-// one Grype's own presenter uses to sort fix versions (models.NewVulnerability, via
-// sortVersions). Generic semver comparison below is otherwise unchanged for every other
-// ecosystem.
+// artifactType selects how versions are compared: for every ecosystem where Grype
+// itself defines a format-aware comparator distinct from semver - apk, deb, rpm (e.g.
+// an epoch-prefixed "1:2.3.4-1", or an Alpine "-r10" release revision), Maven, Python
+// (PEP 440), RubyGems, Portage, Go modules, Windows KB and Bitnami - versions are
+// compared with that same comparator instead, the one Grype's own presenter uses to
+// sort fix versions (models.NewVulnerability, via sortVersions). Generic semver
+// comparison below is otherwise unchanged for every other ecosystem (npm, NuGet, and
+// the other ecosystems that are already semver or close enough to it).
 //
 // If current is not a version in the chosen comparator, the first entry is returned,
 // since there is nothing to compare against. If current is a version but no entry in
 // versions is greater than it, "" is returned rather than falling back to versions[0];
 // versions[0] could be older than current, which would suggest a downgrade (#844).
 //
-// For a recognized distro ecosystem, current failing to parse under its own comparator
-// never falls through to the semver path below: semver was never meant to parse that
+// For a recognized ecosystem, current failing to parse under its own comparator never
+// falls through to the semver path below: semver was never meant to parse that
 // ecosystem's versions either, and guessing versions[0] through it would reintroduce
 // the same unproven-remediation problem this function exists to avoid, just one layer
 // removed.
@@ -311,7 +314,7 @@ func suggestedVersion(current string, versions []string, artifactType v1beta1.Sy
 		return ""
 	}
 
-	if format, ok := distroPackageVersionFormat(artifactType); ok {
+	if format, ok := versionFormatForArtifact(artifactType); ok {
 		return nearestDistroFix(current, versions, format)
 	}
 
@@ -338,16 +341,47 @@ func suggestedVersion(current string, versions []string, artifactType v1beta1.Sy
 	return nearestStr
 }
 
-// distroPackageVersionFormat reports the Grype version format matching artifactType's
-// own (non-semver) version scheme, for the OS package ecosystems where that scheme is
-// known to disagree with generic semver: an apk/deb/rpm version can carry an epoch
-// prefix that plain semver rejects outright, or a release revision (e.g. "-r10") that
-// semver's prerelease-identifier rules order lexically rather than numerically. Every
-// other ecosystem returns false and keeps using suggestedVersion's semver comparison.
-func distroPackageVersionFormat(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
-	switch format := grypeversion.ParseFormat(string(artifactType)); format {
-	case grypeversion.ApkFormat, grypeversion.DebFormat, grypeversion.RpmFormat:
-		return format, true
+// versionFormatForArtifact reports the Grype version format matching the ecosystem of
+// the artifact a match was found in, for every ecosystem where Grype defines a
+// format-aware comparator distinct from generic semver. Every other ecosystem returns
+// false and keeps using suggestedVersion's semver comparison.
+//
+// This maps directly from the syft package type on the artifact (see
+// github.com/anchore/syft/syft/pkg.Type), mirroring how Grype's own
+// grype/pkg.VersionFormat resolves a match's comparator, rather than routing
+// artifactType through grypeversion.ParseFormat. ParseFormat matches format *names*
+// ("maven", "go", "kb"), but several syft package types are spelled differently from
+// Grype's own format name for that ecosystem - "java-archive", "go-module", "msrc-kb" -
+// so a name-based lookup silently misses them and falls through to the unguarded
+// semver comparison this function exists to avoid (#960).
+//
+// JVM installations (Grype's JVMFormat) are a metadata-based sub-case of the same
+// java-archive syft type used for ordinary Java library dependencies, distinguished by
+// package metadata that isn't carried on v1beta1.GrypePackage; java-archive is mapped
+// to MavenFormat unconditionally here, which is Grype's own format for the vast
+// majority of java-archive matches.
+func versionFormatForArtifact(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
+	switch syftPkg.Type(artifactType) {
+	case syftPkg.ApkPkg:
+		return grypeversion.ApkFormat, true
+	case syftPkg.DebPkg:
+		return grypeversion.DebFormat, true
+	case syftPkg.RpmPkg:
+		return grypeversion.RpmFormat, true
+	case syftPkg.JavaPkg:
+		return grypeversion.MavenFormat, true
+	case syftPkg.PythonPkg:
+		return grypeversion.PythonFormat, true
+	case syftPkg.GemPkg:
+		return grypeversion.GemFormat, true
+	case syftPkg.PortagePkg:
+		return grypeversion.PortageFormat, true
+	case syftPkg.GoModulePkg:
+		return grypeversion.GolangFormat, true
+	case syftPkg.KbPkg:
+		return grypeversion.KBFormat, true
+	case syftPkg.BitnamiPkg:
+		return grypeversion.BitnamiFormat, true
 	default:
 		return grypeversion.UnknownFormat, false
 	}

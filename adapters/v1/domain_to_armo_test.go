@@ -8,6 +8,7 @@ import (
 
 	containerRegistryV1 "github.com/google/go-containerregistry/pkg/v1"
 
+	grypeversion "github.com/anchore/grype/grype/version"
 	"github.com/anchore/syft/syft/source"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/containerscan"
@@ -557,10 +558,158 @@ func Test_suggestedVersion(t *testing.T) {
 			artifactType: "rpm",
 			want:         "1.0-3",
 		},
+		{
+			// #960: java-archive (Maven) versions commonly carry a non-numeric
+			// qualifier like "RELEASE" or "Final", which generic semver rejects
+			// outright. Before #960, this fell through to the unguarded semver
+			// fallback and returned versions[0] regardless of order - a possible
+			// downgrade. Grype's own Maven comparator understands the qualifier.
+			name:         "java-archive: a real newer fix is found despite a non-semver qualifier",
+			current:      "5.3.21.RELEASE",
+			versions:     []string{"5.3.20.RELEASE", "5.3.25.RELEASE"},
+			artifactType: "java-archive",
+			want:         "5.3.25.RELEASE",
+		},
+		{
+			name:         "java-archive: no version above current returns empty, never a downgrade",
+			current:      "5.3.25.RELEASE",
+			versions:     []string{"5.3.20.RELEASE", "5.3.21.RELEASE"},
+			artifactType: "java-archive",
+			want:         "",
+		},
+		{
+			// #960: PEP 440 pre/post-release suffixes ("rc1", ".post1") aren't valid
+			// semver either.
+			name:         "python: a real newer fix is found despite a PEP 440 pre-release suffix",
+			current:      "1.2.3rc1",
+			versions:     []string{"1.2.0", "1.2.3"},
+			artifactType: "python",
+			want:         "1.2.3",
+		},
+		{
+			name:         "python: no version above current returns empty, never a downgrade",
+			current:      "2.0.0.post1",
+			versions:     []string{"1.9.0", "2.0.0"},
+			artifactType: "python",
+			want:         "",
+		},
+		{
+			// #960: RubyGems pre-release suffixes ("pre1") aren't valid semver either.
+			name:         "gem: a real newer fix is found despite a non-semver pre-release suffix",
+			current:      "1.2.3.pre1",
+			versions:     []string{"1.2.0", "1.2.3"},
+			artifactType: "gem",
+			want:         "1.2.3",
+		},
+		{
+			// #960: Gentoo/Portage "-rN" revisions are numeric, but generic semver
+			// treats them as prerelease identifiers ordered lexically, the same
+			// class of bug #955 fixed for apk's "-rN" revisions.
+			name:         "portage: a real newer fix at a higher revision is found",
+			current:      "1.2.3-r1",
+			versions:     []string{"1.2.3-r0", "1.2.3-r2"},
+			artifactType: "portage",
+			want:         "1.2.3-r2",
+		},
+		{
+			// #960: syft reports Go modules as "go-module", which does not match
+			// grypeversion.ParseFormat's "go"/"golang" name-based cases - the exact
+			// mismatch that left this ecosystem on the unguarded semver fallback.
+			name:         "go-module: a real newer fix is found",
+			current:      "v1.2.3",
+			versions:     []string{"v1.2.0", "v1.2.4"},
+			artifactType: "go-module",
+			want:         "v1.2.4",
+		},
+		{
+			// #960: Bitnami packages append a package-only revision after the
+			// upstream version (e.g. "-1", "-2") that never addresses a
+			// vulnerability by itself, since it repackages the exact same upstream
+			// source; Grype's own Bitnami comparator deliberately ignores it, so a
+			// revision-only difference must not be suggested as a fix.
+			name:         "bitnami: a revision-only difference is not trusted as an upgrade",
+			current:      "1.2.3-1",
+			versions:     []string{"1.2.3-2"},
+			artifactType: "bitnami",
+			want:         "",
+		},
+		{
+			// #960: syft reports Windows updates as "msrc-kb", which does not match
+			// grypeversion.ParseFormat's "kb" case. Grype's own KB comparator only
+			// supports exact-match identity (KB numbers aren't sequential, so a
+			// larger number is not a "newer" one) - it can never prove a candidate
+			// is an upgrade, so no version is ever suggested for this ecosystem.
+			name:         "msrc-kb: never suggests a fix, since KB numbers cannot be ordered",
+			current:      "5028185",
+			versions:     []string{"5028184", "5028186"},
+			artifactType: "msrc-kb",
+			want:         "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
+		})
+	}
+}
+
+func Test_versionFormatForArtifact(t *testing.T) {
+	tests := []struct {
+		name         string
+		artifactType v1beta1.SyftType
+		wantFormat   grypeversion.Format
+		wantOk       bool
+	}{
+		{name: "apk", artifactType: "apk", wantFormat: grypeversion.ApkFormat, wantOk: true},
+		{name: "deb", artifactType: "deb", wantFormat: grypeversion.DebFormat, wantOk: true},
+		{name: "rpm", artifactType: "rpm", wantFormat: grypeversion.RpmFormat, wantOk: true},
+		{
+			// #960: this is the syft type string for ordinary Java library
+			// dependencies. It does not match grypeversion.ParseFormat's "maven"
+			// case, which is why routing through ParseFormat missed it entirely.
+			name:         "java-archive maps to Maven",
+			artifactType: "java-archive",
+			wantFormat:   grypeversion.MavenFormat,
+			wantOk:       true,
+		},
+		{name: "python maps to Python (PEP 440)", artifactType: "python", wantFormat: grypeversion.PythonFormat, wantOk: true},
+		{name: "gem maps to Gem", artifactType: "gem", wantFormat: grypeversion.GemFormat, wantOk: true},
+		{name: "portage maps to Portage", artifactType: "portage", wantFormat: grypeversion.PortageFormat, wantOk: true},
+		{
+			// #960: this is the syft type string for Go modules. It does not match
+			// grypeversion.ParseFormat's "go"/"golang" case either.
+			name:         "go-module maps to Golang",
+			artifactType: "go-module",
+			wantFormat:   grypeversion.GolangFormat,
+			wantOk:       true,
+		},
+		{
+			// #960: this is the syft type string for Windows updates. It does not
+			// match grypeversion.ParseFormat's "kb" case.
+			name:         "msrc-kb maps to KB",
+			artifactType: "msrc-kb",
+			wantFormat:   grypeversion.KBFormat,
+			wantOk:       true,
+		},
+		{name: "bitnami maps to Bitnami", artifactType: "bitnami", wantFormat: grypeversion.BitnamiFormat, wantOk: true},
+		{
+			name:         "an ecosystem with no dedicated Grype comparator falls back to semver",
+			artifactType: "npm",
+			wantFormat:   grypeversion.UnknownFormat,
+			wantOk:       false,
+		},
+		{
+			name:         "empty artifact type falls back to semver",
+			artifactType: "",
+			wantFormat:   grypeversion.UnknownFormat,
+			wantOk:       false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format, ok := versionFormatForArtifact(tt.artifactType)
+			assert.Equal(t, tt.wantFormat, format)
+			assert.Equal(t, tt.wantOk, ok)
 		})
 	}
 }
