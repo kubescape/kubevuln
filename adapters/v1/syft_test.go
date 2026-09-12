@@ -930,6 +930,29 @@ func Test_syftAdapter_CreateSBOM_MultiArchLocalRegistry(t *testing.T) {
 	}
 }
 
+// Test_syftAdapter_CreateSBOM_MultiArchNoPlatformResolvesHostArch pins #966: with no platform
+// requested against a genuine multi-arch manifest list, stereoscope's registry provider
+// (defaultPlatformIfNil/finalizePlatform in github.com/anchore/stereoscope/pkg/image/oci)
+// silently resolves the variant matching the scanning process's own architecture - here,
+// whichever of amd64/arm64 the test happens to run on - not "whatever the manifest provides"
+// as docs/API.md incorrectly claimed before #966. This is the opposite of what an operator
+// relying on the previous documentation would expect for a pod-less scan (registry rescan,
+// periodic CRD-based rescan) that has no node context and so always leaves platform unset.
+func Test_syftAdapter_CreateSBOM_MultiArchNoPlatformResolvesHostArch(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skipf("mockMultiArchRegistry only serves amd64/arm64 variants, host is %s", runtime.GOARCH)
+	}
+	host := mockMultiArchRegistry(t)
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest",
+		domain.RegistryOptions{InsecureUseHTTP: true})
+
+	require.NoError(t, err)
+	assert.Equal(t, "linux/"+runtime.GOARCH, domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey],
+		"with no platform requested, a multi-arch manifest list resolves to the scanning host's own arch, not the manifest's default")
+}
+
 func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
 	var attempts int
 	var mu sync.Mutex

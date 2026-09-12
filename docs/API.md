@@ -656,8 +656,11 @@ curl -X POST http://localhost:8080/v1/scanRegistryImage \
 
 For multi-arch images, request a specific OS/architecture (OCI format `os/arch[/variant]`, or a
 bare arch such as `arm64`) via the `platform` arg. An operator can populate this from the scanned
-Pod's node architecture; left unset, kubevuln resolves whatever platform the image manifest
-provides instead of forcing the host's own architecture:
+Pod's node architecture. **Do not rely on leaving this unset for a multi-arch image**: kubevuln
+then silently resolves whichever platform variant matches its own scanning process's
+architecture, not the target workload's. Requesting the platform explicitly is the only way to
+get a deterministic, correct result for a multi-arch image; leaving it unset is safe only for a
+single-arch image, where there is nothing to choose between:
 
 ```bash
 curl -X POST http://localhost:8080/v1/sbomCreation \

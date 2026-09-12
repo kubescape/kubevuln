@@ -49,11 +49,15 @@ func IsPlatformMismatch(err error) bool {
 // specifier uses OCI format, "os/arch[/variant]" such as "linux/amd64", and an
 // architecture on its own is read as Linux.
 //
-// An empty specifier gives a nil platform, which leaves selection unset so Syft resolves
-// whatever the image manifest provides. That matters on the pod-less scan paths, registry
-// rescans and periodic CRD-based rescans, which have no node context to derive a platform
-// from: defaulting to the scanning process's own architecture there forced a platform
-// mismatch for single-arch images that did not happen to match it (#512).
+// An empty specifier gives a nil platform, which leaves selection unset. For a single-arch
+// image that resolves to whatever the manifest provides, fixing the platform mismatch #512
+// described for single-arch images that did not happen to match the scanning process's own
+// architecture. For a genuine multi-arch manifest list, though, stereoscope's registry
+// provider (defaultPlatformIfNil in github.com/anchore/stereoscope/pkg/image/oci) still picks
+// the variant matching the scanning process's own architecture - not the target workload's -
+// with no error and no signal that it happened (#966). That matters most on the pod-less scan
+// paths, registry rescans and periodic CRD-based rescans, which have no node context to derive
+// a platform from and so always leave this unset.
 func ParsePlatform(specifier string) (*image.Platform, error) {
 	if specifier == "" {
 		return nil, nil
