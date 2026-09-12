@@ -864,14 +864,22 @@ func mockMultiArchRegistry(t *testing.T) string {
 		arm64.layerHash:  arm64.layerBytes,
 	}
 
+	// Ordered with the host's own arch listed second, not first: a resolver that (incorrectly)
+	// just picked the first manifest-list entry, instead of genuinely matching the host's
+	// runtime.GOARCH, would otherwise pass host-architecture-fallback assertions by accident
+	// whenever the suite happens to run on amd64.
+	first, second := amd64, arm64
+	if runtime.GOARCH == "arm64" {
+		first, second = arm64, amd64
+	}
 	indexBytes := []byte(fmt.Sprintf(`{
 		"schemaVersion": 2,
 		"mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
 		"manifests": [
-			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "amd64", "os": "linux"}},
-			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "arm64", "os": "linux"}}
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": %q, "os": "linux"}},
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": %q, "os": "linux"}}
 		]
-	}`, len(amd64.manifestBytes), amd64.manifestHash, len(arm64.manifestBytes), arm64.manifestHash))
+	}`, len(first.manifestBytes), first.manifestHash, first.arch, len(second.manifestBytes), second.manifestHash, second.arch))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
@@ -928,6 +936,29 @@ func Test_syftAdapter_CreateSBOM_MultiArchLocalRegistry(t *testing.T) {
 				"resolved platform must match what was requested, independent of the host's runtime.GOARCH=%s", runtime.GOARCH)
 		})
 	}
+}
+
+// Test_syftAdapter_CreateSBOM_MultiArchNoPlatformResolvesHostArch pins #966: with no platform
+// requested against a genuine multi-arch manifest list, stereoscope's registry provider
+// (defaultPlatformIfNil/finalizePlatform in github.com/anchore/stereoscope/pkg/image/oci)
+// silently resolves the variant matching the scanning process's own architecture - here,
+// whichever of amd64/arm64 the test happens to run on - not "whatever the manifest provides"
+// as docs/API.md incorrectly claimed before #966. This is the opposite of what an operator
+// relying on the previous documentation would expect for a pod-less scan (registry rescan,
+// periodic CRD-based rescan) that has no node context and so always leaves platform unset.
+func Test_syftAdapter_CreateSBOM_MultiArchNoPlatformResolvesHostArch(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skipf("mockMultiArchRegistry only serves amd64/arm64 variants, host is %s", runtime.GOARCH)
+	}
+	host := mockMultiArchRegistry(t)
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
+	domainSBOM, err := adapter.CreateSBOM(context.Background(), "test", "", host+"/test-image:latest",
+		domain.RegistryOptions{InsecureUseHTTP: true})
+
+	require.NoError(t, err)
+	assert.Equal(t, "linux/"+runtime.GOARCH, domainSBOM.Annotations[domain.ResolvedPlatformAnnotationKey],
+		"with no platform requested, a multi-arch manifest list resolves to the scanning host's own arch, not the manifest's default")
 }
 
 func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
