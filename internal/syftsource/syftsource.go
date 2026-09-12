@@ -14,6 +14,7 @@ import (
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/cataloging"
 )
 
 // FormatResolvedPlatform builds an OCI-style "os/arch[/variant]" string from the platform
@@ -72,4 +73,20 @@ func GetSourceConfig(registryOptions *image.RegistryOptions, platform *image.Pla
 		WithRegistryOptions(registryOptions).
 		WithPlatform(platform).
 		WithSources("registry")
+}
+
+// NewCreateSBOMConfig builds the syft.CreateSBOMConfig both SBOM paths start from. It removes
+// file-digest-cataloger, file-metadata-cataloger and file-executable-cataloger: default-enabled
+// Syft tasks that walk and hash every file in the scanned image's filesystem, dominating
+// transient allocation, whose output is not consumed anywhere downstream of SBOM generation
+// (#355). Both paths must build their config through this helper rather than calling
+// syft.DefaultCreateSBOMConfig() directly, so they cannot silently diverge on this again (#962).
+func NewCreateSBOMConfig() *syft.CreateSBOMConfig {
+	return syft.DefaultCreateSBOMConfig().WithCatalogerSelection(
+		cataloging.NewSelectionRequest().WithRemovals(
+			"file-digest-cataloger",
+			"file-metadata-cataloger",
+			"file-executable-cataloger",
+		),
+	)
 }

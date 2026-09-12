@@ -13,7 +13,6 @@ import (
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
-	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
@@ -405,16 +404,9 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		// generate SBOM
 		logger.L().Debug("generating SBOM",
 			helpers.String("imageID", imageID))
-		cfg := syft.DefaultCreateSBOMConfig()
+		cfg := syftsource.NewCreateSBOMConfig()
 		cfg.ToolName = "syft"
 		cfg.ToolVersion = s.Version()
-		cfg = cfg.WithCatalogerSelection(
-			cataloging.NewSelectionRequest().WithRemovals(
-				"file-digest-cataloger",
-				"file-metadata-cataloger",
-				"file-executable-cataloger",
-			),
-		)
 		if s.scanEmbeddedSBOMs {
 			// ask Syft to also scan the image for embedded SBOMs
 			cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))

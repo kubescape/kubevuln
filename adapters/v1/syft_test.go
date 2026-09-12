@@ -1005,6 +1005,78 @@ func Test_syftAdapter_CreateSBOM_Retry429RateLimit(t *testing.T) {
 	mu.Unlock()
 }
 
+// Test_syftAdapter_CreateSBOM_UsesSharedCatalogerSelection pins #962: the in-process adapter
+// must build its Syft config through syftsource.NewCreateSBOMConfig(), the same constructor
+// the sidecar's scannerServer uses, so the three file-walking catalogers #355 removed for
+// their peak-RSS cost stay removed on both SBOM paths.
+func Test_syftAdapter_CreateSBOM_UsesSharedCatalogerSelection(t *testing.T) {
+	layer := &bytes.Buffer{}
+	gz := gzip.NewWriter(layer)
+	tw := tar.NewWriter(gz)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "etc/hostname", Mode: 0o644, Size: 4}))
+	_, err := tw.Write([]byte("test"))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	layerBytes := layer.Bytes()
+	layerHash := fmt.Sprintf("%x", sha256.Sum256(layerBytes))
+
+	uncompressed := &bytes.Buffer{}
+	zr, err := gzip.NewReader(bytes.NewReader(layerBytes))
+	require.NoError(t, err)
+	_, err = io.Copy(uncompressed, zr)
+	require.NoError(t, err)
+	diffID := fmt.Sprintf("%x", sha256.Sum256(uncompressed.Bytes()))
+
+	configBytes := []byte(fmt.Sprintf(
+		`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffID))
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image-catalogers/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case "/v2/test-image-catalogers/blobs/sha256:" + configHash:
+			_, _ = w.Write(configBytes)
+		case "/v2/test-image-catalogers/blobs/sha256:" + layerHash:
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	var gotCfg *syft.CreateSBOMConfig
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		gotCfg = cfg
+		return &sbom.SBOM{}, nil
+	})
+
+	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil).WithCataloger(cataloger)
+	_, err = adapter.CreateSBOM(context.Background(), "test", "", u.Host+"/test-image-catalogers:latest", domain.RegistryOptions{InsecureUseHTTP: true})
+	require.NoError(t, err)
+
+	require.NotNil(t, gotCfg)
+	assert.ElementsMatch(t, []string{
+		"file-digest-cataloger",
+		"file-metadata-cataloger",
+		"file-executable-cataloger",
+	}, gotCfg.CatalogerSelection.RemoveNamesOrTags)
+}
+
 func Test_SyftAdapter_WithCataloger(t *testing.T) {
 	adapter := NewSyftAdapter(10*time.Second, 100*1024*1024, 10*1024*1024, false, nil)
 	assert.IsType(t, syftsource.DefaultSBOMCataloger{}, adapter.cataloger)
