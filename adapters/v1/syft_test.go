@@ -864,14 +864,22 @@ func mockMultiArchRegistry(t *testing.T) string {
 		arm64.layerHash:  arm64.layerBytes,
 	}
 
+	// Ordered with the host's own arch listed second, not first: a resolver that (incorrectly)
+	// just picked the first manifest-list entry, instead of genuinely matching the host's
+	// runtime.GOARCH, would otherwise pass host-architecture-fallback assertions by accident
+	// whenever the suite happens to run on amd64.
+	first, second := amd64, arm64
+	if runtime.GOARCH == "arm64" {
+		first, second = arm64, amd64
+	}
 	indexBytes := []byte(fmt.Sprintf(`{
 		"schemaVersion": 2,
 		"mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
 		"manifests": [
-			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "amd64", "os": "linux"}},
-			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": "arm64", "os": "linux"}}
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": %q, "os": "linux"}},
+			{"mediaType": "application/vnd.docker.distribution.manifest.v2+json", "size": %d, "digest": "sha256:%s", "platform": {"architecture": %q, "os": "linux"}}
 		]
-	}`, len(amd64.manifestBytes), amd64.manifestHash, len(arm64.manifestBytes), arm64.manifestHash))
+	}`, len(first.manifestBytes), first.manifestHash, first.arch, len(second.manifestBytes), second.manifestHash, second.arch))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
