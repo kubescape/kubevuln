@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // sendError delivers err to errorChan. It always wins the send when the channel has room,
@@ -388,6 +389,51 @@ func (idx *cveExceptionIndex) lookup(CVEName string, filterFixed bool) []armotyp
 	var l []armotypes.VulnerabilityExceptionPolicy
 	for _, i := range indices {
 		exc := idx.srcCVEList[i]
+		if filterFixed && exc.ExpiredOnFix != nil && *exc.ExpiredOnFix {
+			continue
+		}
+		l = append(l, exc)
+	}
+
+	if len(l) > 0 {
+		return l
+	}
+	return nil
+}
+
+// lookupMatch returns every exception declaring a policy matching either m.Vulnerability.ID
+// or any ID in m.RelatedVulnerabilities, in the order they appear in the list it was built
+// from, skipping those marked ExpiredOnFix when filterFixed is set. An exception contributes
+// at most once, even if multiple of its policies match primary or related vulnerability IDs.
+func (idx *cveExceptionIndex) lookupMatch(m v1beta1.Match, filterFixed bool) []armotypes.VulnerabilityExceptionPolicy {
+	if idx == nil {
+		return nil
+	}
+
+	matchedIndices := make(map[int]struct{})
+	addIndicesFor := func(name string) {
+		if name == "" {
+			return
+		}
+		for _, i := range idx.byName[strings.ToLower(name)] {
+			matchedIndices[i] = struct{}{}
+		}
+	}
+
+	addIndicesFor(m.Vulnerability.ID)
+	for _, rel := range m.RelatedVulnerabilities {
+		addIndicesFor(rel.ID)
+	}
+
+	if len(matchedIndices) == 0 {
+		return nil
+	}
+
+	var l []armotypes.VulnerabilityExceptionPolicy
+	for i, exc := range idx.srcCVEList {
+		if _, ok := matchedIndices[i]; !ok {
+			continue
+		}
 		if filterFixed && exc.ExpiredOnFix != nil && *exc.ExpiredOnFix {
 			continue
 		}
