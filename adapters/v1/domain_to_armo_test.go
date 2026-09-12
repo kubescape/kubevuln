@@ -679,3 +679,42 @@ func TestDomainToArmo_IsFixedAgreesWithFixes(t *testing.T) {
 		})
 	}
 }
+
+func TestDomainToArmo_ExceptionApplied_RelatedVulnerabilities(t *testing.T) {
+	doc := v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
+		Matches: []v1beta1.Match{{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:       "GHSA-jfh8-c2jp-5v3q",
+					Severity: "Critical",
+				},
+				Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"2.16.0"}},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "CVE-2021-44228"},
+			},
+			Artifact: v1beta1.GrypePackage{Name: "log4j-core", Version: "2.14.1"},
+		}},
+	}
+
+	exceptions := []armotypes.VulnerabilityExceptionPolicy{
+		{
+			PortalBase:            armotypes.PortalBase{Name: "suppress-log4j"},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	got, err := DomainToArmo(ctx, doc, exceptions)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Vulnerability.ExceptionApplied, 1)
+	assert.Equal(t, "suppress-log4j", got[0].Vulnerability.ExceptionApplied[0].Name)
+}

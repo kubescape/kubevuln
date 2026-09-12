@@ -1505,3 +1505,49 @@ func TestRestoreSuppressedMatches_LeavesGrypeSourcedIgnoresAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestApplySecurityExceptions_RelatedVulnerabilities(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:       "GHSA-jfh8-c2jp-5v3q",
+						Severity: "Critical",
+					},
+				},
+				RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+					{
+						ID:        "CVE-2021-44228",
+						Namespace: "nvd:cve",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					Name:    "log4j-core",
+					Version: "2.14.1",
+				},
+			},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "suppress-log4j",
+				Attributes: map[string]interface{}{
+					"sourceKind": "SecurityException",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	counts := ApplySecurityExceptions(doc, exceptions, nil)
+
+	assert.Empty(t, doc.Matches, "match should be suppressed based on RelatedVulnerabilities CVE ID")
+	require.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Match.Vulnerability.ID)
+	assert.Equal(t, 1, counts["SecurityException"])
+}

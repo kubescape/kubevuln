@@ -22,6 +22,7 @@ import (
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/ptr"
@@ -266,6 +267,100 @@ func TestCVEExceptionIndex_MatchesLinearScan(t *testing.T) {
 			assert.Equal(t, want, got, "cve=%s filterFixed=%v", cve, filterFixed)
 		}
 	}
+}
+
+func TestCVEExceptionIndex_LookupMatch(t *testing.T) {
+	expiredOnFix := true
+	excCVE := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase:            armotypes.PortalBase{Name: "exc-cve"},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+	}
+	excGHSA := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase:            armotypes.PortalBase{Name: "exc-ghsa"},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "GHSA-jfh8-c2jp-5v3q"}},
+	}
+	excExpired := armotypes.VulnerabilityExceptionPolicy{
+		PortalBase:            armotypes.PortalBase{Name: "exc-expired"},
+		VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		ExpiredOnFix:          &expiredOnFix,
+	}
+
+	index := buildCVEExceptionIndex([]armotypes.VulnerabilityExceptionPolicy{excCVE, excGHSA, excExpired})
+
+	t.Run("matches via primary vulnerability ID", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"},
+			},
+		}
+		got := index.lookupMatch(m, false)
+		assert.Equal(t, []armotypes.VulnerabilityExceptionPolicy{excCVE, excExpired}, got)
+	})
+
+	t.Run("matches via related vulnerability ID", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-other-1234"},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "CVE-2021-44228"},
+			},
+		}
+		got := index.lookupMatch(m, false)
+		assert.Equal(t, []armotypes.VulnerabilityExceptionPolicy{excCVE, excExpired}, got)
+	})
+
+	t.Run("matches both primary and related IDs, deduplicating policies in list order", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-jfh8-c2jp-5v3q"},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "CVE-2021-44228"},
+			},
+		}
+		got := index.lookupMatch(m, false)
+		assert.Equal(t, []armotypes.VulnerabilityExceptionPolicy{excCVE, excGHSA, excExpired}, got)
+	})
+
+	t.Run("filters expired exceptions when filterFixed is true", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-unknown"},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "CVE-2021-44228"},
+			},
+		}
+		got := index.lookupMatch(m, true)
+		assert.Equal(t, []armotypes.VulnerabilityExceptionPolicy{excCVE}, got)
+	})
+
+	t.Run("case insensitive related vulnerability lookup", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "GHSA-unknown"},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "cve-2021-44228"},
+			},
+		}
+		got := index.lookupMatch(m, false)
+		assert.Equal(t, []armotypes.VulnerabilityExceptionPolicy{excCVE, excExpired}, got)
+	})
+
+	t.Run("returns nil for no matches", func(t *testing.T) {
+		m := v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-1999-0000"},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{ID: "GHSA-none-0000"},
+			},
+		}
+		got := index.lookupMatch(m, false)
+		assert.Nil(t, got)
+	})
 }
 
 func BenchmarkGetCVEExceptionMatch(b *testing.B) {

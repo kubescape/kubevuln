@@ -868,9 +868,9 @@ func mockMultiArchRegistry(t *testing.T) string {
 	// just picked the first manifest-list entry, instead of genuinely matching the host's
 	// runtime.GOARCH, would otherwise pass host-architecture-fallback assertions by accident
 	// whenever the suite happens to run on amd64.
-	first, second := amd64, arm64
+	first, second := arm64, amd64
 	if runtime.GOARCH == "arm64" {
-		first, second = arm64, amd64
+		first, second = amd64, arm64
 	}
 	indexBytes := []byte(fmt.Sprintf(`{
 		"schemaVersion": 2,
