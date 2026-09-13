@@ -658,9 +658,11 @@ For multi-arch images, request a specific OS/architecture (OCI format `os/arch[/
 bare arch such as `arm64`) via the `platform` arg. An operator can populate this from the scanned
 Pod's node architecture. **Do not rely on leaving this unset for a multi-arch image**: kubevuln
 then silently resolves whichever platform variant matches its own scanning process's
-architecture, not the target workload's. Requesting the platform explicitly is the only way to
-get a deterministic, correct result for a multi-arch image; leaving it unset is safe only for a
-single-arch image, where there is nothing to choose between:
+architecture, not the target workload's. Requesting the platform explicitly makes fresh
+multi-arch image resolution deterministic and correct; leaving it unset is safe only for a
+single-arch image, where there is nothing to choose between. When storage is enabled, an
+existing SBOM may be reused instead of resolving fresh; inspect its
+`kubescape.io/resolved-platform` annotation to confirm the stored result's architecture:
 
 ```bash
 curl -X POST http://localhost:8080/v1/sbomCreation \
