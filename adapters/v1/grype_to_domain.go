@@ -126,7 +126,7 @@ func grypeToDomainMatchesRelatedVulnerabilities(relatedVulnerabilities []models.
 			Severity:    v.Severity,
 			URLs:        v.URLs,
 			Description: v.Description,
-			Cvss:        nil,
+			Cvss:        grypeToDomainMatchesCvss(v.Cvss),
 		})
 	}
 	return result

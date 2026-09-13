@@ -28,8 +28,14 @@ func Test_grypeToDomain(t *testing.T) {
 						Locations: file.Locations{{}},
 						Upstreams: []models.UpstreamPackage{{}},
 					},
-					MatchDetails:           []models.MatchDetails{{}},
-					RelatedVulnerabilities: []models.VulnerabilityMetadata{{}},
+					MatchDetails: []models.MatchDetails{{}},
+					RelatedVulnerabilities: []models.VulnerabilityMetadata{{
+						Cvss: []models.Cvss{{
+							Version: "3.1",
+							Vector:  "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+							Metrics: models.CvssMetrics{BaseScore: 9.8},
+						}},
+					}},
 					Vulnerability: models.Vulnerability{
 						Advisories: []models.Advisory{{}},
 						VulnerabilityMetadata: models.VulnerabilityMetadata{
@@ -47,8 +53,14 @@ func Test_grypeToDomain(t *testing.T) {
 						Locations: []v1beta1.SyftCoordinates{{}},
 						Upstreams: []v1beta1.UpstreamPackage{{}},
 					},
-					MatchDetails:           []v1beta1.MatchDetails{{}},
-					RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{{}},
+					MatchDetails: []v1beta1.MatchDetails{{}},
+					RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{{
+						Cvss: []v1beta1.Cvss{{
+							Version: "3.1",
+							Vector:  "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+							Metrics: v1beta1.CvssMetrics{BaseScore: 9.8},
+						}},
+					}},
 					Vulnerability: v1beta1.Vulnerability{
 						Advisories: []v1beta1.Advisory{{}},
 						VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
@@ -93,8 +105,16 @@ func Test_grypeToDomain_ignoredMatchConvertsLikeAMatch(t *testing.T) {
 			Fix:        models.Fix{Versions: []string{"2.15.0"}, State: "fixed"},
 			Advisories: []models.Advisory{{ID: "GHSA-jfh8-c2jp-5v3q", Link: "https://github.com/advisories"}},
 		},
-		RelatedVulnerabilities: []models.VulnerabilityMetadata{{ID: "GHSA-jfh8-c2jp-5v3q", Namespace: "github:language:java"}},
-		MatchDetails:           []models.MatchDetails{{Type: "exact-indirect-match", Matcher: "java-matcher"}},
+		RelatedVulnerabilities: []models.VulnerabilityMetadata{{
+			ID:        "GHSA-jfh8-c2jp-5v3q",
+			Namespace: "github:language:java",
+			Cvss: []models.Cvss{{
+				Version: "3.1",
+				Vector:  "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+				Metrics: models.CvssMetrics{BaseScore: 10.0},
+			}},
+		}},
+		MatchDetails: []models.MatchDetails{{Type: "exact-indirect-match", Matcher: "java-matcher"}},
 		Artifact: models.Package{
 			Name:      "log4j-core",
 			Version:   "2.14.1",
@@ -125,5 +145,7 @@ func Test_grypeToDomain_ignoredMatchConvertsLikeAMatch(t *testing.T) {
 	assert.Equal(t, "log4j-core", got.IgnoredMatches[0].Artifact.Name)
 	assert.Equal(t, []string{"2.15.0"}, got.IgnoredMatches[0].Vulnerability.Fix.Versions)
 	assert.Len(t, got.IgnoredMatches[0].Vulnerability.VulnerabilityMetadata.Cvss, 1)
+	assert.Len(t, got.IgnoredMatches[0].RelatedVulnerabilities[0].Cvss, 1)
+	assert.Equal(t, 10.0, got.IgnoredMatches[0].RelatedVulnerabilities[0].Cvss[0].Metrics.BaseScore)
 	assert.Len(t, got.IgnoredMatches[0].AppliedIgnoreRules, 1)
 }
