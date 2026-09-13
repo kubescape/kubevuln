@@ -3637,3 +3637,42 @@ func TestScanService_MissingSBOM_ScannerNeverSeesNilContent(t *testing.T) {
 		assert.NotNil(t, sbom.Content, "the CVE scanner dereferences Content; it must never be handed a nil one")
 	}
 }
+
+func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) {
+	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
+	storage := repositories.NewMemoryStorage(false, false)
+	s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+
+	workload := domain.ScanCommand{
+		ImageSlug:          "test-too-large-image",
+		ImageHash:          "sha256:1234567890abcdef",
+		ImageTagNormalized: "test-too-large-image:latest",
+		Wlid:               "wlid://cluster-a/namespace-b/deployment-c",
+		ContainerName:      "cont",
+	}
+
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	// Pre-store a non-stale TooLarge SBOM marker (as stored after an oversized scan)
+	tooLargeSBOM := domain.SBOM{
+		Name:               workload.ImageSlug,
+		Status:             helpersv1.TooLarge,
+		Content:            nil,
+		SBOMCreatorVersion: s.sbomCreator.Version(),
+		Annotations: map[string]string{
+			domain.StatusReasonAnnotationKey: domain.ReasonSBOMTooLarge,
+			domain.MaxSBOMSizeAnnotationKey:  fmt.Sprintf("%d", s.sbomCreator.GetMaxSBOMSize()),
+			domain.MaxImageSizeAnnotationKey: fmt.Sprintf("%d", s.sbomCreator.GetMaxImageSize()),
+			helpersv1.ImageIDMetadataKey:     workload.ImageSlug,
+			helpersv1.ToolVersionMetadataKey: s.sbomCreator.Version(),
+		},
+	}
+	require.NoError(t, storage.StoreSBOM(ctx, tooLargeSBOM, false))
+
+	// Calling getOrCreateSBOM must return the cached TooLarge marker without error
+	gotSBOM, storeErr, err := s.getOrCreateSBOM(ctx, workload)
+	require.NoError(t, err)
+	require.NoError(t, storeErr)
+	assert.Equal(t, helpersv1.TooLarge, gotSBOM.Status)
+}
