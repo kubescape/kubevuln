@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -309,12 +310,12 @@ func linkToVuln(id string) string {
 // ecosystem's versions either, and guessing versions[0] through it would reintroduce
 // the same unproven-remediation problem this function exists to avoid, just one layer
 // removed.
-func suggestedVersion(current string, versions []string, artifactType v1beta1.SyftType) string {
+func suggestedVersion(current string, versions []string, artifactType v1beta1.SyftType, artifactName string, metadataType v1beta1.MetadataType) string {
 	if len(versions) == 0 {
 		return ""
 	}
 
-	if format, ok := versionFormatForArtifact(artifactType); ok {
+	if format, ok := versionFormatForArtifact(artifactType, artifactName, metadataType); ok {
 		return nearestDistroFix(current, versions, format)
 	}
 
@@ -355,12 +356,20 @@ func suggestedVersion(current string, versions []string, artifactType v1beta1.Sy
 // so a name-based lookup silently misses them and falls through to the unguarded
 // semver comparison this function exists to avoid (#960).
 //
-// JVM installations (Grype's JVMFormat) are a metadata-based sub-case of the same
-// java-archive syft type used for ordinary Java library dependencies, distinguished by
-// package metadata that isn't carried on v1beta1.GrypePackage; java-archive is mapped
-// to MavenFormat unconditionally here, which is Grype's own format for the vast
-// majority of java-archive matches.
-func versionFormatForArtifact(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
+// JVM installations (Grype's JVMFormat) are detected the same way Grype's own
+// grype/pkg.isJvmPackage does, ahead of the syft-type switch below: either
+// artifactMetadataType names Grype's JavaVMInstallationMetadata (Grype's JSON
+// document tags a match's package metadata with a "metadataType" field carrying the
+// exact Go type name, e.g. via GrypeDocument's own Artifact.MetadataType), or the
+// artifact is syft's generic "binary" type with one of the package names Grype
+// itself treats as a JVM indication (openjdk, jdk, jre, ...). Without this, a JVM
+// match reported as a binary package (current "1.8.0_292", fix "1.8.0_282") fell
+// through to unguarded semver, which returned versions[0] as a false "fix" even
+// though it is an older release than current (#961).
+func versionFormatForArtifact(artifactType v1beta1.SyftType, artifactName string, metadataType v1beta1.MetadataType) (grypeversion.Format, bool) {
+	if isJVMArtifact(artifactType, artifactName, metadataType) {
+		return grypeversion.JVMFormat, true
+	}
 	switch syftPkg.Type(artifactType) {
 	case syftPkg.ApkPkg:
 		return grypeversion.ApkFormat, true
@@ -387,6 +396,23 @@ func versionFormatForArtifact(artifactType v1beta1.SyftType) (grypeversion.Forma
 	}
 }
 
+// jvmPackageNames mirrors grype/pkg's jvmIndications: syft "binary" package names
+// Grype itself treats as a JVM installation rather than an ordinary binary.
+var jvmPackageNames = map[string]bool{
+	"java_se": true, "jre": true, "jdk": true, "zulu": true,
+	"openjdk": true, "java": true, "java/jre": true, "java/jdk": true,
+}
+
+// isJVMArtifact mirrors grype/pkg.isJvmPackage: true either when metadataType is
+// Grype's JavaVMInstallationMetadata, or when the artifact is syft's generic "binary"
+// type under one of Grype's own JVM-indicating names.
+func isJVMArtifact(artifactType v1beta1.SyftType, artifactName string, metadataType v1beta1.MetadataType) bool {
+	if string(metadataType) == "JavaVMInstallationMetadata" {
+		return true
+	}
+	return syftPkg.Type(artifactType) == syftPkg.BinaryPkg && jvmPackageNames[artifactName]
+}
+
 // nearestDistroFix returns the smallest version in versions that is strictly greater
 // than current, comparing both under format instead of generic semver. "" is returned
 // both when current itself fails to parse under format (nothing to compare against) and
@@ -397,11 +423,24 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 	if err := c.Validate(); err != nil {
 		return ""
 	}
+	// grype's own Portage comparator (rpmVersion's sibling for Gentoo ebuilds) never
+	// fails Validate(): newPortageVersion accepts any string outright, and its Compare
+	// only discovers a malformed value later by indexing regexp submatches that may not
+	// exist, which panics instead of returning an error (#961). Reject anything that
+	// isn't a complete Portage version up front so a feed-provided current never
+	// reaches that comparator unvalidated.
+	if format == grypeversion.PortageFormat && !portageVersionSyntaxValid(current) {
+		return ""
+	}
 
-	var nearest *grypeversion.Version
-	var nearestStr string
+	var eligible []string
 	for _, raw := range versions {
 		if format == grypeversion.RpmFormat && !rpmSafeToCompare(current, raw) {
+			continue
+		}
+		// Same panic risk as above, this time for a candidate: one malformed fix
+		// version in the feed must not abort suggestion for every other candidate.
+		if format == grypeversion.PortageFormat && !portageVersionSyntaxValid(raw) {
 			continue
 		}
 		v := grypeversion.New(raw, format)
@@ -409,11 +448,32 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 		if err != nil || cmp >= 0 {
 			continue
 		}
+		eligible = append(eligible, raw)
+	}
+	if len(eligible) == 0 {
+		return ""
+	}
+
+	// For RPM, once more than one candidate is individually a proven upgrade from
+	// current, Grype's own comparator can no longer be trusted to order them
+	// consistently: rpmSafeToCompare is only a pairwise heuristic, not proof the
+	// comparator is transitive across an entire candidate set (three candidates can
+	// each pairwise-beat one of the others). Rather than reduce with that
+	// non-transitive comparator, fall back to a plain lexical minimum of the raw
+	// strings: weaker than a true numeric minimum, but a genuine total order, so the
+	// result does not depend on feed order or on which pair gets compared first.
+	if format == grypeversion.RpmFormat && len(eligible) > 1 {
+		sorted := append([]string(nil), eligible...)
+		sort.Strings(sorted)
+		return sorted[0]
+	}
+
+	var nearest *grypeversion.Version
+	var nearestStr string
+	for _, raw := range eligible {
+		v := grypeversion.New(raw, format)
 		if nearest == nil {
 			nearest, nearestStr = v, raw
-			continue
-		}
-		if format == grypeversion.RpmFormat && !rpmSafeToCompare(nearestStr, raw) {
 			continue
 		}
 		if nc, err := nearest.Compare(v); err == nil && nc > 0 {
@@ -458,6 +518,23 @@ func rpmSafeToCompare(a, b string) bool {
 		return false
 	}
 	return !rpmVersionsDifferOnlyByTrailingZeros(rpmVersionPart(a), rpmVersionPart(b))
+}
+
+// portageVersionRegexp mirrors grype's own Portage version pattern (grype/version,
+// portageVersion, versionRegexp), anchored to require the raw string to be a complete
+// match rather than merely contain one somewhere. grype's unanchored version finds this
+// pattern inside any string, including e.g. "not-a-version" (matching nothing and
+// leaving its regexp submatches empty), which is exactly the input shape that panics
+// grype's comparePortageVersions when it later indexes those submatches unchecked.
+var portageVersionRegexp = regexp.MustCompile(`^\d+(\.\d+)*[a-z]?(_(pre|p|beta|alpha|rc)\d*)*(-r\d+)?$`)
+
+// portageVersionSyntaxValid reports whether raw is syntactically a complete Portage
+// (Gentoo ebuild) version. grype's own newPortageVersion/Validate never rejects a
+// malformed string -- it is only discovered downstream, inside Compare, once it
+// indexes regexp submatches that a non-matching string never populated -- so this must
+// be checked before any value reaches grype's Portage comparator (#961).
+func portageVersionSyntaxValid(raw string) bool {
+	return portageVersionRegexp.MatchString(raw)
 }
 
 // rpmHasExplicitEpoch reports whether raw carries an "epoch:" prefix, mirroring how

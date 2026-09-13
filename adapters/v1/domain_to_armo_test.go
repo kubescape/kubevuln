@@ -373,6 +373,8 @@ func Test_suggestedVersion(t *testing.T) {
 		current      string
 		versions     []string
 		artifactType v1beta1.SyftType
+		artifactName string
+		metadataType v1beta1.MetadataType
 		want         string
 	}{
 		{
@@ -626,6 +628,28 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "1.2.3-r2",
 		},
 		{
+			// #961: grype's own Portage comparator never fails Validate() for a
+			// malformed string - it only discovers the problem later, inside Compare,
+			// by indexing regexp submatches a non-matching string never populated,
+			// which panics. A malformed current must be rejected before it ever
+			// reaches that comparator, exactly like an unparseable current in any
+			// other ecosystem: nothing to compare against, so no suggestion.
+			name:         "portage: a malformed current does not panic and returns no suggestion",
+			current:      "not-a-version",
+			versions:     []string{"1.2.3", "1.2.4"},
+			artifactType: "portage",
+			want:         "",
+		},
+		{
+			// A malformed candidate must be skipped, not crash suggestion for every
+			// other, valid candidate in the same feed.
+			name:         "portage: a malformed candidate is skipped, not fatal to the others",
+			current:      "1.2.3",
+			versions:     []string{"not-a-version", "1.2.4"},
+			artifactType: "portage",
+			want:         "1.2.4",
+		},
+		{
 			// #960: syft reports Go modules as "go-module", which does not match
 			// grypeversion.ParseFormat's "go"/"golang" name-based cases - the exact
 			// mismatch that left this ecosystem on the unguarded semver fallback.
@@ -659,10 +683,54 @@ func Test_suggestedVersion(t *testing.T) {
 			artifactType: "msrc-kb",
 			want:         "",
 		},
+		{
+			// #961: Grype reports a JVM installation as syft's generic "binary" type,
+			// not "java-archive" - name alone (a JVM-indicating binary name, mirroring
+			// grype/pkg.isJvmPackage) must route it to Grype's JVM comparator instead
+			// of falling through to unguarded semver, which would have accepted
+			// "1.8.0_282" as an upgrade over "1.8.0_292" (semver treats the "_"
+			// suffix as unparseable and just returns versions[0]).
+			name:         "binary package with a JVM-indicating name uses the JVM comparator, not semver",
+			current:      "1.8.0_292",
+			versions:     []string{"1.8.0_282"},
+			artifactType: "binary",
+			artifactName: "openjdk",
+			want:         "",
+		},
+		{
+			name:         "binary package with a JVM-indicating name suggests a genuine JVM upgrade",
+			current:      "1.8.0_282",
+			versions:     []string{"1.8.0_292"},
+			artifactType: "binary",
+			artifactName: "openjdk",
+			want:         "1.8.0_292",
+		},
+		{
+			// JavaVMInstallationMetadata on the artifact is itself sufficient, independent
+			// of the package name or a "binary" type.
+			name:         "JavaVMInstallationMetadata routes to the JVM comparator regardless of type/name",
+			current:      "1.8.0_292",
+			versions:     []string{"1.8.0_282"},
+			artifactType: "java-archive",
+			artifactName: "some-jvm",
+			metadataType: "JavaVMInstallationMetadata",
+			want:         "",
+		},
+		{
+			// A "binary" package whose name isn't one of Grype's JVM indications is an
+			// ordinary binary, not a JVM: it must keep using semver, unaffected by this
+			// change.
+			name:         "binary package with a non-JVM name keeps using semver",
+			current:      "1.2.0",
+			versions:     []string{"1.3.0"},
+			artifactType: "binary",
+			artifactName: "some-random-tool",
+			want:         "1.3.0",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
+			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType, tt.artifactName, tt.metadataType))
 		})
 	}
 }
@@ -671,6 +739,8 @@ func Test_versionFormatForArtifact(t *testing.T) {
 	tests := []struct {
 		name         string
 		artifactType v1beta1.SyftType
+		artifactName string
+		metadataType v1beta1.MetadataType
 		wantFormat   grypeversion.Format
 		wantOk       bool
 	}{
@@ -718,13 +788,61 @@ func Test_versionFormatForArtifact(t *testing.T) {
 			wantFormat:   grypeversion.UnknownFormat,
 			wantOk:       false,
 		},
+		{
+			name:         "binary package with a JVM-indicating name maps to JVM",
+			artifactType: "binary",
+			artifactName: "openjdk",
+			wantFormat:   grypeversion.JVMFormat,
+			wantOk:       true,
+		},
+		{
+			name:         "binary package with a non-JVM name falls back to semver",
+			artifactType: "binary",
+			artifactName: "some-random-tool",
+			wantFormat:   grypeversion.UnknownFormat,
+			wantOk:       false,
+		},
+		{
+			name:         "JavaVMInstallationMetadata maps to JVM regardless of type/name",
+			artifactType: "java-archive",
+			artifactName: "some-jvm",
+			metadataType: "JavaVMInstallationMetadata",
+			wantFormat:   grypeversion.JVMFormat,
+			wantOk:       true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			format, ok := versionFormatForArtifact(tt.artifactType)
+			format, ok := versionFormatForArtifact(tt.artifactType, tt.artifactName, tt.metadataType)
 			assert.Equal(t, tt.wantFormat, format)
 			assert.Equal(t, tt.wantOk, ok)
 		})
+	}
+}
+
+// Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree reproduces review
+// feedback on #956/#961: three RPM candidates that Grype's own comparator ranks in a
+// cycle relative to each other (A beats C, C beats B, B beats A) can make a pairwise
+// "keep the running nearest, replace it when the next candidate wins" reduction
+// order-dependent -- a two-candidate tie-break isn't enough to catch this, since a
+// cycle only shows up with three or more candidates in play. Every permutation of the
+// same three candidates must agree on the same answer.
+func Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree(t *testing.T) {
+	current := "0-1"
+	a, b, c := "1-1", "1+0-1", "1a-1"
+
+	permutations := [][]string{
+		{a, b, c}, {a, c, b}, {b, a, c}, {b, c, a}, {c, a, b}, {c, b, a},
+	}
+
+	var want string
+	for i, perm := range permutations {
+		got := nearestDistroFix(current, perm, grypeversion.RpmFormat)
+		if i == 0 {
+			want = got
+			continue
+		}
+		assert.Equal(t, want, got, "permutation %v disagreed with %v -> %q", perm, permutations[0], want)
 	}
 }
 
