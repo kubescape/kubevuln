@@ -250,7 +250,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		}(src)
 
 		logger.L().Debug("generating SBOM", helpers.String("imageID", imageID))
-		cfg := syft.DefaultCreateSBOMConfig()
+		cfg := syftsource.NewCreateSBOMConfig()
 		cfg.ToolName = "syft"
 		cfg.ToolVersion = s.version
 		if req.EnableEmbeddedSboms {

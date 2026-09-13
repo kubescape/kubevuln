@@ -88,6 +88,22 @@ func TestGetSourceConfig_restrictsToRegistry(t *testing.T) {
 		"kubevuln always pulls; falling back to a local daemon or containerd socket is not wanted")
 }
 
+// TestNewCreateSBOMConfig_RemovesFileCatalogers pins the memory-reduction fix from #355
+// (~500MB peak RSS on a real workload) to the one config constructor both SBOM paths must
+// share, so the sidecar can no longer drift from the in-process adapter and reintroduce it
+// (#962). These three catalogers walk and hash every file in the scanned image and are
+// enabled by default in syft.DefaultCreateSBOMConfig(); their output is not consumed
+// anywhere downstream of SBOM generation.
+func TestNewCreateSBOMConfig_RemovesFileCatalogers(t *testing.T) {
+	cfg := NewCreateSBOMConfig()
+	require.NotNil(t, cfg)
+	assert.ElementsMatch(t, []string{
+		"file-digest-cataloger",
+		"file-metadata-cataloger",
+		"file-executable-cataloger",
+	}, cfg.CatalogerSelection.RemoveNamesOrTags)
+}
+
 // TestIsPlatformMismatch pins what counts as a platform mismatch for both SBOM paths.
 // The "unrelated error" case is the one that matters: classification is by typed error,
 // so an error that merely mentions the phrase must not be treated as one.

@@ -941,6 +941,76 @@ func TestCreateSBOM_Exhausted429RateLimitFromCataloger(t *testing.T) {
 	assert.Equal(t, domain.ReasonTooManyRequests, resp.StatusReason)
 }
 
+// TestCreateSBOM_UsesSharedCatalogerSelection pins #962: the sidecar must build its Syft
+// config through syftsource.NewCreateSBOMConfig(), the same constructor the in-process
+// SyftAdapter uses, so the three file-walking catalogers #355 removed for their peak-RSS
+// cost stay removed on both SBOM paths. It fails if server.go ever goes back to calling
+// syft.DefaultCreateSBOMConfig() directly, the way it silently diverged from the adapter
+// before this fix.
+func TestCreateSBOM_UsesSharedCatalogerSelection(t *testing.T) {
+	layerBytes, layerHash, diffId, err := makeDummyTarGz(64)
+	require.NoError(t, err)
+
+	configPayload := fmt.Sprintf(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":["sha256:%s"]}}`, diffId)
+	configBytes := []byte(configPayload)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
+		switch r.URL.Path {
+		case "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case "/v2/test-image-catalogers/manifests/latest":
+			w.Header().Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+				"config": {"mediaType": "application/vnd.docker.container.image.v1+json", "size": %d, "digest": "sha256:%s"},
+				"layers": [{"mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip", "size": %d, "digest": "sha256:%s"}]
+			}`, len(configBytes), configHash, len(layerBytes), layerHash)))
+		case fmt.Sprintf("/v2/test-image-catalogers/blobs/sha256:%s", configHash):
+			_, _ = w.Write(configBytes)
+		case fmt.Sprintf("/v2/test-image-catalogers/blobs/sha256:%s", layerHash):
+			_, _ = w.Write(layerBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	var gotCfg *syft.CreateSBOMConfig
+	cataloger := syftsource.SBOMCatalogerFunc(func(_ context.Context, _ source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+		gotCfg = cfg
+		return &sbom.SBOM{}, nil
+	})
+
+	client, cleanup := startTestServer(t, WithCataloger(cataloger))
+	defer cleanup()
+
+	resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+		ImageId:         u.Host + "/test-image-catalogers",
+		ImageTag:        u.Host + "/test-image-catalogers:latest",
+		Platform:        "linux/amd64",
+		MaxImageSize:    1 << 30,
+		MaxSbomSize:     1 << 30,
+		TimeoutSeconds:  30,
+		InsecureUseHttp: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Empty(t, resp.ErrorMessage)
+
+	require.NotNil(t, gotCfg)
+	assert.ElementsMatch(t, []string{
+		"file-digest-cataloger",
+		"file-metadata-cataloger",
+		"file-executable-cataloger",
+	}, gotCfg.CatalogerSelection.RemoveNamesOrTags)
+}
+
 func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
