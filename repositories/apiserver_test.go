@@ -1795,6 +1795,32 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 			cveName:  "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
 			expRes:   "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
 		},
+		{
+			workload: domain.ScanCommand{
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-kubevuln",
+				ContainerName: "",
+			},
+			expRes: "deployment-kubevuln",
+		},
+		{
+			workload: domain.ScanCommand{
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-web",
+				ContainerName: "web_container",
+			},
+			expRes: "deployment-web-web-container",
+		},
+		{
+			workload: domain.ScanCommand{},
+			cveName:  "a..b",
+			expRes:   "a.b",
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "valid-slug",
+			},
+			cveName: "---",
+			expRes:  "valid-slug",
+		},
 	}
 
 	testsErrorCases := []struct {
@@ -1802,7 +1828,16 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		err         error
 	}{
 		{
-			err: domain.ErrCastingWorkload,
+			notWorkload: nil,
+			err:         domain.ErrCastingWorkload,
+		},
+		{
+			notWorkload: domain.ScanCommand{},
+			err:         fmt.Errorf("unable to generate valid Kubernetes resource name"),
+		},
+		{
+			notWorkload: domain.ScanCommand{ContainerName: "---"},
+			err:         fmt.Errorf("unable to generate valid Kubernetes resource name"),
 		},
 	}
 
@@ -1814,7 +1849,12 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	}
 
 	for i := range testsErrorCases {
-		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
+		var ctx context.Context
+		if testsErrorCases[i].notWorkload == nil {
+			ctx = context.Background()
+		} else {
+			ctx = context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
+		}
 		name, err := GetCVESummaryK8sResourceName(ctx)
 		assert.NotEqual(t, err, nil)
 		assert.Equal(t, err, testsErrorCases[i].err)

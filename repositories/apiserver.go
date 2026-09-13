@@ -1096,6 +1096,31 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	return GetCVESummaryK8sResourceNameWithCVEName(ctx, "")
 }
 
+func sanitizeResourceName(s string) string {
+	s = strings.ToLower(s)
+	rawLabels := strings.Split(s, ".")
+	var cleanLabels []string
+	for _, label := range rawLabels {
+		var sb strings.Builder
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				sb.WriteRune(r)
+			} else {
+				sb.WriteRune('-')
+			}
+		}
+		trimmed := strings.Trim(sb.String(), "-")
+		if trimmed != "" {
+			cleanLabels = append(cleanLabels, trimmed)
+		}
+	}
+	res := strings.Join(cleanLabels, ".")
+	if len(res) > 253 {
+		res = strings.Trim(res[:253], "-.")
+	}
+	return res
+}
+
 func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string) (string, error) {
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
@@ -1107,17 +1132,49 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 
 	if kind == "" && name == "" {
 		if workload.ImageSlug != "" {
-			return workload.ImageSlug, nil
+			if res := sanitizeResourceName(workload.ImageSlug); res != "" {
+				return res, nil
+			}
 		}
 		if cveName != "" {
-			return cveName, nil
+			if res := sanitizeResourceName(cveName); res != "" {
+				return res, nil
+			}
 		}
 		if contName != "" {
-			return contName, nil
+			if res := sanitizeResourceName(contName); res != "" {
+				return res, nil
+			}
 		}
+		if workload.ImageTag != "" {
+			if res := sanitizeResourceName(workload.ImageTag); res != "" {
+				return res, nil
+			}
+		}
+		if workload.ImageHash != "" {
+			if res := sanitizeResourceName(workload.ImageHash); res != "" {
+				return res, nil
+			}
+		}
+		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
 	}
 
-	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
+	parts := make([]string, 0, 3)
+	if kind != "" {
+		parts = append(parts, kind)
+	}
+	if name != "" {
+		parts = append(parts, name)
+	}
+	if contName != "" {
+		parts = append(parts, contName)
+	}
+
+	res := sanitizeResourceName(strings.Join(parts, "-"))
+	if res == "" {
+		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
+	}
+	return res, nil
 }
 
 func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
