@@ -277,7 +277,7 @@ func suppressionRuleID(src suppressionSource) string {
 }
 
 // normalizedTarget renders a human-readable identifier for what an exception's match criteria
-// targeted, for suppression-provenance reporting.
+// targeted, for suppression-provenance reporting in canonical order [namespace/]APIGroup/Kind/Name.
 func normalizedTarget(resources []sev1beta1.ResourceMatch, namespace string) string {
 	if len(resources) == 0 {
 		if namespace != "" {
@@ -287,14 +287,29 @@ func normalizedTarget(resources []sev1beta1.ResourceMatch, namespace string) str
 	}
 	parts := make([]string, 0, len(resources))
 	for _, r := range resources {
-		target := r.Kind
+		var fields []string
+		if r.APIGroup != "" {
+			fields = append(fields, r.APIGroup)
+		}
+		if r.Kind != "" {
+			fields = append(fields, r.Kind)
+		}
 		if r.Name != "" {
-			target += "/" + r.Name
+			fields = append(fields, r.Name)
 		}
+		if len(fields) > 0 {
+			target := strings.Join(fields, "/")
+			if namespace != "" {
+				target = namespace + "/" + target
+			}
+			parts = append(parts, target)
+		}
+	}
+	if len(parts) == 0 {
 		if namespace != "" {
-			target = namespace + "/" + target
+			return "namespace/" + namespace
 		}
-		parts = append(parts, target)
+		return "cluster-wide"
 	}
 	return strings.Join(parts, ",")
 }
