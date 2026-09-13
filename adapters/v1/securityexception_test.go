@@ -1505,3 +1505,148 @@ func TestRestoreSuppressedMatches_LeavesGrypeSourcedIgnoresAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestApplySecurityExceptions_RelatedVulnerabilities(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:       "GHSA-jfh8-c2jp-5v3q",
+						Severity: "Critical",
+					},
+				},
+				RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+					{
+						ID:        "CVE-2021-44228",
+						Namespace: "nvd:cve",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					Name:    "log4j-core",
+					Version: "2.14.1",
+				},
+			},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "suppress-log4j",
+				Attributes: map[string]interface{}{
+					"sourceKind": "SecurityException",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
+		},
+	}
+
+	counts := ApplySecurityExceptions(doc, exceptions, nil)
+
+	assert.Empty(t, doc.Matches, "match should be suppressed based on RelatedVulnerabilities CVE ID")
+	require.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, "GHSA-jfh8-c2jp-5v3q", doc.IgnoredMatches[0].Match.Vulnerability.ID)
+	assert.Equal(t, 1, counts["SecurityException"])
+}
+
+// TestApplySecurityExceptions_RelatedVulnerabilities_NormalizeByCVE covers the production
+// direction: kubevuln runs Grype with NormalizeByCVE: true, so the primary ID is usually the
+// CVE and the GHSA ends up in RelatedVulnerabilities. An exception targeting the GHSA must
+// still match.
+func TestApplySecurityExceptions_RelatedVulnerabilities_NormalizeByCVE(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:       "CVE-2021-44228",
+						Severity: "Critical",
+					},
+				},
+				RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+					{
+						ID:        "GHSA-jfh8-c2jp-5v3q",
+						Namespace: "github:language:java",
+					},
+				},
+				Artifact: v1beta1.GrypePackage{
+					Name:    "log4j-core",
+					Version: "2.14.1",
+				},
+			},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "suppress-log4j-ghsa",
+				Attributes: map[string]interface{}{
+					"sourceKind": "SecurityException",
+				},
+			},
+			PolicyType:            "vulnerabilityExceptionPolicy",
+			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "GHSA-jfh8-c2jp-5v3q"}},
+		},
+	}
+
+	counts := ApplySecurityExceptions(doc, exceptions, nil)
+
+	assert.Empty(t, doc.Matches, "match should be suppressed based on RelatedVulnerabilities GHSA ID")
+	require.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, "CVE-2021-44228", doc.IgnoredMatches[0].Match.Vulnerability.ID)
+	assert.Equal(t, 1, counts["SecurityException"])
+}
+
+// TestApplySecurityExceptions_RelatedVulnerabilities_DedupRepeatedCandidates proves an
+// exception contributes at most once even when it is reachable through multiple/repeated
+// candidate IDs on the same match.
+func TestApplySecurityExceptions_RelatedVulnerabilities_DedupRepeatedCandidates(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{
+					VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+						ID:       "CVE-2021-44228",
+						Severity: "Critical",
+					},
+				},
+				RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+					{ID: "GHSA-jfh8-c2jp-5v3q", Namespace: "github:language:java"},
+					{ID: "GHSA-jfh8-c2jp-5v3q", Namespace: "github:language:java"},
+				},
+				Artifact: v1beta1.GrypePackage{
+					Name:    "log4j-core",
+					Version: "2.14.1",
+				},
+			},
+		},
+	}
+
+	exceptions := domain.CVEExceptions{
+		{
+			PortalBase: armotypes.PortalBase{
+				Name: "suppress-log4j-dedup",
+				Attributes: map[string]interface{}{
+					"sourceKind": "SecurityException",
+				},
+			},
+			PolicyType: "vulnerabilityExceptionPolicy",
+			Actions:    []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
+			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+				{Name: "CVE-2021-44228"},
+				{Name: "GHSA-jfh8-c2jp-5v3q"},
+			},
+		},
+	}
+
+	counts := ApplySecurityExceptions(doc, exceptions, nil)
+
+	assert.Empty(t, doc.Matches)
+	require.Len(t, doc.IgnoredMatches, 1)
+	assert.Equal(t, 1, counts["SecurityException"], "the exception must be counted once despite matching both the primary ID and a repeated related ID")
+}
