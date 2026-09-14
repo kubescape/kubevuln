@@ -5846,3 +5846,29 @@ func TestAPIServerStore_EnableSecurityExceptionCacheInvalidation_Concurrent(t *t
 
 	assert.NotNil(t, store.securityExceptionInformerStop, "informer stop func must be set after concurrent enable calls")
 }
+
+func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
+	t.Run("distinct image tags with leading hyphens in labels produce distinct resource names", func(t *testing.T) {
+		name1 := sanitizeResourceName("docker.io/library/nginx:v1.-beta-nohash")
+		name2 := sanitizeResourceName("docker.io/library/nginx:v1.beta-nohash")
+		assert.NotEmpty(t, name1)
+		assert.NotEmpty(t, name2)
+		assert.NotEqual(t, name1, name2, "distinct tags must not collapse into the same resource name")
+	})
+
+	t.Run("truncates labels to 63 chars max", func(t *testing.T) {
+		longLabel := strings.Repeat("a", 70)
+		res := sanitizeResourceName(longLabel)
+		assert.LessOrEqual(t, len(res), 63)
+		assert.False(t, strings.HasSuffix(res, "-"))
+	})
+
+	t.Run("invalid characters and consecutive dots generate valid DNS-1123 resource names", func(t *testing.T) {
+		res1 := sanitizeResourceName("a..b")
+		assert.NotEmpty(t, res1)
+		assert.False(t, strings.Contains(res1, ".."))
+
+		res2 := sanitizeResourceName("___")
+		assert.Empty(t, res2, "purely invalid label must sanitize to empty")
+	})
+}

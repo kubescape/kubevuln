@@ -1097,8 +1097,8 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 }
 
 func sanitizeResourceName(s string) string {
-	s = strings.ToLower(s)
-	rawLabels := strings.Split(s, ".")
+	lower := strings.ToLower(s)
+	rawLabels := strings.Split(lower, ".")
 	var cleanLabels []string
 	for _, label := range rawLabels {
 		var sb strings.Builder
@@ -1110,14 +1110,28 @@ func sanitizeResourceName(s string) string {
 			}
 		}
 		trimmed := strings.Trim(sb.String(), "-")
+		if len(trimmed) > 63 {
+			trimmed = strings.TrimRight(trimmed[:63], "-")
+		}
 		if trimmed != "" {
 			cleanLabels = append(cleanLabels, trimmed)
 		}
 	}
 	res := strings.Join(cleanLabels, ".")
-	if len(res) > 253 {
+	if res == "" {
+		return ""
+	}
+
+	if res != lower {
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(s)))[:8]
+		if len(res)+9 > 253 {
+			res = strings.TrimRight(res[:253-9], "-.")
+		}
+		res = res + "-" + hash
+	} else if len(res) > 253 {
 		res = strings.Trim(res[:253], "-.")
 	}
+
 	return res
 }
 
@@ -1133,11 +1147,6 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 	if kind == "" && name == "" {
 		if workload.ImageSlug != "" {
 			if res := sanitizeResourceName(workload.ImageSlug); res != "" {
-				return res, nil
-			}
-		}
-		if cveName != "" {
-			if res := sanitizeResourceName(cveName); res != "" {
 				return res, nil
 			}
 		}
