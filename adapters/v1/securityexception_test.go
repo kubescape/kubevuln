@@ -229,6 +229,8 @@ func TestIsExpiredBoundary(t *testing.T) {
 
 func TestConvertVulnerabilityExceptions_ZeroTimeExpiresAtHandling(t *testing.T) {
 	future := metav1.NewTime(time.Now().Add(24 * time.Hour))
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+
 	exceptions := []sev1beta1.SecurityException{
 		{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
@@ -259,12 +261,45 @@ func TestConvertVulnerabilityExceptions_ZeroTimeExpiresAtHandling(t *testing.T) 
 				},
 			},
 		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &past,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-4"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+						ExpiresAt:     &metav1.Time{},
+					},
+				},
+			},
+		},
 	}
 
 	policies, stats := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
 
 	assert.Len(t, policies, 3)
-	assert.Empty(t, stats.ExpiredBySource)
+	assert.Equal(t, map[string]int{"SecurityException": 1}, stats.ExpiredBySource)
+
+	policyMap := make(map[string]*armotypes.VulnerabilityExceptionPolicy)
+	for i := range policies {
+		for _, vp := range policies[i].VulnerabilityPolicies {
+			policyMap[vp.Name] = &policies[i]
+		}
+	}
+
+	assert.NotNil(t, policyMap["CVE-1"])
+	assert.NotNil(t, policyMap["CVE-1"].ExpirationDate)
+	assert.Equal(t, future.Time, *policyMap["CVE-1"].ExpirationDate, "CVE-1 with zero per-entry expiresAt should inherit document future.Time")
+
+	assert.NotNil(t, policyMap["CVE-2"])
+	assert.NotNil(t, policyMap["CVE-2"].ExpirationDate)
+	assert.Equal(t, future.Time, *policyMap["CVE-2"].ExpirationDate, "CVE-2 with omitted per-entry expiresAt should inherit document future.Time")
+
+	assert.NotNil(t, policyMap["CVE-3"])
+	assert.Nil(t, policyMap["CVE-3"].ExpirationDate, "CVE-3 with zero document expiresAt and omitted per-entry expiresAt should have nil ExpirationDate")
+
+	assert.Nil(t, policyMap["CVE-4"], "CVE-4 with zero per-entry expiresAt and expired document expiresAt should fall back to document deadline and be skipped as expired")
 }
 
 func TestConvertMatchResources(t *testing.T) {
