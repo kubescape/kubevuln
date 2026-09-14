@@ -88,6 +88,7 @@ func TestMatchImages(t *testing.T) {
 		{name: "delimiter spanning glob pattern does not match lowercase tag image", patterns: []string{"docker.io/library/nginx*RC*"}, image: "docker.io/library/nginx:rc1", want: false},
 		{name: "class glob pattern matches uppercase tag image", patterns: []string{"docker.io/library/nginx:[^a-z]C*"}, image: "docker.io/library/nginx:RC1", want: true},
 		{name: "class glob pattern does not match lowercase tag image", patterns: []string{"docker.io/library/nginx:[^a-z]C*"}, image: "docker.io/library/nginx:rc1", want: false},
+		{name: "uppercase wildcard in repo with explicit tag matches lowercase repo image", patterns: []string{"ng*INX:*"}, image: "nginx:v1", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

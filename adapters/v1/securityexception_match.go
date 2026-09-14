@@ -164,7 +164,7 @@ func normalizePatternFormCase(pf string) string {
 	if tagIdx != -1 {
 		repoPath := repoPart[:tagIdx]
 		tagPart := repoPart[tagIdx:]
-		return normalizeRepoPath(repoPath) + tagPart + digestPart
+		return strings.ToLower(repoPath) + tagPart + digestPart
 	}
 
 	return normalizeRepoPath(repoPart) + digestPart
