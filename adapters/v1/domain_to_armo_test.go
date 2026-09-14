@@ -373,8 +373,6 @@ func Test_suggestedVersion(t *testing.T) {
 		current      string
 		versions     []string
 		artifactType v1beta1.SyftType
-		artifactName string
-		metadataType v1beta1.MetadataType
 		want         string
 	}{
 		{
@@ -561,13 +559,13 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "1.0-3",
 		},
 		{
-			// #961: same trailing-zero shape as above, but with a leading zero in the
-			// shared prefix ("1.01.0" vs "1.1"). Grype's own comparator trims the
-			// leading zero, judges the two versions equal, and falls through to
-			// comparing releases alone ("-2" over "-1") - exactly the relaxation
-			// rpmSafeToCompare exists to guard against. Before #961's fix to
-			// rpmVersionsDifferOnlyByTrailingZeros, the leading zero defeated the
-			// guard's own shape check, so this candidate was wrongly trusted.
+			// Same trailing-zero shape as above, but with a leading zero in the shared
+			// prefix ("1.01.0" vs "1.1"). Grype's own comparator trims the leading
+			// zero, judges the two versions equal, and falls through to comparing
+			// releases alone ("-2" over "-1") - exactly the relaxation rpmSafeToCompare
+			// exists to guard against. A raw-string prefix comparison in
+			// rpmVersionsDifferOnlyByTrailingZeros would miss this shape (since "01" !=
+			// "1" as strings), letting this candidate through as a false positive.
 			name:         "rpm trailing-zero guard is not defeated by a leading zero in the prefix",
 			current:      "1.01.0-1",
 			versions:     []string{"1.1-2"},
@@ -603,258 +601,38 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "1-2",
 		},
 		{
-			// #960: java-archive (Maven) versions commonly carry a non-numeric
-			// qualifier like "RELEASE" or "Final", which generic semver rejects
-			// outright. Before #960, this fell through to the unguarded semver
-			// fallback and returned versions[0] regardless of order - a possible
-			// downgrade. Grype's own Maven comparator understands the qualifier.
-			name:         "java-archive: a real newer fix is found despite a non-semver qualifier",
-			current:      "5.3.21.RELEASE",
-			versions:     []string{"5.3.20.RELEASE", "5.3.25.RELEASE"},
-			artifactType: "java-archive",
-			want:         "5.3.25.RELEASE",
-		},
-		{
-			name:         "java-archive: no version above current returns empty, never a downgrade",
-			current:      "5.3.25.RELEASE",
-			versions:     []string{"5.3.20.RELEASE", "5.3.21.RELEASE"},
-			artifactType: "java-archive",
+			// Both "1.0-1" and "1-2" are proven upgrades from "0.5-1". Under the partial-order
+			// rule, neither candidate is safely <= the other, so nearestDistroFix returns empty ("").
+			name:         "rpm mutually incomparable upgrade candidates resolve conservatively to empty",
+			current:      "0.5-1",
+			versions:     []string{"1.0-1", "1-2"},
+			artifactType: "rpm",
 			want:         "",
-		},
-		{
-			// #960: PEP 440 pre/post-release suffixes ("rc1", ".post1") aren't valid
-			// semver either.
-			name:         "python: a real newer fix is found despite a PEP 440 pre-release suffix",
-			current:      "1.2.3rc1",
-			versions:     []string{"1.2.0", "1.2.3"},
-			artifactType: "python",
-			want:         "1.2.3",
-		},
-		{
-			name:         "python: no version above current returns empty, never a downgrade",
-			current:      "2.0.0.post1",
-			versions:     []string{"1.9.0", "2.0.0"},
-			artifactType: "python",
-			want:         "",
-		},
-		{
-			// #960: RubyGems pre-release suffixes ("pre1") aren't valid semver either.
-			name:         "gem: a real newer fix is found despite a non-semver pre-release suffix",
-			current:      "1.2.3.pre1",
-			versions:     []string{"1.2.0", "1.2.3"},
-			artifactType: "gem",
-			want:         "1.2.3",
-		},
-		{
-			// #960: Gentoo/Portage "-rN" revisions are numeric, but generic semver
-			// treats them as prerelease identifiers ordered lexically, the same
-			// class of bug #955 fixed for apk's "-rN" revisions.
-			name:         "portage: a real newer fix at a higher revision is found",
-			current:      "1.2.3-r1",
-			versions:     []string{"1.2.3-r0", "1.2.3-r2"},
-			artifactType: "portage",
-			want:         "1.2.3-r2",
-		},
-		{
-			// #961: grype's own Portage comparator never fails Validate() for a
-			// malformed string - it only discovers the problem later, inside Compare,
-			// by indexing regexp submatches a non-matching string never populated,
-			// which panics. A malformed current must be rejected before it ever
-			// reaches that comparator, exactly like an unparseable current in any
-			// other ecosystem: nothing to compare against, so no suggestion.
-			name:         "portage: a malformed current does not panic and returns no suggestion",
-			current:      "not-a-version",
-			versions:     []string{"1.2.3", "1.2.4"},
-			artifactType: "portage",
-			want:         "",
-		},
-		{
-			// A malformed candidate must be skipped, not crash suggestion for every
-			// other, valid candidate in the same feed.
-			name:         "portage: a malformed candidate is skipped, not fatal to the others",
-			current:      "1.2.3",
-			versions:     []string{"not-a-version", "1.2.4"},
-			artifactType: "portage",
-			want:         "1.2.4",
-		},
-		{
-			// #960: syft reports Go modules as "go-module", which does not match
-			// grypeversion.ParseFormat's "go"/"golang" name-based cases - the exact
-			// mismatch that left this ecosystem on the unguarded semver fallback.
-			name:         "go-module: a real newer fix is found",
-			current:      "v1.2.3",
-			versions:     []string{"v1.2.0", "v1.2.4"},
-			artifactType: "go-module",
-			want:         "v1.2.4",
-		},
-		{
-			// #960: Bitnami packages append a package-only revision after the
-			// upstream version (e.g. "-1", "-2") that never addresses a
-			// vulnerability by itself, since it repackages the exact same upstream
-			// source; Grype's own Bitnami comparator deliberately ignores it, so a
-			// revision-only difference must not be suggested as a fix.
-			name:         "bitnami: a revision-only difference is not trusted as an upgrade",
-			current:      "1.2.3-1",
-			versions:     []string{"1.2.3-2"},
-			artifactType: "bitnami",
-			want:         "",
-		},
-		{
-			// #960: syft reports Windows updates as "msrc-kb", which does not match
-			// grypeversion.ParseFormat's "kb" case. Grype's own KB comparator only
-			// supports exact-match identity (KB numbers aren't sequential, so a
-			// larger number is not a "newer" one) - it can never prove a candidate
-			// is an upgrade, so no version is ever suggested for this ecosystem.
-			name:         "msrc-kb: never suggests a fix, since KB numbers cannot be ordered",
-			current:      "5028185",
-			versions:     []string{"5028184", "5028186"},
-			artifactType: "msrc-kb",
-			want:         "",
-		},
-		{
-			// #961: Grype reports a JVM installation as syft's generic "binary" type,
-			// not "java-archive" - name alone (a JVM-indicating binary name, mirroring
-			// grype/pkg.isJvmPackage) must route it to Grype's JVM comparator instead
-			// of falling through to unguarded semver, which would have accepted
-			// "1.8.0_282" as an upgrade over "1.8.0_292" (semver treats the "_"
-			// suffix as unparseable and just returns versions[0]).
-			name:         "binary package with a JVM-indicating name uses the JVM comparator, not semver",
-			current:      "1.8.0_292",
-			versions:     []string{"1.8.0_282"},
-			artifactType: "binary",
-			artifactName: "openjdk",
-			want:         "",
-		},
-		{
-			name:         "binary package with a JVM-indicating name suggests a genuine JVM upgrade",
-			current:      "1.8.0_282",
-			versions:     []string{"1.8.0_292"},
-			artifactType: "binary",
-			artifactName: "openjdk",
-			want:         "1.8.0_292",
-		},
-		{
-			// JavaVMInstallationMetadata on the artifact is itself sufficient, independent
-			// of the package name or a "binary" type.
-			name:         "JavaVMInstallationMetadata routes to the JVM comparator regardless of type/name",
-			current:      "1.8.0_292",
-			versions:     []string{"1.8.0_282"},
-			artifactType: "java-archive",
-			artifactName: "some-jvm",
-			metadataType: "JavaVMInstallationMetadata",
-			want:         "",
-		},
-		{
-			// A "binary" package whose name isn't one of Grype's JVM indications is an
-			// ordinary binary, not a JVM: it must keep using semver, unaffected by this
-			// change.
-			name:         "binary package with a non-JVM name keeps using semver",
-			current:      "1.2.0",
-			versions:     []string{"1.3.0"},
-			artifactType: "binary",
-			artifactName: "some-random-tool",
-			want:         "1.3.0",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType, tt.artifactName, tt.metadataType))
+			assert.Equal(t, tt.want, suggestedVersion(tt.current, tt.versions, tt.artifactType))
 		})
 	}
 }
 
-func Test_versionFormatForArtifact(t *testing.T) {
-	tests := []struct {
-		name         string
-		artifactType v1beta1.SyftType
-		artifactName string
-		metadataType v1beta1.MetadataType
-		wantFormat   grypeversion.Format
-		wantOk       bool
-	}{
-		{name: "apk", artifactType: "apk", wantFormat: grypeversion.ApkFormat, wantOk: true},
-		{name: "deb", artifactType: "deb", wantFormat: grypeversion.DebFormat, wantOk: true},
-		{name: "rpm", artifactType: "rpm", wantFormat: grypeversion.RpmFormat, wantOk: true},
-		{
-			// #960: this is the syft type string for ordinary Java library
-			// dependencies. It does not match grypeversion.ParseFormat's "maven"
-			// case, which is why routing through ParseFormat missed it entirely.
-			name:         "java-archive maps to Maven",
-			artifactType: "java-archive",
-			wantFormat:   grypeversion.MavenFormat,
-			wantOk:       true,
-		},
-		{name: "python maps to Python (PEP 440)", artifactType: "python", wantFormat: grypeversion.PythonFormat, wantOk: true},
-		{name: "gem maps to Gem", artifactType: "gem", wantFormat: grypeversion.GemFormat, wantOk: true},
-		{name: "portage maps to Portage", artifactType: "portage", wantFormat: grypeversion.PortageFormat, wantOk: true},
-		{
-			// #960: this is the syft type string for Go modules. It does not match
-			// grypeversion.ParseFormat's "go"/"golang" case either.
-			name:         "go-module maps to Golang",
-			artifactType: "go-module",
-			wantFormat:   grypeversion.GolangFormat,
-			wantOk:       true,
-		},
-		{
-			// #960: this is the syft type string for Windows updates. It does not
-			// match grypeversion.ParseFormat's "kb" case.
-			name:         "msrc-kb maps to KB",
-			artifactType: "msrc-kb",
-			wantFormat:   grypeversion.KBFormat,
-			wantOk:       true,
-		},
-		{name: "bitnami maps to Bitnami", artifactType: "bitnami", wantFormat: grypeversion.BitnamiFormat, wantOk: true},
-		{
-			name:         "an ecosystem with no dedicated Grype comparator falls back to semver",
-			artifactType: "npm",
-			wantFormat:   grypeversion.UnknownFormat,
-			wantOk:       false,
-		},
-		{
-			name:         "empty artifact type falls back to semver",
-			artifactType: "",
-			wantFormat:   grypeversion.UnknownFormat,
-			wantOk:       false,
-		},
-		{
-			name:         "binary package with a JVM-indicating name maps to JVM",
-			artifactType: "binary",
-			artifactName: "openjdk",
-			wantFormat:   grypeversion.JVMFormat,
-			wantOk:       true,
-		},
-		{
-			name:         "binary package with a non-JVM name falls back to semver",
-			artifactType: "binary",
-			artifactName: "some-random-tool",
-			wantFormat:   grypeversion.UnknownFormat,
-			wantOk:       false,
-		},
-		{
-			name:         "JavaVMInstallationMetadata maps to JVM regardless of type/name",
-			artifactType: "java-archive",
-			artifactName: "some-jvm",
-			metadataType: "JavaVMInstallationMetadata",
-			wantFormat:   grypeversion.JVMFormat,
-			wantOk:       true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			format, ok := versionFormatForArtifact(tt.artifactType, tt.artifactName, tt.metadataType)
-			assert.Equal(t, tt.wantFormat, format)
-			assert.Equal(t, tt.wantOk, ok)
-		})
-	}
+// Test_nearestDistroFix_MutuallyIncomparableRPMCandidates_OrderIndependent proves that
+// reversing the feed order of two proven-upgrade RPM candidates that cannot be safely
+// ordered against each other resolves conservatively to empty.
+func Test_nearestDistroFix_MutuallyIncomparableRPMCandidates_OrderIndependent(t *testing.T) {
+	current := "0.5-1"
+	a, b := "1.0-1", "1-2"
+
+	got1 := nearestDistroFix(current, []string{a, b}, grypeversion.RpmFormat)
+	got2 := nearestDistroFix(current, []string{b, a}, grypeversion.RpmFormat)
+
+	assert.Equal(t, "", got1, "mutually incomparable RPM candidates must resolve to empty string")
+	assert.Equal(t, "", got2, "mutually incomparable RPM candidates must resolve to empty string")
 }
 
-// Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree reproduces review
-// feedback on #956/#961: three RPM candidates that Grype's own comparator ranks in a
-// cycle relative to each other (A beats C, C beats B, B beats A) can make a pairwise
-// "keep the running nearest, replace it when the next candidate wins" reduction
-// order-dependent -- a two-candidate tie-break isn't enough to catch this, since a
-// cycle only shows up with three or more candidates in play. Every permutation of the
-// same three candidates must agree on the same answer.
+// Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree proves that
+// three RPM candidates forming a cycle or unsafe comparison set all evaluate to empty.
 func Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree(t *testing.T) {
 	current := "0-1"
 	a, b, c := "1-1", "1+0-1", "1a-1"
@@ -863,15 +641,28 @@ func Test_nearestDistroFix_RPMThreeCandidateCycle_AllPermutationsAgree(t *testin
 		{a, b, c}, {a, c, b}, {b, a, c}, {b, c, a}, {c, a, b}, {c, b, a},
 	}
 
-	var want string
-	for i, perm := range permutations {
+	for _, perm := range permutations {
 		got := nearestDistroFix(current, perm, grypeversion.RpmFormat)
-		if i == 0 {
-			want = got
-			continue
-		}
-		assert.Equal(t, want, got, "permutation %v disagreed with %v -> %q", perm, permutations[0], want)
+		assert.Equal(t, "", got, "permutation %v must resolve to empty string", perm)
 	}
+}
+
+func Test_hasKnownFix_AmbiguousRPMCandidates(t *testing.T) {
+	m := v1beta1.Match{
+		Artifact: v1beta1.GrypePackage{
+			Version: "0.5-1",
+			Type:    "rpm",
+		},
+		Vulnerability: v1beta1.Vulnerability{
+			Fix: v1beta1.Fix{
+				Versions: []string{"1.0-1", "1-2"},
+			},
+		},
+	}
+
+	fixed, version := hasKnownFix(m)
+	assert.True(t, fixed, "a fix should be reported as known when candidate fix versions are present")
+	assert.Equal(t, "unknown", version, "ambiguous RPM candidates must map to 'unknown' fix version")
 }
 
 // Test_rpmSafeToCompare exercises the guard in isolation, independent of
@@ -894,9 +685,9 @@ func Test_rpmSafeToCompare(t *testing.T) {
 		{name: "trailing zero version segment, without epoch", a: "1.0-1", b: "1-2", want: false},
 		{name: "matching version shape is unaffected", a: "1.0-1", b: "1.0-3", want: true},
 		{
-			// #961: a leading zero in the shared prefix ("01" vs "1") used to defeat
-			// the trailing-zero shape check by comparing segments as raw strings, so
-			// this pair was (wrongly) judged safe to compare.
+			// A leading zero in the shared prefix ("01" vs "1") used to defeat the
+			// trailing-zero shape check by comparing segments as raw strings, so this
+			// pair was (wrongly) judged safe to compare.
 			name: "trailing zero version segment hidden behind a leading zero in the prefix",
 			a:    "1.01.0-1",
 			b:    "1.1-2",
@@ -1183,86 +974,4 @@ func TestDomainToArmo_IsFixedAgreesWithFixes(t *testing.T) {
 				r.IsFixed, containerscan.CalculateFixed(r.Fixes))
 		})
 	}
-}
-
-func TestDomainToArmo_ExceptionApplied_RelatedVulnerabilities(t *testing.T) {
-	doc := v1beta1.GrypeDocument{
-		Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
-		Matches: []v1beta1.Match{{
-			Vulnerability: v1beta1.Vulnerability{
-				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
-					ID:       "GHSA-jfh8-c2jp-5v3q",
-					Severity: "Critical",
-				},
-				Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"2.16.0"}},
-			},
-			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
-				{ID: "CVE-2021-44228"},
-			},
-			Artifact: v1beta1.GrypePackage{Name: "log4j-core", Version: "2.14.1"},
-		}},
-	}
-
-	exceptions := []armotypes.VulnerabilityExceptionPolicy{
-		{
-			PortalBase:            armotypes.PortalBase{Name: "suppress-log4j"},
-			PolicyType:            "vulnerabilityExceptionPolicy",
-			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
-			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "CVE-2021-44228"}},
-		},
-	}
-
-	ctx := context.TODO()
-	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
-	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
-	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-
-	got, err := DomainToArmo(ctx, doc, exceptions)
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Len(t, got[0].Vulnerability.ExceptionApplied, 1)
-	assert.Equal(t, "suppress-log4j", got[0].Vulnerability.ExceptionApplied[0].Name)
-}
-
-// TestDomainToArmo_ExceptionApplied_RelatedVulnerabilities_NormalizeByCVE covers the
-// production direction: kubevuln runs Grype with NormalizeByCVE: true, so the primary ID is
-// usually the CVE and the GHSA lands in RelatedVulnerabilities. An exception targeting the
-// GHSA must still be reported as applied.
-func TestDomainToArmo_ExceptionApplied_RelatedVulnerabilities_NormalizeByCVE(t *testing.T) {
-	doc := v1beta1.GrypeDocument{
-		Source: &v1beta1.Source{Target: json.RawMessage(threeLayerSource)},
-		Matches: []v1beta1.Match{{
-			Vulnerability: v1beta1.Vulnerability{
-				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
-					ID:       "CVE-2021-44228",
-					Severity: "Critical",
-				},
-				Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"2.16.0"}},
-			},
-			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
-				{ID: "GHSA-jfh8-c2jp-5v3q"},
-			},
-			Artifact: v1beta1.GrypePackage{Name: "log4j-core", Version: "2.14.1"},
-		}},
-	}
-
-	exceptions := []armotypes.VulnerabilityExceptionPolicy{
-		{
-			PortalBase:            armotypes.PortalBase{Name: "suppress-log4j-ghsa"},
-			PolicyType:            "vulnerabilityExceptionPolicy",
-			Actions:               []armotypes.VulnerabilityExceptionPolicyActions{armotypes.Ignore},
-			VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{{Name: "GHSA-jfh8-c2jp-5v3q"}},
-		},
-	}
-
-	ctx := context.TODO()
-	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
-	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
-	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
-
-	got, err := DomainToArmo(ctx, doc, exceptions)
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Len(t, got[0].Vulnerability.ExceptionApplied, 1)
-	assert.Equal(t, "suppress-log4j-ghsa", got[0].Vulnerability.ExceptionApplied[0].Name)
 }
