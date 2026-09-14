@@ -1757,3 +1757,115 @@ func TestApplySecurityExceptions_RelatedVulnerabilities_DedupRepeatedCandidates(
 	require.Len(t, doc.IgnoredMatches, 1)
 	assert.Equal(t, 1, counts["SecurityException"], "the exception must be counted once despite matching both the primary ID and a repeated related ID")
 }
+
+// TestNormalizedTarget verifies that normalizedTarget formats resource target strings in canonical order
+// [namespace/]APIGroup/Kind/Name without leading or double slashes, and correctly handles fallbacks.
+func TestNormalizedTarget(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources []sev1beta1.ResourceMatch
+		namespace string
+		want      string
+	}{
+		{
+			name:      "empty resources with namespace",
+			resources: nil,
+			namespace: "prod",
+			want:      "namespace/prod",
+		},
+		{
+			name:      "empty resources cluster-wide",
+			resources: nil,
+			namespace: "",
+			want:      "cluster-wide",
+		},
+		{
+			name: "kind and name with namespace",
+			resources: []sev1beta1.ResourceMatch{
+				{Kind: "Deployment", Name: "web"},
+			},
+			namespace: "prod",
+			want:      "prod/Deployment/web",
+		},
+		{
+			name: "kind only with namespace",
+			resources: []sev1beta1.ResourceMatch{
+				{Kind: "Deployment"},
+			},
+			namespace: "prod",
+			want:      "prod/Deployment",
+		},
+		{
+			name: "name only with namespace (empty kind does not produce double slash)",
+			resources: []sev1beta1.ResourceMatch{
+				{Name: "web"},
+			},
+			namespace: "prod",
+			want:      "prod/web",
+		},
+		{
+			name: "name only cluster-wide (empty kind does not produce leading slash)",
+			resources: []sev1beta1.ResourceMatch{
+				{Name: "web"},
+			},
+			namespace: "",
+			want:      "web",
+		},
+		{
+			name: "apiGroup only with namespace",
+			resources: []sev1beta1.ResourceMatch{
+				{APIGroup: "apps"},
+			},
+			namespace: "prod",
+			want:      "prod/apps",
+		},
+		{
+			name: "multiple resources combined",
+			resources: []sev1beta1.ResourceMatch{
+				{Kind: "Deployment", Name: "web"},
+				{Name: "api"},
+			},
+			namespace: "prod",
+			want:      "prod/Deployment/web,prod/api",
+		},
+		{
+			name: "all empty ResourceMatch elements fall back cleanly",
+			resources: []sev1beta1.ResourceMatch{
+				{},
+			},
+			namespace: "prod",
+			want:      "namespace/prod",
+		},
+		{
+			name: "apiGroup with kind and name with namespace",
+			resources: []sev1beta1.ResourceMatch{
+				{APIGroup: "apps", Kind: "Deployment", Name: "web"},
+			},
+			namespace: "prod",
+			want:      "prod/apps/Deployment/web",
+		},
+		{
+			name: "apiGroup with kind with namespace",
+			resources: []sev1beta1.ResourceMatch{
+				{APIGroup: "apps", Kind: "Deployment"},
+			},
+			namespace: "prod",
+			want:      "prod/apps/Deployment",
+		},
+		{
+			name: "apiGroup with name cluster-wide",
+			resources: []sev1beta1.ResourceMatch{
+				{APIGroup: "apps", Name: "web"},
+			},
+			namespace: "",
+			want:      "apps/web",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizedTarget(tt.resources, tt.namespace)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
