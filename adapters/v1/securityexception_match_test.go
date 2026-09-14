@@ -74,6 +74,9 @@ func TestMatchImages(t *testing.T) {
 		{name: "custom registry requires an explicit domain in the pattern", patterns: []string{"quay.io/kubescape/kubevuln:v1.0.0"}, image: "quay.io/kubescape/kubevuln:v1.0.0", want: true},
 		{name: "OR across patterns", patterns: []string{"docker.io/library/redis:*", "docker.io/library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "malformed pattern is skipped", patterns: []string{"[bad"}, image: "docker.io/library/nginx:1.25", want: false},
+		{name: "uppercase wildcard pattern matches image", patterns: []string{"MyOrg/*"}, image: "docker.io/myorg/nginx:1.25", want: true},
+		{name: "uppercase wildcard tag pattern matches image", patterns: []string{"Nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "uppercase domain wildcard pattern matches image", patterns: []string{"Docker.io/Library/*"}, image: "docker.io/library/nginx:1.25", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

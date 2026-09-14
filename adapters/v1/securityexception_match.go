@@ -134,8 +134,9 @@ func matchImages(patterns []string, image string) bool {
 	for _, p := range patterns {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
+			lowerPF := strings.ToLower(pf)
 			for _, form := range forms {
-				if ok, err := path.Match(pf, form); err == nil && ok {
+				if ok, err := path.Match(lowerPF, form); err == nil && ok {
 					return true
 				}
 			}
