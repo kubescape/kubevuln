@@ -102,11 +102,14 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	// If only an architecture is provided (e.g. "amd64"), we prepend "linux/".
 	//
 	// Only request a specific platform when the caller explicitly asked for one; otherwise
-	// leave imgPlatform nil so Syft resolves whatever platform the image manifest provides.
-	// This mirrors the in-process adapter (adapters/v1/syft.go) and matters for pod-less scan
-	// paths (registry rescans, periodic CRD-based rescans) that have no node context to derive
-	// a platform from: defaulting to runtime.GOARCH here used to force a platform mismatch for
-	// single-arch images that don't happen to match the sidecar container's own arch (see #512).
+	// leave imgPlatform nil. This mirrors the in-process adapter (adapters/v1/syft.go) and
+	// matters for pod-less scan paths (registry rescans, periodic CRD-based rescans) that have
+	// no node context to derive a platform from: defaulting to runtime.GOARCH here used to
+	// force a platform mismatch for single-arch images that don't happen to match the sidecar
+	// container's own arch (see #512). For a genuine multi-arch manifest list, though, leaving
+	// this nil does not make Syft "resolve whatever the manifest provides" - stereoscope's
+	// registry provider still defaults to the scanning process's own architecture in that case,
+	// silently and with no mismatch error (see #966).
 	imgPlatform, err := syftsource.ParsePlatform(req.Platform)
 	if err != nil {
 		return nil, fmt.Errorf("invalid platform %q: %w", req.Platform, err)

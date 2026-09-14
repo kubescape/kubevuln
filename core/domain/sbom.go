@@ -11,9 +11,11 @@ const (
 	ScannerMemoryLimitAnnotationKey = "kubescape.io/scanner-memory-limit"
 	// ResolvedPlatformAnnotationKey records the OCI platform ("os/arch[/variant]") that was
 	// actually used to resolve the scanned image, regardless of whether the caller requested
-	// one explicitly (RegistryOptions.Platform) or left it empty and let the adapter fall back
-	// to whatever the image manifest provides. Set by both SBOM adapters on success so a
-	// silently-wrong-arch SBOM is inspectable after the fact (see #512).
+	// one explicitly (RegistryOptions.Platform) or left it empty. Left empty against a
+	// single-arch image, resolution reflects the manifest; against a genuine multi-arch
+	// manifest list, it instead resolves to the scanning process's own architecture, silently
+	// (#966). Set by both SBOM adapters on success so a silently-wrong-arch SBOM is
+	// inspectable after the fact (see #512).
 	ResolvedPlatformAnnotationKey = "kubescape.io/resolved-platform"
 
 	ReasonImageTooLarge    = "image-too-large"

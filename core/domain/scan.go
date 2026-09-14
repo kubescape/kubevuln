@@ -13,8 +13,10 @@ const (
 	// ArgsPlatform lets a caller request a specific image platform (OCI "os/arch[/variant]",
 	// or a bare arch such as "arm64") for SBOM generation, e.g. an operator populating it from
 	// the scanned Pod's node architecture. Read via optionsFromWorkload into
-	// RegistryOptions.Platform. Left unset, both SBOM adapters resolve whatever platform the
-	// image manifest provides instead of forcing one (see #512).
+	// RegistryOptions.Platform. Left unset against a single-arch image, both SBOM adapters
+	// resolve whatever the manifest provides (see #512); against a genuine multi-arch
+	// manifest list, they instead resolve to the scanning process's own architecture,
+	// silently (see #966).
 	ArgsPlatform           = "platform"
 	AttributeUseHTTP       = identifiers.AttributeUseHTTP
 	AttributeSkipTLSVerify = identifiers.AttributeSkipTLSVerify
