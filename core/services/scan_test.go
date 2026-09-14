@@ -3688,6 +3688,10 @@ func (m *mockCountingSBOMCreator) GetMaxImageSize() int64 {
 	return m.creator.GetMaxImageSize()
 }
 
+func (m *mockCountingSBOMCreator) GetMemoryLimit() string {
+	return m.creator.GetMemoryLimit()
+}
+
 func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) {
 	workload := domain.ScanCommand{
 		ImageSlug:          "test-too-large-image",
