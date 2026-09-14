@@ -636,6 +636,9 @@ func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []i
 		if r.Name != "" {
 			attrs["name"] = r.Name
 		}
+		if r.APIGroup != "" {
+			attrs["apiGroup"] = r.APIGroup
+		}
 		if len(attrs) == 0 {
 			continue
 		}

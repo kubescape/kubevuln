@@ -262,6 +262,37 @@ func TestConvertMatchResources(t *testing.T) {
 	assert.Equal(t, "my-db", d1.Attributes["name"])
 }
 
+func TestConvertMatchResources_APIGroup(t *testing.T) {
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "production"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Match: sev1beta1.ExceptionMatch{
+					Resources: []sev1beta1.ResourceMatch{
+						{APIGroup: "apps", Kind: "Deployment", Name: "my-app"},
+					},
+				},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2023-9999"}, Status: sev1beta1.VulnerabilityStatusNotAffected},
+				},
+			},
+		},
+	}
+
+	appGroup := "apps"
+	target := ExceptionTarget{Namespace: "production", Kind: "Deployment", Name: "my-app", APIGroup: &appGroup}
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, target)
+
+	require.Len(t, policies, 1)
+	require.Len(t, policies[0].Designatores, 1)
+
+	d0 := policies[0].Designatores[0]
+	assert.Equal(t, "production", d0.Attributes["namespace"])
+	assert.Equal(t, "Deployment", d0.Attributes["kind"])
+	assert.Equal(t, "my-app", d0.Attributes["name"])
+	assert.Equal(t, "apps", d0.Attributes["apiGroup"])
+}
+
 func TestApplySecurityExceptions_MovesToIgnored(t *testing.T) {
 	doc := &v1beta1.GrypeDocument{
 		Matches: []v1beta1.Match{
