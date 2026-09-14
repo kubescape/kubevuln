@@ -3638,11 +3638,57 @@ func TestScanService_MissingSBOM_ScannerNeverSeesNilContent(t *testing.T) {
 	}
 }
 
-func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) {
-	sbomAdapter := adapters.NewMockSBOMAdapter(false, false, false)
-	storage := repositories.NewMemoryStorage(false, false)
-	s := NewScanService(sbomAdapter, storage, adapters.NewMockCVEAdapter(), storage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+type mockNilContentSBOMRepository struct {
+	ports.SBOMRepository
+	stored map[string]domain.SBOM
+}
 
+func newMockNilContentSBOMRepository() *mockNilContentSBOMRepository {
+	return &mockNilContentSBOMRepository{
+		stored: make(map[string]domain.SBOM),
+	}
+}
+
+func (m *mockNilContentSBOMRepository) GetSBOM(ctx context.Context, name, SBOMCreatorVersion string) (domain.SBOM, error) {
+	if sbom, ok := m.stored[name]; ok {
+		return sbom, nil
+	}
+	return domain.SBOM{}, errors.New("not found")
+}
+
+func (m *mockNilContentSBOMRepository) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFiltered bool) error {
+	m.stored[sbom.Name] = sbom
+	return nil
+}
+
+func (m *mockNilContentSBOMRepository) DeleteSBOM(ctx context.Context, name string) error {
+	delete(m.stored, name)
+	return nil
+}
+
+type mockCountingSBOMCreator struct {
+	creator ports.SBOMCreator
+	calls   int
+}
+
+func (m *mockCountingSBOMCreator) CreateSBOM(ctx context.Context, name, imageID, imageTag string, opts domain.RegistryOptions) (domain.SBOM, error) {
+	m.calls++
+	return m.creator.CreateSBOM(ctx, name, imageID, imageTag, opts)
+}
+
+func (m *mockCountingSBOMCreator) Version() string {
+	return m.creator.Version()
+}
+
+func (m *mockCountingSBOMCreator) GetMaxSBOMSize() int64 {
+	return m.creator.GetMaxSBOMSize()
+}
+
+func (m *mockCountingSBOMCreator) GetMaxImageSize() int64 {
+	return m.creator.GetMaxImageSize()
+}
+
+func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) {
 	workload := domain.ScanCommand{
 		ImageSlug:          "test-too-large-image",
 		ImageHash:          "sha256:1234567890abcdef",
@@ -3654,25 +3700,61 @@ func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) 
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
 	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
 
-	// Pre-store a non-stale TooLarge SBOM marker (as stored after an oversized scan)
-	tooLargeSBOM := domain.SBOM{
-		Name:               workload.ImageSlug,
-		Status:             helpersv1.TooLarge,
-		Content:            nil,
-		SBOMCreatorVersion: s.sbomCreator.Version(),
-		Annotations: map[string]string{
-			domain.StatusReasonAnnotationKey: domain.ReasonSBOMTooLarge,
-			domain.MaxSBOMSizeAnnotationKey:  fmt.Sprintf("%d", s.sbomCreator.GetMaxSBOMSize()),
-			domain.MaxImageSizeAnnotationKey: fmt.Sprintf("%d", s.sbomCreator.GetMaxImageSize()),
-			helpersv1.ImageIDMetadataKey:     workload.ImageSlug,
-			helpersv1.ToolVersionMetadataKey: s.sbomCreator.Version(),
-		},
-	}
-	require.NoError(t, storage.StoreSBOM(ctx, tooLargeSBOM, false))
+	t.Run("matching limit returns cached TooLarge marker without calling CreateSBOM", func(t *testing.T) {
+		baseCreator := adapters.NewMockSBOMAdapter(false, false, false)
+		countingCreator := &mockCountingSBOMCreator{creator: baseCreator}
+		storage := newMockNilContentSBOMRepository()
+		cveStorage := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(countingCreator, storage, adapters.NewMockCVEAdapter(), cveStorage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
 
-	// Calling getOrCreateSBOM must return the cached TooLarge marker without error
-	gotSBOM, storeErr, err := s.getOrCreateSBOM(ctx, workload)
-	require.NoError(t, err)
-	require.NoError(t, storeErr)
-	assert.Equal(t, helpersv1.TooLarge, gotSBOM.Status)
+		tooLargeSBOM := domain.SBOM{
+			Name:               workload.ImageSlug,
+			Status:             helpersv1.TooLarge,
+			Content:            nil, // Deliberately nil content
+			SBOMCreatorVersion: s.sbomCreator.Version(),
+			Annotations: map[string]string{
+				domain.StatusReasonAnnotationKey: domain.ReasonSBOMTooLarge,
+				domain.MaxSBOMSizeAnnotationKey:  fmt.Sprintf("%d", s.sbomCreator.GetMaxSBOMSize()),
+				domain.MaxImageSizeAnnotationKey: fmt.Sprintf("%d", s.sbomCreator.GetMaxImageSize()),
+				helpersv1.ImageIDMetadataKey:     workload.ImageSlug,
+				helpersv1.ToolVersionMetadataKey: s.sbomCreator.Version(),
+			},
+		}
+		require.NoError(t, storage.StoreSBOM(ctx, tooLargeSBOM, false))
+
+		gotSBOM, storeErr, err := s.getOrCreateSBOM(ctx, workload)
+		require.NoError(t, err)
+		require.NoError(t, storeErr)
+		assert.Equal(t, helpersv1.TooLarge, gotSBOM.Status)
+		assert.Equal(t, 0, countingCreator.calls, "CreateSBOM must not be called when a matching-limit TooLarge marker is cached")
+	})
+
+	t.Run("changed or missing limit invalidates cached nil-content TooLarge marker and triggers CreateSBOM", func(t *testing.T) {
+		baseCreator := adapters.NewMockSBOMAdapter(false, false, false)
+		countingCreator := &mockCountingSBOMCreator{creator: baseCreator}
+		storage := newMockNilContentSBOMRepository()
+		cveStorage := repositories.NewMemoryStorage(false, false)
+		s := NewScanService(countingCreator, storage, adapters.NewMockCVEAdapter(), cveStorage, adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), true, false, true, false, false)
+
+		tooLargeSBOM := domain.SBOM{
+			Name:               workload.ImageSlug,
+			Status:             helpersv1.TooLarge,
+			Content:            nil,
+			SBOMCreatorVersion: s.sbomCreator.Version(),
+			Annotations: map[string]string{
+				domain.StatusReasonAnnotationKey: domain.ReasonSBOMTooLarge,
+				domain.MaxSBOMSizeAnnotationKey:  "99999999", // Different max size
+				domain.MaxImageSizeAnnotationKey: fmt.Sprintf("%d", s.sbomCreator.GetMaxImageSize()),
+				helpersv1.ImageIDMetadataKey:     workload.ImageSlug,
+				helpersv1.ToolVersionMetadataKey: s.sbomCreator.Version(),
+			},
+		}
+		require.NoError(t, storage.StoreSBOM(ctx, tooLargeSBOM, false))
+
+		gotSBOM, storeErr, err := s.getOrCreateSBOM(ctx, workload)
+		require.NoError(t, err)
+		require.NoError(t, storeErr)
+		assert.NotEqual(t, helpersv1.TooLarge, gotSBOM.Status, "cached marker with changed limit must be invalidated")
+		assert.Equal(t, 1, countingCreator.calls, "CreateSBOM must be called when cached marker limit does not match")
+	})
 }
