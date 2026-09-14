@@ -1311,10 +1311,6 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 		}
 		return sbom, err
 	}
-	if sbom.Content == nil {
-		return sbom, nil
-	}
-
 	if sbom.Status == helpersv1.TooLarge {
 		reason := sbom.Annotations[domain.StatusReasonAnnotationKey]
 		stale := false
@@ -1370,6 +1366,10 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 		}
 	}
 
+	if sbom.Content == nil {
+		return sbom, nil
+	}
+
 	return sbom, nil
 }
 
@@ -1407,7 +1407,7 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 		ran = true
 		// Re-check storage inside singleflight worker in case another worker stored it while we waited
 		if s.storage {
-			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && sbom.Content != nil {
+			if sbom, err := s.getSBOM(workerCtx, workload.ImageSlug, s.sbomCreator.Version()); err == nil && (sbom.Content != nil || sbom.Status == helpersv1.TooLarge) {
 				return sbomCreation{sbom: sbom}, nil
 			}
 		}
