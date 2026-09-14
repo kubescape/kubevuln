@@ -455,17 +455,36 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 	}
 
 	// For RPM, once more than one candidate is individually a proven upgrade from
-	// current, Grype's own comparator can no longer be trusted to order them
-	// consistently: rpmSafeToCompare is only a pairwise heuristic, not proof the
-	// comparator is transitive across an entire candidate set (three candidates can
-	// each pairwise-beat one of the others). Rather than reduce with that
-	// non-transitive comparator, fall back to a plain lexical minimum of the raw
-	// strings: weaker than a true numeric minimum, but a genuine total order, so the
-	// result does not depend on feed order or on which pair gets compared first.
-	if format == grypeversion.RpmFormat && len(eligible) > 1 {
-		sorted := append([]string(nil), eligible...)
-		sort.Strings(sorted)
-		return sorted[0]
+	// current, sort eligible candidates lexically to establish a canonical iteration
+	// order, then select a candidate only when RPM comparison proves it no greater
+	// than every other eligible candidate. If no candidate can be proven <= all others
+	// (e.g. due to unsafe comparisons or non-transitive cycles), return "" so no
+	// ambiguous fix is suggested.
+	if format == grypeversion.RpmFormat {
+		sort.Strings(eligible)
+		for _, candidate := range eligible {
+			vCand := grypeversion.New(candidate, format)
+			isMin := true
+			for _, other := range eligible {
+				if candidate == other {
+					continue
+				}
+				if !rpmSafeToCompare(candidate, other) {
+					isMin = false
+					break
+				}
+				vOther := grypeversion.New(other, format)
+				cmp, err := vCand.Compare(vOther)
+				if err != nil || cmp > 0 {
+					isMin = false
+					break
+				}
+			}
+			if isMin {
+				return candidate
+			}
+		}
+		return ""
 	}
 
 	var nearest *grypeversion.Version

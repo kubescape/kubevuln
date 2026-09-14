@@ -575,6 +575,34 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "",
 		},
 		{
+			name:         "rpm nearest fix selection preserves numeric ordering over lexical order",
+			current:      "1-1",
+			versions:     []string{"2-1", "10-1"},
+			artifactType: "rpm",
+			want:         "2-1",
+		},
+		{
+			name:         "rpm nearest fix selection with reversed feed order still selects nearest numeric fix",
+			current:      "1-1",
+			versions:     []string{"10-1", "2-1"},
+			artifactType: "rpm",
+			want:         "2-1",
+		},
+		{
+			name:         "rpm release selection preserves numeric ordering over lexical order",
+			current:      "1-1",
+			versions:     []string{"1-2", "1-10"},
+			artifactType: "rpm",
+			want:         "1-2",
+		},
+		{
+			name:         "rpm release selection with reversed feed order still selects nearest numeric fix",
+			current:      "1-1",
+			versions:     []string{"1-10", "1-2"},
+			artifactType: "rpm",
+			want:         "1-2",
+		},
+		{
 			// #960: java-archive (Maven) versions commonly carry a non-numeric
 			// qualifier like "RELEASE" or "Final", which generic semver rejects
 			// outright. Before #960, this fell through to the unguarded semver
