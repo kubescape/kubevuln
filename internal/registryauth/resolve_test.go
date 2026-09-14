@@ -286,3 +286,76 @@ func TestResolveSource_FallsBackToAnonymousWhenCredentialedRetryAlsoGets401(t *t
 	assert.Equal(t, "gcr.io/project/image:tag", src.ref)
 	assert.Equal(t, []int{0, 1, 0}, credentialsSeen, "a credentialed retry refused again must still fall back to anonymous")
 }
+
+// TestResolveSource_PreservesUnauthorizedErrWhenAnonymousFallbackFails is a regression
+// test for #959: when both the credentialed and anonymous attempts fail, the returned
+// error must wrap unauthorizedErr regardless of which literal wording either attempt
+// uses. The pre-#959 gate skipped wrapping whenever the anonymous error contained
+// "401 Unauthorized", which dropped structured DENIED:/UNAUTHORIZED: context from
+// the credentialed path (and the mirror case).
+func TestResolveSource_PreservesUnauthorizedErrWhenAnonymousFallbackFails(t *testing.T) {
+	denied := flattenedRegistryAuthError(t, transport.DeniedErrorCode)
+	plain401 := errors.New("401 Unauthorized")
+	structuredUnauthorized := errors.New("UNAUTHORIZED: authentication required")
+
+	tests := []struct {
+		name           string
+		results        []error
+		wantWrap       bool
+		wantErrIs      error
+		wantContains   string
+		wantNotContain string
+	}{
+		{
+			name:         "structured DENIED then plain 401",
+			results:      []error{denied, denied, plain401},
+			wantWrap:     true,
+			wantErrIs:    denied,
+			wantContains: "anonymous fallback failed",
+		},
+		{
+			name:         "plain 401 then structured UNAUTHORIZED",
+			results:      []error{plain401, plain401, structuredUnauthorized},
+			wantWrap:     true,
+			wantErrIs:    plain401,
+			wantContains: "anonymous fallback failed",
+		},
+		{
+			name:           "identical plain 401 dedup",
+			results:        []error{plain401, plain401, errors.New("401 Unauthorized")},
+			wantWrap:       false,
+			wantNotContain: "anonymous fallback failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := GCPCredsFn
+			t.Cleanup(func() { GCPCredsFn = orig; ResetCaches() })
+			ResetCaches()
+			GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+				return &image.RegistryCredentials{Username: "oauth2accesstoken", Password: "tok"}, time.Now().Add(time.Hour), nil
+			}
+
+			var credentialsSeen []int
+			get := func(_ context.Context, _ string, opts *image.RegistryOptions) (fakeSource, error) {
+				attempt := len(credentialsSeen)
+				credentialsSeen = append(credentialsSeen, len(opts.Credentials))
+				require.Less(t, attempt, len(tt.results), "unexpected extra pull")
+				return fakeSource{}, tt.results[attempt]
+			}
+
+			_, err := ResolveSource(context.Background(), "in_process", get,
+				"gcr.io/project/image:tag", "gcr.io/project/image:tag", image.RegistryOptions{})
+
+			require.Error(t, err)
+			assert.Equal(t, []int{0, 1, 0}, credentialsSeen)
+			if tt.wantWrap {
+				require.ErrorIs(t, err, tt.wantErrIs)
+				assert.Contains(t, err.Error(), tt.wantContains)
+			} else {
+				assert.NotContains(t, err.Error(), tt.wantNotContain)
+				assert.Equal(t, "401 Unauthorized", err.Error())
+			}
+		})
+	}
+}
