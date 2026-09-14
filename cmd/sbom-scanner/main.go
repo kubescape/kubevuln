@@ -141,23 +141,33 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
+	serveErrCh := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
-		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
-		close(stopSweep)
-		gracefulStopWithTimeout(srv, shutdownTimeout)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-			logger.L().Warning("metrics server shutdown error", helpers.Error(err))
+		logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
+		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			serveErrCh <- err
 		}
-		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
-			logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
-		}
+		close(serveErrCh)
 	}()
 
-	logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
-	if err := srv.Serve(lis); err != nil { // #nosec G703 -- see SOCKET_PATH note above
-		logger.L().Fatal("gRPC server failed", helpers.Error(err))
+	select {
+	case sig := <-sigCh:
+		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
+	case err := <-serveErrCh:
+		if err != nil {
+			logger.L().Fatal("gRPC server failed", helpers.Error(err))
+		}
+		return
+	}
+
+	close(stopSweep)
+	gracefulStopWithTimeout(srv, shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.L().Warning("metrics server shutdown error", helpers.Error(err))
+	}
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
+		logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
 	}
 }
