@@ -162,7 +162,7 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						},
 					},
 					PackageType:      string(m.Artifact.Type),
-					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookup(m.Vulnerability.ID, isFixed == 1), m.Artifact.PURL),
+					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookupMatch(m, isFixed == 1), m.Artifact.PURL),
 					IsRelevant:       nil, // TODO add relevancy here?
 					Coordinates:      syftCoordinatesToCoordinates(m.Artifact.Locations),
 				},
