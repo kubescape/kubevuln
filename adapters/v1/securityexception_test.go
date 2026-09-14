@@ -224,6 +224,47 @@ func TestIsExpiredBoundary(t *testing.T) {
 	assert.True(t, isExpired(&metav1.Time{Time: now.Add(time.Nanosecond)}, now.Add(2*time.Nanosecond)),
 		"expiresAt strictly before now must be treated as expired")
 	assert.False(t, isExpired(nil, now), "a nil expiresAt must never be treated as expired")
+	assert.False(t, isExpired(&metav1.Time{}, now), "a zero-value metav1.Time must never be treated as expired")
+}
+
+func TestConvertVulnerabilityExceptions_ZeroTimeExpiresAtHandling(t *testing.T) {
+	future := metav1.NewTime(time.Now().Add(24 * time.Hour))
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &future,
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-1"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+						ExpiresAt:     &metav1.Time{},
+					},
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				ExpiresAt: &metav1.Time{},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-3"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies, stats := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+
+	assert.Len(t, policies, 3)
+	assert.Empty(t, stats.ExpiredBySource)
 }
 
 func TestConvertMatchResources(t *testing.T) {

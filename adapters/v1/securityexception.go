@@ -106,7 +106,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 // exclusive: an expiresAt exactly equal to now is not yet expired, so the suppression
 // it governs remains active through that exact instant and only expires strictly after it.
 func isExpired(expiresAt *metav1.Time, now time.Time) bool {
-	return expiresAt != nil && expiresAt.Time.Before(now)
+	return expiresAt != nil && !expiresAt.IsZero() && expiresAt.Time.Before(now)
 }
 
 // effectiveExpiresAt resolves the expiry governing a single vulnerability entry: the
@@ -116,10 +116,13 @@ func isExpired(expiresAt *metav1.Time, now time.Time) bool {
 // expiresAt still expires every entry that does not override it, so documents written
 // before per-entry expiry existed behave exactly as they did before.
 func effectiveExpiresAt(spec sev1beta1.SecurityExceptionSpec, vuln sev1beta1.VulnerabilityException) *metav1.Time {
-	if vuln.ExpiresAt != nil {
+	if vuln.ExpiresAt != nil && !vuln.ExpiresAt.IsZero() {
 		return vuln.ExpiresAt
 	}
-	return spec.ExpiresAt
+	if spec.ExpiresAt != nil && !spec.ExpiresAt.IsZero() {
+		return spec.ExpiresAt
+	}
+	return nil
 }
 
 // shouldSuppress reports whether a VulnerabilityException entry may be
