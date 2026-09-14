@@ -1130,8 +1130,8 @@ func sanitizeResourceName(s string) string {
 		return ""
 	}
 
-	// 3. If clean matches lower (no lossy character substitution or dot collapsing) and is a valid DNS-1123 subdomain, return it.
-	if clean == lower && len(validation.IsDNS1123Subdomain(clean)) == 0 {
+	// 3. If clean matches s (no casing/character transformation) and is a valid DNS-1123 subdomain, return it.
+	if clean == s && len(validation.IsDNS1123Subdomain(clean)) == 0 {
 		return clean
 	}
 

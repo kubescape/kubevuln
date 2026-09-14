@@ -5887,6 +5887,29 @@ func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
 		assert.False(t, strings.HasSuffix(res, "-"))
 	})
 
+	t.Run("case-distinct image tags produce distinct resource names", func(t *testing.T) {
+		name1 := sanitizeResourceName("Release")
+		name2 := sanitizeResourceName("release")
+		assert.NotEmpty(t, name1)
+		assert.NotEmpty(t, name2)
+		assert.NotEqual(t, name1, name2, "case-distinct tags must not collapse into the same resource name")
+	})
+
+	t.Run("store and retrieve with empty ImageSlug and ContainerName resolves distinct keys for Release vs release", func(t *testing.T) {
+		ctx1 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+			ImageTag: "Release",
+		})
+		ctx2 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+			ImageTag: "release",
+		})
+
+		k8sName1, err1 := GetCVESummaryK8sResourceName(ctx1)
+		k8sName2, err2 := GetCVESummaryK8sResourceName(ctx2)
+		require.NoError(t, err1)
+		require.NoError(t, err2)
+		assert.NotEqual(t, k8sName1, k8sName2, "Release and release must map to distinct Kubernetes resource names")
+	})
+
 	t.Run("invalid characters and consecutive dots generate valid DNS-1123 resource names", func(t *testing.T) {
 		res1 := sanitizeResourceName("a..b")
 		assert.NotEmpty(t, res1)
