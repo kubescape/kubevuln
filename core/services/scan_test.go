@@ -3680,7 +3680,7 @@ func (m *mockCountingSBOMCreator) Version() string {
 	return m.creator.Version()
 }
 
-func (m *mockCountingSBOMCreator) GetMaxSBOMSize() int64 {
+func (m *mockCountingSBOMCreator) GetMaxSBOMSize() int {
 	return m.creator.GetMaxSBOMSize()
 }
 
