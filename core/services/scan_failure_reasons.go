@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
@@ -35,12 +36,18 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonScanTimeout
 	}
 
+	// Rate limit / 429 errors
+	if errors.Is(err, domain.ErrTooManyRequests) || tools.IsRateLimitError(err) {
+		return scanfailure.ReasonImageAuthFailed
+	}
+
 	// Go 1.13 pattern: typed error extraction via errors.As
 	var transportErr *transport.Error
 	if errors.As(err, &transportErr) {
 		switch {
 		case transportErr.StatusCode == http.StatusUnauthorized ||
-			transportErr.StatusCode == http.StatusForbidden:
+			transportErr.StatusCode == http.StatusForbidden ||
+			transportErr.StatusCode == http.StatusTooManyRequests:
 			return scanfailure.ReasonImageAuthFailed
 		case transportErr.StatusCode == http.StatusNotFound:
 			return scanfailure.ReasonImageNotFound
@@ -60,9 +67,9 @@ func classifySBOMError(err error) string {
 	// String-based fallbacks for errors not using typed wrapping
 	errStr := err.Error()
 	switch {
-	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
+	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden") || strings.Contains(errStr, "429 Too Many Requests"):
 		return scanfailure.ReasonImageAuthFailed
-	case strings.Contains(errStr, "UNAUTHORIZED"):
+	case strings.Contains(errStr, "UNAUTHORIZED") || strings.Contains(errStr, "TOOMANYREQUESTS"):
 		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
 		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
 		return scanfailure.ReasonImageAuthFailed
