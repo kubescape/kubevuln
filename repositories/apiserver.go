@@ -1107,25 +1107,30 @@ func sanitizeResourceName(s string) string {
 		return s
 	}
 
-	// 2. Otherwise, normalize to lowercase and substitute invalid characters with hyphens.
+	// 2. Otherwise, normalize to lowercase, split by '.', clean labels, and filter empty ones.
 	lower := strings.ToLower(s)
-	var sb strings.Builder
-	for _, r := range lower {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
-			sb.WriteRune(r)
-		} else {
-			sb.WriteRune('-')
+	rawLabels := strings.Split(lower, ".")
+	var cleanLabels []string
+	for _, label := range rawLabels {
+		var sb strings.Builder
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				sb.WriteRune(r)
+			} else {
+				sb.WriteRune('-')
+			}
+		}
+		trimmed := strings.Trim(sb.String(), "-")
+		if trimmed != "" {
+			cleanLabels = append(cleanLabels, trimmed)
 		}
 	}
-	clean := sb.String()
-
-	// Trim leading/trailing hyphens and dots
-	clean = strings.Trim(clean, ".-")
+	clean := strings.Join(cleanLabels, ".")
 	if clean == "" {
 		return ""
 	}
 
-	// 3. If clean matches lower (no lossy character substitution) and is a valid DNS-1123 subdomain, return it.
+	// 3. If clean matches lower (no lossy character substitution or dot collapsing) and is a valid DNS-1123 subdomain, return it.
 	if clean == lower && len(validation.IsDNS1123Subdomain(clean)) == 0 {
 		return clean
 	}
