@@ -134,7 +134,7 @@ func matchImages(patterns []string, image string) bool {
 	for _, p := range patterns {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
-			lowerPF := strings.ToLower(pf)
+			lowerPF := normalizePatternFormCase(pf)
 			for _, form := range forms {
 				if ok, err := path.Match(lowerPF, form); err == nil && ok {
 					return true
@@ -143,6 +143,37 @@ func matchImages(patterns []string, image string) bool {
 		}
 	}
 	return false
+}
+
+// normalizePatternFormCase normalizes the case of registry and repository segments in a pattern
+// form to lowercase, while preserving the case of tag and digest portions (which are case-sensitive).
+func normalizePatternFormCase(pf string) string {
+	if pf == "" {
+		return ""
+	}
+
+	repoPart := pf
+	digestPart := ""
+	if atIdx := strings.Index(pf, "@"); atIdx != -1 {
+		repoPart = pf[:atIdx]
+		digestPart = pf[atIdx:]
+	}
+
+	lastSlash := strings.LastIndex(repoPart, "/")
+	searchStart := 0
+	if lastSlash != -1 {
+		searchStart = lastSlash + 1
+	}
+
+	tagIdx := strings.Index(repoPart[searchStart:], ":")
+	if tagIdx != -1 {
+		tagIdx += searchStart
+		repoName := strings.ToLower(repoPart[:tagIdx])
+		tagPart := repoPart[tagIdx:]
+		return repoName + tagPart + digestPart
+	}
+
+	return strings.ToLower(repoPart) + digestPart
 }
 
 // expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern

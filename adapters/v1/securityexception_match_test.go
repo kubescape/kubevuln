@@ -77,6 +77,11 @@ func TestMatchImages(t *testing.T) {
 		{name: "uppercase wildcard pattern matches image", patterns: []string{"MyOrg/*"}, image: "docker.io/myorg/nginx:1.25", want: true},
 		{name: "uppercase wildcard tag pattern matches image", patterns: []string{"Nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "uppercase domain wildcard pattern matches image", patterns: []string{"Docker.io/Library/*"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "uppercase tag pattern matches exact uppercase tag image", patterns: []string{"docker.io/library/nginx:RC1"}, image: "docker.io/library/nginx:RC1", want: true},
+		{name: "uppercase tag pattern does not match lowercase tag image", patterns: []string{"docker.io/library/nginx:RC1"}, image: "docker.io/library/nginx:rc1", want: false},
+		{name: "lowercase tag pattern does not match uppercase tag image", patterns: []string{"docker.io/library/nginx:rc1"}, image: "docker.io/library/nginx:RC1", want: false},
+		{name: "uppercase tag wildcard pattern matches uppercase tag image", patterns: []string{"docker.io/library/nginx:RC*"}, image: "docker.io/library/nginx:RC1", want: true},
+		{name: "uppercase tag wildcard pattern does not match lowercase tag image", patterns: []string{"docker.io/library/nginx:RC*"}, image: "docker.io/library/nginx:rc1", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
