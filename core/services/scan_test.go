@@ -84,7 +84,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      scanfailure.ReasonImageAuthFailed,
 		},
 		{
 			name:     "phase 2, get SBOM failed",
