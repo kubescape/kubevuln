@@ -45,6 +45,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	k8scache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -1097,41 +1098,46 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 }
 
 func sanitizeResourceName(s string) string {
-	lower := strings.ToLower(s)
-	rawLabels := strings.Split(lower, ".")
-	var cleanLabels []string
-	for _, label := range rawLabels {
-		var sb strings.Builder
-		for _, r := range label {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-				sb.WriteRune(r)
-			} else {
-				sb.WriteRune('-')
-			}
-		}
-		trimmed := strings.Trim(sb.String(), "-")
-		if len(trimmed) > 63 {
-			trimmed = strings.TrimRight(trimmed[:63], "-")
-		}
-		if trimmed != "" {
-			cleanLabels = append(cleanLabels, trimmed)
-		}
-	}
-	res := strings.Join(cleanLabels, ".")
-	if res == "" {
+	if s == "" {
 		return ""
 	}
 
-	if res != lower {
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(s)))[:8]
-		if len(res)+9 > 253 {
-			res = strings.TrimRight(res[:253-9], "-.")
-		}
-		res = res + "-" + hash
-	} else if len(res) > 253 {
-		res = strings.Trim(res[:253], "-.")
+	// 1. If s is already a valid DNS-1123 subdomain, return it as-is.
+	if errs := validation.IsDNS1123Subdomain(s); len(errs) == 0 {
+		return s
 	}
 
+	// 2. Otherwise, normalize to lowercase and substitute invalid characters with hyphens.
+	lower := strings.ToLower(s)
+	var sb strings.Builder
+	for _, r := range lower {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('-')
+		}
+	}
+	clean := sb.String()
+
+	// Trim leading/trailing hyphens and dots
+	clean = strings.Trim(clean, ".-")
+	if clean == "" {
+		return ""
+	}
+
+	// 3. If clean matches lower (no lossy character substitution) and is a valid DNS-1123 subdomain, return it.
+	if clean == lower && len(validation.IsDNS1123Subdomain(clean)) == 0 {
+		return clean
+	}
+
+	// 4. Lossy substitution or overlong input: append hash suffix (16 hex chars = 64 bits) to preserve identity.
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(s)))[:16]
+	maxCleanLen := 253 - 1 - len(hash) // 253 - 1 - 16 = 236
+	if len(clean) > maxCleanLen {
+		clean = strings.TrimRight(clean[:maxCleanLen], ".-")
+	}
+	res := clean + "-" + hash
+	res = strings.Trim(res, ".-")
 	return res
 }
 

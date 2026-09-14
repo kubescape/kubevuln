@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -5856,10 +5857,33 @@ func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
 		assert.NotEqual(t, name1, name2, "distinct tags must not collapse into the same resource name")
 	})
 
-	t.Run("truncates labels to 63 chars max", func(t *testing.T) {
+	t.Run("preserves valid DNS-1123 subdomain longer than 63 characters", func(t *testing.T) {
+		valid66 := "deployment-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-webserver"
+		res1 := sanitizeResourceName(valid66)
+		assert.Equal(t, valid66, res1, "already-valid 66-character key must not be re-keyed or hashed")
+
 		longLabel := strings.Repeat("a", 70)
-		res := sanitizeResourceName(longLabel)
-		assert.LessOrEqual(t, len(res), 63)
+		res2 := sanitizeResourceName(longLabel)
+		assert.Equal(t, longLabel, res2, "already-valid 70-character key must not be truncated")
+	})
+
+	t.Run("distinct inputs requiring sanitization produce distinct hashed names", func(t *testing.T) {
+		prefix := "deployment-" + strings.Repeat("a", 53)
+		input1 := prefix + "_c84416"
+		input2 := prefix + "_c95828"
+		res1 := sanitizeResourceName(input1)
+		res2 := sanitizeResourceName(input2)
+		assert.NotEmpty(t, res1)
+		assert.NotEmpty(t, res2)
+		assert.NotEqual(t, res1, res2, "distinct containers with invalid characters must produce distinct resource names")
+		assert.LessOrEqual(t, len(res1), 253)
+		assert.LessOrEqual(t, len(res2), 253)
+	})
+
+	t.Run("overlong input truncated to 253 max with hash suffix", func(t *testing.T) {
+		overlong := strings.Repeat("a", 300)
+		res := sanitizeResourceName(overlong)
+		assert.LessOrEqual(t, len(res), 253)
 		assert.False(t, strings.HasSuffix(res, "-"))
 	})
 
