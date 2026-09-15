@@ -161,18 +161,15 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 		close(serveErrCh)
 	}()
 
+	var serveErr error
 	select {
 	case sig := <-sigCh:
 		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
 	case err := <-serveErrCh:
 		if err != nil {
-			close(stopSweep)
-			_ = metricsServer.Close()
-			return err
+			logger.L().Error("gRPC server failed", helpers.Error(err))
+			serveErr = err
 		}
-		close(stopSweep)
-		_ = metricsServer.Close()
-		return nil
 	}
 
 	close(stopSweep)
@@ -185,5 +182,5 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
 		logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
 	}
-	return nil
+	return serveErr
 }
