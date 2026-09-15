@@ -155,7 +155,7 @@ func normalizePatternFormCase(pf string) string {
 
 	repoPart := pf
 	digestPart := ""
-	if atIdx := strings.Index(pf, "@"); atIdx != -1 {
+	if atIdx := findDigestSeparator(pf); atIdx != -1 {
 		repoPart = pf[:atIdx]
 		digestPart = pf[atIdx:]
 	}
@@ -168,6 +168,28 @@ func normalizePatternFormCase(pf string) string {
 	}
 
 	return normalizeRepoPath(repoPart) + digestPart
+}
+
+// findDigestSeparator returns the index of the digest separator '@' in s, ignoring '@' inside
+// character classes (e.g. [@a]).
+func findDigestSeparator(s string) int {
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '@':
+			if !inClass {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // findTagSeparator returns the index of the tag separator ':' in s, ignoring ':' inside
