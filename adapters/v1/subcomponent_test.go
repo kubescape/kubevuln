@@ -307,3 +307,11 @@ func TestDomainToArmoScopesExceptionAppliedToSubcomponent(t *testing.T) {
 	assert.Len(t, byPackage["elliptic"], 1, "the scoped package is reported as excepted")
 	assert.Empty(t, byPackage["lodash"], "the out-of-scope package must not be reported as excepted")
 }
+
+// TestPurlMatches_CaseInsensitiveQualifierKeys verifies that purlMatches matches qualifier key names case-insensitively per Package URL spec.
+func TestPurlMatches_CaseInsensitiveQualifierKeys(t *testing.T) {
+	assert.True(t, purlMatches("pkg:deb/debian/curl?Arch=amd64", "pkg:deb/debian/curl?arch=amd64"))
+	assert.True(t, purlMatches("pkg:deb/debian/curl?arch=amd64", "pkg:deb/debian/curl?ARCH=amd64"))
+	assert.False(t, purlMatches("pkg:deb/debian/curl?Arch=amd64", "pkg:deb/debian/curl?arch=arm64"))
+}
+
