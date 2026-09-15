@@ -36,12 +36,13 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonScanTimeout
 	}
 
-	// Rate limit / 429 errors
-	if errors.Is(err, domain.ErrTooManyRequests) || tools.IsRateLimitError(err) {
+	// Sentinel rate limit error
+	if errors.Is(err, domain.ErrTooManyRequests) {
 		return scanfailure.ReasonSBOMGenerationFailed
 	}
 
-	// Go 1.13 pattern: typed error extraction via errors.As
+	// Go 1.13 pattern: typed error extraction via errors.As.
+	// Authoritative typed transport and platform errors take precedence over broad string matching.
 	var transportErr *transport.Error
 	if errors.As(err, &transportErr) {
 		switch {
@@ -63,6 +64,11 @@ func classifySBOMError(err error) string {
 	var platformErr *image.ErrPlatformMismatch
 	if errors.As(err, &platformErr) {
 		return scanfailure.ReasonImageNotFound
+	}
+
+	// String-based fallbacks / tools.IsRateLimitError for errors not using typed wrapping
+	if tools.IsRateLimitError(err) {
+		return scanfailure.ReasonSBOMGenerationFailed
 	}
 
 	// String-based fallbacks for errors not using typed wrapping
