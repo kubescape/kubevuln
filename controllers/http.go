@@ -653,6 +653,9 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 // be kept safely under the pod's terminationGracePeriodSeconds so this path has a
 // chance to log before the kubelet SIGKILLs the process.
 func (h *HTTPController) Shutdown(timeout time.Duration) {
+	if h == nil || h.workerPool == nil {
+		return
+	}
 	logger.L().Info("purging SBOM creation queue",
 		helpers.String("remaining jobs", strconv.Itoa(h.workerPool.WaitingQueueSize())),
 		helpers.String("timeout", timeout.String()))
