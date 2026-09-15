@@ -113,9 +113,13 @@ func purlMatches(subcomponent, purl string) bool {
 	// Qualifiers are what separate variants of the same package, and scanned PURLs routinely
 	// carry arch and distro, so every qualifier the exception states must hold. Ones it
 	// leaves out are unconstrained, keeping an unqualified PURL a match for any variant.
-	pkgQualifiers := pkg.Qualifiers.Map()
+	// Qualifier key names are ASCII strings and case-insensitive per the Package URL spec.
+	pkgQualifiers := make(map[string]string, len(pkg.Qualifiers.Map()))
+	for k, v := range pkg.Qualifiers.Map() {
+		pkgQualifiers[strings.ToLower(k)] = v
+	}
 	for key, want := range sub.Qualifiers.Map() {
-		if pkgQualifiers[key] != want {
+		if pkgQualifiers[strings.ToLower(key)] != want {
 			return false
 		}
 	}
