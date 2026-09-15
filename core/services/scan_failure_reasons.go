@@ -38,7 +38,7 @@ func classifySBOMError(err error) string {
 
 	// Rate limit / 429 errors
 	if errors.Is(err, domain.ErrTooManyRequests) || tools.IsRateLimitError(err) {
-		return scanfailure.ReasonImageAuthFailed
+		return scanfailure.ReasonSBOMGenerationFailed
 	}
 
 	// Go 1.13 pattern: typed error extraction via errors.As
@@ -46,9 +46,10 @@ func classifySBOMError(err error) string {
 	if errors.As(err, &transportErr) {
 		switch {
 		case transportErr.StatusCode == http.StatusUnauthorized ||
-			transportErr.StatusCode == http.StatusForbidden ||
-			transportErr.StatusCode == http.StatusTooManyRequests:
+			transportErr.StatusCode == http.StatusForbidden:
 			return scanfailure.ReasonImageAuthFailed
+		case transportErr.StatusCode == http.StatusTooManyRequests:
+			return scanfailure.ReasonSBOMGenerationFailed
 		case transportErr.StatusCode == http.StatusNotFound:
 			return scanfailure.ReasonImageNotFound
 		}
@@ -67,12 +68,14 @@ func classifySBOMError(err error) string {
 	// String-based fallbacks for errors not using typed wrapping
 	errStr := err.Error()
 	switch {
-	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden") || strings.Contains(errStr, "429 Too Many Requests"):
+	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
-	case strings.Contains(errStr, "UNAUTHORIZED") || strings.Contains(errStr, "TOOMANYREQUESTS"):
-		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
-		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
+	case strings.Contains(errStr, "429 Too Many Requests"):
+		return scanfailure.ReasonSBOMGenerationFailed
+	case strings.Contains(errStr, "UNAUTHORIZED"):
 		return scanfailure.ReasonImageAuthFailed
+	case strings.Contains(errStr, "TOOMANYREQUESTS"):
+		return scanfailure.ReasonSBOMGenerationFailed
 	case strings.Contains(errStr, "404 Not Found") ||
 		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
 		strings.Contains(errStr, "NAME_UNKNOWN") ||

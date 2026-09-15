@@ -175,36 +175,36 @@ func TestClassifySBOMError(t *testing.T) {
 		{
 			name:     "domain.ErrTooManyRequests direct",
 			err:      domain.ErrTooManyRequests,
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "wrapped domain.ErrTooManyRequests",
 			err:      fmt.Errorf("image pull failed: %w", domain.ErrTooManyRequests),
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name: "transport 429 via errors.As",
 			err: &transport.Error{
 				StatusCode: http.StatusTooManyRequests,
 			},
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name: "wrapped transport 429",
 			err: fmt.Errorf("pulling image: %w", &transport.Error{
 				StatusCode: http.StatusTooManyRequests,
 			}),
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "string-based 429 Too Many Requests",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 429 Too Many Requests"),
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 		{
 			name:     "string-based TOOMANYREQUESTS code",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: TOOMANYREQUESTS: rate limit exceeded"),
-			expected: scanfailure.ReasonImageAuthFailed,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 	}
 
