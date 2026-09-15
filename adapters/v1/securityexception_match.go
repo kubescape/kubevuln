@@ -97,7 +97,7 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 		if r.Kind != "" && !strings.EqualFold(r.Kind, target.Kind) {
 			continue
 		}
-		if r.Name != "" && r.Name != target.Name {
+		if r.Name != "" && !strings.EqualFold(r.Name, target.Name) {
 			continue
 		}
 		// apiGroup is optional. When the exception pins a group, the target's
