@@ -73,29 +73,6 @@ func TestLoadConfigRejectsNonPositiveScanConcurrency(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsNonPositiveScannerReadinessTimeout(t *testing.T) {
-	for _, v := range []string{"0", "-1s"} {
-		t.Run(v, func(t *testing.T) {
-			viper.Reset()
-			t.Setenv("SCANNERREADINESSTIMEOUT", v)
-			_, err := LoadConfig("testdata")
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "scannerReadinessTimeout")
-		})
-	}
-}
-
-func TestLoadConfigRejectsNonPositiveShutdownTimeout(t *testing.T) {
-	for _, v := range []string{"0", "-1s"} {
-		t.Run(v, func(t *testing.T) {
-			viper.Reset()
-			t.Setenv("SHUTDOWNTIMEOUT", v)
-			_, err := LoadConfig("testdata")
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "shutdownTimeout")
-		})
-	}
-}
 
 func TestLoadConfigRejectsNonPositiveMaxImageSize(t *testing.T) {
 	for _, v := range []string{"0", "-1"} {

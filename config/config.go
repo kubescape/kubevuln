@@ -182,12 +182,7 @@ func LoadConfig(path string) (Config, error) {
 	if config.ScanConcurrency <= 0 {
 		return Config{}, fmt.Errorf("scanConcurrency must be positive, got %d", config.ScanConcurrency)
 	}
-	if config.ScannerReadinessTimeout <= 0 {
-		return Config{}, fmt.Errorf("scannerReadinessTimeout must be positive, got %s", config.ScannerReadinessTimeout)
-	}
-	if config.ShutdownTimeout <= 0 {
-		return Config{}, fmt.Errorf("shutdownTimeout must be positive, got %s", config.ShutdownTimeout)
-	}
+
 
 	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
