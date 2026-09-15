@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -105,5 +109,89 @@ func TestGracefulStopWithTimeout_ReturnsPromptlyWithNoInFlightRPCs(t *testing.T)
 
 	if elapsed >= timeout/2 {
 		t.Fatalf("gracefulStopWithTimeout took %s with no in-flight RPCs, expected it to return well under the %s timeout", elapsed, timeout)
+	}
+}
+
+// TestRunServer_SignalTriggersCleanup verifies that receiving SIGTERM triggers graceful shutdown,
+// removes the unix socket file, and stops the metrics HTTP server before exiting.
+func TestRunServer_SignalTriggersCleanup(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := filepath.Join(tempDir, "test-scanner.sock")
+
+	metricsLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port for metrics: %v", err)
+	}
+	metricsAddr := metricsLis.Addr().String()
+	metricsLis.Close()
+
+	sigCh := make(chan os.Signal, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- runServer(socketPath, metricsAddr, tempDir, sigCh)
+	}()
+
+	// Wait for socket file to be created
+	socketReady := false
+	for i := 0; i < 50; i++ {
+		if _, err := os.Stat(socketPath); err == nil {
+			socketReady = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !socketReady {
+		t.Fatalf("socket file %s was not created in time", socketPath)
+	}
+
+	// Verify metrics server is listening with bounded retry
+	metricsClient := &http.Client{Timeout: 500 * time.Millisecond}
+	metricsReady := false
+	for i := 0; i < 50; i++ {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				metricsReady = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !metricsReady {
+		t.Fatalf("metrics server at %s was not ready in time", metricsAddr)
+	}
+
+	// Send SIGTERM signal to trigger shutdown
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runServer returned unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runServer did not shut down within 5 seconds of signal")
+	}
+
+	// Verify socket file was removed
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Errorf("socket file %s still exists after shutdown", socketPath)
+	}
+
+	// Verify metrics server is shut down
+	metricsClosed := false
+	for i := 0; i < 50; i++ {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err != nil {
+			metricsClosed = true
+			break
+		}
+		_ = resp.Body.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !metricsClosed {
+		t.Errorf("metrics server is still responding after shutdown")
 	}
 }
