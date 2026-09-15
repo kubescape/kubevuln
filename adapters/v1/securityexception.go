@@ -48,9 +48,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range exceptions {
 		se := &exceptions[i]
-		if !matchExceptionTarget(se.Spec.Match, target, false) {
-			continue
-		}
+		matched := matchExceptionTarget(se.Spec.Match, target, false)
 		namespace := se.Namespace
 		for _, vuln := range se.Spec.Vulnerabilities {
 			if !shouldSuppress(vuln) {
@@ -62,6 +60,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 				logger.L().Debug("security exception suppression expired",
 					helpers.String("name", se.Name),
 					helpers.String("namespace", se.Namespace))
+				continue
+			}
+			if !matched {
 				continue
 			}
 			p := buildPolicy(se.Spec, vuln, namespace, suppressionSource{
@@ -76,9 +77,7 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 	for i := range clusterExceptions {
 		cse := &clusterExceptions[i]
-		if !matchExceptionTarget(cse.Spec.Match, target, true) {
-			continue
-		}
+		matched := matchExceptionTarget(cse.Spec.Match, target, true)
 		for _, vuln := range cse.Spec.Vulnerabilities {
 			if !shouldSuppress(vuln) {
 				continue
@@ -88,6 +87,9 @@ func ConvertToVulnerabilityExceptionPolicies(exceptions []sev1beta1.SecurityExce
 
 				logger.L().Debug("cluster security exception suppression expired",
 					helpers.String("name", cse.Name))
+				continue
+			}
+			if !matched {
 				continue
 			}
 			p := buildPolicy(cse.Spec, vuln, "", suppressionSource{

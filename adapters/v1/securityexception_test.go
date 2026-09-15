@@ -65,6 +65,32 @@ func TestConvertVulnerabilityExceptions(t *testing.T) {
 	assert.Nil(t, policies[1].Designatores)
 }
 
+func TestConvertVulnerabilityExceptions_ExpiredUnmatchedTarget(t *testing.T) {
+	past := metav1.NewTime(time.Now().Add(-1 * time.Hour))
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "expired-unmatched", Namespace: "prod"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Match: sev1beta1.ExceptionMatch{
+					Resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "other"}},
+				},
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+						ExpiresAt:     &past,
+					},
+				},
+			},
+		},
+	}
+
+	policies, stats := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{Kind: "Deployment", Name: "target-workload"})
+	assert.Empty(t, policies, "should not emit policies for unmatched target")
+	assert.Equal(t, 1, stats.ExpiredBySource["SecurityException"], "expired count must be recorded even when target match fails")
+}
+
+
 func TestConvertVulnerabilityExceptions_SuppressionProvenance(t *testing.T) {
 	exceptions := []sev1beta1.SecurityException{
 		{
