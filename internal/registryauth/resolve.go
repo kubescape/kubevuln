@@ -118,7 +118,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 				outcome = metrics.FallbackOutcomeSucceeded
 			}
 			metrics.RecordScanFallback(ctx, component, metrics.FallbackCategoryRegistryAuth, metrics.FallbackStrategyAnonymous, outcome)
-			if err != nil && !strings.Contains(err.Error(), "401 Unauthorized") {
+			if err != nil && !errors.Is(err, unauthorizedErr) && err.Error() != unauthorizedErr.Error() {
 				err = fmt.Errorf("%w (anonymous fallback failed: %v)", unauthorizedErr, err)
 			}
 		}
