@@ -10,6 +10,7 @@ import (
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/kubevuln/core/domain"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/stretchr/testify/assert"
 )
@@ -169,6 +170,40 @@ func TestClassifySBOMError(t *testing.T) {
 			err: &transport.Error{
 				StatusCode: http.StatusInternalServerError,
 			},
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name:     "domain.ErrTooManyRequests direct",
+			err:      domain.ErrTooManyRequests,
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name:     "wrapped domain.ErrTooManyRequests",
+			err:      fmt.Errorf("image pull failed: %w", domain.ErrTooManyRequests),
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name: "transport 429 via errors.As",
+			err: &transport.Error{
+				StatusCode: http.StatusTooManyRequests,
+			},
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name: "wrapped transport 429",
+			err: fmt.Errorf("pulling image: %w", &transport.Error{
+				StatusCode: http.StatusTooManyRequests,
+			}),
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name:     "string-based 429 Too Many Requests",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 429 Too Many Requests"),
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
+			name:     "string-based TOOMANYREQUESTS code",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: TOOMANYREQUESTS: rate limit exceeded"),
 			expected: scanfailure.ReasonSBOMGenerationFailed,
 		},
 	}

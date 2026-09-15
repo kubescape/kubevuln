@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
@@ -35,13 +36,21 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonScanTimeout
 	}
 
-	// Go 1.13 pattern: typed error extraction via errors.As
+	// Sentinel rate limit error
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		return scanfailure.ReasonSBOMGenerationFailed
+	}
+
+	// Go 1.13 pattern: typed error extraction via errors.As.
+	// Authoritative typed transport and platform errors take precedence over broad string matching.
 	var transportErr *transport.Error
 	if errors.As(err, &transportErr) {
 		switch {
 		case transportErr.StatusCode == http.StatusUnauthorized ||
 			transportErr.StatusCode == http.StatusForbidden:
 			return scanfailure.ReasonImageAuthFailed
+		case transportErr.StatusCode == http.StatusTooManyRequests:
+			return scanfailure.ReasonSBOMGenerationFailed
 		case transportErr.StatusCode == http.StatusNotFound:
 			return scanfailure.ReasonImageNotFound
 		}
@@ -57,15 +66,22 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonImageNotFound
 	}
 
+	// String-based fallbacks / tools.IsRateLimitError for errors not using typed wrapping
+	if tools.IsRateLimitError(err) {
+		return scanfailure.ReasonSBOMGenerationFailed
+	}
+
 	// String-based fallbacks for errors not using typed wrapping
 	errStr := err.Error()
 	switch {
 	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
+	case strings.Contains(errStr, "429 Too Many Requests"):
+		return scanfailure.ReasonSBOMGenerationFailed
 	case strings.Contains(errStr, "UNAUTHORIZED"):
-		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
-		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
 		return scanfailure.ReasonImageAuthFailed
+	case strings.Contains(errStr, "TOOMANYREQUESTS"):
+		return scanfailure.ReasonSBOMGenerationFailed
 	case strings.Contains(errStr, "404 Not Found") ||
 		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
 		strings.Contains(errStr, "NAME_UNKNOWN") ||
