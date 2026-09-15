@@ -134,14 +134,118 @@ func matchImages(patterns []string, image string) bool {
 	for _, p := range patterns {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
+			lowerPF := normalizePatternFormCase(pf)
 			for _, form := range forms {
-				if ok, err := path.Match(pf, form); err == nil && ok {
+				if ok, err := path.Match(lowerPF, form); err == nil && ok {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// normalizePatternFormCase normalizes the case of registry and repository segments in a pattern
+// form to lowercase, while preserving the case of tag and digest portions (which are case-sensitive)
+// even when glob tokens hide delimiters.
+func normalizePatternFormCase(pf string) string {
+	if pf == "" {
+		return ""
+	}
+
+	repoPart := pf
+	digestPart := ""
+	if atIdx := findDigestSeparator(pf); atIdx != -1 {
+		repoPart = pf[:atIdx]
+		digestPart = pf[atIdx:]
+	}
+
+	tagIdx := findTagSeparator(repoPart)
+	if tagIdx != -1 {
+		repoPath := repoPart[:tagIdx]
+		tagPart := repoPart[tagIdx:]
+		return strings.ToLower(repoPath) + tagPart + digestPart
+	}
+
+	return normalizeRepoPath(repoPart) + digestPart
+}
+
+// findDigestSeparator returns the index of the digest separator '@' in s, ignoring '@' inside
+// character classes (e.g. [@a]).
+func findDigestSeparator(s string) int {
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '@':
+			if !inClass {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// findTagSeparator returns the index of the tag separator ':' in s, ignoring ':' inside
+// character classes (e.g. [^/]) and taking care not to misidentify port numbers in registry domains.
+func findTagSeparator(s string) int {
+	lastSlash := -1
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '/':
+			if !inClass {
+				lastSlash = i
+			}
+		}
+	}
+	searchStart := 0
+	if lastSlash != -1 {
+		searchStart = lastSlash + 1
+	}
+	inClass = false
+	for i := searchStart; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case ':':
+			if !inClass {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func isEscaped(s string, i int) bool {
+	count := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		count++
+	}
+	return count%2 != 0
+}
+
+// normalizeRepoPath normalizes registry domain and path segments to lowercase, preserving glob wildcards.
+func normalizeRepoPath(repoPath string) string {
+	return strings.ToLower(repoPath)
 }
 
 // expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
@@ -171,7 +275,7 @@ func expandPatternForms(p string) []string {
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
-	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
+	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || strings.EqualFold(firstSeg, "localhost")
 	if !hasDomainOrWildcard {
 		patterns = append(patterns, "docker.io/"+p)
 	}
