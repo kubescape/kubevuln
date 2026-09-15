@@ -492,3 +492,21 @@ func TestLoadConfigStillAcceptsZeroMaxQueueDepth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, c.MaxQueueDepth)
 }
+
+func TestProxyRegistryMapFromViper_NilAndNullHandling(t *testing.T) {
+	v := viper.New()
+	m, err := proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Nil(t, m)
+
+	v.Set("proxyRegistryMap", "null")
+	m, err = proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Nil(t, m)
+
+	v.Set("proxyRegistryMap", `{"docker.io":"mirror.io"}`)
+	m, err = proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"docker.io": "mirror.io"}, m)
+}
+

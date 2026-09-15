@@ -267,14 +267,21 @@ func trustedVendorsFromViper(v *viper.Viper) []string {
 // any indication why, so the env case is parsed explicitly here and any error
 // is surfaced to the caller instead.
 func proxyRegistryMapFromViper(v *viper.Viper) (map[string]string, error) {
-	raw, ok := v.Get("proxyRegistryMap").(string)
-	if !ok {
-		return v.GetStringMapString("proxyRegistryMap"), nil
+	val := v.Get("proxyRegistryMap")
+	if val == nil {
+		return nil, nil
 	}
-	var proxyMap map[string]string
-	if err := json.Unmarshal([]byte(raw), &proxyMap); err != nil {
-		return nil, fmt.Errorf("invalid proxyRegistryMap: %w", err)
+	if raw, ok := val.(string); ok {
+		if strings.TrimSpace(raw) == "" || raw == "null" {
+			return nil, nil
+		}
+		var proxyMap map[string]string
+		if err := json.Unmarshal([]byte(raw), &proxyMap); err != nil {
+			return nil, fmt.Errorf("invalid proxyRegistryMap: %w", err)
+		}
+		return proxyMap, nil
 	}
+	proxyMap := v.GetStringMapString("proxyRegistryMap")
 	return proxyMap, nil
 }
 
