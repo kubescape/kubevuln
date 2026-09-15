@@ -61,6 +61,43 @@ func TestLoadConfigRejectsNonPositiveScanTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsNonPositiveScanConcurrency(t *testing.T) {
+	for _, v := range []string{"0", "-1"} {
+		t.Run(v, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv("SCANCONCURRENCY", v)
+			_, err := LoadConfig("testdata")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "scanConcurrency")
+		})
+	}
+}
+
+
+func TestLoadConfigRejectsNonPositiveMaxImageSize(t *testing.T) {
+	for _, v := range []string{"0", "-1"} {
+		t.Run(v, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv("MAXIMAGESIZE", v)
+			_, err := LoadConfig("testdata")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "maxImageSize")
+		})
+	}
+}
+
+func TestLoadConfigRejectsNonPositiveMaxSBOMSize(t *testing.T) {
+	for _, v := range []string{"0", "-1"} {
+		t.Run(v, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv("MAXSBOMSIZE", v)
+			_, err := LoadConfig("testdata")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "maxSBOMSize")
+		})
+	}
+}
+
 func TestLoadBackendServicesConfig(t *testing.T) {
 	services, err := LoadBackendServicesConfig("testdata", "")
 	assert.NoError(t, err)

@@ -179,6 +179,10 @@ func LoadConfig(path string) (Config, error) {
 	if config.MaxSBOMSize <= 0 {
 		return Config{}, fmt.Errorf("maxSBOMSize must be positive, got %d", config.MaxSBOMSize)
 	}
+	if config.ScanConcurrency <= 0 {
+		return Config{}, fmt.Errorf("scanConcurrency must be positive, got %d", config.ScanConcurrency)
+	}
+
 
 	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
