@@ -97,6 +97,22 @@ func TestHasKnownFix(t *testing.T) {
 			wantVersion: unknownFixVersion,
 		},
 		{
+			name: "fix state case insensitive Fixed",
+			match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: "Fixed"}},
+			},
+			wantFixed:   true,
+			wantVersion: unknownFixVersion,
+		},
+		{
+			name: "fix state case insensitive FIXED",
+			match: v1beta1.Match{
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: "FIXED"}},
+			},
+			wantFixed:   true,
+			wantVersion: unknownFixVersion,
+		},
+		{
 			// #955: a deb package's installed version carries an epoch after a bump
 			// (e.g. util-linux, iptables), which is not valid semver. Before the fix,
 			// this fell through to an unguarded versions[0] and could suggest the very

@@ -43,7 +43,7 @@ func hasKnownFix(m v1beta1.Match) (bool, string) {
 		}
 		return true, unknownFixVersion
 	}
-	if m.Vulnerability.Fix.State == fixStateFixed {
+	if strings.EqualFold(m.Vulnerability.Fix.State, fixStateFixed) {
 		return true, unknownFixVersion
 	}
 	// no concrete version: fall back to CPE matches. Only cpe-match details are read,
