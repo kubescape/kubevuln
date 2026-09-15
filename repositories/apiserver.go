@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -45,7 +46,6 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	k8scache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -1176,21 +1176,16 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 				return res, nil
 			}
 		}
+		if cveName != "" {
+			if res := sanitizeResourceName(cveName); res != "" {
+				return res, nil
+			}
+		}
 		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
 	}
 
-	parts := make([]string, 0, 3)
-	if kind != "" {
-		parts = append(parts, kind)
-	}
-	if name != "" {
-		parts = append(parts, name)
-	}
-	if contName != "" {
-		parts = append(parts, contName)
-	}
-
-	res := sanitizeResourceName(strings.Join(parts, "-"))
+	rawName := fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName)
+	res := sanitizeResourceName(rawName)
 	if res == "" {
 		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
 	}
