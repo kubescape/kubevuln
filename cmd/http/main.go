@@ -81,6 +81,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
+		storage.EnableLabelsCacheInvalidation(ctx)
 	}
 	var sbomAdapter ports.SBOMCreator
 	scanMode := domain.ScanModeInProcess

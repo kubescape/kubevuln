@@ -3648,6 +3648,103 @@ func TestAPIServerStore_GetNamespaceLabels_DoesNotCacheFailures(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
+func TestAPIServerStore_InvalidateLabelsCache(t *testing.T) {
+	dep := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "deploy-x",
+			"namespace": "ns-y",
+			"labels":    map[string]interface{}{"env": "prod"},
+		},
+	}}
+	rc := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ReplicationController",
+		"metadata": map[string]interface{}{
+			"name":      "rc-x",
+			"namespace": "ns-y",
+			"labels":    map[string]interface{}{"tier": "frontend"},
+		},
+	}}
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":   "ns-y",
+			"labels": map[string]interface{}{"team": "sec"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), dep, rc, ns)
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	// Initial fetch - populates cache
+	labels, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "prod"}, labels)
+
+	rcLabels, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "frontend"}, rcLabels)
+
+	nsLabels, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "sec"}, nsLabels)
+
+	// Update underlying objects in K8s dynamic client
+	depUpdated := dep.DeepCopy()
+	depUpdated.SetLabels(map[string]string{"env": "staging"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}).Namespace("ns-y").Update(context.TODO(), depUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	rcUpdated := rc.DeepCopy()
+	rcUpdated.SetLabels(map[string]string{"tier": "backend"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "", Version: "v1", Resource: "replicationcontrollers"}).Namespace("ns-y").Update(context.TODO(), rcUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	nsUpdated := ns.DeepCopy()
+	nsUpdated.SetLabels(map[string]string{"team": "dev"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}).Update(context.TODO(), nsUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	// Cache still serves stale labels before invalidation
+	labelsStale, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "prod"}, labelsStale)
+
+	rcLabelsStale, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "frontend"}, rcLabelsStale)
+
+	nsLabelsStale, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "sec"}, nsLabelsStale)
+
+	// Invalidate cache
+	a.InvalidateWorkloadLabelsCache("ns-y", "Deployment", "deploy-x")
+	a.InvalidateWorkloadLabelsCache("ns-y", "ReplicationController", "rc-x")
+	a.InvalidateNamespaceLabelsCache("ns-y")
+
+	// Re-fetch returns refreshed labels
+	labelsRefreshed, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "staging"}, labelsRefreshed)
+
+	rcLabelsRefreshed, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "backend"}, rcLabelsRefreshed)
+
+	nsLabelsRefreshed, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "dev"}, nsLabelsRefreshed)
+}
+
+
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}

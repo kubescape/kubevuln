@@ -138,6 +138,9 @@ type APIServerStore struct {
 
 	securityExceptionInformerMu   sync.Mutex
 	securityExceptionInformerStop context.CancelFunc
+
+	labelsInformerMu   sync.Mutex
+	labelsInformerStop context.CancelFunc
 }
 
 // securityExceptionCacheEntry pairs a cache key's invalidation generation with the mutex that
@@ -415,6 +418,76 @@ func (a *APIServerStore) EnableSecurityExceptionCacheInvalidation(ctx context.Co
 	}
 
 	a.securityExceptionInformerStop = cancel
+	go factory.Start(watchCtx.Done())
+}
+
+// EnableLabelsCacheInvalidation starts background informers to invalidate cached workload
+// and namespace labels in labelsCache when label updates or object deletions occur on the cluster.
+func (a *APIServerStore) EnableLabelsCacheInvalidation(ctx context.Context) {
+	if a == nil || a.DynamicClient == nil || a.labelsCache == nil {
+		return
+	}
+
+	a.labelsInformerMu.Lock()
+	defer a.labelsInformerMu.Unlock()
+
+	if a.labelsInformerStop != nil {
+		return
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(a.DynamicClient, 0, metav1.NamespaceAll, nil)
+
+	if _, err := factory.ForResource(namespaceGVR).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			uOld := unstructuredFromEvent(oldObj)
+			uNew := unstructuredFromEvent(newObj)
+			if uNew != nil && (uOld == nil || !reflect.DeepEqual(uOld.GetLabels(), uNew.GetLabels())) {
+				a.InvalidateNamespaceLabelsCache(uNew.GetName())
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			if u := unstructuredFromEvent(obj); u != nil {
+				a.InvalidateNamespaceLabelsCache(u.GetName())
+			}
+		},
+	}); err != nil {
+		cancel()
+		logger.L().Warning("failed to register Namespace labels cache invalidation handler", helpers.Error(err))
+		return
+	}
+
+	workloadGVRs := []schema.GroupVersionResource{
+		{Group: "", Version: "v1", Resource: "pods"},
+		{Group: "", Version: "v1", Resource: "replicationcontrollers"},
+		{Group: "apps", Version: "v1", Resource: "deployments"},
+		{Group: "apps", Version: "v1", Resource: "replicasets"},
+		{Group: "apps", Version: "v1", Resource: "statefulsets"},
+		{Group: "apps", Version: "v1", Resource: "daemonsets"},
+		{Group: "batch", Version: "v1", Resource: "jobs"},
+		{Group: "batch", Version: "v1", Resource: "cronjobs"},
+	}
+
+	for _, gvr := range workloadGVRs {
+		if _, err := factory.ForResource(gvr).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				uOld := unstructuredFromEvent(oldObj)
+				uNew := unstructuredFromEvent(newObj)
+				if uNew != nil && (uOld == nil || !reflect.DeepEqual(uOld.GetLabels(), uNew.GetLabels())) {
+					a.InvalidateWorkloadLabelsCache(uNew.GetNamespace(), uNew.GetKind(), uNew.GetName())
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				if u := unstructuredFromEvent(obj); u != nil {
+					a.InvalidateWorkloadLabelsCache(u.GetNamespace(), u.GetKind(), u.GetName())
+				}
+			},
+		}); err != nil {
+			logger.L().Warning("failed to register workload labels cache invalidation handler", helpers.String("resource", gvr.Resource), helpers.Error(err))
+		}
+	}
+
+	a.labelsInformerStop = cancel
 	go factory.Start(watchCtx.Done())
 }
 
@@ -806,6 +879,22 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 		a.labelsCache.Set(cacheKey, labels, labelsCacheTTL)
 	}
 	return labels, nil
+}
+
+// InvalidateWorkloadLabelsCache invalidates a workload's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateWorkloadLabelsCache(namespace, kind, name string) {
+	if a.labelsCache != nil && namespace != "" && kind != "" && name != "" {
+		cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
+		a.labelsCache.Delete(cacheKey)
+	}
+}
+
+// InvalidateNamespaceLabelsCache invalidates a namespace's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateNamespaceLabelsCache(name string) {
+	if a.labelsCache != nil && name != "" {
+		cacheKey := namespaceLabelsCacheKeyPrefix + name
+		a.labelsCache.Delete(cacheKey)
+	}
 }
 
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
