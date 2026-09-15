@@ -1622,9 +1622,14 @@ func TestShouldRetryReport(t *testing.T) {
 		status int
 		want   bool
 	}{
+		{http.StatusOK, true},
+		{http.StatusBadRequest, false},
 		{http.StatusUnauthorized, false},
 		{http.StatusForbidden, false},
 		{http.StatusNotFound, false},
+		{http.StatusMethodNotAllowed, false},
+		{http.StatusRequestEntityTooLarge, false},
+		{http.StatusUnprocessableEntity, false},
 		{http.StatusInternalServerError, true}, // #486
 		{http.StatusTooManyRequests, true},
 		{http.StatusBadGateway, true},
@@ -1875,31 +1880,4 @@ func TestHttpPostWithContext_ZeroRetryAfterDoesNotSpin(t *testing.T) {
 	}
 }
 
-func TestShouldRetryReport(t *testing.T) {
-	tests := []struct {
-		statusCode int
-		want       bool
-	}{
-		{http.StatusOK, true},
-		{http.StatusBadRequest, false},
-		{http.StatusUnauthorized, false},
-		{http.StatusForbidden, false},
-		{http.StatusNotFound, false},
-		{http.StatusMethodNotAllowed, false},
-		{http.StatusRequestEntityTooLarge, false},
-		{http.StatusUnprocessableEntity, false},
-		{http.StatusTooManyRequests, true},
-		{http.StatusInternalServerError, true},
-		{http.StatusBadGateway, true},
-		{http.StatusServiceUnavailable, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(http.StatusText(tt.statusCode), func(t *testing.T) {
-			resp := &http.Response{StatusCode: tt.statusCode}
-			got := shouldRetryReport(resp)
-			assert.Equal(t, tt.want, got, "shouldRetryReport(%d)", tt.statusCode)
-		})
-	}
-}
 
