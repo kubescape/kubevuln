@@ -115,7 +115,8 @@ func TestGracefulStopWithTimeout_ReturnsPromptlyWithNoInFlightRPCs(t *testing.T)
 // TestRunServer_SignalTriggersCleanup verifies that receiving SIGTERM triggers graceful shutdown,
 // removes the unix socket file, and stops the metrics HTTP server before exiting.
 func TestRunServer_SignalTriggersCleanup(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "test-scanner.sock")
+	tempDir := t.TempDir()
+	socketPath := filepath.Join(tempDir, "test-scanner.sock")
 
 	metricsLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -128,7 +129,7 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- runServer(socketPath, metricsAddr, sigCh)
+		errCh <- runServer(socketPath, metricsAddr, tempDir, sigCh)
 	}()
 
 	// Wait for socket file to be created
@@ -144,12 +145,23 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 		t.Fatalf("socket file %s was not created in time", socketPath)
 	}
 
-	// Verify metrics server is listening
-	resp, err := http.Get("http://" + metricsAddr + "/metrics")
-	if err != nil {
-		t.Fatalf("failed to reach metrics server before shutdown: %v", err)
+	// Verify metrics server is listening with bounded retry
+	metricsClient := &http.Client{Timeout: 500 * time.Millisecond}
+	metricsReady := false
+	for i := 0; i < 50; i++ {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				metricsReady = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	_ = resp.Body.Close()
+	if !metricsReady {
+		t.Fatalf("metrics server at %s was not ready in time", metricsAddr)
+	}
 
 	// Send SIGTERM signal to trigger shutdown
 	sigCh <- syscall.SIGTERM
@@ -169,9 +181,17 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	}
 
 	// Verify metrics server is shut down
-	_, err = http.Get("http://" + metricsAddr + "/metrics")
-	if err == nil {
+	metricsClosed := false
+	for i := 0; i < 50; i++ {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err != nil {
+			metricsClosed = true
+			break
+		}
+		_ = resp.Body.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !metricsClosed {
 		t.Errorf("metrics server is still responding after shutdown")
 	}
 }
-

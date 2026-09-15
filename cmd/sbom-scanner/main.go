@@ -92,12 +92,15 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	if err := runServer(socketPath, metricsAddr, sigCh); err != nil {
+	if err := runServer(socketPath, metricsAddr, os.TempDir(), sigCh); err != nil {
 		logger.L().Fatal("gRPC server failed", helpers.Error(err))
 	}
 }
 
-func runServer(socketPath, metricsAddr string, sigCh <-chan os.Signal) error {
+func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) error {
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
 	// Remove stale socket file from a previous run
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
 		logger.L().Warning("failed to remove stale socket file", helpers.Error(err), helpers.String("path", socketPath))
@@ -140,7 +143,7 @@ func runServer(socketPath, metricsAddr string, sigCh <-chan os.Signal) error {
 	// sweep at all, startup or periodic, despite being the one that performs pod-less
 	// registry pulls (registry rescans, periodic CRD-based rescans).
 	stopSweep := make(chan struct{})
-	tools.StartPeriodicTempDirSweep(stopSweep, os.TempDir(), "stereoscope-", tempDirSweepInterval, tempDirSweepInterval, func(removed int, err error) {
+	tools.StartPeriodicTempDirSweep(stopSweep, tempDir, "stereoscope-", tempDirSweepInterval, tempDirSweepInterval, func(removed int, err error) {
 		if err != nil {
 			logger.L().Warning("temp dir sweep error", helpers.Error(err), helpers.Int("removed", removed))
 		} else if removed > 0 {
@@ -184,4 +187,3 @@ func runServer(socketPath, metricsAddr string, sigCh <-chan os.Signal) error {
 	}
 	return nil
 }
-
