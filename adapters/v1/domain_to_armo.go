@@ -165,7 +165,7 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 						},
 					},
 					PackageType:      string(m.Artifact.Type),
-					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookup(m.Vulnerability.ID, isFixed == 1), m.Artifact.PURL),
+					ExceptionApplied: scopedToSubcomponent(exceptionIndex.lookupMatch(m, isFixed == 1), m.Artifact.PURL),
 					IsRelevant:       nil, // TODO add relevancy here?
 					Coordinates:      syftCoordinatesToCoordinates(m.Artifact.Locations),
 				},
@@ -312,7 +312,7 @@ func suggestedVersion(current string, versions []string, artifactType v1beta1.Sy
 		return ""
 	}
 
-	if format, ok := distroPackageVersionFormat(artifactType); ok {
+	if format, ok := versionFormatForArtifact(artifactType); ok {
 		return nearestDistroFix(current, versions, format)
 	}
 
@@ -339,19 +339,14 @@ func suggestedVersion(current string, versions []string, artifactType v1beta1.Sy
 	return nearestStr
 }
 
-// distroPackageVersionFormat reports the Grype version format matching artifactType's
-// own (non-semver) version scheme, for the OS package ecosystems where that scheme is
-// known to disagree with generic semver: an apk/deb/rpm version can carry an epoch
-// prefix that plain semver rejects outright, or a release revision (e.g. "-r10") that
-// semver's prerelease-identifier rules order lexically rather than numerically. Every
-// other ecosystem returns false and keeps using suggestedVersion's semver comparison.
-func distroPackageVersionFormat(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
-	switch format := grypeversion.ParseFormat(string(artifactType)); format {
-	case grypeversion.ApkFormat, grypeversion.DebFormat, grypeversion.RpmFormat:
-		return format, true
-	default:
+// versionFormatForArtifact reports the Grype version format matching artifactType's
+// own (non-semver) version scheme for all supported ecosystems.
+func versionFormatForArtifact(artifactType v1beta1.SyftType) (grypeversion.Format, bool) {
+	format := grypeversion.ParseFormat(string(artifactType))
+	if format == grypeversion.UnknownFormat {
 		return grypeversion.UnknownFormat, false
 	}
+	return format, true
 }
 
 // nearestDistroFix returns the smallest version in versions that is strictly greater
