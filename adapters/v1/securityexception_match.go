@@ -176,6 +176,9 @@ func findTagSeparator(s string) int {
 	lastSlash := -1
 	inClass := false
 	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
 		switch s[i] {
 		case '[':
 			inClass = true
@@ -193,6 +196,9 @@ func findTagSeparator(s string) int {
 	}
 	inClass = false
 	for i := searchStart; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
 		switch s[i] {
 		case '[':
 			inClass = true
@@ -207,42 +213,17 @@ func findTagSeparator(s string) int {
 	return -1
 }
 
-// normalizeRepoPath normalizes registry domain and path segments to lowercase up to any
-// tag/glob pattern boundaries, preserving glob case sensitivity where wildcards occur.
+func isEscaped(s string, i int) bool {
+	count := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		count++
+	}
+	return count%2 != 0
+}
+
+// normalizeRepoPath normalizes registry domain and path segments to lowercase, preserving glob wildcards.
 func normalizeRepoPath(repoPath string) string {
-	lastSlash := -1
-	inClass := false
-	for i := 0; i < len(repoPath); i++ {
-		switch repoPath[i] {
-		case '[':
-			inClass = true
-		case ']':
-			inClass = false
-		case '/':
-			if !inClass {
-				lastSlash = i
-			}
-		}
-	}
-
-	prefix := ""
-	namePart := repoPath
-	if lastSlash != -1 {
-		prefix = repoPath[:lastSlash+1]
-		namePart = repoPath[lastSlash+1:]
-	}
-
-	wildcardIdx := strings.IndexAny(namePart, "*?[")
-	nameNormalized := ""
-	if wildcardIdx != -1 {
-		nameLiteral := strings.ToLower(namePart[:wildcardIdx])
-		globRest := namePart[wildcardIdx:]
-		nameNormalized = nameLiteral + globRest
-	} else {
-		nameNormalized = strings.ToLower(namePart)
-	}
-
-	return strings.ToLower(prefix) + nameNormalized
+	return strings.ToLower(repoPath)
 }
 
 // expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
