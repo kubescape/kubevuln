@@ -43,6 +43,18 @@ func TestHTTPController_Alive(t *testing.T) {
 	assert.Equal(t, w.Body.String(), "{\"status\":200,\"title\":\"OK\"}", w.Body.String())
 }
 
+func TestHTTPController_Shutdown_NilWorkerPoolDoesNotPanic(t *testing.T) {
+	var nilController *HTTPController
+	require.NotPanics(t, func() {
+		nilController.Shutdown(time.Second)
+	})
+
+	emptyController := &HTTPController{}
+	require.NotPanics(t, func() {
+		emptyController.Shutdown(time.Second)
+	})
+}
+
 func TestHTTPController_GenerateSBOM(t *testing.T) {
 	tests := []struct {
 		name         string
