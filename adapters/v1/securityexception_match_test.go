@@ -94,6 +94,7 @@ func TestMatchResources(t *testing.T) {
 	}{
 		{name: "empty matches everything", resources: nil, target: target, want: true},
 		{name: "kind case-insensitive match", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "nginx"}}, target: target, want: true},
+		{name: "resource name case-insensitive match", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "Nginx"}}, target: target, want: true},
 		{name: "kind-only match ignores name", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment"}}, target: target, want: true},
 		{name: "kind mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "StatefulSet"}}, target: target, want: false},
 		{name: "name mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "other"}}, target: target, want: false},
