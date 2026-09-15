@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1795,6 +1796,32 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 			cveName:  "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
 			expRes:   "docker.io-rancher-system-upgrade-controller-sha256-7b334b59a48c",
 		},
+		{
+			workload: domain.ScanCommand{
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-kubevuln",
+				ContainerName: "",
+			},
+			expRes: "deployment-kubevuln",
+		},
+		{
+			workload: domain.ScanCommand{
+				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-web",
+				ContainerName: "web_container",
+			},
+			expRes: "deployment-web-web-container",
+		},
+		{
+			workload: domain.ScanCommand{},
+			cveName:  "a..b",
+			expRes:   "a.b",
+		},
+		{
+			workload: domain.ScanCommand{
+				ImageSlug: "valid-slug",
+			},
+			cveName: "---",
+			expRes:  "valid-slug",
+		},
 	}
 
 	testsErrorCases := []struct {
@@ -1802,7 +1829,16 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		err         error
 	}{
 		{
-			err: domain.ErrCastingWorkload,
+			notWorkload: nil,
+			err:         domain.ErrCastingWorkload,
+		},
+		{
+			notWorkload: domain.ScanCommand{},
+			err:         fmt.Errorf("unable to generate valid Kubernetes resource name"),
+		},
+		{
+			notWorkload: domain.ScanCommand{ContainerName: "---"},
+			err:         fmt.Errorf("unable to generate valid Kubernetes resource name"),
 		},
 	}
 
@@ -1814,7 +1850,12 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 	}
 
 	for i := range testsErrorCases {
-		ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
+		var ctx context.Context
+		if testsErrorCases[i].notWorkload == nil {
+			ctx = context.Background()
+		} else {
+			ctx = context.WithValue(context.Background(), domain.WorkloadKey{}, testsErrorCases[i].notWorkload)
+		}
 		name, err := GetCVESummaryK8sResourceName(ctx)
 		assert.NotEqual(t, err, nil)
 		assert.Equal(t, err, testsErrorCases[i].err)
@@ -5805,4 +5846,76 @@ func TestAPIServerStore_EnableSecurityExceptionCacheInvalidation_Concurrent(t *t
 	wg.Wait()
 
 	assert.NotNil(t, store.securityExceptionInformerStop, "informer stop func must be set after concurrent enable calls")
+}
+
+func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
+	t.Run("distinct image tags with leading hyphens in labels produce distinct resource names", func(t *testing.T) {
+		name1 := sanitizeResourceName("docker.io/library/nginx:v1.-beta-nohash")
+		name2 := sanitizeResourceName("docker.io/library/nginx:v1.beta-nohash")
+		assert.NotEmpty(t, name1)
+		assert.NotEmpty(t, name2)
+		assert.NotEqual(t, name1, name2, "distinct tags must not collapse into the same resource name")
+	})
+
+	t.Run("preserves valid DNS-1123 subdomain longer than 63 characters", func(t *testing.T) {
+		valid66 := "deployment-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-webserver"
+		res1 := sanitizeResourceName(valid66)
+		assert.Equal(t, valid66, res1, "already-valid 66-character key must not be re-keyed or hashed")
+
+		longLabel := strings.Repeat("a", 70)
+		res2 := sanitizeResourceName(longLabel)
+		assert.Equal(t, longLabel, res2, "already-valid 70-character key must not be truncated")
+	})
+
+	t.Run("distinct inputs requiring sanitization produce distinct hashed names", func(t *testing.T) {
+		prefix := "deployment-" + strings.Repeat("a", 53)
+		input1 := prefix + "_c84416"
+		input2 := prefix + "_c95828"
+		res1 := sanitizeResourceName(input1)
+		res2 := sanitizeResourceName(input2)
+		assert.NotEmpty(t, res1)
+		assert.NotEmpty(t, res2)
+		assert.NotEqual(t, res1, res2, "distinct containers with invalid characters must produce distinct resource names")
+		assert.LessOrEqual(t, len(res1), 253)
+		assert.LessOrEqual(t, len(res2), 253)
+	})
+
+	t.Run("overlong input truncated to 253 max with hash suffix", func(t *testing.T) {
+		overlong := strings.Repeat("a", 300)
+		res := sanitizeResourceName(overlong)
+		assert.LessOrEqual(t, len(res), 253)
+		assert.False(t, strings.HasSuffix(res, "-"))
+	})
+
+	t.Run("case-distinct image tags produce distinct resource names", func(t *testing.T) {
+		name1 := sanitizeResourceName("Release")
+		name2 := sanitizeResourceName("release")
+		assert.NotEmpty(t, name1)
+		assert.NotEmpty(t, name2)
+		assert.NotEqual(t, name1, name2, "case-distinct tags must not collapse into the same resource name")
+	})
+
+	t.Run("store and retrieve with empty ImageSlug and ContainerName resolves distinct keys for Release vs release", func(t *testing.T) {
+		ctx1 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+			ImageTag: "Release",
+		})
+		ctx2 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+			ImageTag: "release",
+		})
+
+		k8sName1, err1 := GetCVESummaryK8sResourceName(ctx1)
+		k8sName2, err2 := GetCVESummaryK8sResourceName(ctx2)
+		require.NoError(t, err1)
+		require.NoError(t, err2)
+		assert.NotEqual(t, k8sName1, k8sName2, "Release and release must map to distinct Kubernetes resource names")
+	})
+
+	t.Run("invalid characters and consecutive dots generate valid DNS-1123 resource names", func(t *testing.T) {
+		res1 := sanitizeResourceName("a..b")
+		assert.NotEmpty(t, res1)
+		assert.False(t, strings.Contains(res1, ".."))
+
+		res2 := sanitizeResourceName("___")
+		assert.Empty(t, res2, "purely invalid label must sanitize to empty")
+	})
 }
