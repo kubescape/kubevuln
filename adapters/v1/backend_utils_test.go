@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -1098,3 +1099,22 @@ func TestSummarize_SeverityStatsOrderIsStable(t *testing.T) {
 		assert.Equal(t, firstExcluded, order(got.ExcludedSeveritiesStats))
 	}
 }
+
+func TestPostResults_ErrorOnNon200StatusCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	defer server.Close()
+
+	a := NewBackendAdapter("account-1", "http://apiserver", server.URL, "accessKey", nil)
+	report := v1.ScanResultReport{
+		Designators: identifiers.PortalDesignator{
+			Attributes: map[string]string{identifiers.AttributeCustomerGUID: "cust-1"},
+		},
+	}
+	err := a.postResults(context.TODO(), report, server.URL, "image:tag", "wlid://w")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+}
+
