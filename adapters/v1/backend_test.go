@@ -1622,9 +1622,14 @@ func TestShouldRetryReport(t *testing.T) {
 		status int
 		want   bool
 	}{
+		{http.StatusOK, true},
+		{http.StatusBadRequest, false},
 		{http.StatusUnauthorized, false},
 		{http.StatusForbidden, false},
 		{http.StatusNotFound, false},
+		{http.StatusMethodNotAllowed, false},
+		{http.StatusRequestEntityTooLarge, false},
+		{http.StatusUnprocessableEntity, false},
 		{http.StatusInternalServerError, true}, // #486
 		{http.StatusTooManyRequests, true},
 		{http.StatusBadGateway, true},
@@ -1874,3 +1879,5 @@ func TestHttpPostWithContext_ZeroRetryAfterDoesNotSpin(t *testing.T) {
 		})
 	}
 }
+
+
