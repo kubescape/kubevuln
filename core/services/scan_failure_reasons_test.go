@@ -102,6 +102,30 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
+			name: "transport 429 via errors.As",
+			err: &transport.Error{
+				StatusCode: http.StatusTooManyRequests,
+			},
+			expected: ReasonRateLimitExceeded,
+		},
+		{
+			name: "wrapped transport 429",
+			err: fmt.Errorf("pulling image: %w", &transport.Error{
+				StatusCode: http.StatusTooManyRequests,
+			}),
+			expected: ReasonRateLimitExceeded,
+		},
+		{
+			name:     "string-based 429 Too Many Requests",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: 429 Too Many Requests"),
+			expected: ReasonRateLimitExceeded,
+		},
+		{
+			name:     "string-based TOOMANYREQUESTS code",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: TOOMANYREQUESTS: rate limit exceeded"),
+			expected: ReasonRateLimitExceeded,
+		},
+		{
 			name:     "string-based UNAUTHORIZED code",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: UNAUTHORIZED: authentication required"),
 			expected: scanfailure.ReasonImageAuthFailed,

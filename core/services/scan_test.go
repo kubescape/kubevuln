@@ -84,7 +84,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:     "phase 2, get SBOM failed",
@@ -361,7 +361,7 @@ func TestScanService_ScanCP(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:      "empty wlid",
@@ -774,7 +774,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:      "empty wlid",
@@ -1163,7 +1163,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:     "scan",

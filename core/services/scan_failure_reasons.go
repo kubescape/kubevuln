@@ -14,6 +14,9 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
+// ReasonRateLimitExceeded indicates image pull failed due to registry rate limiting (HTTP 429).
+const ReasonRateLimitExceeded = "rate_limit_exceeded"
+
 // classifySBOMError inspects the error returned by CreateSBOM and returns
 // a reason code constant. Uses errors.Is for sentinel errors (Go 1.13+),
 // errors.As for typed errors, and falls back to string matching.
@@ -44,6 +47,8 @@ func classifySBOMError(err error) string {
 			return scanfailure.ReasonImageAuthFailed
 		case transportErr.StatusCode == http.StatusNotFound:
 			return scanfailure.ReasonImageNotFound
+		case transportErr.StatusCode == http.StatusTooManyRequests:
+			return ReasonRateLimitExceeded
 		}
 	}
 
@@ -74,6 +79,11 @@ func classifySBOMError(err error) string {
 		// tag/digest on an existing repo). Same "not found" bucket since armoapi-go has no
 		// dedicated reason.
 		return scanfailure.ReasonImageNotFound
+	case strings.Contains(errStr, "429 Too Many Requests") ||
+		strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "Rate limit exceeded"):
+		return ReasonRateLimitExceeded
 	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
 	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
 	case strings.Contains(errStr, "MANIFEST_SCHEMA_UNSUPPORTED") ||
