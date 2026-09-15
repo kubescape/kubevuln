@@ -1184,7 +1184,27 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
 	}
 
-	rawName := fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName)
+	var rawName string
+	if contName != "" {
+		if kind != "" && name != "" {
+			rawName = fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName)
+		} else if kind != "" {
+			rawName = fmt.Sprintf("%s--%s", kind, contName)
+		} else if name != "" {
+			rawName = fmt.Sprintf("-%s-%s", name, contName)
+		} else {
+			rawName = contName
+		}
+	} else {
+		if kind != "" && name != "" {
+			rawName = fmt.Sprintf("%s-%s", kind, name)
+		} else if kind != "" {
+			rawName = kind
+		} else {
+			rawName = name
+		}
+	}
+
 	res := sanitizeResourceName(rawName)
 	if res == "" {
 		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
