@@ -3648,6 +3648,45 @@ func TestAPIServerStore_GetNamespaceLabels_DoesNotCacheFailures(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
 
+func TestAPIServerStore_InvalidateLabelsCache(t *testing.T) {
+	dep := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "deploy-x",
+			"namespace": "ns-y",
+			"labels":    map[string]interface{}{"env": "prod"},
+		},
+	}}
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":   "ns-y",
+			"labels": map[string]interface{}{"team": "sec"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), dep, ns)
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	labels, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "prod"}, labels)
+
+	nsLabels, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "sec"}, nsLabels)
+
+	a.InvalidateWorkloadLabelsCache("ns-y", "Deployment", "deploy-x")
+	a.InvalidateNamespaceLabelsCache("ns-y")
+}
+
+
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}

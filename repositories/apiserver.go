@@ -808,6 +808,22 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 	return labels, nil
 }
 
+// InvalidateWorkloadLabelsCache invalidates a workload's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateWorkloadLabelsCache(namespace, kind, name string) {
+	if a.labelsCache != nil && namespace != "" && kind != "" && name != "" {
+		cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
+		a.labelsCache.Delete(cacheKey)
+	}
+}
+
+// InvalidateNamespaceLabelsCache invalidates a namespace's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateNamespaceLabelsCache(name string) {
+	if a.labelsCache != nil && name != "" {
+		cacheKey := namespaceLabelsCacheKeyPrefix + name
+		a.labelsCache.Delete(cacheKey)
+	}
+}
+
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetContainerProfile")
 	defer span.End()
