@@ -56,6 +56,14 @@ func TestLabelsFromImageID(t *testing.T) {
 			imageID: "quay.io/prometheus/node-exporter@sha256:f2269e73124dd0f60a7d19a2ce1264d33d08a985aed0ee6b0b89d0be470592cd",
 			want:    map[string]string{helpersv1.ArtifactTypeMetadataKey: helpersv1.ImageArtifactType, helpersv1.ImageIDMetadataKey: "quay-io-prometheus-node-exporter-sha256-f2269e73124dd0f60a7d19a", helpersv1.ImageNameMetadataKey: "quay-io-prometheus-node-exporter"},
 		},
+		{
+			imageID: "registry.com:8080/myapp:V1.0-RC1",
+			want:    map[string]string{helpersv1.ArtifactTypeMetadataKey: helpersv1.ImageArtifactType, helpersv1.ImageIDMetadataKey: "registry-com-8080-myapp-v1-0-rc1", helpersv1.ImageNameMetadataKey: "registry-com-8080-myapp", helpersv1.ImageTagMetadataKey: "v1-0-rc1"},
+		},
+		{
+			imageID: "MyOrg/MyApp:V1.0-RC1",
+			want:    map[string]string{helpersv1.ArtifactTypeMetadataKey: helpersv1.ImageArtifactType, helpersv1.ImageIDMetadataKey: "myorg-myapp-v1-0-rc1", helpersv1.ImageNameMetadataKey: "myorg-myapp", helpersv1.ImageTagMetadataKey: "v1-0-rc1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.imageID, func(t *testing.T) {

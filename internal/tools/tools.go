@@ -66,7 +66,14 @@ func LabelsFromImageID(imageID string) map[string]string {
 	}
 	ref, err := reference.Parse(imageID)
 	if err != nil {
-		return labels
+		ref, err = reference.Parse(strings.ToLower(imageID))
+		if err != nil {
+			named, normErr := reference.ParseNormalizedNamed(strings.ToLower(imageID))
+			if normErr != nil {
+				return labels
+			}
+			ref = named
+		}
 	}
 	if named, ok := ref.(reference.Named); ok {
 		labels[helpersv1.ImageIDMetadataKey] = SanitizeLabel(named.String())
