@@ -1622,9 +1622,15 @@ func TestShouldRetryReport(t *testing.T) {
 		status int
 		want   bool
 	}{
+		{http.StatusOK, true},
+		{http.StatusRequestTimeout, true}, // RFC 9110 15.5.9 permits repeating a 408 request
+		{http.StatusBadRequest, false},
 		{http.StatusUnauthorized, false},
 		{http.StatusForbidden, false},
 		{http.StatusNotFound, false},
+		{http.StatusMethodNotAllowed, false},
+		{http.StatusRequestEntityTooLarge, false},
+		{http.StatusUnprocessableEntity, false},
 		{http.StatusInternalServerError, true}, // #486
 		{http.StatusTooManyRequests, true},
 		{http.StatusBadGateway, true},
@@ -1834,6 +1840,29 @@ func TestHttpPostWithContext_HonorsRetryAfter(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond,
 		"should have waited close to the requested 1s, not the default ~500ms backoff interval")
 	assert.Less(t, elapsed, 5*time.Second, "should not have waited far longer than requested")
+}
+
+// A 408 Request Timeout means the event receiver gave up waiting for the request before it was
+// fully received, not that the request was rejected; RFC 9110 15.5.9 explicitly permits repeating
+// it unmodified. Treating it as permanent (like the other 4xx statuses) would drop the report on
+// the first timeout instead of retrying.
+func TestHttpPostWithContext_RetriesRequestTimeout(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			w.WriteHeader(http.StatusRequestTimeout)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	resp, err := httpPostWithContext(context.Background(), server.Client(), server.URL, nil, nil, 10*time.Second)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
 }
 
 // A Retry-After of zero used to be honoured literally. backoff resets its interval whenever
