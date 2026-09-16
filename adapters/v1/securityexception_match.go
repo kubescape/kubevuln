@@ -135,7 +135,8 @@ func matchImages(patterns []string, image string) bool {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
 			for _, form := range forms {
-				if ok, err := path.Match(pf, form); err == nil && ok {
+				lowerPF := normalizePatternFormForCandidate(pf, form)
+				if ok, err := path.Match(lowerPF, form); err == nil && ok {
 					return true
 				}
 			}
@@ -144,17 +145,149 @@ func matchImages(patterns []string, image string) bool {
 	return false
 }
 
-// expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
-// (e.g. "nginx:1.25", "nginx:*", "library/nginx:1.25", "kubescape/kubevuln:*") without an explicit
-// registry domain or top-level wildcard in its first segment, it expands p against the fixed
-// default Docker Hub domain and namespace ("docker.io"/"library").
-//
-// The fallback domain is pinned rather than derived from the image being scanned. A domain-less
-// pattern like "nginx:1.25" is, per its own author's intent, shorthand for Docker Hub's
-// nginx:1.25 -- not "whatever registry this particular scan's image happens to come from". Basing
-// the fallback on the scanned image made the registry check a no-op for every short-form pattern:
-// a SecurityException written expecting to scope suppression to Docker Hub would also suppress an
-// unrelated image at any other registry, since that registry would always equal its own fallback.
+// normalizePatternFormForCandidate normalizes the case of registry and repository segments in a pattern
+// form to lowercase, while preserving the case of tag and digest portions (which are case-sensitive).
+// When form is a bare repository reference (no tag or digest), the pattern is matched as a repository selector
+// and all repository text outside character classes is lowercased.
+func normalizePatternFormForCandidate(pf, form string) string {
+	if pf == "" {
+		return ""
+	}
+
+	repoPart := pf
+	digestPart := ""
+	if atIdx := findDigestSeparator(pf); atIdx != -1 {
+		repoPart = pf[:atIdx]
+		digestPart = pf[atIdx:]
+	}
+
+	if tagIdx := findTagSeparator(repoPart); tagIdx != -1 {
+		// An explicit ':' unambiguously marks where the tag starts: lowercase only the
+		// repository text before it, and leave the tag (case-sensitive) untouched.
+		return lowercaseOutsideClasses(repoPart[:tagIdx]) + repoPart[tagIdx:] + digestPart
+	}
+
+	// If the candidate form has no tag and no digest, it is a bare repository reference.
+	// In that case, the entire pattern is matching repository text, so all repository
+	// text outside character classes can be lowercased safely.
+	formHasTagOrDigest := findTagSeparator(form) != -1 || findDigestSeparator(form) != -1
+	if !formHasTagOrDigest {
+		return lowercaseOutsideClasses(repoPart) + digestPart
+	}
+
+	// No explicit tag delimiter in pattern, but the candidate form carries a tag/digest.
+	// A wildcard may span the hidden tag boundary (e.g. "nginx*RC*" matching "nginx:RC1"),
+	// so only the path segment before the last separator is unambiguously repository/registry text.
+	lastSlash := findLastPathSeparator(repoPart)
+	if lastSlash == -1 {
+		return lowercaseOutsideClasses(repoPart) + digestPart
+	}
+	return lowercaseOutsideClasses(repoPart[:lastSlash+1]) + repoPart[lastSlash+1:] + digestPart
+}
+
+func isEscaped(s string, i int) bool {
+	count := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		count++
+	}
+	return count%2 != 0
+}
+
+func findDigestSeparator(s string) int {
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '@':
+			if !inClass {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func findTagSeparator(s string) int {
+	searchStart := 0
+	if lastSlash := findLastPathSeparator(s); lastSlash != -1 {
+		searchStart = lastSlash + 1
+	}
+	inClass := false
+	for i := searchStart; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case ':':
+			if !inClass {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func findLastPathSeparator(s string) int {
+	lastSlash := -1
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		switch s[i] {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '/':
+			if !inClass {
+				lastSlash = i
+			}
+		}
+	}
+	return lastSlash
+}
+
+func lowercaseOutsideClasses(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inClass := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isEscaped(s, i) {
+			b.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+			b.WriteByte(c)
+		case ']':
+			inClass = false
+			b.WriteByte(c)
+		default:
+			if inClass {
+				b.WriteByte(c)
+			} else if c >= 'A' && c <= 'Z' {
+				b.WriteByte(c + ('a' - 'A'))
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	return b.String()
+}
+
 func expandPatternForms(p string) []string {
 	patterns := []string{p}
 	if p == "" {
@@ -171,7 +304,7 @@ func expandPatternForms(p string) []string {
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
-	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
+	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || strings.EqualFold(firstSeg, "localhost")
 	if !hasDomainOrWildcard {
 		patterns = append(patterns, "docker.io/"+p)
 	}
