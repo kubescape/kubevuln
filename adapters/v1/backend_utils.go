@@ -360,7 +360,7 @@ func buildCVEExceptionIndex(srcCVEList []armotypes.VulnerabilityExceptionPolicy)
 	for i := range srcCVEList {
 		seen := make(map[string]struct{})
 		for j := range srcCVEList[i].VulnerabilityPolicies {
-			name := strings.ToLower(srcCVEList[i].VulnerabilityPolicies[j].Name)
+			name := strings.ToLower(strings.TrimSpace(srcCVEList[i].VulnerabilityPolicies[j].Name))
 			if _, ok := seen[name]; ok {
 				continue
 			}
@@ -381,7 +381,7 @@ func (idx *cveExceptionIndex) lookup(CVEName string, filterFixed bool) []armotyp
 	if idx == nil {
 		return nil
 	}
-	indices := idx.byName[strings.ToLower(CVEName)]
+	indices := idx.byName[strings.ToLower(strings.TrimSpace(CVEName))]
 	if len(indices) == 0 {
 		return nil
 	}

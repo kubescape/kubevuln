@@ -228,6 +228,24 @@ func TestGetCVEExceptionMatchCVENameFromList(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "padded policy name and lookup query with whitespace",
+			srcCVEList: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "  CVE-2021-44228  "},
+					},
+				},
+			},
+			CVEName: " CVE-2021-44228 ",
+			expected: []armotypes.VulnerabilityExceptionPolicy{
+				{
+					VulnerabilityPolicies: []armotypes.VulnerabilityPolicy{
+						{Name: "  CVE-2021-44228  "},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
