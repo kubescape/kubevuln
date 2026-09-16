@@ -84,7 +84,7 @@ func TestScanService_GenerateSBOM(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:     "phase 2, get SBOM failed",
@@ -361,7 +361,7 @@ func TestScanService_ScanCP(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:      "empty wlid",
@@ -631,7 +631,8 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	storageCP := repositories.NewMemoryStorage(false, false)
 	storageSBOM := repositories.NewMemoryStorage(false, false)
 	storageCVE := repositories.NewMemoryStorage(false, false)
-	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, adapters.NewMockPlatform(false, nil), v1.NewContainerProfileAdapter(storageCP), true, false, true, false, false)
+	platform := &failureRecordingPlatform{}
+	s := NewScanService(sbomAdapter, storageSBOM, cveAdapter, storageCVE, platform, v1.NewContainerProfileAdapter(storageCP), true, false, true, false, false)
 	ctx := context.TODO()
 	s.Ready(ctx)
 
@@ -673,8 +674,9 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	err = s.ScanCP(ctx)
 	var scanErr *domain.ScanError
 	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
-	assert.Equal(t, scanfailure.ReasonSBOMGenerationFailed, scanErr.Reason)
+	assert.Equal(t, ReasonRateLimitExceeded, scanErr.Reason)
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
+	assert.Equal(t, []string{ReasonRateLimitExceeded}, platform.reasons, "expected ReportScanFailure to record ReasonRateLimitExceeded")
 }
 
 // TestIsRegistryRateLimitedErr is a regression test: checkCreateSBOM's rate-limit detection
@@ -774,7 +776,7 @@ func TestScanService_ScanCVE(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:      "empty wlid",
@@ -1163,7 +1165,7 @@ func TestScanService_ScanRegistry(t *testing.T) {
 			toomanyrequests: true,
 			workload:        true,
 			wantErr:         true,
-			wantReason:      scanfailure.ReasonSBOMGenerationFailed,
+			wantReason:      ReasonRateLimitExceeded,
 		},
 		{
 			name:     "scan",
@@ -3441,6 +3443,7 @@ type failureRecordingPlatform struct {
 	adapters.MockPlatform
 	mu      sync.Mutex
 	jobIDs  []string
+	reasons []string
 	reports int
 }
 
@@ -3449,6 +3452,7 @@ func (p *failureRecordingPlatform) ReportScanFailure(ctx context.Context, failur
 	p.mu.Lock()
 	p.reports++
 	p.jobIDs = append(p.jobIDs, workload.JobID)
+	p.reasons = append(p.reasons, reason)
 	p.mu.Unlock()
 	return p.MockPlatform.ReportScanFailure(ctx, failureCase, reason, scanErr)
 }

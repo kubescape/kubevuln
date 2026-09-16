@@ -1266,28 +1266,3 @@ func TestDomainToArmo_ExceptionApplied_RelatedVulnerabilities_NormalizeByCVE(t *
 	require.Len(t, got[0].Vulnerability.ExceptionApplied, 1)
 	assert.Equal(t, "suppress-log4j-ghsa", got[0].Vulnerability.ExceptionApplied[0].Name)
 }
-
-// TestParseImageManifest_DirectoryTarget verifies that ParseImageManifest returns (nil, nil) when given a directory source type.
-func TestParseImageManifest_DirectoryTarget(t *testing.T) {
-	im, err := ParseImageManifest(&v1beta1.GrypeDocument{
-		Source: &v1beta1.Source{
-			Type:   "directory",
-			Target: []byte(`"/path/to/directory"`),
-		},
-	})
-	assert.NoError(t, err)
-	assert.Nil(t, im)
-}
-
-// TestParseImageManifest_NilRawConfig verifies that ParseImageManifest returns (nil, nil) when rawManifest.RawConfig is nil.
-func TestParseImageManifest_NilRawConfig(t *testing.T) {
-	im, err := ParseImageManifest(&v1beta1.GrypeDocument{
-		Source: &v1beta1.Source{
-			Type:   "image",
-			Target: []byte(`{"user":"root"}`),
-		},
-	})
-	assert.NoError(t, err)
-	assert.Nil(t, im)
-}
-

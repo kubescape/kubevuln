@@ -696,23 +696,14 @@ func syftCoordinatesToCoordinates(c []v1beta1.SyftCoordinates) []containerscan.C
 
 }
 
-// ParseImageManifest extracts and builds containerscan.ImageManifest metadata from a Grype document source.
-// It returns (nil, nil) if the source type is "directory" or if rawManifest.RawConfig is nil, as directory targets
-// and sources without raw image configuration do not produce an image manifest.
 func ParseImageManifest(grypeDocument *v1beta1.GrypeDocument) (*containerscan.ImageManifest, error) {
 	if grypeDocument == nil || grypeDocument.Source == nil {
 		return nil, fmt.Errorf("empty grype document")
-	}
-	if grypeDocument.Source.Type == "directory" {
-		return nil, nil
 	}
 
 	var rawManifest source.ImageMetadata
 	if err := json.Unmarshal(grypeDocument.Source.Target, &rawManifest); err != nil {
 		return nil, err
-	}
-	if rawManifest.RawConfig == nil {
-		return nil, nil
 	}
 
 	var config v1.ConfigFile
