@@ -88,8 +88,14 @@ func TestPolicySubcomponents(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
-	t.Run("unreadable value is a scope nothing satisfies", func(t *testing.T) {
+	t.Run("single string value", func(t *testing.T) {
 		got, isScoped := policySubcomponents(scoped("pkg:npm/lodash"))
+		assert.True(t, isScoped)
+		assert.Equal(t, []string{"pkg:npm/lodash"}, got)
+	})
+
+	t.Run("unreadable non-string value is a scope nothing satisfies", func(t *testing.T) {
+		got, isScoped := policySubcomponents(scoped(12345))
 		assert.True(t, isScoped)
 		assert.Empty(t, got)
 	})

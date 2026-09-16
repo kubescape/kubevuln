@@ -54,6 +54,8 @@ func policySubcomponents(p armotypes.VulnerabilityExceptionPolicy) ([]string, bo
 			}
 		}
 		return out, true
+	case string:
+		return []string{v}, true
 	default:
 		return nil, true
 	}
