@@ -273,6 +273,9 @@ func (s *scanStatusStore) markTerminal(jobID string, state domain.ScanState, rea
 // evicted yet -- expiredTerminal is the same check evictLocked uses, applied to just this one
 // entry instead of every entry in the store.
 func (s *scanStatusStore) get(jobID string) (domain.ScanStatus, bool) {
+	if jobID == "" {
+		return domain.ScanStatus{}, false
+	}
 	s.mu.RLock()
 	status, ok := s.items[jobID]
 	s.mu.RUnlock()

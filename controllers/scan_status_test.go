@@ -256,6 +256,12 @@ func TestScanStatusStore_RecordAcceptedAllowsReuseOnceTerminal(t *testing.T) {
 	}
 }
 
+func TestScanStatusStore_EmptyJobIDGetReturnsEarly(t *testing.T) {
+	s := newScanStatusStore()
+	_, ok := s.get("")
+	require.False(t, ok, "empty jobID must return false early without error or lock contention")
+}
+
 // Before #790, get()'s cost scaled with the store's total size (evictLocked's full sweep).
 // This benchmark's ns/op should stay flat across store sizes now that a lookup only touches
 // the one key it was asked for; run with -benchtime and compare sizes to see the effect, e.g.
