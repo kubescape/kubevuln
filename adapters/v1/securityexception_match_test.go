@@ -94,6 +94,7 @@ func TestMatchResources(t *testing.T) {
 	}{
 		{name: "empty matches everything", resources: nil, target: target, want: true},
 		{name: "kind case-insensitive match", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "nginx"}}, target: target, want: true},
+		{name: "resource name is case-sensitive, unlike kind", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "Nginx"}}, target: target, want: false},
 		{name: "kind-only match ignores name", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment"}}, target: target, want: true},
 		{name: "kind mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "StatefulSet"}}, target: target, want: false},
 		{name: "name mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "other"}}, target: target, want: false},
@@ -343,5 +344,22 @@ func TestBuildExceptionTarget(t *testing.T) {
 		assert.Equal(t, "docker.io/library/nginx:1.25", target.Image)
 		assert.Nil(t, target.WorkloadLabels)
 		assert.False(t, target.WorkloadLabelsResolved)
+	})
+
+	// Regression for wlidpkg.GetNameFromWlid running the name segment through the
+	// kind-name mapper GetK8SKindFronList (pinned utils-k8s-go v0.0.35): a Deployment
+	// literally named "service" must stay "service", not become "Service", both in the
+	// target used for exact resource-name matching and in the name handed to the workload
+	// label lookup that objectSelector exceptions rely on.
+	t.Run("preserves a resource name that collides with a known kind", func(t *testing.T) {
+		serviceWorkload := domain.ScanCommand{
+			Wlid:               "wlid://cluster-c/namespace-production/deployment-service",
+			ImageTagNormalized: "docker.io/library/nginx:1.25",
+		}
+		repo := &mockSecurityExceptionRepo{workloadLabels: map[string]string{"app": "service"}}
+		se := []sev1beta1.SecurityException{{Spec: sev1beta1.SecurityExceptionSpec{Match: sev1beta1.ExceptionMatch{ObjectSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "service"}}}}}}
+		target := BuildExceptionTarget(context.Background(), serviceWorkload, se, nil, repo)
+		assert.Equal(t, "service", target.Name)
+		assert.Equal(t, "service", repo.gotWorkloadName)
 	})
 }

@@ -1162,13 +1162,18 @@ type mockSecurityExceptionRepo struct {
 	namespaceLabels    map[string]string
 	workloadLabelsErr  error
 	namespaceLabelsErr error
+	// gotWorkloadName records the name argument the last GetWorkloadLabels call was made
+	// with, so tests can assert BuildExceptionTarget feeds the label lookup the exact
+	// Kubernetes resource name, not a transformed one.
+	gotWorkloadName string
 }
 
 func (m *mockSecurityExceptionRepo) GetSecurityExceptions(_ context.Context, _ string) ([]sev1beta1.SecurityException, []sev1beta1.ClusterSecurityException, error) {
 	return m.exceptions, m.clusterExceptions, m.err
 }
 
-func (m *mockSecurityExceptionRepo) GetWorkloadLabels(_ context.Context, _, _, _ string) (map[string]string, error) {
+func (m *mockSecurityExceptionRepo) GetWorkloadLabels(_ context.Context, _, _, name string) (map[string]string, error) {
+	m.gotWorkloadName = name
 	return m.workloadLabels, m.workloadLabelsErr
 }
 

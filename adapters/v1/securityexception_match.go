@@ -222,6 +222,21 @@ func labelSelectorMatches(sel *metav1.LabelSelector, lbls map[string]string) boo
 	return selector.Matches(labels.Set(lbls))
 }
 
+// rawNameFromWlid extracts the resource name segment from a wlid without wlidpkg.GetNameFromWlid's
+// unwanted transform: in the pinned utils-k8s-go v0.0.35, that helper runs the name segment
+// through GetK8SKindFronList (meant for the kind segment), which title-cases any segment that
+// happens to match a known Kubernetes kind list entry — so a Deployment literally named "service"
+// comes back as "Service". Exception matching (and the label lookups fed by this target) need the
+// exact name Kubernetes has, so this reads the same wlid segment RestoreMicroserviceIDs already
+// parses without running it through that transform.
+func rawNameFromWlid(wlid string) string {
+	r := wlidpkg.RestoreMicroserviceIDs(wlid)
+	if len(r) >= 4 {
+		return r[3]
+	}
+	return ""
+}
+
 // BuildExceptionTarget assembles the ExceptionTarget for the workload in the
 // scan context. Workload and namespace labels are resolved through repo only
 // when at least one exception actually uses objectSelector/namespaceSelector,
@@ -229,7 +244,7 @@ func labelSelectorMatches(sel *metav1.LabelSelector, lbls map[string]string) boo
 func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, repo ports.SecurityExceptionRepository) ExceptionTarget {
 	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
 	kind := wlidpkg.GetKindFromWlid(workload.Wlid)
-	name := wlidpkg.GetNameFromWlid(workload.Wlid)
+	name := rawNameFromWlid(workload.Wlid)
 
 	target := ExceptionTarget{
 		Namespace: namespace,
