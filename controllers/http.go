@@ -115,6 +115,9 @@ func (h *HTTPController) WithDiagnostics(f func(ctx context.Context) domain.Diag
 // the pre-existing behavior for anyone who doesn't opt in.
 func (h *HTTPController) WithMaxQueueDepth(n int) *HTTPController {
 	h.maxQueueDepth = n
+	if n <= 0 {
+		h.pending.Store(0)
+	}
 	return h
 }
 

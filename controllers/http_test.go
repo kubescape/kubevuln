@@ -1305,9 +1305,14 @@ func TestHTTPController_TryAdmitRelease(t *testing.T) {
 		assert.EqualValues(t, 2, h.pending.Load())
 	})
 
-	t.Run("non-positive depth means unbounded", func(t *testing.T) {
+	t.Run("non-positive depth means unbounded and resets pending", func(t *testing.T) {
+		h := (&HTTPController{}).WithMaxQueueDepth(2)
+		require.True(t, h.tryAdmit())
+		assert.EqualValues(t, 1, h.pending.Load())
+
 		for _, depth := range []int{0, -1} {
-			h := (&HTTPController{}).WithMaxQueueDepth(depth)
+			h.WithMaxQueueDepth(depth)
+			assert.EqualValues(t, 0, h.pending.Load(), "pending count should reset to 0 when queue becomes unbounded")
 			for range 100 {
 				require.True(t, h.tryAdmit(), "depth=%d", depth)
 			}
