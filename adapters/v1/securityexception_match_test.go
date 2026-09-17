@@ -99,6 +99,7 @@ func TestMatchResources(t *testing.T) {
 		{name: "name mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "other"}}, target: target, want: false},
 		{name: "OR across entries", resources: []sev1beta1.ResourceMatch{{Kind: "StatefulSet", Name: "db"}, {Kind: "Deployment", Name: "nginx"}}, target: target, want: true},
 		{name: "apiGroup match", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: target, want: true},
+		{name: "apiGroup padded with whitespace matches", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", Name: "nginx", APIGroup: "  apps  "}}, target: target, want: true},
 		{name: "apiGroup mismatch", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "batch"}}, target: target, want: false},
 		{name: "apiGroup fails closed when target group unknown", resources: []sev1beta1.ResourceMatch{{Kind: "Deployment", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "deployment", Name: "nginx"}, want: false},
 		{name: "core group target does not match a group-scoped exception", resources: []sev1beta1.ResourceMatch{{Kind: "Pod", APIGroup: "apps"}}, target: ExceptionTarget{Kind: "pod", Name: "p", APIGroup: strptr("")}, want: false},

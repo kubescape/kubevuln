@@ -105,7 +105,7 @@ func matchResources(resources []sev1beta1.ResourceMatch, target ExceptionTarget)
 		// exception does not apply — fail closed rather than match a resource whose
 		// group was never verified. A non-nil "" is the core group and only matches
 		// an exception that pins "" (or none).
-		if r.APIGroup != "" && (target.APIGroup == nil || !strings.EqualFold(r.APIGroup, *target.APIGroup)) {
+		if r.APIGroup != "" && (target.APIGroup == nil || !strings.EqualFold(strings.TrimSpace(r.APIGroup), strings.TrimSpace(*target.APIGroup))) {
 			continue
 		}
 		return true
