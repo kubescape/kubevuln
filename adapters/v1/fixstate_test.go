@@ -156,6 +156,15 @@ func TestHasKnownFix(t *testing.T) {
 			},
 			wantFixed: false,
 		},
+		{
+			name: "ambiguous RPM candidates report unknown fix version",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "0.5-1", Type: "rpm"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"1.0-1", "1-2"}}},
+			},
+			wantFixed:   true,
+			wantVersion: unknownFixVersion,
+		},
 	}
 
 	for _, tt := range tests {
