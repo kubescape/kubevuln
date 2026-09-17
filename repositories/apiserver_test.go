@@ -1801,19 +1801,19 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-kubevuln",
 				ContainerName: "",
 			},
-			expRes: "deployment-kubevuln",
+			expRes: sanitizeResourceName("deployment-kubevuln-"),
 		},
 		{
 			workload: domain.ScanCommand{
 				Wlid:          "wlid://cluster-aaa/namespace-kubescape/deployment-web",
 				ContainerName: "web_container",
 			},
-			expRes: "deployment-web-web-container",
+			expRes: sanitizeResourceName("deployment-web-web_container"),
 		},
 		{
 			workload: domain.ScanCommand{},
 			cveName:  "a..b",
-			expRes:   "a.b",
+			expRes:   sanitizeResourceName("a..b"),
 		},
 		{
 			workload: domain.ScanCommand{
@@ -1861,6 +1861,24 @@ func TestAPIServerStore_getCVESummaryK8sResourceName(t *testing.T) {
 		assert.Equal(t, err, testsErrorCases[i].err)
 		assert.Equal(t, name, "")
 	}
+}
+
+func TestGetCVESummaryK8sResourceName_DistinctWorkloadContainerIdentities(t *testing.T) {
+	ctx1 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-default/deployment-web-app",
+		ContainerName: "",
+	})
+	ctx2 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-default/deployment-web",
+		ContainerName: "app",
+	})
+
+	name1, err1 := GetCVESummaryK8sResourceName(ctx1)
+	require.NoError(t, err1)
+	name2, err2 := GetCVESummaryK8sResourceName(ctx2)
+	require.NoError(t, err2)
+
+	assert.NotEqual(t, name1, name2, "distinct workload/container identities must produce distinct resource names")
 }
 
 func TestMergeMaps(t *testing.T) {
