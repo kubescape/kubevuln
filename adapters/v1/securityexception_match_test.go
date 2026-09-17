@@ -74,6 +74,17 @@ func TestMatchImages(t *testing.T) {
 		{name: "custom registry requires an explicit domain in the pattern", patterns: []string{"quay.io/kubescape/kubevuln:v1.0.0"}, image: "quay.io/kubescape/kubevuln:v1.0.0", want: true},
 		{name: "OR across patterns", patterns: []string{"docker.io/library/redis:*", "docker.io/library/nginx:*"}, image: "docker.io/library/nginx:1.25", want: true},
 		{name: "malformed pattern is skipped", patterns: []string{"[bad"}, image: "docker.io/library/nginx:1.25", want: false},
+		{name: "character class with @ in repo matches normalized image", patterns: []string{"docker.io/library/ng[@a]INX:*"}, image: "docker.io/library/ngainx:v1", want: true},
+		{name: "character class with @ in repo matches literal @ image", patterns: []string{"docker.io/library/ng[@a]INX:*"}, image: "docker.io/library/ng@inx:v1", want: true},
+		{name: "repo wildcard with uppercase letters matches lowercase repo", patterns: []string{"ng*INX:*"}, image: "nginx:v1", want: true},
+		{name: "uppercase tag in pattern matches exact uppercase tag", patterns: []string{"nginx:RC1"}, image: "nginx:RC1", want: true},
+		{name: "uppercase tag in pattern does not match lowercase tag", patterns: []string{"nginx:RC1"}, image: "nginx:rc1", want: false},
+		{name: "digest-pinned uppercase repo matches normalized image with digest", patterns: []string{"docker.io/library/NGINX*@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, image: "docker.io/library/nginx@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", want: true},
+		{name: "escaped uppercase letter in repo matches lowercase repo", patterns: []string{`docker.io/library/nginx\X:*`}, image: "docker.io/library/nginxx:v1", want: true},
+		{name: "bracketed domain wildcard does not expand to docker.io", patterns: []string{"[Ll]ocalhost/app:*"}, image: "docker.io/localhost/app:v1", want: false},
+		{name: "bracketed domain wildcard matches matching domain", patterns: []string{"[Ll]ocalhost/app:*"}, image: "localhost/app:v1", want: true},
+		{name: "delimiter spanning glob matches exact uppercase tag", patterns: []string{"nginx*RC*"}, image: "nginx:RC1", want: true},
+		{name: "delimiter spanning glob does not match lowercase tag", patterns: []string{"nginx*RC*"}, image: "nginx:rc1", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

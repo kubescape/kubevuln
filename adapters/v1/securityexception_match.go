@@ -167,6 +167,13 @@ func normalizePatternFormForCandidate(pf, form string) string {
 		return lowercaseOutsideClasses(repoPart[:tagIdx]) + repoPart[tagIdx:] + digestPart
 	}
 
+	// If the pattern has an explicit digest pinned (e.g. repo@sha256:...), then repoPart
+	// is unambiguously the repository portion (there is no tag). Lowercase all repository
+	// text outside character classes.
+	if digestPart != "" {
+		return lowercaseOutsideClasses(repoPart) + digestPart
+	}
+
 	// If the candidate form has no tag and no digest, it is a bare repository reference.
 	// In that case, the entire pattern is matching repository text, so all repository
 	// text outside character classes can be lowercased safely.
@@ -175,12 +182,12 @@ func normalizePatternFormForCandidate(pf, form string) string {
 		return lowercaseOutsideClasses(repoPart) + digestPart
 	}
 
-	// No explicit tag delimiter in pattern, but the candidate form carries a tag/digest.
-	// A wildcard may span the hidden tag boundary (e.g. "nginx*RC*" matching "nginx:RC1"),
+	// No explicit tag or digest delimiter in pattern, but the candidate form carries a tag/digest.
+	// A wildcard in the last segment may span the hidden tag boundary (e.g. "nginx*RC*" matching "nginx:RC1"),
 	// so only the path segment before the last separator is unambiguously repository/registry text.
 	lastSlash := findLastPathSeparator(repoPart)
 	if lastSlash == -1 {
-		return lowercaseOutsideClasses(repoPart) + digestPart
+		return repoPart + digestPart
 	}
 	return lowercaseOutsideClasses(repoPart[:lastSlash+1]) + repoPart[lastSlash+1:] + digestPart
 }
@@ -265,7 +272,11 @@ func lowercaseOutsideClasses(s string) string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if isEscaped(s, i) {
-			b.WriteByte(c)
+			if c >= 'A' && c <= 'Z' {
+				b.WriteByte(c + ('a' - 'A'))
+			} else {
+				b.WriteByte(c)
+			}
 			continue
 		}
 		switch c {
@@ -304,12 +315,27 @@ func expandPatternForms(p string) []string {
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
-	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || strings.EqualFold(firstSeg, "localhost")
-	if !hasDomainOrWildcard {
+	if !hasDomainOrWildcard(firstSeg) {
 		patterns = append(patterns, "docker.io/"+p)
 	}
 
 	return appendNormalizedPattern(patterns, p)
+}
+
+func hasDomainOrWildcard(firstSeg string) bool {
+	if strings.EqualFold(firstSeg, "localhost") {
+		return true
+	}
+	for i := 0; i < len(firstSeg); i++ {
+		if isEscaped(firstSeg, i) {
+			continue
+		}
+		switch firstSeg[i] {
+		case '.', ':', '*', '?', '[':
+			return true
+		}
+	}
+	return false
 }
 
 // appendNormalizedPattern adds p's canonical reference form to patterns, when p is a
