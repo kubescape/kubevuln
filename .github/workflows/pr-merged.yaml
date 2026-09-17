@@ -53,7 +53,7 @@ jobs:
       contents: write
       pull-requests: read
       attestations: write  # required by actions/attest-build-provenance in the shared workflow
-    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@b9dd9392ec340e05edb01f30adbb0093028d37dd
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@547a98f361e0713832308e3f34165bb89fd9b08c
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
       IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}
