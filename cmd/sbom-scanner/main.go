@@ -97,7 +97,10 @@ func main() {
 	}
 }
 
-var metricsHandlerWrapper func(http.Handler) http.Handler
+var (
+	metricsHandlerWrapper  func(http.Handler) http.Handler
+	onMetricsShutdownStart func()
+)
 
 func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) error {
 	if tempDir == "" {
@@ -182,6 +185,9 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 	gracefulStopWithTimeout(srv, shutdownTimeout)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if onMetricsShutdownStart != nil {
+		onMetricsShutdownStart()
+	}
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
 		logger.L().Warning("metrics server shutdown error", helpers.Error(err))
 	}

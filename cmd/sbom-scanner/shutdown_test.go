@@ -117,7 +117,14 @@ func TestGracefulStopWithTimeout_ReturnsPromptlyWithNoInFlightRPCs(t *testing.T)
 // removes the unix socket file, and stops the metrics HTTP server before exiting.
 func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "test-scanner.sock")
+	socketDir, err := os.MkdirTemp("", "sb-")
+	if err != nil {
+		t.Fatalf("failed to create socket temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(socketDir)
+	})
+	socketPath := filepath.Join(socketDir, "s.sock")
 
 	metricsLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -125,13 +132,26 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	}
 	metricsAddr := metricsLis.Addr().String()
 	metricsLis.Close()
+	time.Sleep(100 * time.Millisecond)
 
 	sigCh := make(chan os.Signal, 1)
 	errCh := make(chan error, 1)
+	done := make(chan struct{})
 
 	go func() {
+		defer close(done)
 		errCh <- runServer(socketPath, metricsAddr, tempDir, sigCh)
 	}()
+	t.Cleanup(func() {
+		select {
+		case sigCh <- syscall.SIGTERM:
+		default:
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	})
 
 	// Wait for socket file to be created
 	socketReady := false
@@ -182,24 +202,23 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	}
 
 	// Verify metrics server is shut down
-	metricsClosed := false
-	for i := 0; i < 50; i++ {
-		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
-		if err != nil {
-			metricsClosed = true
-			break
-		}
+	resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+	if err == nil {
 		_ = resp.Body.Close()
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !metricsClosed {
 		t.Errorf("metrics server is still responding after shutdown")
 	}
 }
 
 func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T) {
 	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "scanner.sock")
+	socketDir, err := os.MkdirTemp("", "sb-")
+	if err != nil {
+		t.Fatalf("failed to create socket temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(socketDir)
+	})
+	socketPath := filepath.Join(socketDir, "s.sock")
 
 	metricsLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -213,6 +232,13 @@ func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T
 
 	requestEntered := make(chan struct{}, 1)
 	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseRequest)
+		})
+	}
+
 	var gateActive bool
 	var gateMu sync.Mutex
 
@@ -233,10 +259,29 @@ func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T
 	}
 	defer func() { metricsHandlerWrapper = nil }()
 
+	shutdownStarted := make(chan struct{})
+	onMetricsShutdownStart = func() {
+		close(shutdownStarted)
+	}
+	defer func() { onMetricsShutdownStart = nil }()
+
 	errCh := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		errCh <- runServer(socketPath, metricsAddr, tempDir, sigCh)
 	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case sigCh <- syscall.SIGTERM:
+		default:
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	})
 
 	// Wait for socket file to be created
 	socketReady := false
@@ -277,8 +322,9 @@ func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T
 	gateActive = true
 	gateMu.Unlock()
 
+	gatedClient := &http.Client{Timeout: 10 * time.Second}
 	go func() {
-		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		resp, err := gatedClient.Get("http://" + metricsAddr + "/metrics")
 		if err == nil {
 			_ = resp.Body.Close()
 		}
@@ -292,13 +338,21 @@ func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T
 
 	sigCh <- syscall.SIGTERM
 
+	// Wait until metrics shutdown sequence begins
+	select {
+	case <-shutdownStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("metrics shutdown did not begin in time")
+	}
+
+	// Verify runServer is still blocked waiting for in-flight request completion
 	select {
 	case err := <-errCh:
 		t.Fatalf("runServer returned prematurely (%v) while metrics request was blocked", err)
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(releaseRequest)
+	release()
 
 	select {
 	case err := <-errCh:
