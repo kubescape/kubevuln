@@ -233,9 +233,16 @@ func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 // on the first one loses data that a retry would have delivered (#486). The retry budget is
 // bounded by maxElapsedTime, so a genuinely broken backend still fails fast enough.
 func shouldRetryReport(resp *http.Response) bool {
-	return resp.StatusCode != http.StatusUnauthorized &&
-		resp.StatusCode != http.StatusForbidden &&
-		resp.StatusCode != http.StatusNotFound
+	if resp == nil {
+		return true
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
+		return true
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return false
+	}
+	return true
 }
 
 const ActionName = "vuln scan"
