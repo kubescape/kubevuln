@@ -45,16 +45,16 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	}
 	instanceIDString, ok := containerProfile.Annotations[helpersv1.InstanceIDMetadataKey]
 	if !ok {
-		return nil, fmt.Errorf("instance ID not found in container profile %s/%s", namespace, name)
+		return scans, fmt.Errorf("instance ID not found in container profile %s/%s", namespace, name)
 	}
 	wlid, ok := containerProfile.Annotations[helpersv1.WlidMetadataKey]
 	if !ok {
-		return nil, fmt.Errorf("WLID not found in container profile %s/%s", namespace, name)
+		return scans, fmt.Errorf("WLID not found in container profile %s/%s", namespace, name)
 	}
 
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(instanceIDString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate instance ID: %w", err)
+		return scans, fmt.Errorf("failed to generate instance ID: %w", err)
 	}
 	// copy labels map so we never mutate the repository-owned profile and nil labels scan cleanly
 	scanLabels := make(map[string]string, len(containerProfile.Labels)+1)

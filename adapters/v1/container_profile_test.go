@@ -59,3 +59,14 @@ func TestGetContainerRelevancyScans_DoesNotMutateStoredProfile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"foo": "bar"}, stored.Labels)
 }
+
+func TestGetContainerRelevancyScans_MissingAnnotations(t *testing.T) {
+	repo := repositories.NewMemoryStorage(false, false)
+	cp := validContainerProfile("daemonset-kube-proxy", "kube-system", nil)
+	delete(cp.Annotations, helpersv1.InstanceIDMetadataKey)
+	require.NoError(t, repo.StoreContainerProfile(context.TODO(), cp))
+
+	scans, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.TODO(), "kube-system", "daemonset-kube-proxy", true)
+	assert.Error(t, err)
+	assert.Nil(t, scans)
+}
