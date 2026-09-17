@@ -196,6 +196,11 @@ func TestReferenceMatchForms(t *testing.T) {
 			ref:  "",
 			want: []string{""},
 		},
+		{
+			name: "padded reference with whitespace",
+			ref:  "  docker.io/library/nginx:1.25  ",
+			want: []string{"docker.io/library/nginx:1.25", "docker.io/library/nginx"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -289,6 +289,7 @@ func NormalizeReference(ref string) string {
 // ("docker.io/library/nginx:1.25@sha256:..."), so matching against the
 // reference alone would never match a pattern written against the tag.
 func ReferenceMatchForms(ref string) []string {
+	ref = strings.TrimSpace(ref)
 	forms := []string{ref}
 	n, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
