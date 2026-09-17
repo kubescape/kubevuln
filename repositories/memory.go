@@ -106,6 +106,17 @@ func (m *MemoryStore) StoreContainerProfile(ctx context.Context, ap v1beta1.Cont
 	return nil
 }
 
+// ContainerProfiles returns all container profiles stored in memory, for tests
+func (m *MemoryStore) ContainerProfiles() []v1beta1.ContainerProfile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]v1beta1.ContainerProfile, 0, len(m.aps))
+	for _, cp := range m.aps {
+		out = append(out, cp)
+	}
+	return out
+}
+
 // GetCVE returns a CVE manifest from an in-memory map
 func (m *MemoryStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, CVEScannerVersion, CVEDBVersion string) (domain.CVEManifest, error) {
 	_, span := otel.Tracer("").Start(ctx, "MemoryStore.GetCVE")

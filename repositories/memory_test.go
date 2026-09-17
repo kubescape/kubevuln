@@ -128,3 +128,19 @@ func TestMemoryStore_GetCVESummary_IsAStub(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, summary)
 }
+
+func TestMemoryStore_ContainerProfiles(t *testing.T) {
+	m := NewMemoryStorage(false, false)
+	ctx := context.TODO()
+
+	assert.Empty(t, m.ContainerProfiles())
+
+	cp := v1beta1.ContainerProfile{}
+	cp.Namespace = "default"
+	cp.Name = "test-cp"
+	require.NoError(t, m.StoreContainerProfile(ctx, cp))
+
+	profiles := m.ContainerProfiles()
+	require.Len(t, profiles, 1)
+	assert.Equal(t, "test-cp", profiles[0].Name)
+}
