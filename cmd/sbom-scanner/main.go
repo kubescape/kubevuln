@@ -97,6 +97,8 @@ func main() {
 	}
 }
 
+var metricsHandlerWrapper func(http.Handler) http.Handler
+
 func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) error {
 	if tempDir == "" {
 		tempDir = os.TempDir()
@@ -119,9 +121,13 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 		_ = lis.Close()
 		return err
 	}
+	var handler http.Handler = m.Handler()
+	if metricsHandlerWrapper != nil {
+		handler = metricsHandlerWrapper(handler)
+	}
 	metricsServer := &http.Server{
 		Addr:              metricsAddr,
-		Handler:           m.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Second,

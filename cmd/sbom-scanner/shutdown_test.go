@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -193,5 +194,122 @@ func TestRunServer_SignalTriggersCleanup(t *testing.T) {
 	}
 	if !metricsClosed {
 		t.Errorf("metrics server is still responding after shutdown")
+	}
+}
+
+func TestRunServer_DeterministicOrdering_MetricsShutdownGatesReturn(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := filepath.Join(tempDir, "scanner.sock")
+
+	metricsLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port for metrics: %v", err)
+	}
+	metricsAddr := metricsLis.Addr().String()
+	metricsLis.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	sigCh := make(chan os.Signal, 1)
+
+	requestEntered := make(chan struct{}, 1)
+	releaseRequest := make(chan struct{})
+	var gateActive bool
+	var gateMu sync.Mutex
+
+	metricsHandlerWrapper = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gateMu.Lock()
+			active := gateActive
+			gateMu.Unlock()
+			if active {
+				select {
+				case requestEntered <- struct{}{}:
+				default:
+				}
+				<-releaseRequest
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	defer func() { metricsHandlerWrapper = nil }()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runServer(socketPath, metricsAddr, tempDir, sigCh)
+	}()
+
+	// Wait for socket file to be created
+	socketReady := false
+	for i := 0; i < 50; i++ {
+		select {
+		case err := <-errCh:
+			t.Fatalf("runServer returned early with error: %v", err)
+		default:
+		}
+		if _, err := os.Stat(socketPath); err == nil {
+			socketReady = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !socketReady {
+		t.Fatalf("socket file %s was not created in time", socketPath)
+	}
+
+	metricsClient := &http.Client{Timeout: 500 * time.Millisecond}
+	metricsReady := false
+	for i := 0; i < 50; i++ {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				metricsReady = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !metricsReady {
+		t.Fatalf("metrics server at %s was not ready in time", metricsAddr)
+	}
+
+	gateMu.Lock()
+	gateActive = true
+	gateMu.Unlock()
+
+	go func() {
+		resp, err := metricsClient.Get("http://" + metricsAddr + "/metrics")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-requestEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("gated HTTP request did not enter handler in time")
+	}
+
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("runServer returned prematurely (%v) while metrics request was blocked", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	close(releaseRequest)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runServer returned error after release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runServer did not return within 5 seconds after releasing metrics request")
+	}
+
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Errorf("socket file %s still exists after shutdown completion", socketPath)
 	}
 }
