@@ -287,6 +287,28 @@ func TestResolveSource_FallsBackToAnonymousWhenCredentialedRetryAlsoGets401(t *t
 	assert.Equal(t, []int{0, 1, 0}, credentialsSeen, "a credentialed retry refused again must still fall back to anonymous")
 }
 
+func TestResolveSource_TrimsCredentialWhitespace(t *testing.T) {
+	origGCPCredsFn := GCPCredsFn
+	defer func() { GCPCredsFn = origGCPCredsFn; ResetCaches() }()
+	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return &image.RegistryCredentials{Username: " oauth2accesstoken\n", Password: " token123\n"}, time.Now().Add(time.Hour), nil
+	}
+
+	var passedCreds image.RegistryCredentials
+	get := func(_ context.Context, ref string, opts *image.RegistryOptions) (fakeSource, error) {
+		if len(opts.Credentials) == 0 {
+			return fakeSource{}, errors.New("401 Unauthorized")
+		}
+		passedCreds = opts.Credentials[0]
+		return fakeSource{ref: ref}, nil
+	}
+
+	_, err := ResolveSource(context.Background(), "in_process", get, "gcr.io/project/image:tag", "gcr.io/project/image:tag", image.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "oauth2accesstoken", passedCreds.Username)
+	assert.Equal(t, "token123", passedCreds.Password)
+}
+
 // TestResolveSource_PreservesUnauthorizedErrWhenAnonymousFallbackFails is a regression
 // test for #959: when both the credentialed and anonymous attempts fail, the returned
 // error must wrap unauthorizedErr regardless of which literal wording either attempt

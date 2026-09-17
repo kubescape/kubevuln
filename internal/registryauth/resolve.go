@@ -84,6 +84,8 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 					helpers.Error(credErr),
 					helpers.String("imageID", imageID))
 			} else {
+				creds.Username = strings.TrimSpace(creds.Username)
+				creds.Password = strings.TrimSpace(creds.Password)
 				opts.Credentials = []image.RegistryCredentials{*creds}
 				src, err = get(ctx, pullRef, &opts)
 				outcome := metrics.FallbackOutcomeFailed
