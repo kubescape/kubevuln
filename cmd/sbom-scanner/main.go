@@ -84,6 +84,28 @@ func main() {
 	}
 	socketPath = filepath.Clean(socketPath)
 
+	metricsAddr := os.Getenv("METRICS_ADDR")
+	if metricsAddr == "" {
+		metricsAddr = defaultMetricsAddr
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+	if err := runServer(socketPath, metricsAddr, os.TempDir(), sigCh); err != nil {
+		logger.L().Fatal("gRPC server failed", helpers.Error(err))
+	}
+}
+
+var (
+	metricsHandlerWrapper  func(http.Handler) http.Handler
+	onMetricsShutdownStart func()
+)
+
+func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) error {
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
 	// Remove stale socket file from a previous run
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
 		logger.L().Warning("failed to remove stale socket file", helpers.Error(err), helpers.String("path", socketPath))
@@ -91,7 +113,7 @@ func main() {
 
 	lis, err := net.Listen("unix", socketPath) // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config, not untrusted input; path is cleaned above
 	if err != nil {
-		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
+		return err
 	}
 
 	// Without this, RecordTempDirSweep below (and any other metrics.Record* called from the
@@ -99,15 +121,16 @@ func main() {
 	// is a no-op: the component="sidecar" series would never be emitted, silently.
 	m, err := metrics.New()
 	if err != nil {
-		logger.L().Fatal("metrics initialization error", helpers.Error(err))
+		_ = lis.Close()
+		return err
 	}
-	metricsAddr := os.Getenv("METRICS_ADDR")
-	if metricsAddr == "" {
-		metricsAddr = defaultMetricsAddr
+	var handler http.Handler = m.Handler()
+	if metricsHandlerWrapper != nil {
+		handler = metricsHandlerWrapper(handler)
 	}
 	metricsServer := &http.Server{
 		Addr:              metricsAddr,
-		Handler:           m.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -129,7 +152,7 @@ func main() {
 	// sweep at all, startup or periodic, despite being the one that performs pod-less
 	// registry pulls (registry rescans, periodic CRD-based rescans).
 	stopSweep := make(chan struct{})
-	tools.StartPeriodicTempDirSweep(stopSweep, os.TempDir(), "stereoscope-", tempDirSweepInterval, tempDirSweepInterval, func(removed int, err error) {
+	tools.StartPeriodicTempDirSweep(stopSweep, tempDir, "stereoscope-", tempDirSweepInterval, tempDirSweepInterval, func(removed int, err error) {
 		if err != nil {
 			logger.L().Warning("temp dir sweep error", helpers.Error(err), helpers.Int("removed", removed))
 		} else if removed > 0 {
@@ -138,26 +161,38 @@ func main() {
 		metrics.RecordTempDirSweep(context.Background(), metrics.ComponentSidecar, removed)
 	})
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
+	serveErrCh := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
-		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
-		close(stopSweep)
-		gracefulStopWithTimeout(srv, shutdownTimeout)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-			logger.L().Warning("metrics server shutdown error", helpers.Error(err))
+		logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
+		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			serveErrCh <- err
 		}
-		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
-			logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
-		}
+		close(serveErrCh)
 	}()
 
-	logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
-	if err := srv.Serve(lis); err != nil { // #nosec G703 -- see SOCKET_PATH note above
-		logger.L().Fatal("gRPC server failed", helpers.Error(err))
+	var serveErr error
+	select {
+	case sig := <-sigCh:
+		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
+	case err := <-serveErrCh:
+		if err != nil {
+			logger.L().Error("gRPC server failed", helpers.Error(err))
+			serveErr = err
+		}
 	}
+
+	close(stopSweep)
+	gracefulStopWithTimeout(srv, shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if onMetricsShutdownStart != nil {
+		onMetricsShutdownStart()
+	}
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.L().Warning("metrics server shutdown error", helpers.Error(err))
+	}
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) { // #nosec G703 -- SOCKET_PATH is operator-controlled deployment config; path is cleaned above
+		logger.L().Warning("failed to remove socket file on shutdown", helpers.Error(err), helpers.String("path", socketPath))
+	}
+	return serveErr
 }
