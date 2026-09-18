@@ -181,9 +181,9 @@ func splitPatternForm(pf string) (pRepo, pTag, pDigest string, hasTag, hasDigest
 		return "", "", "", false, false
 	}
 	pRepo = pf
-	if atIdx := findDigestSeparator(pf); atIdx != -1 {
-		pRepo = pf[:atIdx]
-		pDigest = pf[atIdx+1:]
+	if atStart, atEnd := findDigestSeparator(pf); atStart != -1 {
+		pRepo = pf[:atStart]
+		pDigest = pf[atEnd:]
 		hasDigest = true
 	}
 	if tagStart, tagEnd := findTagSeparator(pRepo); tagStart != -1 {
@@ -291,24 +291,32 @@ func isEscaped(s string, i int) bool {
 	return count%2 != 0
 }
 
-func findDigestSeparator(s string) int {
+func findDigestSeparator(s string) (startIdx, endIdx int) {
 	inClass := false
 	for i := 0; i < len(s); i++ {
-		if isEscaped(s, i) {
-			continue
-		}
+		escaped := isEscaped(s, i)
 		switch s[i] {
 		case '[':
-			inClass = true
+			if !escaped {
+				if !inClass && i+2 < len(s) && s[i+1] == '@' && s[i+2] == ']' {
+					return i, i + 3
+				}
+				inClass = true
+			}
 		case ']':
-			inClass = false
+			if !escaped {
+				inClass = false
+			}
 		case '@':
 			if !inClass {
-				return i
+				if escaped {
+					return i - 1, i + 1
+				}
+				return i, i + 1
 			}
 		}
 	}
-	return -1
+	return -1, -1
 }
 
 func findTagSeparator(s string) (startIdx, endIdx int) {
@@ -318,19 +326,24 @@ func findTagSeparator(s string) (startIdx, endIdx int) {
 	}
 	inClass := false
 	for i := searchStart; i < len(s); i++ {
-		if isEscaped(s, i) {
-			continue
-		}
+		escaped := isEscaped(s, i)
 		switch s[i] {
 		case '[':
-			if !inClass && i+2 < len(s) && s[i+1] == ':' && s[i+2] == ']' {
-				return i, i + 3
+			if !escaped {
+				if !inClass && i+2 < len(s) && s[i+1] == ':' && s[i+2] == ']' {
+					return i, i + 3
+				}
+				inClass = true
 			}
-			inClass = true
 		case ']':
-			inClass = false
+			if !escaped {
+				inClass = false
+			}
 		case ':':
 			if !inClass {
+				if escaped {
+					return i - 1, i + 1
+				}
 				return i, i + 1
 			}
 		}
