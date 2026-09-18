@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -1096,6 +1097,55 @@ func GetCVESummaryK8sResourceName(ctx context.Context) (string, error) {
 	return GetCVESummaryK8sResourceNameWithCVEName(ctx, "")
 }
 
+func sanitizeResourceName(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	// 1. If s is already a valid DNS-1123 subdomain, return it as-is.
+	if errs := validation.IsDNS1123Subdomain(s); len(errs) == 0 {
+		return s
+	}
+
+	// 2. Otherwise, normalize to lowercase, split by '.', clean labels, and filter empty ones.
+	lower := strings.ToLower(s)
+	rawLabels := strings.Split(lower, ".")
+	var cleanLabels []string
+	for _, label := range rawLabels {
+		var sb strings.Builder
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				sb.WriteRune(r)
+			} else {
+				sb.WriteRune('-')
+			}
+		}
+		trimmed := strings.Trim(sb.String(), "-")
+		if trimmed != "" {
+			cleanLabels = append(cleanLabels, trimmed)
+		}
+	}
+	clean := strings.Join(cleanLabels, ".")
+	if clean == "" {
+		return ""
+	}
+
+	// 3. If clean matches s (no casing/character transformation) and is a valid DNS-1123 subdomain, return it.
+	if clean == s && len(validation.IsDNS1123Subdomain(clean)) == 0 {
+		return clean
+	}
+
+	// 4. Lossy substitution or overlong input: append hash suffix (16 hex chars = 64 bits) to preserve identity.
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(s)))[:16]
+	maxCleanLen := 253 - 1 - len(hash) // 253 - 1 - 16 = 236
+	if len(clean) > maxCleanLen {
+		clean = strings.TrimRight(clean[:maxCleanLen], ".-")
+	}
+	res := clean + "-" + hash
+	res = strings.Trim(res, ".-")
+	return res
+}
+
 func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string) (string, error) {
 	workload, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
 	if !ok {
@@ -1107,17 +1157,29 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 
 	if kind == "" && name == "" {
 		if workload.ImageSlug != "" {
-			return workload.ImageSlug, nil
+			if res := sanitizeResourceName(workload.ImageSlug); res != "" {
+				return res, nil
+			}
 		}
 		if cveName != "" {
-			return cveName, nil
+			if res := sanitizeResourceName(cveName); res != "" {
+				return res, nil
+			}
 		}
 		if contName != "" {
-			return contName, nil
+			if res := sanitizeResourceName(contName); res != "" {
+				return res, nil
+			}
 		}
+		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
 	}
 
-	return fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName), nil
+	rawName := fmt.Sprintf(vulnSummaryContNameFormat, kind, name, contName)
+	res := sanitizeResourceName(rawName)
+	if res == "" {
+		return "", fmt.Errorf("unable to generate valid Kubernetes resource name")
+	}
+	return res, nil
 }
 
 func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
