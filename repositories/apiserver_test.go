@@ -3847,6 +3847,32 @@ func TestAPIServerStore_LabelsCache_LifecycleAndCleanup(t *testing.T) {
 	assert.False(t, exists, "labelsEntries entry must be deleted after all in-flight refreshes finish")
 }
 
+func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing.T) {
+	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+	key := workloadLabelsCacheKeyPrefix + "default/Deployment/test-deploy"
+
+	// 1. Snapshot generation as if Get() started
+	gen := a.beginLabelsCacheRefresh(key)
+
+	// Invalidation runs atomically (bumps generation and clears cache within same critical section)
+	a.InvalidateWorkloadLabelsCache("default", "Deployment", "test-deploy")
+
+	// Even if invalidation runs again when no in-flight calls are active:
+	a.InvalidateWorkloadLabelsCache("default", "Deployment", "test-deploy")
+
+	// Completed GET attempts to write with stale snapshot generation
+	a.trySetLabelsCache(key, gen, map[string]string{"env": "stale"})
+
+	// Stale write MUST NOT be published to cache
+	_, ok := a.labelsCache.Get(key)
+	assert.False(t, ok, "stale labels must not be published after invalidation")
+
+	a.labelsEntriesMu.Lock()
+	_, exists := a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries must be cleanly reclaimed")
+}
+
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()

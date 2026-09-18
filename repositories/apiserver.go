@@ -220,13 +220,12 @@ type labelsCacheEntry struct {
 
 func (a *APIServerStore) invalidateLabelsCacheKey(cacheKey string) {
 	a.labelsEntriesMu.Lock()
+	defer a.labelsEntriesMu.Unlock()
 	if a.labelsEntries != nil {
 		if entry, ok := a.labelsEntries[cacheKey]; ok {
 			entry.generation++
 		}
 	}
-	a.labelsEntriesMu.Unlock()
-
 	if a.labelsCache != nil {
 		a.labelsCache.Delete(cacheKey)
 	}
@@ -248,25 +247,22 @@ func (a *APIServerStore) beginLabelsCacheRefresh(cacheKey string) uint64 {
 }
 
 func (a *APIServerStore) trySetLabelsCache(cacheKey string, seenGeneration uint64, value interface{}) {
-	var canSet bool
 	a.labelsEntriesMu.Lock()
+	defer a.labelsEntriesMu.Unlock()
 	if a.labelsEntries != nil {
 		if entry, ok := a.labelsEntries[cacheKey]; ok {
 			if entry.refreshes > 0 {
 				entry.refreshes--
 			}
 			if value != nil && entry.generation == seenGeneration {
-				canSet = true
+				if a.labelsCache != nil {
+					a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
+				}
 			}
 			if entry.refreshes == 0 {
 				delete(a.labelsEntries, cacheKey)
 			}
 		}
-	}
-	a.labelsEntriesMu.Unlock()
-
-	if canSet && a.labelsCache != nil {
-		a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
 	}
 }
 
