@@ -492,3 +492,62 @@ func TestLoadConfigStillAcceptsZeroMaxQueueDepth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, c.MaxQueueDepth)
 }
+
+func TestProxyRegistryMapFromViper_NilAndNullHandling(t *testing.T) {
+	v := viper.New()
+	m, err := proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Nil(t, m)
+
+	v.Set("proxyRegistryMap", "null")
+	m, err = proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Nil(t, m)
+
+	v.Set("proxyRegistryMap", `{"docker.io":"mirror.io"}`)
+	m, err = proxyRegistryMapFromViper(v)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"docker.io": "mirror.io"}, m)
+}
+
+// A whitespace-only PROXYREGISTRYMAP is malformed, not an opt-out: silently treating it as "no
+// map" would clear a previously configured mirror without any indication why.
+func TestProxyRegistryMapFromViper_WhitespaceIsAnError(t *testing.T) {
+	v := viper.New()
+	v.Set("proxyRegistryMap", "   ")
+	_, err := proxyRegistryMapFromViper(v)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid proxyRegistryMap")
+}
+
+// Non-string shapes and non-string values must be rejected explicitly instead of silently
+// producing an empty or partially-empty map that consumers can't distinguish from "no mirrors".
+func TestProxyRegistryMapFromViper_RejectsUnsupportedShapes(t *testing.T) {
+	v := viper.New()
+	v.Set("proxyRegistryMap", []interface{}{"docker.io"})
+	_, err := proxyRegistryMapFromViper(v)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid proxyRegistryMap")
+
+	v2 := viper.New()
+	v2.Set("proxyRegistryMap", map[string]interface{}{"docker.io": nil})
+	_, err = proxyRegistryMapFromViper(v2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid proxyRegistryMap")
+
+	v3 := viper.New()
+	v3.Set("proxyRegistryMap", `{"docker.io": null}`)
+	_, err = proxyRegistryMapFromViper(v3)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid proxyRegistryMap")
+}
+
+func TestLoadConfigProxyRegistryMapEnv_NullMember(t *testing.T) {
+	viper.Reset()
+	t.Setenv("PROXYREGISTRYMAP", `{"docker.io": null}`)
+	_, err := LoadConfig("testdata")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxyRegistryMap")
+}
+
+
