@@ -148,6 +148,15 @@ func (a *BackendAdapter) postResults(
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		statusErr := fmt.Errorf("event receiver returned status code %d", resp.StatusCode)
+		logger.L().Ctx(ctx).Error("failed posting to event receiver",
+			helpers.Error(statusErr),
+			helpers.Int("statusCode", resp.StatusCode),
+			helpers.String("image", imagetag),
+			helpers.String("wlid", wlid))
+		return statusErr
+	}
 	body, err := httputils.HttpRespToString(resp)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed reading response body from event receiver", helpers.Error(err),

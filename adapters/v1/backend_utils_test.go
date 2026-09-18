@@ -1098,3 +1098,51 @@ func TestSummarize_SeverityStatsOrderIsStable(t *testing.T) {
 		assert.Equal(t, firstExcluded, order(got.ExcludedSeveritiesStats))
 	}
 }
+
+// TestPostResults_ErrorOnNon200StatusCode is defense-in-depth for an injected BackendClient
+// that returns a non-2xx *http.Response with a nil error: the production defaultBackendClient
+// can't do this (httpPostWithContext turns every non-200 into an error before postResults ever
+// sees a response), but nothing in the BackendClient interface guarantees that, so postResults
+// must not blindly trust a response it was handed. Using the default client here would exit
+// through the pre-existing err != nil branch and pass even with this guard removed.
+func TestPostResults_ErrorOnNon200StatusCode(t *testing.T) {
+	closed := false
+	body := &trackCloseReader{
+		Reader: strings.NewReader(`{"error":"internal server error"}`),
+		closeFn: func() error {
+			closed = true
+			return nil
+		},
+	}
+	a := NewBackendAdapter("account-1", "http://apiserver", "http://event-receiver", "accessKey", nil).
+		WithBackendClient(&MockBackendClient{
+			HttpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusInternalServerError,
+					Body:       body,
+				}, nil
+			},
+		})
+	report := v1.ScanResultReport{
+		Designators: identifiers.PortalDesignator{
+			Attributes: map[string]string{identifiers.AttributeCustomerGUID: "cust-1"},
+		},
+	}
+	err := a.postResults(context.TODO(), report, "http://event-receiver", "image:tag", "wlid://w")
+	require.Error(t, err)
+	assert.Equal(t, "event receiver returned status code 500", err.Error())
+	assert.True(t, closed, "response body should be closed on non-2xx status code")
+}
+
+type trackCloseReader struct {
+	io.Reader
+	closeFn func() error
+}
+
+func (r *trackCloseReader) Close() error {
+	if r.closeFn != nil {
+		return r.closeFn()
+	}
+	return nil
+}
+
