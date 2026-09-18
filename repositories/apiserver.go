@@ -1161,23 +1161,13 @@ func GetCVESummaryK8sResourceNameWithCVEName(ctx context.Context, cveName string
 				return res, nil
 			}
 		}
-		if contName != "" {
-			if res := sanitizeResourceName(contName); res != "" {
-				return res, nil
-			}
-		}
-		if workload.ImageTag != "" {
-			if res := sanitizeResourceName(workload.ImageTag); res != "" {
-				return res, nil
-			}
-		}
-		if workload.ImageHash != "" {
-			if res := sanitizeResourceName(workload.ImageHash); res != "" {
-				return res, nil
-			}
-		}
 		if cveName != "" {
 			if res := sanitizeResourceName(cveName); res != "" {
+				return res, nil
+			}
+		}
+		if contName != "" {
+			if res := sanitizeResourceName(contName); res != "" {
 				return res, nil
 			}
 		}
