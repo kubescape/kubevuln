@@ -81,7 +81,6 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("storage initialization error", helpers.Error(err))
 		}
-		storage.EnableLabelsCacheInvalidation(ctx)
 	}
 	var sbomAdapter ports.SBOMCreator
 	scanMode := domain.ScanModeInProcess
@@ -113,6 +112,7 @@ func main() {
 	if riskAcceptanceActive {
 		seRepo = storage
 		storage.EnableSecurityExceptionCacheInvalidation(ctx)
+		storage.EnableLabelsCacheInvalidation(ctx)
 		logger.L().Info("SecurityException CRD integration enabled")
 
 		// Event recording is best-effort: a confirmed suppression is always logged

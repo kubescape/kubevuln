@@ -3744,6 +3744,38 @@ func TestAPIServerStore_InvalidateLabelsCache(t *testing.T) {
 	assert.Equal(t, map[string]string{"team": "dev"}, nsLabelsRefreshed)
 }
 
+func TestAPIServerStore_InvalidateLabelsCache_InFlightReadDoesNotOverwriteInvalidation(t *testing.T) {
+	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+
+	// 1. Workload labels: snapshot generation as if Get() started
+	workloadKey := workloadLabelsCacheKeyPrefix + "ns-a/Deployment/deploy-a"
+	seenGenWorkload := a.beginLabelsCacheRefresh(workloadKey)
+
+	// Informer invalidates before Get() completes
+	a.InvalidateWorkloadLabelsCache("ns-a", "Deployment", "deploy-a")
+
+	// Get() completes with stale labels and tries to set cache
+	a.trySetLabelsCache(workloadKey, seenGenWorkload, map[string]string{"env": "old"})
+
+	// Stale write should be rejected because generation changed
+	_, ok := a.labelsCache.Get(workloadKey)
+	assert.False(t, ok, "an in-flight workload GET must not restore stale labels after invalidation")
+
+	// 2. Namespace labels: snapshot generation as if Get() started
+	nsKey := namespaceLabelsCacheKeyPrefix + "ns-a"
+	seenGenNS := a.beginLabelsCacheRefresh(nsKey)
+
+	// Informer invalidates before Get() completes
+	a.InvalidateNamespaceLabelsCache("ns-a")
+
+	// Get() completes with stale labels and tries to set cache
+	a.trySetLabelsCache(nsKey, seenGenNS, map[string]string{"team": "old"})
+
+	// Stale write should be rejected because generation changed
+	_, ok = a.labelsCache.Get(nsKey)
+	assert.False(t, ok, "an in-flight namespace GET must not restore stale labels after invalidation")
+}
+
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
