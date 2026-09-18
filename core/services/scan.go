@@ -1416,8 +1416,8 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 			logger.L().Ctx(workerCtx).Warning("skipping SBOM creation, image pull previously rate limited",
 				helpers.String("imageSlug", workload.ImageSlug))
 			_ = s.platform.ReportScanFailure(workerCtx, scanfailure.ScanFailureSBOMGeneration,
-				scanfailure.ReasonSBOMGenerationFailed, domain.ErrTooManyRequests)
-			return domain.SBOM{}, &domain.ScanError{Reason: scanfailure.ReasonSBOMGenerationFailed, Err: domain.ErrTooManyRequests}
+				ReasonRateLimitExceeded, domain.ErrTooManyRequests)
+			return domain.SBOM{}, &domain.ScanError{Reason: ReasonRateLimitExceeded, Err: domain.ErrTooManyRequests}
 		}
 
 		// create SBOM, retrying on 429 rate-limit errors before activating the circuit-breaker.

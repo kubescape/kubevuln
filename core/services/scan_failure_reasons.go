@@ -14,6 +14,18 @@ import (
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
+// ReasonRateLimitExceeded indicates image pull failed due to registry rate limiting (HTTP 429).
+//
+// This is defined locally rather than in armoapi-go/scanfailure because that shared package (pinned
+// at v0.0.718, confirmed still absent as of v0.0.761) has no rate-limit reason constant or
+// ReasonFriendlyText mapping. Consumers that format this reason via scanfailure.ReasonFriendlyText
+// for a human-facing notification will see the raw "rate_limit_exceeded" token rather than
+// readable text until that package adds one -- tracked at
+// https://github.com/armosec/armoapi-go/issues/708. The report itself is still correctly
+// classified and delivered; only the friendly-text rendering degrades. Once armoapi-go ships a
+// shared constant, switch this to consume it directly.
+const ReasonRateLimitExceeded = "rate_limit_exceeded"
+
 // classifySBOMError inspects the error returned by CreateSBOM and returns
 // a reason code constant. Uses errors.Is for sentinel errors (Go 1.13+),
 // errors.As for typed errors, and falls back to string matching.
@@ -35,6 +47,14 @@ func classifySBOMError(err error) string {
 		return scanfailure.ReasonScanTimeout
 	}
 
+	// Sidecar-specific: the sidecar wraps its ErrorMessage (e.g. "received status code: 429")
+	// with this sentinel so it survives crossing gRPC, per adapters/v1/sidecar.go. errors.Is
+	// carries no risk of matching URL/tag text, unlike the string fallback below, so it's safe
+	// to check ahead of the typed-transport precedence rules.
+	if errors.Is(err, domain.ErrTooManyRequests) {
+		return ReasonRateLimitExceeded
+	}
+
 	// Go 1.13 pattern: typed error extraction via errors.As
 	var transportErr *transport.Error
 	if errors.As(err, &transportErr) {
@@ -44,6 +64,8 @@ func classifySBOMError(err error) string {
 			return scanfailure.ReasonImageAuthFailed
 		case transportErr.StatusCode == http.StatusNotFound:
 			return scanfailure.ReasonImageNotFound
+		case transportErr.StatusCode == http.StatusTooManyRequests:
+			return ReasonRateLimitExceeded
 		}
 	}
 
@@ -74,6 +96,14 @@ func classifySBOMError(err error) string {
 		// tag/digest on an existing repo). Same "not found" bucket since armoapi-go has no
 		// dedicated reason.
 		return scanfailure.ReasonImageNotFound
+	case strings.Contains(errStr, "429 Too Many Requests") ||
+		strings.Contains(errStr, "TOOMANYREQUESTS") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "Rate limit exceeded") ||
+		strings.Contains(errStr, "status code: 429"):
+		// "status code: 429" also matches the sidecar's "received status code: 429" shape
+		// (adapters/v1/sidecar.go), for callers that only have the flattened error text.
+		return ReasonRateLimitExceeded
 	// uppercase code is the stable token; lowercase phrase varies by registry. A typed
 	// *transport.Error (HTTP 400 + code) also lands here, as its Error() includes the code.
 	case strings.Contains(errStr, "MANIFEST_SCHEMA_UNSUPPORTED") ||
