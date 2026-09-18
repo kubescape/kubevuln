@@ -94,6 +94,10 @@ func TestMatchImages(t *testing.T) {
 		{name: "hidden tag in digest pattern rejects lowercase tag with digest", patterns: []string{"docker.io/library/nginx*RC*@sha256:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
 		{name: "escaped uppercase member in character class is preserved", patterns: []string{`docker.io/library/nginx[\A]:*`}, image: "docker.io/library/nginxA:v1", want: true},
 		{name: "escaped uppercase member in character class does not match lowercase", patterns: []string{`docker.io/library/nginx[\A]:*`}, image: "docker.io/library/nginxa:v1", want: false},
+		{name: "repo wildcard with uppercase tag matches uppercase tag and lowercase repo", patterns: []string{"docker.io/library/ng*INX*RC*"}, image: "docker.io/library/nginx:RC1", want: true},
+		{name: "repo wildcard with uppercase tag rejects lowercase tag and lowercase repo", patterns: []string{"docker.io/library/ng*INX*RC*"}, image: "docker.io/library/nginx:rc1", want: false},
+		{name: "class-hidden tag separator matches uppercase tag with digest", patterns: []string{"docker.io/library/nginx[:]RC1@sha256:*"}, image: "docker.io/library/nginx:RC1@sha256:" + testDigest, want: true},
+		{name: "class-hidden tag separator rejects lowercase tag with digest", patterns: []string{"docker.io/library/nginx[:]RC1@sha256:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

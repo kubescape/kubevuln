@@ -138,12 +138,7 @@ func matchImages(patterns []string, image string) bool {
 				if ok, err := path.Match(pf, form); err == nil && ok {
 					return true
 				}
-				lowerPF := normalizePatternFormForCandidate(pf, form)
-				lowerForm := normalizeCandidateForm(form)
-				if ok, err := path.Match(lowerPF, lowerForm); err == nil && ok {
-					return true
-				}
-				if ok, err := path.Match(lowerPF, form); err == nil && ok {
+				if matchCandidate(pf, form) {
 					return true
 				}
 			}
@@ -152,90 +147,92 @@ func matchImages(patterns []string, image string) bool {
 	return false
 }
 
-// normalizeCandidateForm normalizes the repository portion of a concrete reference candidate
-// to lowercase, while preserving case-sensitive tag and digest portions.
-func normalizeCandidateForm(form string) string {
+// splitCandidateForm decomposes a concrete image reference form into its
+// repository, tag, and digest components.
+func splitCandidateForm(form string) (repo, tag, digest string) {
 	if form == "" {
-		return ""
+		return "", "", ""
 	}
-	repoPart := form
-	rest := ""
+	repo = form
 	if atIdx := strings.IndexByte(form, '@'); atIdx != -1 {
-		repoPart = form[:atIdx]
-		rest = form[atIdx:]
-	} else {
-		lastSlash := strings.LastIndexByte(form, '/')
-		searchStart := 0
-		if lastSlash != -1 {
-			searchStart = lastSlash + 1
-		}
-		if tagIdx := strings.IndexByte(form[searchStart:], ':'); tagIdx != -1 {
-			tagIdx += searchStart
-			repoPart = form[:tagIdx]
-			rest = form[tagIdx:]
-		}
+		repo = form[:atIdx]
+		digest = form[atIdx+1:]
 	}
-	return strings.ToLower(repoPart) + rest
+	lastSlash := strings.LastIndexByte(repo, '/')
+	searchStart := 0
+	if lastSlash != -1 {
+		searchStart = lastSlash + 1
+	}
+	if tagIdx := strings.IndexByte(repo[searchStart:], ':'); tagIdx != -1 {
+		tagIdx += searchStart
+		tag = repo[tagIdx+1:]
+		repo = repo[:tagIdx]
+	}
+	return repo, tag, digest
 }
 
-// normalizePatternFormForCandidate normalizes the case of registry and repository segments in a pattern
-// form to lowercase, while preserving the case of tag and digest portions (which are case-sensitive).
-func normalizePatternFormForCandidate(pf, form string) string {
+// splitPatternForm decomposes a pattern form into its repository, tag, and
+// digest pattern components, tracking whether tag or digest delimiters were present.
+func splitPatternForm(pf string) (pRepo, pTag, pDigest string, hasTag, hasDigest bool) {
 	if pf == "" {
-		return ""
+		return "", "", "", false, false
 	}
-
-	lastSlash := findLastPathSeparator(pf)
-	if lastSlash == -1 {
-		return normalizeLastPatternSegment(pf, form)
+	pRepo = pf
+	if atIdx := findDigestSeparator(pf); atIdx != -1 {
+		pRepo = pf[:atIdx]
+		pDigest = pf[atIdx+1:]
+		hasDigest = true
 	}
-
-	// All path segments before the last slash are strictly registry and parent repository path segments.
-	prefix := lowercaseOutsideClasses(pf[:lastSlash+1])
-	lastSeg := pf[lastSlash+1:]
-	return prefix + normalizeLastPatternSegment(lastSeg, form)
+	if tagIdx := findTagSeparator(pRepo); tagIdx != -1 {
+		pTag = pRepo[tagIdx+1:]
+		pRepo = pRepo[:tagIdx]
+		hasTag = true
+	}
+	return pRepo, pTag, pDigest, hasTag, hasDigest
 }
 
-func normalizeLastPatternSegment(seg, form string) string {
-	if seg == "" {
-		return ""
+// matchCandidate performs component-aware matching between pattern pf and candidate form:
+// - Repository matching is case-insensitive (lowercased outside character classes).
+// - Tag and digest matching are case-sensitive.
+func matchCandidate(pf, form string) bool {
+	pRepo, pTag, pDigest, hasTag, hasDigest := splitPatternForm(pf)
+	formRepo, formTag, formDigest := splitCandidateForm(form)
+
+	// 1. Repository matching: case-insensitive in Docker/OCI.
+	lowerPRepo := lowercaseOutsideClasses(pRepo)
+	lowerFormRepo := strings.ToLower(formRepo)
+	repoMatch, err := path.Match(lowerPRepo, lowerFormRepo)
+	if err != nil || !repoMatch {
+		return false
 	}
 
-	repoPart := seg
-	delimiterAndRest := ""
-
-	if atIdx := findDigestSeparator(seg); atIdx != -1 {
-		repoPart = seg[:atIdx]
-		delimiterAndRest = seg[atIdx:]
-	} else if tagIdx := findTagSeparator(seg); tagIdx != -1 {
-		repoPart = seg[:tagIdx]
-		delimiterAndRest = seg[tagIdx:]
-	}
-
-	// If the repoPart contains wildcards ('*' or '?'), a glob might cross into
-	// tag/digest portions in the candidate (e.g. nginx*RC*:* or nginx*RC*@sha256:*).
-	// To preserve tag case-sensitivity, do not lowercase uppercase characters
-	// in wildcarded repo parts when matching against tagged/digested candidates.
-	if hasUnescapedWildcards(repoPart) {
-		formHasTagOrDigest := findTagSeparator(form) != -1 || findDigestSeparator(form) != -1
-		if formHasTagOrDigest {
-			return seg
+	// 2. Tag matching: case-sensitive.
+	if hasTag {
+		if formTag == "" {
+			return false
+		}
+		tagMatch, err := path.Match(pTag, formTag)
+		if err != nil || !tagMatch {
+			return false
+		}
+	} else if formTag != "" {
+		if !hasDigest {
+			return false
 		}
 	}
 
-	return lowercaseOutsideClasses(repoPart) + delimiterAndRest
-}
-
-func hasUnescapedWildcards(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if isEscaped(s, i) {
-			continue
+	// 3. Digest matching: case-sensitive.
+	if hasDigest {
+		if formDigest == "" {
+			return false
 		}
-		if s[i] == '*' || s[i] == '?' {
-			return true
+		digestMatch, err := path.Match(pDigest, formDigest)
+		if err != nil || !digestMatch {
+			return false
 		}
 	}
-	return false
+
+	return true
 }
 
 func isEscaped(s string, i int) bool {
