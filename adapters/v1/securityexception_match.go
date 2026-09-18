@@ -258,12 +258,12 @@ func matchSpanningWildcard(pf, form string) bool {
 		tagOrDigestSuffix = "@" + formDigest
 	}
 
-	lastSlash := findLastPathSeparator(pf)
+	_, lastSlashEnd := findLastPathSeparator(pf)
 	prefix := ""
 	lastSeg := pf
-	if lastSlash != -1 {
-		prefix = lowercaseOutsideClasses(pf[:lastSlash+1])
-		lastSeg = pf[lastSlash+1:]
+	if lastSlashEnd != -1 {
+		prefix = lowercaseOutsideClasses(pf[:lastSlashEnd])
+		lastSeg = pf[lastSlashEnd:]
 	}
 
 	for i := 0; i < len(lastSeg); i++ {
@@ -291,85 +291,160 @@ func isEscaped(s string, i int) bool {
 	return count%2 != 0
 }
 
+func findClassSpan(s string, start int) (end int, ok bool) {
+	if start >= len(s) || s[start] != '[' {
+		return -1, false
+	}
+	for i := start + 1; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		if s[i] == ']' {
+			return i + 1, true
+		}
+	}
+	return -1, false
+}
+
+func classMatchesChar(classContent string, target byte) bool {
+	if len(classContent) == 0 {
+		return false
+	}
+	negated := false
+	if classContent[0] == '!' || classContent[0] == '^' {
+		negated = true
+		classContent = classContent[1:]
+	}
+	matched := false
+	for i := 0; i < len(classContent); i++ {
+		if isEscaped(classContent, i) {
+			if classContent[i] == target {
+				matched = true
+				break
+			}
+			continue
+		}
+		if i+2 < len(classContent) && classContent[i+1] == '-' && !isEscaped(classContent, i+1) {
+			startChar := classContent[i]
+			endChar := classContent[i+2]
+			if target >= startChar && target <= endChar {
+				matched = true
+				break
+			}
+			i += 2
+			continue
+		}
+		if classContent[i] == target {
+			matched = true
+			break
+		}
+	}
+	if negated {
+		return !matched
+	}
+	return matched
+}
+
 func findDigestSeparator(s string) (startIdx, endIdx int) {
-	inClass := false
-	for i := 0; i < len(s); i++ {
+	searchStart := 0
+	if _, lastSlashEnd := findLastPathSeparator(s); lastSlashEnd != -1 {
+		searchStart = lastSlashEnd
+	}
+	lastAtStart, lastAtEnd := -1, -1
+	for i := searchStart; i < len(s); i++ {
 		escaped := isEscaped(s, i)
-		switch s[i] {
-		case '[':
-			if !escaped {
-				if !inClass && i+2 < len(s) && s[i+1] == '@' && s[i+2] == ']' {
-					return i, i + 3
+		if s[i] == '[' && !escaped {
+			if end, ok := findClassSpan(s, i); ok {
+				classContent := s[i+1 : end-1]
+				if classMatchesChar(classContent, '@') {
+					lastAtStart = i
+					lastAtEnd = end
 				}
-				inClass = true
+				i = end - 1
+				continue
 			}
-		case ']':
-			if !escaped {
-				inClass = false
-			}
-		case '@':
-			if !inClass {
-				if escaped {
-					return i - 1, i + 1
-				}
-				return i, i + 1
+		}
+		if s[i] == '@' {
+			if escaped {
+				lastAtStart = i - 1
+				lastAtEnd = i + 1
+			} else {
+				lastAtStart = i
+				lastAtEnd = i + 1
 			}
 		}
 	}
-	return -1, -1
+	if lastAtStart == -1 {
+		return -1, -1
+	}
+	// If a tag separator exists after this '@', the '@' was part of the repository/tag text, not a digest delimiter
+	afterAt := s[lastAtEnd:]
+	if colonIdx := strings.IndexByte(afterAt, ':'); colonIdx != -1 {
+		// If after ':' there is another '@' or if the prefix before ':' is not a digest algorithm keyword/pattern
+		// (e.g. tag with ':v1' following '@repo'), check if afterAt has another tag
+		algoCandidate := afterAt[:colonIdx]
+		if !strings.EqualFold(algoCandidate, "sha256") && !strings.EqualFold(algoCandidate, "sha384") && !strings.EqualFold(algoCandidate, "sha512") && algoCandidate != "*" && algoCandidate != "?" {
+			if tagStart, _ := findTagSeparator(afterAt); tagStart != -1 {
+				return -1, -1
+			}
+		}
+	}
+	return lastAtStart, lastAtEnd
 }
 
 func findTagSeparator(s string) (startIdx, endIdx int) {
 	searchStart := 0
-	if lastSlash := findLastPathSeparator(s); lastSlash != -1 {
-		searchStart = lastSlash + 1
+	if _, lastSlashEnd := findLastPathSeparator(s); lastSlashEnd != -1 {
+		searchStart = lastSlashEnd
 	}
-	inClass := false
 	for i := searchStart; i < len(s); i++ {
 		escaped := isEscaped(s, i)
-		switch s[i] {
-		case '[':
-			if !escaped {
-				if !inClass && i+2 < len(s) && s[i+1] == ':' && s[i+2] == ']' {
-					return i, i + 3
+		if s[i] == '[' && !escaped {
+			if end, ok := findClassSpan(s, i); ok {
+				classContent := s[i+1 : end-1]
+				if classMatchesChar(classContent, ':') {
+					return i, end
 				}
-				inClass = true
+				i = end - 1
+				continue
 			}
-		case ']':
-			if !escaped {
-				inClass = false
+		}
+		if s[i] == ':' {
+			if escaped {
+				return i - 1, i + 1
 			}
-		case ':':
-			if !inClass {
-				if escaped {
-					return i - 1, i + 1
-				}
-				return i, i + 1
-			}
+			return i, i + 1
 		}
 	}
 	return -1, -1
 }
 
-func findLastPathSeparator(s string) int {
-	lastSlash := -1
-	inClass := false
+func findLastPathSeparator(s string) (startIdx, endIdx int) {
+	lastStart, lastEnd := -1, -1
 	for i := 0; i < len(s); i++ {
-		if isEscaped(s, i) {
-			continue
+		escaped := isEscaped(s, i)
+		if s[i] == '[' && !escaped {
+			if end, ok := findClassSpan(s, i); ok {
+				classContent := s[i+1 : end-1]
+				if classMatchesChar(classContent, '/') {
+					lastStart = i
+					lastEnd = end
+				}
+				i = end - 1
+				continue
+			}
 		}
-		switch s[i] {
-		case '[':
-			inClass = true
-		case ']':
-			inClass = false
-		case '/':
-			if !inClass {
-				lastSlash = i
+		if s[i] == '/' {
+			if escaped {
+				lastStart = i - 1
+				lastEnd = i + 1
+			} else {
+				lastStart = i
+				lastEnd = i + 1
 			}
 		}
 	}
-	return lastSlash
+	return lastStart, lastEnd
 }
 
 func lowercaseOutsideClasses(s string) string {

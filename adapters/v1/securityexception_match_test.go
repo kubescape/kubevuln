@@ -102,6 +102,10 @@ func TestMatchImages(t *testing.T) {
 		{name: "escaped tag separator with uppercase repo rejects lowercase tag", patterns: []string{`NG*INX\:RC1`}, image: "nginx:rc1", want: false},
 		{name: "escaped digest separator with uppercase repo matches digest", patterns: []string{`docker.io/library/NGINX\@sha256:` + testDigest}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
 		{name: "class-hidden digest separator with uppercase repo matches digest", patterns: []string{`docker.io/library/NGINX[@]sha256:` + testDigest}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
+		{name: "multi-member class-hidden tag separator matches uppercase tag", patterns: []string{"docker.io/library/nginx[:x]RC1@sha256:*"}, image: "docker.io/library/nginx:RC1@sha256:" + testDigest, want: true},
+		{name: "multi-member class-hidden tag separator rejects lowercase tag", patterns: []string{"docker.io/library/nginx[:x]RC1@sha256:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
+		{name: "escaped slash with registry port matches normalized image", patterns: []string{`EXAMPLE.COM:5000\/NGINX:*`}, image: "example.com:5000/nginx:v1", want: true},
+		{name: "class-contained slash with registry port matches normalized image", patterns: []string{"EXAMPLE.COM:5000[/]NGINX:*"}, image: "example.com:5000/nginx:v1", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
