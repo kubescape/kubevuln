@@ -135,7 +135,14 @@ func matchImages(patterns []string, image string) bool {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
 			for _, form := range forms {
+				if ok, err := path.Match(pf, form); err == nil && ok {
+					return true
+				}
 				lowerPF := normalizePatternFormForCandidate(pf, form)
+				lowerForm := normalizeCandidateForm(form)
+				if ok, err := path.Match(lowerPF, lowerForm); err == nil && ok {
+					return true
+				}
 				if ok, err := path.Match(lowerPF, form); err == nil && ok {
 					return true
 				}
@@ -145,51 +152,90 @@ func matchImages(patterns []string, image string) bool {
 	return false
 }
 
+// normalizeCandidateForm normalizes the repository portion of a concrete reference candidate
+// to lowercase, while preserving case-sensitive tag and digest portions.
+func normalizeCandidateForm(form string) string {
+	if form == "" {
+		return ""
+	}
+	repoPart := form
+	rest := ""
+	if atIdx := strings.IndexByte(form, '@'); atIdx != -1 {
+		repoPart = form[:atIdx]
+		rest = form[atIdx:]
+	} else {
+		lastSlash := strings.LastIndexByte(form, '/')
+		searchStart := 0
+		if lastSlash != -1 {
+			searchStart = lastSlash + 1
+		}
+		if tagIdx := strings.IndexByte(form[searchStart:], ':'); tagIdx != -1 {
+			tagIdx += searchStart
+			repoPart = form[:tagIdx]
+			rest = form[tagIdx:]
+		}
+	}
+	return strings.ToLower(repoPart) + rest
+}
+
 // normalizePatternFormForCandidate normalizes the case of registry and repository segments in a pattern
 // form to lowercase, while preserving the case of tag and digest portions (which are case-sensitive).
-// When form is a bare repository reference (no tag or digest), the pattern is matched as a repository selector
-// and all repository text outside character classes is lowercased.
 func normalizePatternFormForCandidate(pf, form string) string {
 	if pf == "" {
 		return ""
 	}
 
-	repoPart := pf
-	digestPart := ""
-	if atIdx := findDigestSeparator(pf); atIdx != -1 {
-		repoPart = pf[:atIdx]
-		digestPart = pf[atIdx:]
-	}
-
-	if tagIdx := findTagSeparator(repoPart); tagIdx != -1 {
-		// An explicit ':' unambiguously marks where the tag starts: lowercase only the
-		// repository text before it, and leave the tag (case-sensitive) untouched.
-		return lowercaseOutsideClasses(repoPart[:tagIdx]) + repoPart[tagIdx:] + digestPart
-	}
-
-	// If the pattern has an explicit digest pinned (e.g. repo@sha256:...), then repoPart
-	// is unambiguously the repository portion (there is no tag). Lowercase all repository
-	// text outside character classes.
-	if digestPart != "" {
-		return lowercaseOutsideClasses(repoPart) + digestPart
-	}
-
-	// If the candidate form has no tag and no digest, it is a bare repository reference.
-	// In that case, the entire pattern is matching repository text, so all repository
-	// text outside character classes can be lowercased safely.
-	formHasTagOrDigest := findTagSeparator(form) != -1 || findDigestSeparator(form) != -1
-	if !formHasTagOrDigest {
-		return lowercaseOutsideClasses(repoPart) + digestPart
-	}
-
-	// No explicit tag or digest delimiter in pattern, but the candidate form carries a tag/digest.
-	// A wildcard in the last segment may span the hidden tag boundary (e.g. "nginx*RC*" matching "nginx:RC1"),
-	// so only the path segment before the last separator is unambiguously repository/registry text.
-	lastSlash := findLastPathSeparator(repoPart)
+	lastSlash := findLastPathSeparator(pf)
 	if lastSlash == -1 {
-		return repoPart + digestPart
+		return normalizeLastPatternSegment(pf, form)
 	}
-	return lowercaseOutsideClasses(repoPart[:lastSlash+1]) + repoPart[lastSlash+1:] + digestPart
+
+	// All path segments before the last slash are strictly registry and parent repository path segments.
+	prefix := lowercaseOutsideClasses(pf[:lastSlash+1])
+	lastSeg := pf[lastSlash+1:]
+	return prefix + normalizeLastPatternSegment(lastSeg, form)
+}
+
+func normalizeLastPatternSegment(seg, form string) string {
+	if seg == "" {
+		return ""
+	}
+
+	repoPart := seg
+	delimiterAndRest := ""
+
+	if atIdx := findDigestSeparator(seg); atIdx != -1 {
+		repoPart = seg[:atIdx]
+		delimiterAndRest = seg[atIdx:]
+	} else if tagIdx := findTagSeparator(seg); tagIdx != -1 {
+		repoPart = seg[:tagIdx]
+		delimiterAndRest = seg[tagIdx:]
+	}
+
+	// If the repoPart contains wildcards ('*' or '?'), a glob might cross into
+	// tag/digest portions in the candidate (e.g. nginx*RC*:* or nginx*RC*@sha256:*).
+	// To preserve tag case-sensitivity, do not lowercase uppercase characters
+	// in wildcarded repo parts when matching against tagged/digested candidates.
+	if hasUnescapedWildcards(repoPart) {
+		formHasTagOrDigest := findTagSeparator(form) != -1 || findDigestSeparator(form) != -1
+		if formHasTagOrDigest {
+			return seg
+		}
+	}
+
+	return lowercaseOutsideClasses(repoPart) + delimiterAndRest
+}
+
+func hasUnescapedWildcards(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if isEscaped(s, i) {
+			continue
+		}
+		if s[i] == '*' || s[i] == '?' {
+			return true
+		}
+	}
+	return false
 }
 
 func isEscaped(s string, i int) bool {
@@ -271,6 +317,13 @@ func lowercaseOutsideClasses(s string) string {
 	inClass := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if inClass {
+			if c == ']' && !isEscaped(s, i) {
+				inClass = false
+			}
+			b.WriteByte(c)
+			continue
+		}
 		if isEscaped(s, i) {
 			if c >= 'A' && c <= 'Z' {
 				b.WriteByte(c + ('a' - 'A'))
@@ -283,13 +336,8 @@ func lowercaseOutsideClasses(s string) string {
 		case '[':
 			inClass = true
 			b.WriteByte(c)
-		case ']':
-			inClass = false
-			b.WriteByte(c)
 		default:
-			if inClass {
-				b.WriteByte(c)
-			} else if c >= 'A' && c <= 'Z' {
+			if c >= 'A' && c <= 'Z' {
 				b.WriteByte(c + ('a' - 'A'))
 			} else {
 				b.WriteByte(c)
@@ -327,12 +375,16 @@ func hasDomainOrWildcard(firstSeg string) bool {
 		return true
 	}
 	for i := 0; i < len(firstSeg); i++ {
-		if isEscaped(firstSeg, i) {
-			continue
-		}
+		escaped := isEscaped(firstSeg, i)
 		switch firstSeg[i] {
-		case '.', ':', '*', '?', '[':
+		case '.', ':':
+			// Literal domain punctuation (even if escaped like quay\.io) marks a registry domain
 			return true
+		case '*', '?', '[':
+			// Glob wildcards only qualify as domain wildcards if unescaped
+			if !escaped {
+				return true
+			}
 		}
 	}
 	return false

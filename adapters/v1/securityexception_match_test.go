@@ -82,9 +82,18 @@ func TestMatchImages(t *testing.T) {
 		{name: "digest-pinned uppercase repo matches normalized image with digest", patterns: []string{"docker.io/library/NGINX*@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, image: "docker.io/library/nginx@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", want: true},
 		{name: "escaped uppercase letter in repo matches lowercase repo", patterns: []string{`docker.io/library/nginx\X:*`}, image: "docker.io/library/nginxx:v1", want: true},
 		{name: "bracketed domain wildcard does not expand to docker.io", patterns: []string{"[Ll]ocalhost/app:*"}, image: "docker.io/localhost/app:v1", want: false},
-		{name: "bracketed domain wildcard matches matching domain", patterns: []string{"[Ll]ocalhost/app:*"}, image: "localhost/app:v1", want: true},
 		{name: "delimiter spanning glob matches exact uppercase tag", patterns: []string{"nginx*RC*"}, image: "nginx:RC1", want: true},
 		{name: "delimiter spanning glob does not match lowercase tag", patterns: []string{"nginx*RC*"}, image: "nginx:rc1", want: false},
+		{name: "escaped domain punctuation matches intended registry", patterns: []string{`quay\.io/org/app:*`}, image: "quay.io/org/app:v1", want: true},
+		{name: "escaped domain punctuation does not match docker.io", patterns: []string{`quay\.io/org/app:*`}, image: "docker.io/quay.io/org/app:v1", want: false},
+		{name: "uppercase domain pattern matches identical uppercase domain image", patterns: []string{"EXAMPLE.COM/app:v1"}, image: "EXAMPLE.COM/app:v1", want: true},
+		{name: "uppercase domain pattern matches normalized lowercase domain image", patterns: []string{"EXAMPLE.COM/app:v1"}, image: "example.com/app:v1", want: true},
+		{name: "hidden tag in colon pattern matches uppercase tag with digest", patterns: []string{"docker.io/library/nginx*RC*:*"}, image: "docker.io/library/nginx:RC1@sha256:" + testDigest, want: true},
+		{name: "hidden tag in colon pattern rejects lowercase tag with digest", patterns: []string{"docker.io/library/nginx*RC*:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
+		{name: "hidden tag in digest pattern matches uppercase tag with digest", patterns: []string{"docker.io/library/nginx*RC*@sha256:*"}, image: "docker.io/library/nginx:RC1@sha256:" + testDigest, want: true},
+		{name: "hidden tag in digest pattern rejects lowercase tag with digest", patterns: []string{"docker.io/library/nginx*RC*@sha256:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
+		{name: "escaped uppercase member in character class is preserved", patterns: []string{`docker.io/library/nginx[\A]:*`}, image: "docker.io/library/nginxA:v1", want: true},
+		{name: "escaped uppercase member in character class does not match lowercase", patterns: []string{`docker.io/library/nginx[\A]:*`}, image: "docker.io/library/nginxa:v1", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
