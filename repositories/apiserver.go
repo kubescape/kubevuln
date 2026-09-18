@@ -214,6 +214,7 @@ func (a *APIServerStore) trySetSecurityExceptionCache(cacheKey string, seenGener
 type labelsCacheEntry struct {
 	mu         sync.Mutex
 	generation uint64
+	refreshes  uint32
 }
 
 func (a *APIServerStore) labelsCacheEntry(cacheKey string) *labelsCacheEntry {
@@ -222,33 +223,51 @@ func (a *APIServerStore) labelsCacheEntry(cacheKey string) *labelsCacheEntry {
 }
 
 func (a *APIServerStore) invalidateLabelsCacheKey(cacheKey string) {
-	entry := a.labelsCacheEntry(cacheKey)
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-	entry.generation++
+	v, ok := a.labelsCacheEntries.Load(cacheKey)
+	if ok {
+		entry := v.(*labelsCacheEntry)
+		entry.mu.Lock()
+		entry.generation++
+		if a.labelsCache != nil {
+			a.labelsCache.Delete(cacheKey)
+		}
+		if entry.refreshes == 0 {
+			a.labelsCacheEntries.Delete(cacheKey)
+		}
+		entry.mu.Unlock()
+		return
+	}
 	if a.labelsCache != nil {
 		a.labelsCache.Delete(cacheKey)
 	}
 }
 
-func (a *APIServerStore) beginLabelsCacheRefresh(cacheKey string) (seenGeneration uint64) {
-	entry := a.labelsCacheEntry(cacheKey)
+func (a *APIServerStore) beginLabelsCacheRefresh(cacheKey string) (entry *labelsCacheEntry, seenGeneration uint64) {
+	entry = a.labelsCacheEntry(cacheKey)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	return entry.generation
+	entry.refreshes++
+	return entry, entry.generation
 }
 
-func (a *APIServerStore) trySetLabelsCache(cacheKey string, seenGeneration uint64, value interface{}) {
-	if a.labelsCache == nil {
+func (a *APIServerStore) trySetLabelsCache(cacheKey string, entry *labelsCacheEntry, seenGeneration uint64, value interface{}) {
+	if entry == nil {
 		return
 	}
-	entry := a.labelsCacheEntry(cacheKey)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.generation != seenGeneration {
+	if entry.refreshes > 0 {
+		entry.refreshes--
+	}
+	if value == nil || entry.generation != seenGeneration {
+		if entry.refreshes == 0 {
+			a.labelsCacheEntries.Delete(cacheKey)
+		}
 		return
 	}
-	a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
+	if a.labelsCache != nil {
+		a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
+	}
 }
 
 var (
@@ -874,10 +893,11 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		}
 	}
 
-	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+	entry, seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
 
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
+		a.trySetLabelsCache(cacheKey, entry, seenGeneration, nil)
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -887,10 +907,11 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// Propagate NotFound as an error (rather than nil labels) so the caller
 		// fails closed: a negative objectSelector must not match a workload that
 		// could not be resolved.
+		a.trySetLabelsCache(cacheKey, entry, seenGeneration, nil)
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	a.trySetLabelsCache(cacheKey, entry, seenGeneration, labels)
 	return labels, nil
 }
 
@@ -910,7 +931,7 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 		}
 	}
 
-	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+	entry, seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
 
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -918,10 +939,11 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 	if err != nil {
 		// Propagate NotFound as an error so the caller fails closed (see
 		// GetWorkloadLabels).
+		a.trySetLabelsCache(cacheKey, entry, seenGeneration, nil)
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	a.trySetLabelsCache(cacheKey, entry, seenGeneration, labels)
 	return labels, nil
 }
 
