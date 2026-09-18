@@ -3749,39 +3749,102 @@ func TestAPIServerStore_InvalidateLabelsCache_InFlightReadDoesNotOverwriteInvali
 
 	// 1. Workload labels: snapshot generation as if Get() started
 	workloadKey := workloadLabelsCacheKeyPrefix + "ns-a/Deployment/deploy-a"
-	entryWorkload, seenGenWorkload := a.beginLabelsCacheRefresh(workloadKey)
+	seenGenWorkload := a.beginLabelsCacheRefresh(workloadKey)
 
 	// Informer invalidates before Get() completes
 	a.InvalidateWorkloadLabelsCache("ns-a", "Deployment", "deploy-a")
 
 	// Get() completes with stale labels and tries to set cache
-	a.trySetLabelsCache(workloadKey, entryWorkload, seenGenWorkload, map[string]string{"env": "old"})
+	a.trySetLabelsCache(workloadKey, seenGenWorkload, map[string]string{"env": "old"})
 
 	// Stale write should be rejected because generation changed
 	_, ok := a.labelsCache.Get(workloadKey)
 	assert.False(t, ok, "an in-flight workload GET must not restore stale labels after invalidation")
 
-	// Entry must be deleted from labelsCacheEntries when refreshes reach 0
-	_, exists := a.labelsCacheEntries.Load(workloadKey)
-	assert.False(t, exists, "labelsCacheEntries must be cleaned up when no in-flight refreshes remain")
+	// Entry must be deleted from labelsEntries when refreshes reach 0
+	a.labelsEntriesMu.Lock()
+	_, exists := a.labelsEntries[workloadKey]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries must be cleaned up when no in-flight refreshes remain")
 
 	// 2. Namespace labels: snapshot generation as if Get() started
 	nsKey := namespaceLabelsCacheKeyPrefix + "ns-a"
-	entryNS, seenGenNS := a.beginLabelsCacheRefresh(nsKey)
+	seenGenNS := a.beginLabelsCacheRefresh(nsKey)
 
 	// Informer invalidates before Get() completes
 	a.InvalidateNamespaceLabelsCache("ns-a")
 
 	// Get() completes with stale labels and tries to set cache
-	a.trySetLabelsCache(nsKey, entryNS, seenGenNS, map[string]string{"team": "old"})
+	a.trySetLabelsCache(nsKey, seenGenNS, map[string]string{"team": "old"})
 
 	// Stale write should be rejected because generation changed
 	_, ok = a.labelsCache.Get(nsKey)
 	assert.False(t, ok, "an in-flight namespace GET must not restore stale labels after invalidation")
 
-	// Entry must be deleted from labelsCacheEntries when refreshes reach 0
-	_, exists = a.labelsCacheEntries.Load(nsKey)
-	assert.False(t, exists, "labelsCacheEntries must be cleaned up when no in-flight refreshes remain")
+	// Entry must be deleted from labelsEntries when refreshes reach 0
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[nsKey]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries must be cleaned up when no in-flight refreshes remain")
+}
+
+func TestAPIServerStore_LabelsCache_LifecycleAndCleanup(t *testing.T) {
+	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+	key := workloadLabelsCacheKeyPrefix + "default/Pod/test-pod"
+
+	// 1. Successful refresh: caches value and cleans up entry from map
+	gen := a.beginLabelsCacheRefresh(key)
+	a.trySetLabelsCache(key, gen, map[string]string{"app": "v1"})
+
+	cached, ok := a.labelsCache.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"app": "v1"}, cached)
+
+	a.labelsEntriesMu.Lock()
+	_, exists := a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be removed after successful refresh completes")
+
+	// 2. Error/nil refresh: does not cache and cleans up entry
+	genErr := a.beginLabelsCacheRefresh(key)
+	a.trySetLabelsCache(key, genErr, nil)
+
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be removed when refresh encounters error (nil value)")
+
+	// 3. Multi-reader with invalidation interleaving:
+	// Reader 1 begins before invalidation
+	gen1 := a.beginLabelsCacheRefresh(key)
+
+	// Invalidation occurs
+	a.invalidateLabelsCacheKey(key)
+
+	// Reader 2 begins after invalidation
+	gen2 := a.beginLabelsCacheRefresh(key)
+
+	// Reader 1 completes with stale labels -> rejected, entry still kept for Reader 2
+	a.trySetLabelsCache(key, gen1, map[string]string{"app": "stale"})
+	_, ok = a.labelsCache.Get(key)
+	assert.False(t, ok, "stale read from Reader 1 must be rejected")
+
+	a.labelsEntriesMu.Lock()
+	entry, exists := a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	require.True(t, exists, "labelsEntries entry must remain while Reader 2 is in-flight")
+	assert.Equal(t, uint32(1), entry.refreshes)
+
+	// Reader 2 completes with fresh labels -> accepted and entry cleaned up
+	a.trySetLabelsCache(key, gen2, map[string]string{"app": "fresh"})
+	cached, ok = a.labelsCache.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"app": "fresh"}, cached)
+
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be deleted after all in-flight refreshes finish")
 }
 
 
