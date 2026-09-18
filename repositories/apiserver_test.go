@@ -2872,11 +2872,14 @@ func TestAPIServerStore_GetCVESummary_FallbackNamespace(t *testing.T) {
 	a := newFakeAPIServerStore("kubescape", wrapped)
 
 	workload := domain.ScanCommand{
+		ImageSlug: "nginx-latest",
 		ImageHash: "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
 		ImageTag:  "nginx:latest",
 	}
 	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
-	_, _ = a.GetCVESummary(ctx)
+	res, err := a.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.Nil(t, res)
 
 	require.Contains(t, wrapped.vulnSummaries, "kubescape")
 }
@@ -5913,12 +5916,12 @@ func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
 		assert.NotEqual(t, name1, name2, "case-distinct tags must not collapse into the same resource name")
 	})
 
-	t.Run("store and retrieve with empty ImageSlug and ContainerName resolves distinct keys for Release vs release", func(t *testing.T) {
+	t.Run("store and retrieve with case-distinct ImageSlug resolves distinct keys for Release vs release", func(t *testing.T) {
 		ctx1 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
-			ImageTag: "Release",
+			ImageSlug: "Release",
 		})
 		ctx2 := context.WithValue(context.Background(), domain.WorkloadKey{}, domain.ScanCommand{
-			ImageTag: "release",
+			ImageSlug: "release",
 		})
 
 		k8sName1, err1 := GetCVESummaryK8sResourceName(ctx1)
