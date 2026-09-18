@@ -154,9 +154,12 @@ func splitCandidateForm(form string) (repo, tag, digest string) {
 		return "", "", ""
 	}
 	repo = form
-	if atIdx := strings.IndexByte(form, '@'); atIdx != -1 {
-		repo = form[:atIdx]
-		digest = form[atIdx+1:]
+	if atIdx := strings.LastIndexByte(form, '@'); atIdx != -1 {
+		afterAt := form[atIdx+1:]
+		if colonIdx := strings.IndexByte(afterAt, ':'); colonIdx != -1 && len(afterAt[colonIdx+1:]) >= 32 {
+			repo = form[:atIdx]
+			digest = afterAt
+		}
 	}
 	lastSlash := strings.LastIndexByte(repo, '/')
 	searchStart := 0
@@ -183,9 +186,9 @@ func splitPatternForm(pf string) (pRepo, pTag, pDigest string, hasTag, hasDigest
 		pDigest = pf[atIdx+1:]
 		hasDigest = true
 	}
-	if tagIdx := findTagSeparator(pRepo); tagIdx != -1 {
-		pTag = pRepo[tagIdx+1:]
-		pRepo = pRepo[:tagIdx]
+	if tagStart, tagEnd := findTagSeparator(pRepo); tagStart != -1 {
+		pTag = pRepo[tagEnd:]
+		pRepo = pRepo[:tagStart]
 		hasTag = true
 	}
 	return pRepo, pTag, pDigest, hasTag, hasDigest
@@ -198,41 +201,86 @@ func matchCandidate(pf, form string) bool {
 	pRepo, pTag, pDigest, hasTag, hasDigest := splitPatternForm(pf)
 	formRepo, formTag, formDigest := splitCandidateForm(form)
 
-	// 1. Repository matching: case-insensitive in Docker/OCI.
+	// 1. Component-aware matching:
 	lowerPRepo := lowercaseOutsideClasses(pRepo)
 	lowerFormRepo := strings.ToLower(formRepo)
 	repoMatch, err := path.Match(lowerPRepo, lowerFormRepo)
-	if err != nil || !repoMatch {
+	if err == nil && repoMatch {
+		if hasTag {
+			if formTag != "" {
+				tagMatch, err := path.Match(pTag, formTag)
+				if err == nil && tagMatch {
+					if hasDigest {
+						if formDigest != "" {
+							digestMatch, err := path.Match(pDigest, formDigest)
+							if err == nil && digestMatch {
+								return true
+							}
+						}
+					} else {
+						return true
+					}
+				}
+			}
+		} else if hasDigest {
+			if formDigest != "" {
+				digestMatch, err := path.Match(pDigest, formDigest)
+				if err == nil && digestMatch {
+					return true
+				}
+			}
+		} else {
+			// Bare repository pattern matches any tag/digest form.
+			return true
+		}
+	}
+
+	// 2. Wildcard spanning repository and tag/digest (e.g. ng*INX*RC* or nginx*RC*):
+	if matchSpanningWildcard(pf, form) {
+		return true
+	}
+
+	return false
+}
+
+func matchSpanningWildcard(pf, form string) bool {
+	formRepo, formTag, formDigest := splitCandidateForm(form)
+	if formTag == "" && formDigest == "" {
 		return false
 	}
-
-	// 2. Tag matching: case-sensitive.
-	if hasTag {
-		if formTag == "" {
-			return false
+	tagOrDigestSuffix := ""
+	if formTag != "" {
+		tagOrDigestSuffix = ":" + formTag
+		if formDigest != "" {
+			tagOrDigestSuffix += "@" + formDigest
 		}
-		tagMatch, err := path.Match(pTag, formTag)
-		if err != nil || !tagMatch {
-			return false
-		}
-	} else if formTag != "" {
-		if !hasDigest {
-			return false
-		}
+	} else if formDigest != "" {
+		tagOrDigestSuffix = "@" + formDigest
 	}
 
-	// 3. Digest matching: case-sensitive.
-	if hasDigest {
-		if formDigest == "" {
-			return false
-		}
-		digestMatch, err := path.Match(pDigest, formDigest)
-		if err != nil || !digestMatch {
-			return false
-		}
+	lastSlash := findLastPathSeparator(pf)
+	prefix := ""
+	lastSeg := pf
+	if lastSlash != -1 {
+		prefix = lowercaseOutsideClasses(pf[:lastSlash+1])
+		lastSeg = pf[lastSlash+1:]
 	}
 
-	return true
+	for i := 0; i < len(lastSeg); i++ {
+		if !isEscaped(lastSeg, i) && (lastSeg[i] == '*' || lastSeg[i] == '?') {
+			repoPattern := prefix + lowercaseOutsideClasses(lastSeg[:i])
+			suffixPattern := lastSeg[i:]
+
+			// Check if repo portion matches candidate repo (case-insensitively)
+			if repoOk, err := path.Match(repoPattern, strings.ToLower(formRepo)); err == nil && repoOk {
+				// Check if suffix portion matches candidate tag/digest suffix (case-sensitively)
+				if suffixOk, err := path.Match(suffixPattern, tagOrDigestSuffix); err == nil && suffixOk {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isEscaped(s string, i int) bool {
@@ -263,7 +311,7 @@ func findDigestSeparator(s string) int {
 	return -1
 }
 
-func findTagSeparator(s string) int {
+func findTagSeparator(s string) (startIdx, endIdx int) {
 	searchStart := 0
 	if lastSlash := findLastPathSeparator(s); lastSlash != -1 {
 		searchStart = lastSlash + 1
@@ -275,16 +323,19 @@ func findTagSeparator(s string) int {
 		}
 		switch s[i] {
 		case '[':
+			if !inClass && i+2 < len(s) && s[i+1] == ':' && s[i+2] == ']' {
+				return i, i + 3
+			}
 			inClass = true
 		case ']':
 			inClass = false
 		case ':':
 			if !inClass {
-				return i
+				return i, i + 1
 			}
 		}
 	}
-	return -1
+	return -1, -1
 }
 
 func findLastPathSeparator(s string) int {
