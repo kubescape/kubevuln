@@ -85,6 +85,23 @@ func TestResolve_NilProductTree_NeverPanics(t *testing.T) {
 		_, err := resolver.Resolve("anything")
 		assert.ErrorIs(t, err, ErrNoRelationship)
 	})
+
+	// Resolver with nil tree but populated compositeToRef map
+	resWithNilTree := &Resolver{
+		tree:           nil,
+		compositeToRef: map[string]string{"foo:bar": "CSAFPID-0001"},
+	}
+	assert.NotPanics(t, func() {
+		_, err := resWithNilTree.Resolve("foo:bar")
+		assert.ErrorIs(t, err, ErrNoRelationship)
+	})
+
+	// Nil receiver
+	var nilResolver *Resolver
+	assert.NotPanics(t, func() {
+		_, err := nilResolver.Resolve("anything")
+		assert.ErrorIs(t, err, ErrNoRelationship)
+	})
 }
 
 // TestResolve_ReferenceWithNoPURL_ReturnsErrNoPURL proves the honest,
