@@ -166,7 +166,7 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 		if err != nil {
 			return nil, err
 		}
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			defer resp.Body.Close()
 			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			bodyStr := strings.TrimSpace(string(bodyBytes))
