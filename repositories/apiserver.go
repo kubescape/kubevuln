@@ -1205,6 +1205,7 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	if err != nil {
 		return err
 	}
+	incomingTimestamp := ctx.Value(domain.TimestampKey{}).(int64) // validated by enrichSummaryManifestObjectAnnotations
 	labels, err := enrichSummaryManifestObjectLabels(ctx, cve.Labels, withRelevancy)
 	if err != nil {
 		return err
@@ -1233,14 +1234,38 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 			Vulnerabilities: parseVulnerabilitiesComponents(cve, cvep, a.Namespace, withRelevancy),
 		},
 	}
-	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),
-		"CVE summary manifest", manifest.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
-		func(existing *v1beta1.VulnerabilityManifestSummary) {
+	store := a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace)
+	_, err = store.Create(ctx, &manifest, metav1.CreateOptions{})
+	switch {
+	case errors.IsAlreadyExists(err):
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// The metadata-only read includes the scan timestamp and resource version.
+			// A stale result must return before Update: the fetched Spec is empty.
+			existing, getErr := store.Get(ctx, manifest.Name, metav1.GetOptions{ResourceVersion: resourceVersionMetadata})
+			if getErr != nil {
+				return getErr
+			}
+			if existingTimestamp, parseErr := strconv.ParseInt(existing.Annotations[timestampMetadataKey], 10, 64); parseErr == nil && existingTimestamp > incomingTimestamp {
+				return nil
+			}
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
-		},
-		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
+			_, updateErr := store.Update(ctx, existing, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update CVE summary manifest in storage: %w", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("failed to store CVE summary manifest in storage: %w", err)
+	default:
+		return nil
+	}
 }
 
 // summaryHasVulnerabilityData reports whether a summary already holds real scan results
