@@ -522,7 +522,19 @@ func emitSuppressionEvent(recorder record.EventRecorder, p armotypes.Vulnerabili
 	}
 	kind, _ := p.Attributes["sourceKind"].(string)
 	uid, _ := p.Attributes["sourceUID"].(string)
-	if kind == "" || p.Name == "" || uid == "" {
+	missingFields := make([]string, 0, 3)
+	if kind == "" {
+		missingFields = append(missingFields, "sourceKind")
+	}
+	if p.Name == "" {
+		missingFields = append(missingFields, "sourceName")
+	}
+	if uid == "" {
+		missingFields = append(missingFields, "sourceUID")
+	}
+	if len(missingFields) > 0 {
+		logger.L().Debug("skipping suppression event: incomplete provenance",
+			helpers.String("missingFields", strings.Join(missingFields, ",")))
 		return
 	}
 	namespace, _ := p.Attributes["sourceNamespace"].(string)
