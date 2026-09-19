@@ -134,11 +134,16 @@ func matchImages(patterns []string, image string) bool {
 	for _, p := range patterns {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
+			// Fail-closed on invalid path.Match patterns (e.g. malformed classes like [:-] or [bad)
+			if _, err := path.Match(pf, ""); err != nil {
+				continue
+			}
 			for _, form := range forms {
 				if ok, err := path.Match(pf, form); err == nil && ok {
 					return true
 				}
-				if matchCandidate(pf, form) {
+				repo, _, _ := splitCandidateForm(form)
+				if matchImagePattern(pf, form, len(repo)) {
 					return true
 				}
 			}
@@ -174,313 +179,180 @@ func splitCandidateForm(form string) (repo, tag, digest string) {
 	return repo, tag, digest
 }
 
-// splitPatternForm decomposes a pattern form into its repository, tag, and
-// digest pattern components, tracking whether tag or digest delimiters were present.
-func splitPatternForm(pf string) (pRepo, pTag, pDigest string, hasTag, hasDigest bool) {
-	if pf == "" {
-		return "", "", "", false, false
+// matchImagePattern matches pattern against candidate form following path.Match
+// rules, treating repository characters (indices < repoLen in candidate)
+// case-insensitively, while strictly preserving case sensitivity on tag and digest
+// characters (indices >= repoLen in candidate) and preserving standard character-class semantics.
+func matchImagePattern(pattern, candidate string, repoLen int) bool {
+	origCandidate := candidate
+Pattern:
+	for len(pattern) > 0 {
+		var star bool
+		var chunk string
+		star, chunk, pattern = scanChunk(pattern)
+		if star && chunk == "" {
+			// Trailing * matches the rest of the string unless it has a /.
+			return !strings.Contains(candidate, "/")
+		}
+		// Look for match at current position.
+		t, ok, err := matchChunkAt(chunk, candidate, len(origCandidate)-len(candidate), repoLen)
+		if ok && (len(t) == 0 || len(pattern) > 0) {
+			candidate = t
+			continue
+		}
+		if err != nil {
+			return false
+		}
+		if star {
+			// Look for match skipping i characters.
+			// Cannot skip /.
+			for i := 0; i < len(candidate) && candidate[i] != '/'; i++ {
+				t, ok, err := matchChunkAt(chunk, candidate[i+1:], len(origCandidate)-len(candidate[i+1:]), repoLen)
+				if ok {
+					if len(pattern) == 0 && len(t) > 0 {
+						continue
+					}
+					candidate = t
+					continue Pattern
+				}
+				if err != nil {
+					return false
+				}
+			}
+		}
+		return false
 	}
-	pRepo = pf
-	if atStart, atEnd := findDigestSeparator(pf); atStart != -1 {
-		pRepo = pf[:atStart]
-		pDigest = pf[atEnd:]
-		hasDigest = true
-	}
-	if tagStart, tagEnd := findTagSeparator(pRepo); tagStart != -1 {
-		pTag = pRepo[tagEnd:]
-		pRepo = pRepo[:tagStart]
-		hasTag = true
-	}
-	return pRepo, pTag, pDigest, hasTag, hasDigest
+	return len(candidate) == 0
 }
 
-// matchCandidate performs component-aware matching between pattern pf and candidate form:
-// - Repository matching is case-insensitive (lowercased outside character classes).
-// - Tag and digest matching are case-sensitive.
-func matchCandidate(pf, form string) bool {
-	pRepo, pTag, pDigest, hasTag, hasDigest := splitPatternForm(pf)
-	formRepo, formTag, formDigest := splitCandidateForm(form)
+func scanChunk(pattern string) (star bool, chunk, rest string) {
+	for len(pattern) > 0 && pattern[0] == '*' {
+		pattern = pattern[1:]
+		star = true
+	}
+	inrange := false
+	var i int
+Scan:
+	for i = 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			if i+1 < len(pattern) {
+				i++
+			}
+		case '[':
+			inrange = true
+		case ']':
+			inrange = false
+		case '*':
+			if !inrange {
+				break Scan
+			}
+		}
+	}
+	return star, pattern[0:i], pattern[i:]
+}
 
-	// 1. Component-aware matching:
-	lowerPRepo := lowercaseOutsideClasses(pRepo)
-	lowerFormRepo := strings.ToLower(formRepo)
-	repoMatch, err := path.Match(lowerPRepo, lowerFormRepo)
-	if err == nil && repoMatch {
-		if hasTag {
-			if formTag != "" {
-				tagMatch, err := path.Match(pTag, formTag)
-				if err == nil && tagMatch {
-					if hasDigest {
-						if formDigest != "" {
-							digestMatch, err := path.Match(pDigest, formDigest)
-							if err == nil && digestMatch {
-								return true
-							}
-						}
-					} else {
-						return true
+func matchChunkAt(chunk, s string, startPos, repoLen int) (rest string, ok bool, err error) {
+	origLenS := len(s)
+	for len(chunk) > 0 {
+		if len(s) == 0 {
+			return "", false, nil
+		}
+		curPos := startPos + (origLenS - len(s))
+		inRepo := curPos < repoLen
+
+		switch chunk[0] {
+		case '[':
+			// character class
+			r := s[0]
+			s = s[1:]
+			chunk = chunk[1:]
+			// possible negation: only '^' is negation in path.Match
+			negated := false
+			if len(chunk) > 0 && chunk[0] == '^' {
+				negated = true
+				chunk = chunk[1:]
+				if r == '/' {
+					return "", false, nil
+				}
+			}
+			// parse class
+			match := false
+			nrange := 0
+			for {
+				if len(chunk) > 0 && chunk[0] == ']' && nrange > 0 {
+					chunk = chunk[1:]
+					break
+				}
+				var lo, hi byte
+				if len(chunk) == 0 {
+					return "", false, path.ErrBadPattern
+				}
+				if chunk[0] == '\\' {
+					chunk = chunk[1:]
+					if len(chunk) == 0 {
+						return "", false, path.ErrBadPattern
 					}
 				}
-			}
-		} else if hasDigest {
-			if formDigest != "" {
-				digestMatch, err := path.Match(pDigest, formDigest)
-				if err == nil && digestMatch {
-					return true
+				lo = chunk[0]
+				chunk = chunk[1:]
+				hi = lo
+				if len(chunk) >= 2 && chunk[0] == '-' && chunk[1] != ']' {
+					chunk = chunk[1:]
+					if chunk[0] == '\\' {
+						chunk = chunk[1:]
+						if len(chunk) == 0 {
+							return "", false, path.ErrBadPattern
+						}
+					}
+					hi = chunk[0]
+					chunk = chunk[1:]
 				}
-			}
-		} else {
-			// Bare repository pattern matches any tag/digest form.
-			return true
-		}
-	}
-
-	// 2. Wildcard spanning repository and tag/digest (e.g. ng*INX*RC* or nginx*RC*):
-	if matchSpanningWildcard(pf, form) {
-		return true
-	}
-
-	return false
-}
-
-func matchSpanningWildcard(pf, form string) bool {
-	formRepo, formTag, formDigest := splitCandidateForm(form)
-	if formTag == "" && formDigest == "" {
-		return false
-	}
-	tagOrDigestSuffix := ""
-	if formTag != "" {
-		tagOrDigestSuffix = ":" + formTag
-		if formDigest != "" {
-			tagOrDigestSuffix += "@" + formDigest
-		}
-	} else if formDigest != "" {
-		tagOrDigestSuffix = "@" + formDigest
-	}
-
-	_, lastSlashEnd := findLastPathSeparator(pf)
-	prefix := ""
-	lastSeg := pf
-	if lastSlashEnd != -1 {
-		prefix = lowercaseOutsideClasses(pf[:lastSlashEnd])
-		lastSeg = pf[lastSlashEnd:]
-	}
-
-	for i := 0; i < len(lastSeg); i++ {
-		if !isEscaped(lastSeg, i) && (lastSeg[i] == '*' || lastSeg[i] == '?') {
-			repoPattern := prefix + lowercaseOutsideClasses(lastSeg[:i])
-			suffixPattern := lastSeg[i:]
-
-			// Check if repo portion matches candidate repo (case-insensitively)
-			if repoOk, err := path.Match(repoPattern, strings.ToLower(formRepo)); err == nil && repoOk {
-				// Check if suffix portion matches candidate tag/digest suffix (case-sensitively)
-				if suffixOk, err := path.Match(suffixPattern, tagOrDigestSuffix); err == nil && suffixOk {
-					return true
+				if lo > hi {
+					return "", false, path.ErrBadPattern
 				}
-			}
-		}
-	}
-	return false
-}
-
-func isEscaped(s string, i int) bool {
-	count := 0
-	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
-		count++
-	}
-	return count%2 != 0
-}
-
-func findClassSpan(s string, start int) (end int, ok bool) {
-	if start >= len(s) || s[start] != '[' {
-		return -1, false
-	}
-	for i := start + 1; i < len(s); i++ {
-		if isEscaped(s, i) {
-			continue
-		}
-		if s[i] == ']' {
-			return i + 1, true
-		}
-	}
-	return -1, false
-}
-
-func classMatchesChar(classContent string, target byte) bool {
-	if len(classContent) == 0 {
-		return false
-	}
-	negated := false
-	if classContent[0] == '!' || classContent[0] == '^' {
-		negated = true
-		classContent = classContent[1:]
-	}
-	matched := false
-	for i := 0; i < len(classContent); i++ {
-		if isEscaped(classContent, i) {
-			if classContent[i] == target {
-				matched = true
-				break
-			}
-			continue
-		}
-		if i+2 < len(classContent) && classContent[i+1] == '-' && !isEscaped(classContent, i+1) {
-			startChar := classContent[i]
-			endChar := classContent[i+2]
-			if target >= startChar && target <= endChar {
-				matched = true
-				break
-			}
-			i += 2
-			continue
-		}
-		if classContent[i] == target {
-			matched = true
-			break
-		}
-	}
-	if negated {
-		return !matched
-	}
-	return matched
-}
-
-func findDigestSeparator(s string) (startIdx, endIdx int) {
-	searchStart := 0
-	if _, lastSlashEnd := findLastPathSeparator(s); lastSlashEnd != -1 {
-		searchStart = lastSlashEnd
-	}
-	lastAtStart, lastAtEnd := -1, -1
-	for i := searchStart; i < len(s); i++ {
-		escaped := isEscaped(s, i)
-		if s[i] == '[' && !escaped {
-			if end, ok := findClassSpan(s, i); ok {
-				classContent := s[i+1 : end-1]
-				if classMatchesChar(classContent, '@') {
-					lastAtStart = i
-					lastAtEnd = end
+				if lo <= r && r <= hi {
+					match = true
 				}
-				i = end - 1
-				continue
+				nrange++
 			}
-		}
-		if s[i] == '@' {
-			if escaped {
-				lastAtStart = i - 1
-				lastAtEnd = i + 1
-			} else {
-				lastAtStart = i
-				lastAtEnd = i + 1
+			if match == negated {
+				return "", false, nil
 			}
-		}
-	}
-	if lastAtStart == -1 {
-		return -1, -1
-	}
-	// If a tag separator exists after this '@', the '@' was part of the repository/tag text, not a digest delimiter
-	afterAt := s[lastAtEnd:]
-	if colonIdx := strings.IndexByte(afterAt, ':'); colonIdx != -1 {
-		// If after ':' there is another '@' or if the prefix before ':' is not a digest algorithm keyword/pattern
-		// (e.g. tag with ':v1' following '@repo'), check if afterAt has another tag
-		algoCandidate := afterAt[:colonIdx]
-		if !strings.EqualFold(algoCandidate, "sha256") && !strings.EqualFold(algoCandidate, "sha384") && !strings.EqualFold(algoCandidate, "sha512") && algoCandidate != "*" && algoCandidate != "?" {
-			if tagStart, _ := findTagSeparator(afterAt); tagStart != -1 {
-				return -1, -1
-			}
-		}
-	}
-	return lastAtStart, lastAtEnd
-}
 
-func findTagSeparator(s string) (startIdx, endIdx int) {
-	searchStart := 0
-	if _, lastSlashEnd := findLastPathSeparator(s); lastSlashEnd != -1 {
-		searchStart = lastSlashEnd
-	}
-	for i := searchStart; i < len(s); i++ {
-		escaped := isEscaped(s, i)
-		if s[i] == '[' && !escaped {
-			if end, ok := findClassSpan(s, i); ok {
-				classContent := s[i+1 : end-1]
-				if classMatchesChar(classContent, ':') {
-					return i, end
-				}
-				i = end - 1
-				continue
+		case '?':
+			if s[0] == '/' {
+				return "", false, nil
 			}
-		}
-		if s[i] == ':' {
-			if escaped {
-				return i - 1, i + 1
-			}
-			return i, i + 1
-		}
-	}
-	return -1, -1
-}
+			s = s[1:]
+			chunk = chunk[1:]
 
-func findLastPathSeparator(s string) (startIdx, endIdx int) {
-	lastStart, lastEnd := -1, -1
-	for i := 0; i < len(s); i++ {
-		escaped := isEscaped(s, i)
-		if s[i] == '[' && !escaped {
-			if end, ok := findClassSpan(s, i); ok {
-				classContent := s[i+1 : end-1]
-				if classMatchesChar(classContent, '/') {
-					lastStart = i
-					lastEnd = end
-				}
-				i = end - 1
-				continue
+		case '\\':
+			chunk = chunk[1:]
+			if len(chunk) == 0 {
+				return "", false, path.ErrBadPattern
 			}
-		}
-		if s[i] == '/' {
-			if escaped {
-				lastStart = i - 1
-				lastEnd = i + 1
-			} else {
-				lastStart = i
-				lastEnd = i + 1
-			}
-		}
-	}
-	return lastStart, lastEnd
-}
+			fallthrough
 
-func lowercaseOutsideClasses(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	inClass := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if inClass {
-			if c == ']' && !isEscaped(s, i) {
-				inClass = false
-			}
-			b.WriteByte(c)
-			continue
-		}
-		if isEscaped(s, i) {
-			if c >= 'A' && c <= 'Z' {
-				b.WriteByte(c + ('a' - 'A'))
-			} else {
-				b.WriteByte(c)
-			}
-			continue
-		}
-		switch c {
-		case '[':
-			inClass = true
-			b.WriteByte(c)
 		default:
-			if c >= 'A' && c <= 'Z' {
-				b.WriteByte(c + ('a' - 'A'))
-			} else {
-				b.WriteByte(c)
+			c1 := chunk[0]
+			c2 := s[0]
+			if inRepo {
+				if c1 >= 'A' && c1 <= 'Z' {
+					c1 += 'a' - 'A'
+				}
+				if c2 >= 'A' && c2 <= 'Z' {
+					c2 += 'a' - 'A'
+				}
 			}
+			if c1 != c2 {
+				return "", false, nil
+			}
+			s = s[1:]
+			chunk = chunk[1:]
 		}
 	}
-	return b.String()
+	return s, true, nil
 }
 
 func expandPatternForms(p string) []string {
@@ -524,6 +396,14 @@ func hasDomainOrWildcard(firstSeg string) bool {
 		}
 	}
 	return false
+}
+
+func isEscaped(s string, i int) bool {
+	count := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		count++
+	}
+	return count%2 != 0
 }
 
 // appendNormalizedPattern adds p's canonical reference form to patterns, when p is a

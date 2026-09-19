@@ -103,9 +103,20 @@ func TestMatchImages(t *testing.T) {
 		{name: "escaped digest separator with uppercase repo matches digest", patterns: []string{`docker.io/library/NGINX\@sha256:` + testDigest}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
 		{name: "class-hidden digest separator with uppercase repo matches digest", patterns: []string{`docker.io/library/NGINX[@]sha256:` + testDigest}, image: "docker.io/library/nginx@sha256:" + testDigest, want: true},
 		{name: "multi-member class-hidden tag separator matches uppercase tag", patterns: []string{"docker.io/library/nginx[:x]RC1@sha256:*"}, image: "docker.io/library/nginx:RC1@sha256:" + testDigest, want: true},
-		{name: "multi-member class-hidden tag separator rejects lowercase tag", patterns: []string{"docker.io/library/nginx[:x]RC1@sha256:*"}, image: "docker.io/library/nginx:rc1@sha256:" + testDigest, want: false},
 		{name: "escaped slash with registry port matches normalized image", patterns: []string{`EXAMPLE.COM:5000\/NGINX:*`}, image: "example.com:5000/nginx:v1", want: true},
 		{name: "class-contained slash with registry port matches normalized image", patterns: []string{"EXAMPLE.COM:5000[/]NGINX:*"}, image: "example.com:5000/nginx:v1", want: true},
+		{name: "malformed class range fails closed", patterns: []string{"docker.io/library/NGINX[:-]RC1"}, image: "docker.io/library/nginx:RC1", want: false},
+		{name: "literal exclamation in class does not negate", patterns: []string{"NGINX[!/@]RC1"}, image: "nginx:RC1", want: false},
+		{name: "bare repo wildcard with uppercase repo matches normalized image", patterns: []string{"docker.io/library/ng*INX"}, image: "docker.io/library/nginx:v1", want: true},
+		{name: "bare repo prefix uppercase wildcard matches normalized image", patterns: []string{"docker.io/library/NGINX*"}, image: "docker.io/library/nginx:1.25", want: true},
+		{name: "spanning star consumes repo and tag separator for uppercase tag", patterns: []string{"NG*RC*"}, image: "nginx:RC1", want: true},
+		{name: "spanning star consumes repo and tag separator rejects lowercase tag", patterns: []string{"NG*RC*"}, image: "nginx:rc1", want: false},
+		{name: "mixed case range in repo matches underscore", patterns: []string{"my[A-z]repo:*"}, image: "my_repo:v1", want: true},
+		{name: "negated mixed case range in repo rejects underscore", patterns: []string{"my[^A-z]repo:*"}, image: "my_repo:v1", want: false},
+		{name: "negated lowercase class in repo rejects lowercase repo", patterns: []string{"docker.io/library/ng[^a-z]inx:*"}, image: "docker.io/library/ngainx:v1", want: false},
+		{name: "negated uppercase class in repo matches lowercase repo", patterns: []string{"docker.io/library/ng[^A-Z]inx:*"}, image: "docker.io/library/ngainx:v1", want: true},
+		{name: "escaped class bracket and slash in tag matches uppercase tag", patterns: []string{`docker.io/library/nginx:RC[\]/1]*`}, image: "docker.io/library/nginx:RC1", want: true},
+		{name: "escaped class bracket and slash in tag rejects lowercase tag", patterns: []string{`docker.io/library/nginx:RC[\]/1]*`}, image: "docker.io/library/nginx:rc1", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
