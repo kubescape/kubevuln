@@ -134,8 +134,16 @@ func matchImages(patterns []string, image string) bool {
 	for _, p := range patterns {
 		pForms := expandPatternForms(p)
 		for _, pf := range pForms {
+			// Fail-closed on invalid path.Match patterns (e.g. malformed classes like [:-] or [bad)
+			if _, err := path.Match(pf, ""); err != nil {
+				continue
+			}
 			for _, form := range forms {
 				if ok, err := path.Match(pf, form); err == nil && ok {
+					return true
+				}
+				repo, _, _ := splitCandidateForm(form)
+				if matchImagePattern(pf, form, len(repo)) {
 					return true
 				}
 			}
@@ -144,17 +152,209 @@ func matchImages(patterns []string, image string) bool {
 	return false
 }
 
-// expandPatternForms returns candidate match patterns for p. If p is an unanchored short pattern
-// (e.g. "nginx:1.25", "nginx:*", "library/nginx:1.25", "kubescape/kubevuln:*") without an explicit
-// registry domain or top-level wildcard in its first segment, it expands p against the fixed
-// default Docker Hub domain and namespace ("docker.io"/"library").
-//
-// The fallback domain is pinned rather than derived from the image being scanned. A domain-less
-// pattern like "nginx:1.25" is, per its own author's intent, shorthand for Docker Hub's
-// nginx:1.25 -- not "whatever registry this particular scan's image happens to come from". Basing
-// the fallback on the scanned image made the registry check a no-op for every short-form pattern:
-// a SecurityException written expecting to scope suppression to Docker Hub would also suppress an
-// unrelated image at any other registry, since that registry would always equal its own fallback.
+// splitCandidateForm decomposes a concrete image reference form into its
+// repository, tag, and digest components.
+func splitCandidateForm(form string) (repo, tag, digest string) {
+	if form == "" {
+		return "", "", ""
+	}
+	repo = form
+	if atIdx := strings.LastIndexByte(form, '@'); atIdx != -1 {
+		afterAt := form[atIdx+1:]
+		if colonIdx := strings.IndexByte(afterAt, ':'); colonIdx != -1 && len(afterAt[colonIdx+1:]) >= 32 {
+			repo = form[:atIdx]
+			digest = afterAt
+		}
+	}
+	lastSlash := strings.LastIndexByte(repo, '/')
+	searchStart := 0
+	if lastSlash != -1 {
+		searchStart = lastSlash + 1
+	}
+	if tagIdx := strings.IndexByte(repo[searchStart:], ':'); tagIdx != -1 {
+		tagIdx += searchStart
+		tag = repo[tagIdx+1:]
+		repo = repo[:tagIdx]
+	}
+	return repo, tag, digest
+}
+
+// matchImagePattern matches pattern against candidate form following path.Match
+// rules, treating repository characters (indices < repoLen in candidate)
+// case-insensitively, while strictly preserving case sensitivity on tag and digest
+// characters (indices >= repoLen in candidate) and preserving standard character-class semantics.
+func matchImagePattern(pattern, candidate string, repoLen int) bool {
+	origCandidate := candidate
+Pattern:
+	for len(pattern) > 0 {
+		var star bool
+		var chunk string
+		star, chunk, pattern = scanChunk(pattern)
+		if star && chunk == "" {
+			// Trailing * matches the rest of the string unless it has a /.
+			return !strings.Contains(candidate, "/")
+		}
+		// Look for match at current position.
+		t, ok, err := matchChunkAt(chunk, candidate, len(origCandidate)-len(candidate), repoLen)
+		if ok && (len(t) == 0 || len(pattern) > 0) {
+			candidate = t
+			continue
+		}
+		if err != nil {
+			return false
+		}
+		if star {
+			// Look for match skipping i characters.
+			// Cannot skip /.
+			for i := 0; i < len(candidate) && candidate[i] != '/'; i++ {
+				t, ok, err := matchChunkAt(chunk, candidate[i+1:], len(origCandidate)-len(candidate[i+1:]), repoLen)
+				if ok {
+					if len(pattern) == 0 && len(t) > 0 {
+						continue
+					}
+					candidate = t
+					continue Pattern
+				}
+				if err != nil {
+					return false
+				}
+			}
+		}
+		return false
+	}
+	return len(candidate) == 0
+}
+
+func scanChunk(pattern string) (star bool, chunk, rest string) {
+	for len(pattern) > 0 && pattern[0] == '*' {
+		pattern = pattern[1:]
+		star = true
+	}
+	inrange := false
+	var i int
+Scan:
+	for i = 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			if i+1 < len(pattern) {
+				i++
+			}
+		case '[':
+			inrange = true
+		case ']':
+			inrange = false
+		case '*':
+			if !inrange {
+				break Scan
+			}
+		}
+	}
+	return star, pattern[0:i], pattern[i:]
+}
+
+func matchChunkAt(chunk, s string, startPos, repoLen int) (rest string, ok bool, err error) {
+	origLenS := len(s)
+	for len(chunk) > 0 {
+		if len(s) == 0 {
+			return "", false, nil
+		}
+		curPos := startPos + (origLenS - len(s))
+		inRepo := curPos < repoLen
+
+		switch chunk[0] {
+		case '[':
+			// character class
+			r := s[0]
+			s = s[1:]
+			chunk = chunk[1:]
+			// possible negation: only '^' is negation in path.Match
+			negated := false
+			if len(chunk) > 0 && chunk[0] == '^' {
+				negated = true
+				chunk = chunk[1:]
+				if r == '/' {
+					return "", false, nil
+				}
+			}
+			// parse class
+			match := false
+			nrange := 0
+			for {
+				if len(chunk) > 0 && chunk[0] == ']' && nrange > 0 {
+					chunk = chunk[1:]
+					break
+				}
+				var lo, hi byte
+				if len(chunk) == 0 {
+					return "", false, path.ErrBadPattern
+				}
+				if chunk[0] == '\\' {
+					chunk = chunk[1:]
+					if len(chunk) == 0 {
+						return "", false, path.ErrBadPattern
+					}
+				}
+				lo = chunk[0]
+				chunk = chunk[1:]
+				hi = lo
+				if len(chunk) >= 2 && chunk[0] == '-' && chunk[1] != ']' {
+					chunk = chunk[1:]
+					if chunk[0] == '\\' {
+						chunk = chunk[1:]
+						if len(chunk) == 0 {
+							return "", false, path.ErrBadPattern
+						}
+					}
+					hi = chunk[0]
+					chunk = chunk[1:]
+				}
+				if lo > hi {
+					return "", false, path.ErrBadPattern
+				}
+				if lo <= r && r <= hi {
+					match = true
+				}
+				nrange++
+			}
+			if match == negated {
+				return "", false, nil
+			}
+
+		case '?':
+			if s[0] == '/' {
+				return "", false, nil
+			}
+			s = s[1:]
+			chunk = chunk[1:]
+
+		case '\\':
+			chunk = chunk[1:]
+			if len(chunk) == 0 {
+				return "", false, path.ErrBadPattern
+			}
+			fallthrough
+
+		default:
+			c1 := chunk[0]
+			c2 := s[0]
+			if inRepo {
+				if c1 >= 'A' && c1 <= 'Z' {
+					c1 += 'a' - 'A'
+				}
+				if c2 >= 'A' && c2 <= 'Z' {
+					c2 += 'a' - 'A'
+				}
+			}
+			if c1 != c2 {
+				return "", false, nil
+			}
+			s = s[1:]
+			chunk = chunk[1:]
+		}
+	}
+	return s, true, nil
+}
+
 func expandPatternForms(p string) []string {
 	patterns := []string{p}
 	if p == "" {
@@ -171,12 +371,39 @@ func expandPatternForms(p string) []string {
 	}
 
 	firstSeg, _, _ := strings.Cut(p, "/")
-	hasDomainOrWildcard := strings.ContainsAny(firstSeg, ".:*?") || firstSeg == "localhost"
-	if !hasDomainOrWildcard {
+	if !hasDomainOrWildcard(firstSeg) {
 		patterns = append(patterns, "docker.io/"+p)
 	}
 
 	return appendNormalizedPattern(patterns, p)
+}
+
+func hasDomainOrWildcard(firstSeg string) bool {
+	if strings.EqualFold(firstSeg, "localhost") {
+		return true
+	}
+	for i := 0; i < len(firstSeg); i++ {
+		escaped := isEscaped(firstSeg, i)
+		switch firstSeg[i] {
+		case '.', ':':
+			// Literal domain punctuation (even if escaped like quay\.io) marks a registry domain
+			return true
+		case '*', '?', '[':
+			// Glob wildcards only qualify as domain wildcards if unescaped
+			if !escaped {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isEscaped(s string, i int) bool {
+	count := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		count++
+	}
+	return count%2 != 0
 }
 
 // appendNormalizedPattern adds p's canonical reference form to patterns, when p is a
