@@ -1,10 +1,14 @@
 package v1
 
 import (
+	"bytes"
+	"io"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -1045,6 +1049,75 @@ func TestApplySecurityExceptions_EmitsEventWhenRecorderConfigured(t *testing.T) 
 	default:
 		t.Fatal("expected a suppression event to be recorded")
 	}
+}
+
+func TestApplySecurityExceptions_LogsWhenSuppressionEventProvenanceIsIncomplete(t *testing.T) {
+	doc := &v1beta1.GrypeDocument{
+		Matches: []v1beta1.Match{
+			{
+				Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-2021-44228"}},
+				Artifact:      v1beta1.GrypePackage{Name: "log4j-core"},
+			},
+		},
+	}
+
+	exceptions := []sev1beta1.SecurityException{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-log4shell", Namespace: "default"},
+			Spec: sev1beta1.SecurityExceptionSpec{
+				Reason: "accepted risk",
+				Vulnerabilities: []sev1beta1.VulnerabilityException{
+					{
+						Vulnerability: sev1beta1.VulnerabilityRef{ID: "CVE-2021-44228"},
+						Status:        sev1beta1.VulnerabilityStatusNotAffected,
+					},
+				},
+			},
+		},
+	}
+
+	policies, _ := ConvertToVulnerabilityExceptionPolicies(exceptions, nil, ExceptionTarget{})
+	require.Len(t, policies, 1)
+	assert.Equal(t, "SecurityException", policies[0].Attributes["sourceKind"])
+	assert.NotContains(t, policies[0].Attributes, "sourceUID")
+
+	oldLogger := logger.L()
+	oldLoggerName := oldLogger.LoggerName()
+	oldLoggerLevel := oldLogger.GetLevel()
+	oldLoggerWriter := oldLogger.GetWriter()
+	oldStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = writer
+	t.Setenv(logger.EnvLoggerLevel, "debug")
+	logger.InitLogger("pretty")
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = writer.Close()
+		_ = reader.Close()
+		logger.InitLogger(oldLoggerName)
+		_ = logger.L().SetLevel(oldLoggerLevel)
+		if oldLoggerWriter != nil {
+			logger.L().SetWriter(oldLoggerWriter)
+		}
+	})
+
+	recorder := record.NewFakeRecorder(1)
+	ApplySecurityExceptions(doc, domain.CVEExceptions(policies), recorder)
+
+	_ = writer.Close()
+	var output bytes.Buffer
+	_, err = io.Copy(&output, reader)
+	require.NoError(t, err)
+
+	require.Len(t, doc.IgnoredMatches, 1)
+	select {
+	case event := <-recorder.Events:
+		t.Fatalf("expected no suppression event, got %q", event)
+	default:
+	}
+	assert.Contains(t, output.String(), "skipping suppression event")
+	assert.Contains(t, output.String(), "sourceUID")
 }
 
 func TestApplySecurityExceptions_NilRecorderIsNoOp(t *testing.T) {
