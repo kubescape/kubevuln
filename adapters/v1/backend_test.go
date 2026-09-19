@@ -1759,9 +1759,8 @@ func TestHttpPostWithContext_Accepts2xxResponses(t *testing.T) {
 
 			resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
 			assert.NoError(t, err)
-			assert.NotNil(t, resp)
-			assert.Equal(t, code, resp.StatusCode)
-			if resp != nil {
+			if assert.NotNil(t, resp) {
+				assert.Equal(t, code, resp.StatusCode)
 				_ = resp.Body.Close()
 			}
 		})
