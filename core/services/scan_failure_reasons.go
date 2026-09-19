@@ -125,6 +125,8 @@ func classifySBOMError(err error) string {
 // memory-limit annotation — classifySBOMStatusWithAnnotation handles that case.
 func classifySBOMStatus(status string) string {
 	switch status {
+	case helpersv1.Unauthorize:
+		return scanfailure.ReasonImageAuthFailed
 	case helpersv1.TooLarge:
 		return scanfailure.ReasonImageTooLarge
 	case helpersv1.Incomplete:
