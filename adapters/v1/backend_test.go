@@ -1745,6 +1745,29 @@ func TestHttpPostWithContext_EmptyResponseBody(t *testing.T) {
 	assert.Equal(t, "received status code: 500", err.Error())
 }
 
+// TestHttpPostWithContext_Accepts2xxResponses verifies that valid 2xx status codes (200, 201, 202, 204) are treated as successful.
+func TestHttpPostWithContext_Accepts2xxResponses(t *testing.T) {
+	for _, code := range []int{http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent} {
+		t.Run(fmt.Sprintf("status_%d", code), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(code)
+			}))
+			defer ts.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			resp, err := httpPostWithContext(ctx, http.DefaultClient, ts.URL, nil, []byte("data"), 100*time.Millisecond)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, code, resp.StatusCode)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+		})
+	}
+}
+
 // TestBackendAdapter_PostResults_429RateLimitLogging verifies that postResults detects 429 rate-limiting errors and logs vendor guidance.
 func TestBackendAdapter_PostResults_429RateLimitLogging(t *testing.T) {
 	backend := &BackendAdapter{
