@@ -1291,3 +1291,25 @@ func TestParseImageManifest_NilRawConfig(t *testing.T) {
 	assert.Nil(t, im)
 }
 
+func TestNewTargetFromSource_Directory(t *testing.T) {
+	// String target with absolute Unix path
+	srcUnix := v1beta1.Source{
+		Type:   "directory",
+		Target: []byte(`"/app/source/code"`),
+	}
+	target, err := NewTargetFromSource(&srcUnix)
+	assert.NoError(t, err)
+	if assert.NotNil(t, target.directoryMetadata) {
+		assert.Equal(t, "/app/source/code", target.directoryMetadata.Path)
+	}
+
+	// Relative path fails
+	srcRel := v1beta1.Source{
+		Type:   "directory",
+		Target: []byte(`"relative/path"`),
+	}
+	_, err = NewTargetFromSource(&srcRel)
+	assert.Error(t, err)
+}
+
+

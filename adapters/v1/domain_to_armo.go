@@ -43,7 +43,7 @@ func NewTargetFromSource(src *v1beta1.Source) (Target, error) {
 			if err := json.Unmarshal(src.Target, &path); err != nil {
 				return target, fmt.Errorf("failed to unmarshal directory target as either DirectoryMetadata or string: %w", err)
 			}
-			if filepath.IsAbs(path) {
+			if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
 				target.directoryMetadata = &source.DirectoryMetadata{Path: path}
 			} else {
 				return target, fmt.Errorf("expected a 'directory' to represent a valid path but got: %s", path)
