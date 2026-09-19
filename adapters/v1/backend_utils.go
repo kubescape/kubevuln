@@ -315,7 +315,7 @@ func Summarize(report v1.ScanResultReport, vulnerabilities []containerscan.Commo
 			actualSeveritiesStats[severity] = severityStats
 		}
 		summary.SeverityStats.RelevancyScanCount = 1
-		if summary.SeverityStats.RelevantCount == 0 {
+		if summary.RelevantCount == 0 {
 			// if there is CVEp but no relevant vulnerabilities, label is "no"
 			summary.SetRelevantLabel(containerscan.RelevantLabelNo)
 		} else {

@@ -755,6 +755,47 @@ func Test_summarize(t *testing.T) {
 	}
 }
 
+func Test_Summarize_RelevantLabel(t *testing.T) {
+	workload := domain.ScanCommand{
+		ImageHash:          "imagehash",
+		ImageTag:           "imagetag",
+		ImageTagNormalized: "imagetag",
+	}
+	report := v1.ScanResultReport{
+		ContainerScanID: "scan-id",
+	}
+
+	// 1. Without relevancy data -> RelevantLabelNotExists ("")
+	summaryNoRelevancy, _ := Summarize(report, nil, workload, false, nil)
+	assert.Equal(t, containerscan.RelevantLabelNotExists, summaryNoRelevancy.RelevantLabel)
+
+	// 2. With relevancy data but 0 relevant vulnerabilities -> RelevantLabelNo ("no")
+	vulnsNotRelevant := []containerscan.CommonContainerVulnerabilityResult{
+		{
+			Vulnerability: containerscan.Vulnerability{
+				IsRelevant: ptr.To(false),
+				Severity:   "High",
+			},
+		},
+	}
+	summaryNotRelevant, _ := Summarize(report, vulnsNotRelevant, workload, true, nil)
+	assert.Equal(t, int64(0), summaryNotRelevant.RelevantCount)
+	assert.Equal(t, containerscan.RelevantLabelNo, summaryNotRelevant.RelevantLabel)
+
+	// 3. With relevancy data and >0 relevant vulnerabilities -> RelevantLabelYes ("yes")
+	vulnsRelevant := []containerscan.CommonContainerVulnerabilityResult{
+		{
+			Vulnerability: containerscan.Vulnerability{
+				IsRelevant: ptr.To(true),
+				Severity:   "Critical",
+			},
+		},
+	}
+	summaryRelevant, _ := Summarize(report, vulnsRelevant, workload, true, nil)
+	assert.Equal(t, int64(1), summaryRelevant.RelevantCount)
+	assert.Equal(t, containerscan.RelevantLabelYes, summaryRelevant.RelevantLabel)
+}
+
 func fileToReport(path string) *v1.ScanResultReport {
 	var report *v1.ScanResultReport
 	b, err := os.ReadFile(path)
