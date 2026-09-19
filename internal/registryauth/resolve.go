@@ -19,9 +19,9 @@ import (
 // which credentials to try, not about what comes back.
 type Getter[T any] func(ctx context.Context, ref string, opts *image.RegistryOptions) (T, error)
 
-// isAuthDenied reports whether err is a registry rejecting the request as unauthenticated or
+// IsAuthDenied reports whether err is a registry rejecting the request as unauthenticated or
 // unauthorized -- the two outcomes credentials (ours, or none at all) can actually change.
-func isAuthDenied(err error) bool {
+func IsAuthDenied(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -74,7 +74,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 		src, err = get(ctx, pullRef, &opts)
 	}
 
-	if isAuthDenied(err) {
+	if IsAuthDenied(err) {
 		usedFallback = true
 		unauthorizedErr := err
 		if provider, ok := For(pullRef); ok {
@@ -96,7 +96,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 		// If no provider matched, its credentials were unavailable, or it succeeded in auth
 		// but still got denied, fall back to anonymous access. err/src retain the last attempt.
 		//
-		// The isAuthDenied check matters: when a provider's credentials were used above, err
+		// The IsAuthDenied check matters: when a provider's credentials were used above, err
 		// may now hold whatever the credentialed retry actually failed with, not another
 		// auth rejection -- a 429, a 5xx, a timeout. None of those are fixed by dropping
 		// credentials and retrying anonymously (the registry was never rejecting the request
@@ -108,7 +108,7 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 		// unavailable, err is untouched here and still holds the original auth-denied error
 		// from the initial pull (or the MANIFEST_UNKNOWN retry above it), so this check doesn't change
 		// that path's existing behavior. See #921.
-		if isAuthDenied(err) {
+		if IsAuthDenied(err) {
 			logger.L().Debug("retrying without credentials",
 				helpers.String("imageID", imageID))
 			opts.Credentials = nil

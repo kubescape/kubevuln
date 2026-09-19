@@ -84,7 +84,7 @@ func classifySBOMError(err error) string {
 	switch {
 	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
-	case strings.Contains(errStr, "UNAUTHORIZED"):
+	case strings.Contains(errStr, "UNAUTHORIZED") || strings.Contains(errStr, "DENIED"):
 		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
 		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
 		return scanfailure.ReasonImageAuthFailed
