@@ -341,3 +341,68 @@ func TestValidate_NoSubcomponents_Passes(t *testing.T) {
 		t.Fatalf("product-scope statements must still pass, got: %v", err)
 	}
 }
+
+// TestValidate_BlankComponentIdentity_Fails covers the placeholder shape a length check
+// misses: the key is present, every value under it is blank. Such a document parses, carries
+// a hashes or identifiers map, and still identifies nothing.
+func TestValidate_BlankComponentIdentity_Fails(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+		want error
+	}{
+		{
+			name: "product with a whitespace-only id",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "   "}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "product identified only by a blank hash",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"hashes": {"sha256": "   "}}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "product identified only by a blank purl",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"identifiers": {"purl": "   "}}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "subcomponent with a whitespace-only id",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"@id": "   "}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+		{
+			name: "subcomponent identified only by a blank hash",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"hashes": {"sha256": "   "}}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+		{
+			name: "subcomponent identified only by a blank purl",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"identifiers": {"purl": "   "}}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := Validate([]byte(tt.doc)); !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// One real value is enough to identify a component, so a map holding a blank alongside it
+// must still pass. The check is for at least one value that identifies something, not for
+// the absence of blank ones.
+func TestValidate_IdentityAlongsideABlankValue_Passes(t *testing.T) {
+	product := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"hashes": {"md5": "   ", "sha256": "abc"}}], "status": "fixed"}]}`
+	if err := Validate([]byte(product)); err != nil {
+		t.Fatalf("a real hash alongside a blank one identifies the product, got: %v", err)
+	}
+
+	sub := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"identifiers": {"cpe22": "   ", "purl": "pkg:deb/a"}}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(sub)); err != nil {
+		t.Fatalf("a real purl alongside a blank one identifies the subcomponent, got: %v", err)
+	}
+}

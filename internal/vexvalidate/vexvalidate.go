@@ -87,13 +87,34 @@ func hasValidContext(context string) bool {
 	return rest == "" || strings.HasPrefix(rest, "/")
 }
 
+// hasIdentifyingValue reports whether m holds at least one value that is not
+// blank. A map carrying only blank values is a placeholder: present in the
+// document, identifying nothing, so its length alone says nothing about
+// whether the component is identified.
+func hasIdentifyingValue[K comparable, V ~string](m map[K]V) bool {
+	for _, v := range m {
+		if strings.TrimSpace(string(v)) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
 // componentIsEmpty reports whether c identifies nothing at all. A Component's
 // ID is optional in go-vex, since it can instead be identified by Hashes or
 // Identifiers - so ID alone being unset does not make it empty, but having
 // none of the three does. Used for a product and for each of its
 // subcomponents, which are the same Component type.
+//
+// Each is checked for content rather than presence, so that a whitespace-only
+// ID, or a hash or identifier map whose every value is blank, is recognised as
+// identifying nothing. That is the same placeholder shape vulnerabilityIsAnonymous
+// rejects for the vulnerability itself.
 func componentIsEmpty(c vex.Component) bool {
-	return c.ID == "" && len(c.Hashes) == 0 && len(c.Identifiers) == 0
+	return strings.TrimSpace(c.ID) == "" &&
+		!hasIdentifyingValue(c.Hashes) &&
+		!hasIdentifyingValue(c.Identifiers)
 }
 
 // vulnerabilityIsAnonymous reports whether v names no vulnerability. go-vex
