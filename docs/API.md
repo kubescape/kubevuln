@@ -290,6 +290,7 @@ POST /v1/sbomCreation
 |--------|-------------|
 | `200 OK` | Request accepted, SBOM generation started |
 | `400 Bad Request` | Invalid request payload or validation failed |
+| `413 Request Entity Too Large` | Request body is larger than 4 MiB |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 | `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 | `409 Conflict` | `jobID` already belongs to a scan that is still queued or running; retry with a fresh `jobID`, or wait for the existing one to finish |
@@ -345,6 +346,7 @@ POST /v1/scanImage
 |--------|-------------|
 | `200 OK` | Request accepted, CVE scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
+| `413 Request Entity Too Large` | Request body is larger than 4 MiB |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 | `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 | `409 Conflict` | `jobID` already belongs to a scan that is still queued or running; retry with a fresh `jobID`, or wait for the existing one to finish |
@@ -397,6 +399,7 @@ POST /v1/scanRegistryImage
 |--------|-------------|
 | `200 OK` | Request accepted, registry scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
+| `413 Request Entity Too Large` | Request body is larger than 4 MiB |
 | `429 Too Many Requests` | Registry rate limit hit on a previous pull for this image |
 | `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 | `409 Conflict` | `jobID` already belongs to a scan that is still queued or running; retry with a fresh `jobID`, or wait for the existing one to finish |
@@ -454,6 +457,7 @@ POST /v1/applicationProfileScan
 |--------|-------------|
 | `200 OK` | Request accepted, profile scan started |
 | `400 Bad Request` | Invalid request payload or validation failed |
+| `413 Request Entity Too Large` | Request body is larger than 4 MiB |
 | `503 Service Unavailable` | Scan admission capacity is full (positive `maxQueueDepth` reached; unset or non-positive means unbounded admission); retry later. Unrelated to `/v1/readiness` |
 | `409 Conflict` | `jobID` already belongs to a scan that is still queued or running; retry with a fresh `jobID`, or wait for the existing one to finish |
 
@@ -554,6 +558,7 @@ All responses follow RFC 7807.
 |------|---------|------|
 | `200` | OK | Request accepted |
 | `400` | Bad Request | Invalid JSON, missing required fields, or validation failed |
+| `413` | Request Entity Too Large | A scan endpoint's request body is larger than 4 MiB |
 | `409` | Conflict | A scan endpoint's `jobID` already belongs to a scan that is still queued or running |
 | `429` | Too Many Requests | Registry rate limit hit on a previous pull for this image |
 | `500` | Internal Server Error | Internal error |

@@ -308,14 +308,30 @@ func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, e
 	))
 }
 
+// maxScanRequestBytes bounds the body every scan endpoint will read. A scan command carries
+// identifiers, an image reference and an optional list of registry credentials, so 4 MiB is far
+// beyond any realistic payload, while still stopping a request from making the process buffer
+// and decode an arbitrarily large document before any of the validation below gets to look at
+// it. http.Server sets ReadHeaderTimeout but nothing on the body.
+const maxScanRequestBytes = 4 << 20
+
 // bindScanCommand decodes the request body into T and converts it to a domain.ScanCommand.
 // A body that will not bind is answered here with the same 400 each handler used to write
 // for itself, and reported as ok=false so the caller returns without scanning. T is the
 // wire command the endpoint accepts, which is WebsocketScanCommand for three of the four
 // and RegistryScanCommand for ScanRegistry.
 func bindScanCommand[T any](c *gin.Context, ctx context.Context, convert func(T) domain.ScanCommand) (domain.ScanCommand, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxScanRequestBytes)
 	var cmd T
 	if err := c.ShouldBindJSON(&cmd); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			logger.L().Ctx(ctx).Warning("rejecting scan, request body too large",
+				helpers.Int("limit", int(tooLarge.Limit)))
+			_, _ = problem.Of(http.StatusRequestEntityTooLarge).
+				Append(problem.Detailf("body exceeds %d bytes", tooLarge.Limit)).WriteTo(c.Writer)
+			return domain.ScanCommand{}, false
+		}
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
 		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
 		return domain.ScanCommand{}, false
