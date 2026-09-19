@@ -3848,29 +3848,68 @@ func TestAPIServerStore_LabelsCache_LifecycleAndCleanup(t *testing.T) {
 }
 
 func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing.T) {
-	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
-	key := workloadLabelsCacheKeyPrefix + "default/Deployment/test-deploy"
+	// 1. Barrier-controlled concurrent race between trySetLabelsCache and InvalidateWorkloadLabelsCache.
+	// This exercises the race window where trySetLabelsCache checks generation validity and writes to cache.
+	// Because cache publication (Set) is performed under labelsEntriesMu atomically with generation validation,
+	// no concurrent invalidation (Delete + generation++) can interleave between validation and publication.
+	for i := 0; i < 100; i++ {
+		a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+		key := workloadLabelsCacheKeyPrefix + fmt.Sprintf("ns-%d/Deployment/deploy-%d", i, i)
 
-	// 1. Snapshot generation as if Get() started
-	gen := a.beginLabelsCacheRefresh(key)
+		gen := a.beginLabelsCacheRefresh(key)
 
-	// Invalidation runs atomically (bumps generation and clears cache within same critical section)
-	a.InvalidateWorkloadLabelsCache("default", "Deployment", "test-deploy")
+		startBarrier := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-	// Even if invalidation runs again when no in-flight calls are active:
-	a.InvalidateWorkloadLabelsCache("default", "Deployment", "test-deploy")
+		// Goroutine 1: trySetLabelsCache attempts to publish stale labels
+		go func() {
+			defer wg.Done()
+			<-startBarrier
+			a.trySetLabelsCache(key, gen, map[string]string{"env": "stale"})
+		}()
 
-	// Completed GET attempts to write with stale snapshot generation
-	a.trySetLabelsCache(key, gen, map[string]string{"env": "stale"})
+		// Goroutine 2: concurrent invalidation runs
+		go func() {
+			defer wg.Done()
+			<-startBarrier
+			a.InvalidateWorkloadLabelsCache(fmt.Sprintf("ns-%d", i), "Deployment", fmt.Sprintf("deploy-%d", i))
+		}()
 
-	// Stale write MUST NOT be published to cache
-	_, ok := a.labelsCache.Get(key)
-	assert.False(t, ok, "stale labels must not be published after invalidation")
+		// Release both goroutines at the same time
+		close(startBarrier)
+		wg.Wait()
 
-	a.labelsEntriesMu.Lock()
-	_, exists := a.labelsEntries[key]
-	a.labelsEntriesMu.Unlock()
-	assert.False(t, exists, "labelsEntries must be cleanly reclaimed")
+		// After invalidation has completed, the cache MUST NOT contain stale labels
+		_, ok := a.labelsCache.Get(key)
+		assert.False(t, ok, "stale labels must never remain in cache after invalidation in iteration %d", i)
+
+		a.labelsEntriesMu.Lock()
+		_, exists := a.labelsEntries[key]
+		a.labelsEntriesMu.Unlock()
+		assert.False(t, exists, "labelsEntries must be cleanly reclaimed in iteration %d", i)
+	}
+
+	// 2. Invalidation when no in-flight calls are active (zero in-flight refreshes)
+	{
+		a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+		key := workloadLabelsCacheKeyPrefix + "default/Deployment/idle-deploy"
+
+		// Prime cache with an existing entry
+		a.labelsCache.Set(key, map[string]string{"env": "prod"}, time.Minute)
+
+		// Invalidate with no active in-flight refreshes in labelsEntries
+		a.InvalidateWorkloadLabelsCache("default", "Deployment", "idle-deploy")
+
+		// Cached entry must be evicted
+		_, ok := a.labelsCache.Get(key)
+		assert.False(t, ok, "cached labels must be evicted even when no in-flight refreshes exist")
+
+		a.labelsEntriesMu.Lock()
+		_, exists := a.labelsEntries[key]
+		a.labelsEntriesMu.Unlock()
+		assert.False(t, exists, "labelsEntries must remain empty when invalidating with no in-flight refreshes")
+	}
 }
 
 
