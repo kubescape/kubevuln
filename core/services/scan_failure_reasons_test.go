@@ -147,6 +147,11 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageAuthFailed,
 		},
 		{
+			name:     "unrelated DENIED text without OCI boundary does not match auth failed",
+			err:      fmt.Errorf("unexpected text DENIED: unrelated failure"),
+			expected: scanfailure.ReasonSBOMGenerationFailed,
+		},
+		{
 			name:     "MANIFEST_UNKNOWN",
 			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/latest: MANIFEST_UNKNOWN: not found"),
 			expected: scanfailure.ReasonImageNotFound,
