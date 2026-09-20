@@ -1004,6 +1004,36 @@ func Test_linkToVuln(t *testing.T) {
 			want: "https://alas.aws.amazon.com/AL2023/ALAS-2026-123.html",
 		},
 		{
+			name: "GO vulnerability",
+			id:   "GO-2022-0189",
+			want: "https://pkg.go.dev/vuln/GO-2022-0189",
+		},
+		{
+			name: "RUSTSEC advisory",
+			id:   "RUSTSEC-2020-0001",
+			want: "https://rustsec.org/advisories/RUSTSEC-2020-0001.html",
+		},
+		{
+			name: "PYSEC vulnerability",
+			id:   "PYSEC-2021-1",
+			want: "https://osv.dev/vulnerability/PYSEC-2021-1",
+		},
+		{
+			name: "BIT vulnerability",
+			id:   "BIT-django-2023-0001",
+			want: "https://osv.dev/vulnerability/BIT-django-2023-0001",
+		},
+		{
+			name: "CGA vulnerability",
+			id:   "CGA-1234-5678",
+			want: "https://osv.dev/vulnerability/CGA-1234-5678",
+		},
+		{
+			name: "OSV vulnerability",
+			id:   "OSV-2020-1",
+			want: "https://osv.dev/vulnerability/OSV-2020-1",
+		},
+		{
 			name: "CVE defaults to NVD",
 			id:   "CVE-2021-21300",
 			want: "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
@@ -1290,4 +1320,5 @@ func TestParseImageManifest_NilRawConfig(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, im)
 }
+
 
