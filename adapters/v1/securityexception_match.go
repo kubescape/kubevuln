@@ -272,9 +272,6 @@ func matchChunkAt(chunk, s string, startPos, repoLen int) (rest string, ok bool,
 			if len(chunk) > 0 && chunk[0] == '^' {
 				negated = true
 				chunk = chunk[1:]
-				if r == '/' {
-					return "", false, nil
-				}
 			}
 			// parse class
 			match := false
@@ -307,9 +304,6 @@ func matchChunkAt(chunk, s string, startPos, repoLen int) (rest string, ok bool,
 					}
 					hi = chunk[0]
 					chunk = chunk[1:]
-				}
-				if lo > hi {
-					return "", false, path.ErrBadPattern
 				}
 				if lo <= r && r <= hi {
 					match = true

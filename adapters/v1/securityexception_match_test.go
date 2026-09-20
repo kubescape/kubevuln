@@ -117,6 +117,8 @@ func TestMatchImages(t *testing.T) {
 		{name: "negated uppercase class in repo matches lowercase repo", patterns: []string{"docker.io/library/ng[^A-Z]inx:*"}, image: "docker.io/library/ngainx:v1", want: true},
 		{name: "escaped class bracket and slash in tag matches uppercase tag", patterns: []string{`docker.io/library/nginx:RC[\]/1]*`}, image: "docker.io/library/nginx:RC1", want: true},
 		{name: "escaped class bracket and slash in tag rejects lowercase tag", patterns: []string{`docker.io/library/nginx:RC[\]/1]*`}, image: "docker.io/library/nginx:rc1", want: false},
+		{name: "negated character class consumes slash in pattern with uppercase repository", patterns: []string{"EXAMPLE.COM[^x]NGINX:*"}, image: "example.com/nginx:v1", want: true},
+		{name: "descending character range treated as empty and subsequent range matches", patterns: []string{"EXAMPLE.COM/nginx:[z-a0-9]"}, image: "example.com/nginx:1", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
