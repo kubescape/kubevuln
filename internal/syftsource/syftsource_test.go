@@ -25,14 +25,31 @@ func TestParsePlatform(t *testing.T) {
 			wantNil:  true,
 		},
 		{
+			name:     "whitespace only leaves platform unset",
+			platform: "   ",
+			wantNil:  true,
+		},
+		{
 			name:     "architecture only gets linux prefix",
 			platform: "arm64",
 			wantOS:   "linux",
 			wantArch: "arm64",
 		},
 		{
+			name:     "architecture with whitespace gets linux prefix",
+			platform: "  arm64  ",
+			wantOS:   "linux",
+			wantArch: "arm64",
+		},
+		{
 			name:     "full OCI platform is preserved",
 			platform: "linux/amd64",
+			wantOS:   "linux",
+			wantArch: "amd64",
+		},
+		{
+			name:     "full OCI platform with whitespace is trimmed",
+			platform: "  linux/amd64  ",
 			wantOS:   "linux",
 			wantArch: "amd64",
 		},

@@ -60,6 +60,7 @@ func IsPlatformMismatch(err error) bool {
 // paths, registry rescans and periodic CRD-based rescans, which have no node context to derive
 // a platform from and so always leave this unset.
 func ParsePlatform(specifier string) (*image.Platform, error) {
+	specifier = strings.TrimSpace(specifier)
 	if specifier == "" {
 		return nil, nil
 	}
