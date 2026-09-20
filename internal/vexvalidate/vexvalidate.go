@@ -94,7 +94,7 @@ func Validate(data []byte) error {
 		return fmt.Errorf("vexvalidate: parsing document: %w", err)
 	}
 
-	if !hasValidContext(doc.Context) {
+	if doc == nil || !hasValidContext(doc.Context) {
 		return ErrInvalidContext
 	}
 

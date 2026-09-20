@@ -96,6 +96,13 @@ func TestValidate_EmptyDocument_RejectedForContext(t *testing.T) {
 	}
 }
 
+func TestValidate_JSONNull_RejectedForContext(t *testing.T) {
+	err := Validate([]byte(`null`))
+	if !errors.Is(err, ErrInvalidContext) {
+		t.Fatalf("expected ErrInvalidContext for null JSON, got: %v", err)
+	}
+}
+
 func TestValidate_MissingContext_Rejected(t *testing.T) {
 	doc := `{"author": "test", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/a"}], "status": "fixed"}]}`
 	err := Validate([]byte(doc))
