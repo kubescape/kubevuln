@@ -134,4 +134,28 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.Contains(t, ignoredIDs, "CVE-2023-1255")
 		require.Contains(t, ignoredIDs, "CVE-2023-3817")
 	})
+
+	t.Run("empty and blank paths are safely skipped", func(t *testing.T) {
+		matches := newMatches()
+
+		remaining, ignored, err := Apply(
+			[]Document{
+				{
+					Format: FormatOpenVEX,
+					Path:   "",
+				},
+				{
+					Format: FormatCSAF,
+					Path:   "   ",
+				},
+			},
+			pkgContext,
+			&matches,
+			nil,
+			ignoreRules,
+		)
+		require.NoError(t, err)
+		require.Equal(t, 2, remaining.Count())
+		require.Empty(t, ignored)
+	})
 }

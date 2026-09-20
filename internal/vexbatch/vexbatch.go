@@ -2,6 +2,7 @@ package vexbatch
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
@@ -56,7 +57,13 @@ func Apply(
 
 		paths := make([]string, 0, len(group))
 		for _, document := range group {
-			paths = append(paths, document.Path)
+			if path := strings.TrimSpace(document.Path); path != "" {
+				paths = append(paths, path)
+			}
+		}
+
+		if len(paths) == 0 {
+			continue
 		}
 
 		processor, err := vex.NewProcessor(vex.ProcessorOptions{
