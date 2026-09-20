@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -323,7 +324,15 @@ const maxScanRequestBytes = 4 << 20
 func bindScanCommand[T any](c *gin.Context, ctx context.Context, convert func(T) domain.ScanCommand) (domain.ScanCommand, bool) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxScanRequestBytes)
 	var cmd T
-	if err := c.ShouldBindJSON(&cmd); err != nil {
+	err := c.ShouldBindJSON(&cmd)
+	if err == nil {
+		// json.Decoder stops at the end of the first JSON value, so the bytes after it are
+		// never read and MaxBytesReader cannot trip on them: a valid command followed by more
+		// than the limit of trailing whitespace would otherwise bind successfully. Drain the
+		// rest so the cap applies to the whole body, not just its JSON prefix.
+		_, err = io.Copy(io.Discard, c.Request.Body)
+	}
+	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			logger.L().Ctx(ctx).Warning("rejecting scan, request body too large",

@@ -1678,3 +1678,70 @@ func TestHTTPController_ScanCP_InvalidRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "{\"status\":400,\"title\":\"Bad Request\"}", w.Body.String())
 }
+
+// TestHTTPController_GenerateSBOM_BodyLimit covers the request body cap on the scan endpoints.
+// json.Decoder stops at the end of the first JSON value, so a valid command followed by more than
+// maxScanRequestBytes of trailing whitespace binds successfully without MaxBytesReader ever
+// reaching its limit; bindScanCommand has to drain the rest of the body for the cap to apply to
+// the whole request rather than only its JSON prefix.
+func TestHTTPController_GenerateSBOM_BodyLimit(t *testing.T) {
+	const validCommand = `{
+		"imageTag": "k8s.gcr.io/kube-proxy:v1.24.3",
+		"imageHash": "k8s.gcr.io/kube-proxy@sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	}`
+
+	tests := []struct {
+		name         string
+		body         string
+		expectedCode int
+	}{
+		{
+			name:         "valid command with small trailing whitespace",
+			body:         validCommand + strings.Repeat(" ", 1024),
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "valid command in a body of exactly the limit",
+			body:         validCommand + strings.Repeat(" ", maxScanRequestBytes-len(validCommand)),
+			expectedCode: http.StatusOK,
+		},
+		{
+			name:         "valid command in a body one byte over the limit",
+			body:         validCommand + strings.Repeat(" ", maxScanRequestBytes-len(validCommand)+1),
+			expectedCode: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:         "valid command followed by more than the limit of whitespace",
+			body:         validCommand + strings.Repeat(" ", maxScanRequestBytes),
+			expectedCode: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:         "oversized value inside the JSON",
+			body:         `{"imageTag": "` + strings.Repeat("a", maxScanRequestBytes) + `"}`,
+			expectedCode: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:         "malformed JSON is still a bad request",
+			body:         `{"imageTag":`,
+			expectedCode: http.StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := HTTPController{
+				scanService: services.NewMockScanService(true),
+				workerPool:  workerpool.New(1),
+			}
+			defer c.Shutdown(5 * time.Second)
+
+			router := gin.New()
+			router.POST("/v1/generateSBOM", c.GenerateSBOM)
+
+			req, _ := http.NewRequest("POST", "/v1/generateSBOM", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedCode, w.Code, w.Body.String())
+		})
+	}
+}
