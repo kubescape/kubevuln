@@ -147,6 +147,11 @@ type APIServerStore struct {
 
 	labelsInformerMu   sync.Mutex
 	labelsInformerStop context.CancelFunc
+
+	// labelsCacheBeforeSetHook, if set, is called synchronously inside trySetLabelsCache
+	// while holding labelsEntriesMu right after validating generation, before writing to labelsCache.
+	// Tests use it as a deterministic barrier to verify atomic publication against invalidation.
+	labelsCacheBeforeSetHook func()
 }
 
 // securityExceptionCacheEntry pairs a cache key's invalidation generation with the mutex that
@@ -255,6 +260,9 @@ func (a *APIServerStore) trySetLabelsCache(cacheKey string, seenGeneration uint6
 				entry.refreshes--
 			}
 			if value != nil && entry.generation == seenGeneration {
+				if a.labelsCacheBeforeSetHook != nil {
+					a.labelsCacheBeforeSetHook()
+				}
 				if a.labelsCache != nil {
 					a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
 				}
