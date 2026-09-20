@@ -2,6 +2,7 @@ package syftsource
 
 import (
 	"context"
+	"errors"
 
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/sbom"
@@ -30,5 +31,8 @@ var _ SBOMCataloger = SBOMCatalogerFunc(nil)
 
 // CreateSBOM calls the underlying function.
 func (f SBOMCatalogerFunc) CreateSBOM(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error) {
+	if f == nil {
+		return nil, errors.New("syftsource: nil SBOMCatalogerFunc")
+	}
 	return f(ctx, src, cfg)
 }
