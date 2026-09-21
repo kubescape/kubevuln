@@ -133,8 +133,13 @@ func DomainToArmo(ctx context.Context, grypeDocument v1beta1.GrypeDocument, vuln
 			if fixed {
 				isFixed = 1
 			}
-			if description == "" && len(m.RelatedVulnerabilities) > 0 {
-				description = m.RelatedVulnerabilities[0].Description
+			if description == "" {
+				for _, rv := range m.RelatedVulnerabilities {
+					if rv.Description != "" {
+						description = rv.Description
+						break
+					}
+				}
 			}
 			// create a vulnerability result for this vulnerability
 			vulnerabilityResult := containerscan.CommonContainerVulnerabilityResult{
