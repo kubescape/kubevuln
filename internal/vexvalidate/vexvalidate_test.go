@@ -279,3 +279,130 @@ func TestValidate_AllOpenVEXStatuses_WithRequiredFields_Accepted(t *testing.T) {
 		})
 	}
 }
+
+// A statement that never says which vulnerability it is about passes every other check:
+// go-vex's Statement.Validate checks the status and the fields each status may carry, but
+// not this. Matching keys on the vulnerability name, so an unnamed statement keys on the
+// empty string and collides with every other unnamed one.
+func TestValidate_StatementWithoutVulnerability_Fails(t *testing.T) {
+	doc := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"status": "fixed", "products": [{"@id": "pkg:oci/x"}]}]}`
+	if err := Validate([]byte(doc)); !errors.Is(err, ErrNoVulnerability) {
+		t.Fatalf("expected ErrNoVulnerability, got: %v", err)
+	}
+}
+
+func TestValidate_VulnerabilityIdentifiedByEitherField(t *testing.T) {
+	byName := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-2024-0001"}, "products": [{"@id": "pkg:oci/x"}], "status": "fixed"}]}`
+	if err := Validate([]byte(byName)); err != nil {
+		t.Fatalf("a name identifies the vulnerability, got: %v", err)
+	}
+
+	byID := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"@id": "https://example.test/CVE-2024-0001"}, "products": [{"@id": "pkg:oci/x"}], "status": "fixed"}]}`
+	if err := Validate([]byte(byID)); err != nil {
+		t.Fatalf("an @id alone identifies the vulnerability, got: %v", err)
+	}
+
+	whitespace := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "   "}, "products": [{"@id": "pkg:oci/x"}], "status": "fixed"}]}`
+	if err := Validate([]byte(whitespace)); !errors.Is(err, ErrNoVulnerability) {
+		t.Fatalf("expected ErrNoVulnerability for a whitespace-only name, got: %v", err)
+	}
+}
+
+// The same emptiness test a product already gets, one level down. Subcomponents are what
+// scope a statement to a package, which is the granularity suppression matches on.
+func TestValidate_EmptySubcomponent_Fails(t *testing.T) {
+	only := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(only)); !errors.Is(err, ErrEmptySubcomponent) {
+		t.Fatalf("expected ErrEmptySubcomponent, got: %v", err)
+	}
+
+	second := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"@id": "pkg:deb/a"}, {}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(second)); !errors.Is(err, ErrEmptySubcomponent) {
+		t.Fatalf("a later empty subcomponent counts too, got: %v", err)
+	}
+}
+
+func TestValidate_PopulatedSubcomponents_Pass(t *testing.T) {
+	byID := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"@id": "pkg:deb/a"}, {"@id": "pkg:deb/b"}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(byID)); err != nil {
+		t.Fatalf("populated subcomponents should pass, got: %v", err)
+	}
+
+	byHash := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"hashes": {"sha256": "abc"}}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(byHash)); err != nil {
+		t.Fatalf("hashes identify a subcomponent, same as a product, got: %v", err)
+	}
+}
+
+// No subcomponents at all is product scope, which is legitimate and must stay so.
+func TestValidate_NoSubcomponents_Passes(t *testing.T) {
+	doc := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x"}], "status": "fixed"}]}`
+	if err := Validate([]byte(doc)); err != nil {
+		t.Fatalf("product-scope statements must still pass, got: %v", err)
+	}
+}
+
+// TestValidate_BlankComponentIdentity_Fails covers the placeholder shape a length check
+// misses: the key is present, every value under it is blank. Such a document parses, carries
+// a hashes or identifiers map, and still identifies nothing.
+func TestValidate_BlankComponentIdentity_Fails(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+		want error
+	}{
+		{
+			name: "product with a whitespace-only id",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "   "}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "product identified only by a blank hash",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"hashes": {"sha256": "   "}}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "product identified only by a blank purl",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"identifiers": {"purl": "   "}}], "status": "fixed"}]}`,
+			want: ErrEmptyProduct,
+		},
+		{
+			name: "subcomponent with a whitespace-only id",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"@id": "   "}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+		{
+			name: "subcomponent identified only by a blank hash",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"hashes": {"sha256": "   "}}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+		{
+			name: "subcomponent identified only by a blank purl",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"identifiers": {"purl": "   "}}]}], "status": "fixed"}]}`,
+			want: ErrEmptySubcomponent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := Validate([]byte(tt.doc)); !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// One real value is enough to identify a component, so a map holding a blank alongside it
+// must still pass. The check is for at least one value that identifies something, not for
+// the absence of blank ones.
+func TestValidate_IdentityAlongsideABlankValue_Passes(t *testing.T) {
+	product := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"hashes": {"md5": "   ", "sha256": "abc"}}], "status": "fixed"}]}`
+	if err := Validate([]byte(product)); err != nil {
+		t.Fatalf("a real hash alongside a blank one identifies the product, got: %v", err)
+	}
+
+	sub := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/x", "subcomponents": [{"identifiers": {"cpe22": "   ", "purl": "pkg:deb/a"}}]}], "status": "fixed"}]}`
+	if err := Validate([]byte(sub)); err != nil {
+		t.Fatalf("a real purl alongside a blank one identifies the subcomponent, got: %v", err)
+	}
+}
