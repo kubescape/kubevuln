@@ -3849,6 +3849,7 @@ func TestAPIServerStore_LabelsCache_LifecycleAndCleanup(t *testing.T) {
 
 func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing.T) {
 	lblCache := cache.New(time.Minute)
+	t.Cleanup(lblCache.Close)
 
 	// 1. Deterministic barrier-controlled publication test.
 	// We set labelsCacheBeforeSetHook to run right after generation validation while holding labelsEntriesMu.
@@ -3866,6 +3867,10 @@ func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing
 		invalidationDone := make(chan struct{})
 
 		a.labelsCacheBeforeSetHook = func() {
+			if a.labelsEntriesMu.TryLock() {
+				a.labelsEntriesMu.Unlock()
+				assert.Fail(t, "labelsEntriesMu must be held during publication")
+			}
 			close(hookEntered)
 		}
 
