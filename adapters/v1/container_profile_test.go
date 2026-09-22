@@ -96,12 +96,12 @@ func TestGetContainerRelevancyScans_HostProfileSkippedCleanly(t *testing.T) {
 	assert.Empty(t, scans)
 }
 
-// TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillErrors
+// TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillReturnsScan
 // guards the fix's precision: a genuinely malformed real-container profile
 // missing only ImageID (ImageTag still present) must still reach slug
 // computation and surface its existing error, not be silently absorbed by
 // the host skip -- the skip is deliberately keyed on BOTH fields being empty.
-func TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillErrors(t *testing.T) {
+func TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillReturnsScan(t *testing.T) {
 	profile := validContainerProfile("daemonset-kube-proxy", "kube-system", nil)
 	profile.Spec.ImageID = ""
 	repo := repositories.NewMemoryStorage(false, false)
