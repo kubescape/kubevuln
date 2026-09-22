@@ -130,10 +130,6 @@ func ParseRetryAfter(err error) (time.Duration, bool) {
 // RetryWithBackoff executes operation fn up to config.MaxAttempts times if fn returns an error for which isRetryable(err) is true.
 func RetryWithBackoff[T any](ctx context.Context, operation string, config RetryConfig, isRetryable func(error) bool, fn func(ctx context.Context) (T, error)) (T, error) {
 	var zero T
-	maxAttempts := config.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 1
-	}
 	wait := config.InitialWait
 
 	for attempt := 1; ; attempt++ {
@@ -149,7 +145,7 @@ func RetryWithBackoff[T any](ctx context.Context, operation string, config Retry
 			return val, nil
 		}
 
-		if attempt >= maxAttempts || !isRetryable(err) {
+		if attempt >= config.MaxAttempts || !isRetryable(err) {
 			if isRetryable(err) {
 				metrics.RecordRetryAttempt(ctx, operation, metrics.RetryOutcomeExhausted)
 			}
