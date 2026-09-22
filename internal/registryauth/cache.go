@@ -159,9 +159,6 @@ func (c *credentialCache) get(ctx context.Context, key string, fetch credentialF
 		if res.Err != nil {
 			return nil, res.Err
 		}
-		if res.Val == nil {
-			return nil, nil
-		}
 		return res.Val.(*image.RegistryCredentials), nil
 	}
 }
