@@ -74,7 +74,7 @@ func TestIsAuthDenied(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isAuthDenied(tt.err))
+			assert.Equal(t, tt.want, IsAuthDenied(tt.err))
 		})
 	}
 }

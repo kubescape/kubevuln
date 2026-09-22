@@ -348,7 +348,7 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 		endActiveTempDirUse()
 		releasePullSem()
 		return domainSBOM, nil
-	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
+	case err != nil && registryauth.IsAuthDenied(err):
 		domainSBOM.Status = helpersv1.Unauthorize
 		endActiveTempDirUse()
 		releasePullSem()

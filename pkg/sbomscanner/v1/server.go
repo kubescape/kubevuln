@@ -187,7 +187,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 			Status:       helpersv1.TooLarge,
 			StatusReason: domain.ReasonImageTooLarge,
 		}, nil
-	case err != nil && strings.Contains(err.Error(), "401 Unauthorized"):
+	case err != nil && registryauth.IsAuthDenied(err):
 		endActiveTempDirUse()
 		return &pb.CreateSBOMResponse{
 			Status:       helpersv1.Unauthorize,
