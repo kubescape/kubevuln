@@ -1624,6 +1624,9 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	// address came back with its path still attached and matched no registry.
 	assert.Equal(t, "http-registry.internal", parseAuthorityFromServerAddress("http-registry.internal/v2/"))
 	assert.Equal(t, "httpsregistry.example.com", parseAuthorityFromServerAddress("httpsregistry.example.com/v2/"))
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("HTTPS://index.docker.io/v1/"))
+	assert.Equal(t, "registry.example.com", parseAuthorityFromServerAddress("HTTP://registry.example.com/v2/"))
+	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("HttPs://quay.io:5000/v2/"))
 }
 
 // The auth field is the canonical one; username and password are supplementary and an entry
