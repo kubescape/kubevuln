@@ -1056,3 +1056,57 @@ func Test_WithCataloger(t *testing.T) {
 	_, _ = srv.cataloger.CreateSBOM(context.Background(), nil, nil)
 	assert.True(t, called)
 }
+
+func TestCreateSBOM_AuthDenied_ReturnsUnauthorize(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+	}{
+		{
+			name:       "401 Unauthorized",
+			statusCode: http.StatusUnauthorized,
+			body:       `401 Unauthorized`,
+		},
+		{
+			name:       "403 Forbidden",
+			statusCode: http.StatusForbidden,
+			body:       `403 Forbidden`,
+		},
+		{
+			name:       "DENIED code in body",
+			statusCode: http.StatusUnauthorized,
+			body:       `{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			u, err := url.Parse(server.URL)
+			require.NoError(t, err)
+
+			client, cleanup := startTestServer(t)
+			defer cleanup()
+
+			resp, err := client.CreateSBOM(context.Background(), &pb.CreateSBOMRequest{
+				ImageId:         u.Host + "/test-auth-denied",
+				ImageTag:        u.Host + "/test-auth-denied:latest",
+				Platform:        "linux/amd64",
+				MaxImageSize:    1 << 30,
+				MaxSbomSize:     1 << 30,
+				TimeoutSeconds:  5,
+				InsecureUseHttp: true,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, helpersv1.Unauthorize, resp.Status)
+		})
+	}
+}
+
