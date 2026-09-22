@@ -1075,13 +1075,11 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
 	if workloadKind != "" {
-		groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind)
-		if err != nil {
-			return nil, err
+		if groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind); err == nil {
+			enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
+			enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
 		}
 
-		enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
-		enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
 		enrichedLabels[helpersv1.RelatedKindMetadataKey] = strings.ToLower(workloadKind)
 		enrichedLabels[helpersv1.RelatedNameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
 		enrichedLabels[helpersv1.RelatedNamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)

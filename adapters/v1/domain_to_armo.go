@@ -280,6 +280,15 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "ALAS-"):
 		return "https://alas.aws.amazon.com/" + id + ".html"
 
+	case strings.HasPrefix(id, "GO-"):
+		return "https://pkg.go.dev/vuln/" + id
+
+	case strings.HasPrefix(id, "RUSTSEC-"):
+		return "https://rustsec.org/advisories/" + id + ".html"
+
+	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"):
+		return "https://osv.dev/vulnerability/" + id
+
 	default:
 		return "https://nvd.nist.gov/vuln/detail/" + id
 	}
