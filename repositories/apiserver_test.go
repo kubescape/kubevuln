@@ -1537,6 +1537,21 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 			},
 		},
 		{
+			k8sResourceType:      "rollout",
+			k8sResourceGroup:     "",
+			k8sResourceVersion:   "",
+			k8sResourceName:      "frontend",
+			k8sResourceNamespace: "prod",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-prod/rollout-frontend",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contNameRollout",
+			},
+		},
+		{
 			k8sResourceType:      "",
 			k8sResourceGroup:     "",
 			k8sResourceVersion:   "",
@@ -1560,15 +1575,25 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		assert.NoError(t, err)
 
 		if tests[i].workload.Wlid != "" {
-			val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
-			assert.True(t, exist)
-			assert.Equal(t, tests[i].k8sResourceGroup, val)
+			if tests[i].k8sResourceGroup != "" {
+				val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+				assert.True(t, exist)
+				assert.Equal(t, tests[i].k8sResourceGroup, val)
+			} else {
+				_, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+				assert.False(t, exist)
+			}
 
-			val, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
-			assert.True(t, exist)
-			assert.Equal(t, tests[i].k8sResourceVersion, val)
+			if tests[i].k8sResourceVersion != "" {
+				val, exist := enrichedLabels[helpersv1.ApiVersionMetadataKey]
+				assert.True(t, exist)
+				assert.Equal(t, tests[i].k8sResourceVersion, val)
+			} else {
+				_, exist := enrichedLabels[helpersv1.ApiVersionMetadataKey]
+				assert.False(t, exist)
+			}
 
-			val, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
+			val, exist := enrichedLabels[helpersv1.RelatedKindMetadataKey]
 			assert.True(t, exist)
 			assert.Equal(t, tests[i].k8sResourceType, val)
 
@@ -1597,6 +1622,9 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		assert.Equal(t, tests[i].workload.ContainerName, val)
 	}
 
+	// Test error when domain.WorkloadKey is missing from context
+	_, err := enrichSummaryManifestObjectLabels(context.Background(), make(map[string]string), true)
+	assert.Error(t, err)
 }
 
 func TestAPIServerStore_StoreCVESummary_EmptyWlid(t *testing.T) {

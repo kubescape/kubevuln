@@ -51,6 +51,21 @@ var (
 	// only a product with none of the three says nothing about what it
 	// actually is.
 	ErrEmptyProduct = errors.New("vexvalidate: statement has a product that identifies nothing")
+
+	// ErrNoVulnerability is returned when a statement never says which
+	// vulnerability it is about. go-vex's Statement.Validate() checks the
+	// status and the fields each status may carry, but not this, so a
+	// statement carrying neither an @id nor a name passes every other check
+	// here. Matching keys on the vulnerability name, so an unnamed statement
+	// keys on the empty string and collides with every other unnamed one.
+	ErrNoVulnerability = errors.New("vexvalidate: statement does not identify a vulnerability")
+
+	// ErrEmptySubcomponent is returned when a product lists a subcomponent
+	// that identifies nothing, by the same ID/hashes/identifiers test
+	// ErrEmptyProduct applies one level up. Subcomponents are what scope a
+	// statement to a package, which is the granularity suppression matches
+	// on, so an empty one says as little as an empty product.
+	ErrEmptySubcomponent = errors.New("vexvalidate: statement has a subcomponent that identifies nothing")
 )
 
 // openVEXContextPrefix is the real OpenVEX namespace URI. The spec allows a
@@ -72,12 +87,42 @@ func hasValidContext(context string) bool {
 	return rest == "" || strings.HasPrefix(rest, "/")
 }
 
-// productIsEmpty reports whether p identifies nothing at all. A Product's ID
-// is optional in go-vex's own Component type, since a product can instead be
-// identified by Hashes or Identifiers - so ID alone being unset does not
-// make a product empty, but having none of the three does.
-func productIsEmpty(p vex.Product) bool {
-	return p.ID == "" && len(p.Hashes) == 0 && len(p.Identifiers) == 0
+// hasIdentifyingValue reports whether m holds at least one value that is not
+// blank. A map carrying only blank values is a placeholder: present in the
+// document, identifying nothing, so its length alone says nothing about
+// whether the component is identified.
+func hasIdentifyingValue[K comparable, V ~string](m map[K]V) bool {
+	for _, v := range m {
+		if strings.TrimSpace(string(v)) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// componentIsEmpty reports whether c identifies nothing at all. A Component's
+// ID is optional in go-vex, since it can instead be identified by Hashes or
+// Identifiers - so ID alone being unset does not make it empty, but having
+// none of the three does. Used for a product and for each of its
+// subcomponents, which are the same Component type.
+//
+// Each is checked for content rather than presence, so that a whitespace-only
+// ID, or a hash or identifier map whose every value is blank, is recognised as
+// identifying nothing. That is the same placeholder shape vulnerabilityIsAnonymous
+// rejects for the vulnerability itself.
+func componentIsEmpty(c vex.Component) bool {
+	return strings.TrimSpace(c.ID) == "" &&
+		!hasIdentifyingValue(c.Hashes) &&
+		!hasIdentifyingValue(c.Identifiers)
+}
+
+// vulnerabilityIsAnonymous reports whether v names no vulnerability. go-vex
+// makes both fields optional: @id is an IRI referencing it, name is the main
+// identifier. Either one identifies the statement's subject, so only having
+// neither leaves it about nothing in particular.
+func vulnerabilityIsAnonymous(v vex.Vulnerability) bool {
+	return strings.TrimSpace(v.ID) == "" && strings.TrimSpace(string(v.Name)) == ""
 }
 
 // Validate parses data as an OpenVEX document and checks it is genuinely
@@ -109,13 +154,23 @@ func Validate(data []byte) error {
 			return fmt.Errorf("%w: statement %d: %w", ErrInvalidStatement, i, err)
 		}
 
+		if vulnerabilityIsAnonymous(s.Vulnerability) {
+			return fmt.Errorf("%w: statement %d", ErrNoVulnerability, i)
+		}
+
 		if len(s.Products) == 0 {
 			return fmt.Errorf("%w: statement %d", ErrNoProducts, i)
 		}
 
 		for j, p := range s.Products {
-			if productIsEmpty(p) {
+			if componentIsEmpty(p.Component) {
 				return fmt.Errorf("%w: statement %d, product %d", ErrEmptyProduct, i, j)
+			}
+			for k, sub := range p.Subcomponents {
+				if componentIsEmpty(sub.Component) {
+					return fmt.Errorf("%w: statement %d, product %d, subcomponent %d",
+						ErrEmptySubcomponent, i, j, k)
+				}
 			}
 		}
 	}

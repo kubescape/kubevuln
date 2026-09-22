@@ -189,6 +189,7 @@ func checkIPAllowed(ip net.IP) error {
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
 		ip.IsMulticast() ||
+		ip.Equal(net.IPv4bcast) ||
 		carrierGradeNAT.Contains(ip) ||
 		thisHostOnThisNetwork.Contains(ip) ||
 		nat64LocalUse.Contains(ip) {
