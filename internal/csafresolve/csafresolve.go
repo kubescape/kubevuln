@@ -81,6 +81,9 @@ func New(tree *csaf.ProductTree) *Resolver {
 	return r
 }
 
+// Resolve returns the real purl for compositeID (e.g.
+// "red_hat_enterprise_linux_10:xz"), or an error explaining why it could
+// not be resolved.
 func (r *Resolver) Resolve(compositeID string) (string, error) {
 	if r == nil || r.tree == nil {
 		return "", fmt.Errorf("%w: %q", ErrNoRelationship, compositeID)
