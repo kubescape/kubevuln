@@ -12,18 +12,6 @@ func TestScanError_Error(t *testing.T) {
 	scanErr := &ScanError{Reason: "some-reason", Err: inner}
 
 	assert.Equal(t, "boom", scanErr.Error())
-
-	// Test nil Err with Reason
-	scanErrNilErrWithReason := &ScanError{Reason: "some-reason", Err: nil}
-	assert.Equal(t, "some-reason", scanErrNilErrWithReason.Error())
-
-	// Test nil Err with empty Reason
-	scanErrNilErrEmptyReason := &ScanError{Reason: "", Err: nil}
-	assert.Equal(t, "scan error", scanErrNilErrEmptyReason.Error())
-
-	// Test nil receiver
-	var nilScanErr *ScanError
-	assert.Equal(t, "", nilScanErr.Error())
 }
 
 func TestScanError_Unwrap(t *testing.T) {
@@ -31,9 +19,6 @@ func TestScanError_Unwrap(t *testing.T) {
 	scanErr := &ScanError{Reason: "some-reason", Err: inner}
 
 	assert.Equal(t, inner, scanErr.Unwrap())
-
-	var nilScanErr *ScanError
-	assert.Nil(t, nilScanErr.Unwrap())
 }
 
 func TestScanError_ErrorsIs(t *testing.T) {

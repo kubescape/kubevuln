@@ -65,24 +65,8 @@ type ScanError struct {
 	Err    error
 }
 
-func (e *ScanError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if e.Err != nil {
-		return e.Err.Error()
-	}
-	if e.Reason != "" {
-		return e.Reason
-	}
-	return "scan error"
-}
-func (e *ScanError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
+func (e *ScanError) Error() string { return e.Err.Error() }
+func (e *ScanError) Unwrap() error { return e.Err }
 
 type ScanIDKey struct{}
 type TimestampKey struct{}
