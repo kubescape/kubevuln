@@ -3605,6 +3605,9 @@ func TestScanService_MissingSBOM_NoFlowScansANilSBOM(t *testing.T) {
 		err = s.ScanRegistry(ctx)
 
 		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		var scanErr *domain.ScanError
+		require.ErrorAs(t, err, &scanErr)
+		assert.Equal(t, scanfailure.ReasonUnexpected, scanErr.Reason)
 		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
 	})
 
@@ -3621,6 +3624,9 @@ func TestScanService_MissingSBOM_NoFlowScansANilSBOM(t *testing.T) {
 		err = s.ScanCVE(ctx)
 
 		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		var scanErr *domain.ScanError
+		require.ErrorAs(t, err, &scanErr)
+		assert.Equal(t, scanfailure.ReasonUnexpected, scanErr.Reason)
 		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
 	})
 }

@@ -31,6 +31,7 @@ func TestCheckIPAllowed(t *testing.T) {
 		{"unspecified IPv4", "0.0.0.0", true},
 		{"unspecified IPv6", "::", true},
 		{"multicast", "224.0.0.1", true},
+		{"limited broadcast IPv4 (255.255.255.255)", "255.255.255.255", true},
 		{"real public IPv4 (Google DNS)", "8.8.8.8", false},
 		{"real public IPv4 (Cloudflare DNS)", "1.1.1.1", false},
 		{"carrier-grade NAT / cloud internal (100.64.0.0/10)", "100.64.0.1", true},
