@@ -1321,4 +1321,42 @@ func TestParseImageManifest_NilRawConfig(t *testing.T) {
 	assert.Nil(t, im)
 }
 
+func TestDomainToArmo_RelatedVulnerabilities_FirstNonEmptyDescription(t *testing.T) {
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{
+		Wlid: "wlid://cluster/test/workload",
+	})
+
+	doc := v1beta1.GrypeDocument{
+		Source: &v1beta1.Source{
+			Target: json.RawMessage(`{"userInput":"","imageID":"","manifestDigest":"","mediaType":"","tags":null,"imageSize":0,"layers":[{"mediaType":"","digest":"dummyLayer","size":0}],"manifest":null,"config":null,"repoDigests":null,"architecture":"","os":""}`),
+		},
+		Matches: []v1beta1.Match{{
+			Vulnerability: v1beta1.Vulnerability{
+				VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{
+					ID:          "CVE-2023-99999",
+					Description: "", // empty primary description
+				},
+			},
+			RelatedVulnerabilities: []v1beta1.VulnerabilityMetadata{
+				{
+					ID:          "GHSA-1111",
+					Description: "", // empty first related description
+				},
+				{
+					ID:          "GHSA-2222",
+					Description: "valid fallback description from second related vulnerability",
+				},
+			},
+		}},
+	}
+
+	results, err := DomainToArmo(ctx, doc, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "valid fallback description from second related vulnerability", results[0].Vulnerability.Description)
+}
+
 

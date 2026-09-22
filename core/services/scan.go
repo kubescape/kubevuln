@@ -492,7 +492,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if !s.sbomGeneration && sbom.Content == nil {
 			logger.L().Ctx(ctx).Warning("missing SBOM",
 				helpers.String("imageSlug", workload.ImageSlug))
-			return domain.ErrMissingSBOM
+			return &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: domain.ErrMissingSBOM}
 		}
 
 		// do not process timed out SBOM
