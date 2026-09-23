@@ -384,3 +384,36 @@ func TestRetryWithBackoff_ContextAlreadyCanceled(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 0, calls, "fn must not be called when context is already canceled")
 }
+
+func TestRetryWithBackoff_NonPositiveMaxAttempts(t *testing.T) {
+	for _, maxAttempts := range []int{0, -1} {
+		t.Run(fmt.Sprintf("max_attempts_%d", maxAttempts), func(t *testing.T) {
+			calls := 0
+			config := RetryConfig{
+				MaxAttempts: maxAttempts,
+				InitialWait: 10 * time.Millisecond,
+				MaxWait:     50 * time.Millisecond,
+				Backoff:     2.0,
+			}
+
+			// Success on first attempt
+			val, err := RetryWithBackoff(context.Background(), "test_zero_max_success", config, IsRateLimitError, func(ctx context.Context) (string, error) {
+				calls++
+				return "success", nil
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, "success", val)
+			assert.Equal(t, 1, calls)
+
+			// Failure on first attempt should not panic and should terminate immediately
+			calls = 0
+			retryableErr := &transport.Error{StatusCode: http.StatusTooManyRequests}
+			_, err = RetryWithBackoff(context.Background(), "test_zero_max_fail", config, IsRateLimitError, func(ctx context.Context) (string, error) {
+				calls++
+				return "", retryableErr
+			})
+			assert.Equal(t, retryableErr, err)
+			assert.Equal(t, 1, calls)
+		})
+	}
+}

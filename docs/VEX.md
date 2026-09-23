@@ -333,6 +333,7 @@ a scan:
 | package | what it is for |
 | --- | --- |
 | [`internal/safefetch`](../internal/safefetch) | fetching a user-supplied URL without turning it into an SSRF. https only, dial-time IP validation against private, loopback, link-local, carrier-grade NAT and NAT64-embedded addresses, a redirect hop limit with per-hop scheme checking, and a response size bound |
+| [`internal/vexsource`](../internal/vexsource) | fetching and validating external VEX documents. `Source.Fetch` keeps retrieval and validation separate from persistence and temporary-file creation |
 | [`internal/vexdoc`](../internal/vexdoc) | writing a fetched document to a temp file. Grype's `vex.Processor` accepts only real file paths, so anything handing it a fetched document has to write one first. Random filename, `0600`, always inside `os.TempDir()` |
 | [`internal/csafresolve`](../internal/csafresolve) | resolving a CSAF advisory's composite product IDs into real purls. Grype's CSAF matcher compares purls by string equality but only looks for one directly on a relationships entry, which real Red Hat advisories never populate |
 
