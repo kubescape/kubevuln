@@ -360,7 +360,7 @@ SecurityException CRDs suppress security findings — access should be restricte
 
 Scanner components also need `create` and `patch` on `events` (core API group) to emit Kubernetes Events bound to SecurityException resources.
 
-Scanner components additionally need `get` on `namespaces` and on every workload kind an exception may target (`pods`, `replicationcontrollers`, `apps/deployments`, `apps/statefulsets`, `apps/daemonsets`, `apps/replicasets`, `batch/jobs`, `batch/cronjobs`) in order to read the labels that `match.objectSelector` and `match.namespaceSelector` are evaluated against. These lookups fail closed: if the scanner cannot read a workload's or namespace's labels, the exception does **not** apply and the finding is reported. A selector-based exception that targets a kind outside this list will therefore never apply until the scanner is granted `get` on that kind.
+Scanner components additionally need `get`, `list`, and `watch` on `namespaces` and on every workload kind an exception may target (`pods`, `replicationcontrollers`, `apps/deployments`, `apps/statefulsets`, `apps/daemonsets`, `apps/replicasets`, `batch/jobs`, `batch/cronjobs`) in order to read and watch the labels that `match.objectSelector` and `match.namespaceSelector` are evaluated against. These lookups fail closed: if the scanner cannot read a workload's or namespace's labels, the exception does **not** apply and the finding is reported. A selector-based exception that targets a kind outside this list will therefore never apply until the scanner is granted `get`, `list`, and `watch` on that kind.
 
 Organizations should create dedicated `ClusterRole`/`Role` resources for SecurityException management rather than granting access through broad wildcard rules.
 
