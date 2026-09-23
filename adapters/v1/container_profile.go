@@ -56,6 +56,22 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate instance ID: %w", err)
 	}
+
+	// A ContainerProfile with no image identity has nothing to compute a CVE
+	// slug from. In practice this is exactly and only the "host" pseudo-
+	// workload from kubescape/node-agent's host-monitoring feature: it has a
+	// real WLID/InstanceID and can reach Completed/Learning + completion=Full
+	// like any other profile (there is no separate "this is host" flag on the
+	// CR), but its Spec is never populated with an image, since it isn't one.
+	// Returning an error here would make ScanCP report a scan failure every
+	// time this profile is reconciled; skipping cleanly (empty scans, no
+	// error) matches how the caller already treats "nothing to do" -- ScanCP
+	// only returns an error when failed > 0, so an empty scans slice here is
+	// silently and correctly a no-op there.
+	if containerProfile.Spec.ImageID == "" && containerProfile.Spec.ImageTag == "" {
+		return scans, nil
+	}
+
 	// copy labels map so we never mutate the repository-owned profile and nil labels scan cleanly
 	scanLabels := make(map[string]string, len(containerProfile.Labels)+1)
 	for k, v := range containerProfile.Labels {
