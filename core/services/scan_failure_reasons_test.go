@@ -234,6 +234,11 @@ func TestClassifySBOMStatus(t *testing.T) {
 		expected string
 	}{
 		{
+			name:     "Unauthorize status",
+			status:   helpersv1.Unauthorize,
+			expected: scanfailure.ReasonImageAuthFailed,
+		},
+		{
 			name:     "TooLarge status",
 			status:   helpersv1.TooLarge,
 			expected: scanfailure.ReasonImageTooLarge,
