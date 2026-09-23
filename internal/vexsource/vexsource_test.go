@@ -2,23 +2,30 @@ package vexsource
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/kubescape/kubevuln/internal/safefetch"
-	"github.com/stretchr/testify/assert"
+	"github.com/kubescape/kubevuln/internal/vexvalidate"
 	"github.com/stretchr/testify/require"
 )
 
 const validOpenVEX = `{
-    "@context": "https://openvex.dev/ns/v0.2.0",
-    "statements": [{
-        "vulnerability": {"name": "CVE-2026-0001"},
-        "products": [{"identifiers": {"purl": "pkg:oci/example@sha256:abc"}}],
-        "status": "fixed"
-    }]
+"@context": "https://openvex.dev/ns/v0.2.0",
+"@id": "https://example.com/vex-1",
+"author": "test",
+"timestamp": "2026-01-01T00:00:00Z",
+"version": 1,
+"statements": [
+{
+"vulnerability": {"name": "CVE-2021-44228"},
+"products": [{"@id": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0"}],
+"status": "not_affected",
+"justification": "vulnerable_code_not_present"
+}
+]
 }`
 
 func TestSourceFetch(t *testing.T) {
@@ -29,62 +36,59 @@ func TestSourceFetch(t *testing.T) {
 	defer server.Close()
 
 	source := Source{URL: server.URL}
+
 	fetcher := &safefetch.Fetcher{
 		Client:   server.Client(),
 		MaxBytes: 1 << 20,
 	}
 
-	doc, cleanup, err := source.Fetch(context.Background(), fetcher)
-	require.NoError(t, err)
-	require.NotNil(t, cleanup)
-	defer cleanup()
+	document, err := source.Fetch(context.Background(), fetcher)
 
-	assert.Equal(t, "openvex", string(doc.Format))
-	assert.NotEmpty(t, doc.Path)
-
-	data, err := os.ReadFile(doc.Path)
 	require.NoError(t, err)
-	assert.JSONEq(t, validOpenVEX, string(data))
-
-	_, err = os.Stat(doc.Path)
-	require.NoError(t, err)
+	require.Equal(t, source.URL, document.URL)
+	require.JSONEq(t, validOpenVEX, string(document.Data))
 }
 
-func TestSourceFetchRejectsInvalidVEX(t *testing.T) {
+func TestSourceFetch_EmptyURL(t *testing.T) {
+	source := Source{}
+
+	_, err := source.Fetch(context.Background(), safefetch.New())
+
+	require.EqualError(t, err, "vexsource: URL is empty")
+}
+
+func TestSourceFetch_NilFetcher(t *testing.T) {
+	source := Source{URL: "https://example.com/vex.json"}
+
+	_, err := source.Fetch(context.Background(), nil)
+
+	require.EqualError(t, err, "vexsource: fetcher is nil")
+}
+
+func TestSourceFetch_FetchError(t *testing.T) {
+	source := Source{URL: "http://example.com/vex.json"}
+
+	_, err := source.Fetch(context.Background(), safefetch.New())
+
+	require.Error(t, err)
+}
+
+func TestSourceFetch_InvalidVEX(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"not": "vex"}`))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"invalid":"vex"}`))
 	}))
 	defer server.Close()
 
 	source := Source{URL: server.URL}
+
 	fetcher := &safefetch.Fetcher{
 		Client:   server.Client(),
 		MaxBytes: 1 << 20,
 	}
 
-	doc, cleanup, err := source.Fetch(context.Background(), fetcher)
+	_, err := source.Fetch(context.Background(), fetcher)
 
 	require.Error(t, err)
-	assert.Empty(t, doc.Path)
-	assert.NotNil(t, cleanup)
-}
-
-func TestSourceFetchRequiresURL(t *testing.T) {
-	source := Source{}
-
-	doc, cleanup, err := source.Fetch(context.Background(), safefetch.New())
-
-	require.Error(t, err)
-	assert.Empty(t, doc.Path)
-	assert.NotNil(t, cleanup)
-}
-
-func TestSourceFetchRequiresFetcher(t *testing.T) {
-	source := Source{URL: "https://example.com/vex.json"}
-
-	doc, cleanup, err := source.Fetch(context.Background(), nil)
-
-	require.Error(t, err)
-	assert.Empty(t, doc.Path)
-	assert.NotNil(t, cleanup)
+	require.True(t, errors.Is(err, vexvalidate.ErrInvalidContext))
 }
