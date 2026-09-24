@@ -113,3 +113,15 @@ func TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillReturnsSca
 	assert.Empty(t, scans[0].ImageID)
 	assert.NotEmpty(t, scans[0].ImageTag)
 }
+
+func TestGetContainerRelevancyScans_NotFound(t *testing.T) {
+	repo := repositories.NewMemoryStorage(false, false)
+
+	_, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.TODO(), "default", "non-existent-profile", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "container profile default/non-existent-profile not found")
+
+	_, err = NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.TODO(), "default", "non-existent-profile", true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "container profile default/non-existent-profile not found")
+}

@@ -30,6 +30,9 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	if err != nil {
 		return scans, fmt.Errorf("GetContainerProfile: %w", err)
 	}
+	if containerProfile.Name == "" {
+		return scans, fmt.Errorf("container profile %s/%s not found", namespace, name)
+	}
 
 	// check completion status
 	// if partialRelevancy is false, only full container profiles are considered
