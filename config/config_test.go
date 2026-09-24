@@ -61,26 +61,21 @@ func TestLoadConfigRejectsNonPositiveScanTimeout(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsNonPositiveScannerReadinessTimeout(t *testing.T) {
+func TestLoadConfigAcceptsNonPositiveReadinessAndShutdownTimeouts(t *testing.T) {
 	for _, v := range []string{"0", "-1s"} {
-		t.Run(v, func(t *testing.T) {
+		t.Run("scannerReadinessTimeout_"+v, func(t *testing.T) {
 			viper.Reset()
 			t.Setenv("SCANNERREADINESSTIMEOUT", v)
-			_, err := LoadConfig("testdata")
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "scannerReadinessTimeout")
+			cfg, err := LoadConfig("testdata")
+			require.NoError(t, err)
+			assert.LessOrEqual(t, cfg.ScannerReadinessTimeout, time.Duration(0))
 		})
-	}
-}
-
-func TestLoadConfigRejectsNonPositiveShutdownTimeout(t *testing.T) {
-	for _, v := range []string{"0", "-1s"} {
-		t.Run(v, func(t *testing.T) {
+		t.Run("shutdownTimeout_"+v, func(t *testing.T) {
 			viper.Reset()
 			t.Setenv("SHUTDOWNTIMEOUT", v)
-			_, err := LoadConfig("testdata")
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "shutdownTimeout")
+			cfg, err := LoadConfig("testdata")
+			require.NoError(t, err)
+			assert.LessOrEqual(t, cfg.ShutdownTimeout, time.Duration(0))
 		})
 	}
 }

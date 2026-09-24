@@ -166,12 +166,6 @@ func LoadConfig(path string) (Config, error) {
 	if config.ScanTimeout <= 0 {
 		return Config{}, fmt.Errorf("scanTimeout must be positive, got %s", config.ScanTimeout)
 	}
-	if config.ScannerReadinessTimeout <= 0 {
-		return Config{}, fmt.Errorf("scannerReadinessTimeout must be positive, got %s", config.ScannerReadinessTimeout)
-	}
-	if config.ShutdownTimeout <= 0 {
-		return Config{}, fmt.Errorf("shutdownTimeout must be positive, got %s", config.ShutdownTimeout)
-	}
 
 	// Both limits are compared with a strict > against a measured size, so a non-positive
 	// value does not mean "unlimited": it means every image or SBOM exceeds it. maxSBOMSize
