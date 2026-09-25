@@ -22,3 +22,11 @@ func TestSBOMCatalogerFunc(t *testing.T) {
 	assert.NotNil(t, res)
 	assert.True(t, called)
 }
+
+func TestSBOMCatalogerFunc_NilReturnsError(t *testing.T) {
+	var nilFn SBOMCatalogerFunc
+	nilRes, err := nilFn.CreateSBOM(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.Nil(t, nilRes)
+	assert.Contains(t, err.Error(), "nil SBOMCatalogerFunc")
+}
