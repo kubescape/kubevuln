@@ -404,6 +404,85 @@ func TestAPIServerStore_StoreCVESummary_ReferencesStorageNamespace(t *testing.T)
 	}
 }
 
+func TestAPIServerStore_StoreCVESummary_ScanOrder(t *testing.T) {
+	for _, tt := range []struct {
+		name, storedTime string
+		incomingTime     int64
+		stale            bool
+	}{
+		{"older", "101", 100, true},
+		{"newer", "99", 100, false},
+		{"equal", "100", 100, false},
+		{"missing", "", 100, false},
+		{"malformed", "not-a-timestamp", 100, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := domain.ScanCommand{Wlid: "wlid://cluster-test/namespace-app/deployment-web", ContainerName: "web"}
+			ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+			ctx = context.WithValue(ctx, domain.TimestampKey{}, tt.incomingTime)
+			resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, "image")
+			require.NoError(t, err)
+			seed := &v1beta1.VulnerabilityManifestSummary{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "app", ResourceVersion: "7", Annotations: map[string]string{"keep": "old"}, Labels: map[string]string{"keep": "old"}},
+				Spec:       v1beta1.VulnerabilityManifestSummarySpec{Severities: v1beta1.SeveritySummary{High: v1beta1.VulnerabilityCounters{All: 7}}},
+			}
+			if tt.storedTime != "" {
+				seed.Annotations[timestampMetadataKey] = tt.storedTime
+			}
+			clientset := newFakeStorageClientset(seed)
+			updates := 0
+			clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+				updates++
+				return false, nil, nil
+			})
+			a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+			cve := domain.CVEManifest{Name: "image", Annotations: map[string]string{"incoming": "yes"}, Labels: map[string]string{"incoming": "yes"}, Content: &v1beta1.GrypeDocument{}}
+			require.NoError(t, a.StoreCVESummary(ctx, cve, domain.CVEManifest{}, false))
+			got, err := a.StorageClient.VulnerabilityManifestSummaries("app").Get(ctx, resourceName, metav1.GetOptions{})
+			require.NoError(t, err)
+			if tt.stale {
+				assert.Equal(t, seed, got)
+				assert.Zero(t, updates)
+			} else {
+				assert.Equal(t, 1, updates)
+				assert.Equal(t, "100", got.Annotations[timestampMetadataKey])
+				assert.Equal(t, "yes", got.Annotations["incoming"])
+				assert.Equal(t, "yes", got.Labels["incoming"])
+				assert.Zero(t, got.Spec.Severities.High.All)
+			}
+		})
+	}
+}
+
+func TestAPIServerStore_StoreCVESummary_ConflictRechecksTimestamp(t *testing.T) {
+	workload := domain.ScanCommand{Wlid: "wlid://cluster-test/namespace-app/deployment-web", ContainerName: "web"}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(100))
+	resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, "image")
+	require.NoError(t, err)
+	seed := &v1beta1.VulnerabilityManifestSummary{ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "app", Annotations: map[string]string{timestampMetadataKey: "90"}}}
+	clientset := newFakeStorageClientset(seed)
+	updates := 0
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		updates++
+		if updates == 1 {
+			newer := seed.DeepCopy()
+			newer.Annotations[timestampMetadataKey] = "110"
+			newer.Spec.Severities.High.All = 11
+			require.NoError(t, clientset.Tracker().Update(schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "vulnerabilitymanifestsummaries"}, newer, "app"))
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "vulnerabilitymanifestsummaries"}, resourceName, fmt.Errorf("concurrent write"))
+		}
+		return false, nil, nil
+	})
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+	require.NoError(t, a.StoreCVESummary(ctx, domain.CVEManifest{Name: "image", Content: &v1beta1.GrypeDocument{}}, domain.CVEManifest{}, false))
+	got, err := a.StorageClient.VulnerabilityManifestSummaries("app").Get(ctx, resourceName, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, updates)
+	assert.Equal(t, "110", got.Annotations[timestampMetadataKey])
+	assert.Equal(t, int64(11), got.Spec.Severities.High.All)
+}
+
 // func TestAPIServerStore_storeCVESummary(t *testing.T) {
 // 	cveManifest := tools.FileToCVEManifest("testdata/nginx-cve.json")
 // 	a := NewFakeAPIServerStorage("namespace")
