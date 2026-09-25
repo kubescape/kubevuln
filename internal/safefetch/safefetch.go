@@ -31,6 +31,17 @@ var carrierGradeNAT = mustParseCIDR("100.64.0.0/10")
 // working bypass of the loopback check if left unhandled.
 var thisHostOnThisNetwork = mustParseCIDR("0.0.0.0/8")
 
+// ipv4Reserved is RFC 1112's 240.0.0.0/4 (formerly Class E), reserved for
+// future use. net.IP.IsPrivate() does not cover this range, and while
+// 255.255.255.255 is the limited broadcast address, the entire /4 block
+// is designated non-routable on the public internet by RFC 6890.
+var ipv4Reserved = mustParseCIDR("240.0.0.0/4")
+
+// benchmarkTesting is RFC 2544's 198.18.0.0/15, allocated for benchmark tests
+// of network interconnect devices. RFC 6890 classifies this range as not
+// globally routable.
+var benchmarkTesting = mustParseCIDR("198.18.0.0/15")
+
 // The IPv6 transition mechanisms below each carry an IPv4 address inside an IPv6 one,
 // and a packet sent to them is delivered to that IPv4 destination. net.IP.To4 unwraps
 // only the IPv4-mapped form (::ffff:a.b.c.d), so for these the checks in checkIPAllowed
@@ -192,6 +203,8 @@ func checkIPAllowed(ip net.IP) error {
 		ip.Equal(net.IPv4bcast) ||
 		carrierGradeNAT.Contains(ip) ||
 		thisHostOnThisNetwork.Contains(ip) ||
+		ipv4Reserved.Contains(ip) ||
+		benchmarkTesting.Contains(ip) ||
 		nat64LocalUse.Contains(ip) {
 		return fmt.Errorf("%w: %s", ErrBlockedIP, ip)
 	}

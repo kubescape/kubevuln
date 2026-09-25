@@ -36,6 +36,8 @@ func TestCheckIPAllowed(t *testing.T) {
 		{"real public IPv4 (Cloudflare DNS)", "1.1.1.1", false},
 		{"carrier-grade NAT / cloud internal (100.64.0.0/10)", "100.64.0.1", true},
 		{"0.0.0.0/8 (routes to localhost on Linux)", "0.0.0.1", true},
+		{"RFC 1112 reserved / Class E (240.0.0.0/4)", "240.0.0.1", true},
+		{"RFC 2544 benchmark testing (198.18.0.0/15)", "198.18.0.1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,6 +157,8 @@ func TestCheckIPAllowed_EmbeddedIPv4(t *testing.T) {
 		{"IPv4-compatible to cloud metadata", "::a9fe:a9fe", true},
 		{"IPv4-translated to cloud metadata", "::ffff:0:a9fe:a9fe", true},
 		{"IPv4-mapped to loopback", "::ffff:127.0.0.1", true},
+		{"NAT64 well-known to RFC 1112 reserved", "64:ff9b::f000:1", true},
+		{"NAT64 well-known to RFC 2544 benchmark testing", "64:ff9b::c612:1", true},
 
 		// the embedded address is what decides it, so translation to a genuinely
 		// public host stays reachable: on an IPv6-only cluster NAT64 is how it is
@@ -212,6 +216,8 @@ func TestNew_DialBlocksAddress(t *testing.T) {
 		{"carrier-grade NAT", "100.64.0.1:443"},
 		{"0.0.0.0/8, routes to localhost on Linux", "0.0.0.1:443"},
 		{"NAT64 to cloud metadata", "[64:ff9b::a9fe:a9fe]:443"},
+		{"RFC 1112 reserved address", "240.0.0.1:443"},
+		{"RFC 2544 benchmark testing address", "198.18.0.1:443"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
