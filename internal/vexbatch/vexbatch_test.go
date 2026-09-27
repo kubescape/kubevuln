@@ -134,4 +134,29 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.Contains(t, ignoredIDs, "CVE-2023-1255")
 		require.Contains(t, ignoredIDs, "CVE-2023-3817")
 	})
+
+	t.Run("uppercase and mixed-case formats", func(t *testing.T) {
+		matches := newMatches()
+
+		remaining, ignored, err := Apply(
+			[]Document{
+				{
+					Format: "OpenVEX",
+					Path:   openvexPath,
+				},
+				{
+					Format: "CSAF",
+					Path:   csafPath,
+				},
+			},
+			pkgContext,
+			&matches,
+			nil,
+			ignoreRules,
+		)
+		require.NoError(t, err)
+
+		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, ignored, 2)
+	})
 }

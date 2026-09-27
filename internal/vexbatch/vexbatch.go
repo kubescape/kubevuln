@@ -2,6 +2,7 @@ package vexbatch
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
@@ -35,7 +36,8 @@ func Apply(
 	var order []Format
 
 	for _, document := range documents {
-		switch document.Format {
+		format := Format(strings.ToLower(string(document.Format)))
+		switch format {
 		case FormatOpenVEX, FormatCSAF:
 		default:
 			return matches, ignoredMatches, fmt.Errorf(
@@ -44,11 +46,11 @@ func Apply(
 			)
 		}
 
-		if _, exists := groups[document.Format]; !exists {
-			order = append(order, document.Format)
+		if _, exists := groups[format]; !exists {
+			order = append(order, format)
 		}
 
-		groups[document.Format] = append(groups[document.Format], document)
+		groups[format] = append(groups[format], document)
 	}
 
 	for _, format := range order {
