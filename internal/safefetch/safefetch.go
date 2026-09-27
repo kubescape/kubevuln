@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -180,7 +181,7 @@ func New() *Fetcher {
 				if len(via) >= defaultMaxRedirects {
 					return ErrTooManyRedirects
 				}
-				if req.URL.Scheme != "https" {
+				if !strings.EqualFold(req.URL.Scheme, "https") {
 					return fmt.Errorf("redirect target: %w", ErrScheme)
 				}
 				return nil
@@ -230,7 +231,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing url: %w", err)
 	}
-	if parsed.Scheme != "https" {
+	if !strings.EqualFold(parsed.Scheme, "https") {
 		return nil, ErrScheme
 	}
 

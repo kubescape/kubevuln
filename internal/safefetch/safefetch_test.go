@@ -68,6 +68,33 @@ func TestFetch_RejectsNonHTTPS(t *testing.T) {
 	}
 }
 
+func TestFetch_AcceptsHTTPSCaseInsensitive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	// Inject a custom client that talks to the test server
+	f := &Fetcher{
+		MaxBytes: 1024,
+		Client:   server.Client(),
+	}
+
+	tests := []string{
+		"https://example.com/feed.json",
+		"HTTPS://example.com/feed.json",
+		"Https://example.com/feed.json",
+		"hTTps://example.com/feed.json",
+	}
+	for _, u := range tests {
+		t.Run(u, func(t *testing.T) {
+			_, err := f.Fetch(context.Background(), u)
+			assert.NotErrorIs(t, err, ErrScheme)
+		})
+	}
+}
+
 func TestFetch_MalformedURL(t *testing.T) {
 	f := New()
 	_, err := f.Fetch(context.Background(), "://not-a-url")
@@ -276,6 +303,8 @@ func TestNew_RedirectPolicy(t *testing.T) {
 		wantErr error
 	}{
 		{"https target, first hop", "https://example.com/a", 1, nil},
+		{"HTTPS target uppercase, first hop", "HTTPS://example.com/a", 1, nil},
+		{"Https target mixed-case, first hop", "Https://example.com/a", 1, nil},
 		{"https target, last allowed hop", "https://example.com/a", defaultMaxRedirects - 1, nil},
 		{"one hop past the limit", "https://example.com/a", defaultMaxRedirects, ErrTooManyRedirects},
 		{"well past the limit", "https://example.com/a", defaultMaxRedirects + 10, ErrTooManyRedirects},
