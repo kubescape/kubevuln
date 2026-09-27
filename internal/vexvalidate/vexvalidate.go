@@ -80,6 +80,7 @@ const openVEXContextPrefix = "https://openvex.dev/ns"
 // the prefix must be either nothing (the bare form) or a "/" (a versioned
 // form), never any other character.
 func hasValidContext(context string) bool {
+	context = strings.TrimSpace(context)
 	if !strings.HasPrefix(context, openVEXContextPrefix) {
 		return false
 	}

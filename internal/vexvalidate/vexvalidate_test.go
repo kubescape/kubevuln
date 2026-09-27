@@ -48,6 +48,27 @@ func TestValidate_BareContext_Passes(t *testing.T) {
 	}
 }
 
+func TestValidate_ContextWithWhitespace_Passes(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  string
+	}{
+		{"leading space", "  https://openvex.dev/ns/v0.2.0"},
+		{"trailing space", "https://openvex.dev/ns/v0.2.0   "},
+		{"surrounding spaces", "   https://openvex.dev/ns   "},
+		{"escaped newline in JSON", "https://openvex.dev/ns/v0.2.0\\n"},
+		{"escaped tabs and spaces in JSON", "\\t https://openvex.dev/ns \\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := `{"@context": "` + tt.ctx + `", "statements": [{"vulnerability": {"name": "CVE-1"}, "products": [{"@id": "pkg:oci/a"}], "status": "fixed"}]}`
+			if err := Validate([]byte(doc)); err != nil {
+				t.Fatalf("expected @context with whitespace %q to be valid, got: %v", tt.ctx, err)
+			}
+		})
+	}
+}
+
 func TestValidate_ProductIdentifiedByHashOnly_Passes(t *testing.T) {
 	// A product with no @id but a real hash still identifies something real -
 	// go-vex's own Component type allows this, so Validate must too.
