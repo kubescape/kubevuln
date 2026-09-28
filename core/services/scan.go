@@ -1014,7 +1014,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 // produces entries where only auth is set, so falling back to it here is required for those
 // credentials to reach the registry pull at all, rather than being silently dropped.
 func credentialsFromAuth(auth string) (username, password string) {
-	decoded, err := base64.StdEncoding.DecodeString(auth)
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(auth))
 	if err != nil {
 		return "", ""
 	}
