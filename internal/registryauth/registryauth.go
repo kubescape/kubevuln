@@ -66,7 +66,7 @@ func For(imageID string) (Provider, bool) {
 
 func host(imageID string) string {
 	h, _, _ := strings.Cut(imageID, "/")
-	return h
+	return strings.ToLower(h)
 }
 
 // GCP resolves credentials for GCR and Artifact Registry hosts via Application Default
