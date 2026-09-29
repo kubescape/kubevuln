@@ -69,11 +69,44 @@ func TestParseRetryAfter(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, 5*time.Second, dur)
 
+	// Zero seconds delay must be accepted and yield 0 duration
+	zeroErr := errors.New("received status code 429 Retry-After: 0")
+	durZero, okZero := ParseRetryAfter(zeroErr)
+	assert.True(t, okZero)
+	assert.Equal(t, time.Duration(0), durZero)
+
+	// Negative delay must be rejected
+	negErr := errors.New("received status code 429 Retry-After: -5")
+	durNeg, okNeg := ParseRetryAfter(negErr)
+	assert.False(t, okNeg)
+	assert.Equal(t, time.Duration(0), durNeg)
+
 	futureTime := time.Now().Add(10 * time.Second).Format(time.RFC1123)
 	errWithDateHeader := fmt.Errorf("received status code 429 Retry-After: %s", futureTime)
 	durDate, okDate := ParseRetryAfter(errWithDateHeader)
 	assert.True(t, okDate)
 	assert.Greater(t, durDate, 0*time.Second)
+
+	// Past HTTP-date must be accepted and clamped to 0 duration
+	pastTime := time.Now().Add(-10 * time.Minute).UTC().Format(http.TimeFormat)
+	errWithPastDate := fmt.Errorf("received status code 429 Retry-After: %s", pastTime)
+	durPast, okPast := ParseRetryAfter(errWithPastDate)
+	assert.True(t, okPast)
+	assert.Equal(t, time.Duration(0), durPast)
+
+	// RFC 850 HTTP-date format
+	rfc850Future := time.Now().Add(10 * time.Second).UTC().Format(time.RFC850)
+	errWithRFC850 := fmt.Errorf("received status code 429 Retry-After: %s", rfc850Future)
+	durRFC850, okRFC850 := ParseRetryAfter(errWithRFC850)
+	assert.True(t, okRFC850)
+	assert.Greater(t, durRFC850, 0*time.Second)
+
+	// ANSI C asctime HTTP-date format
+	ansicFuture := time.Now().Add(10 * time.Second).UTC().Format(time.ANSIC)
+	errWithANSIC := fmt.Errorf("received status code 429 Retry-After: %s", ansicFuture)
+	durANSIC, okANSIC := ParseRetryAfter(errWithANSIC)
+	assert.True(t, okANSIC)
+	assert.Greater(t, durANSIC, 0*time.Second)
 
 	noHdrErr := errors.New("received status code 429")
 	_, ok = ParseRetryAfter(noHdrErr)
@@ -279,6 +312,36 @@ func TestRetryWithBackoff_HonoursRetryAfterUnderTheCeiling(t *testing.T) {
 
 	require.Error(t, err)
 	assert.GreaterOrEqual(t, elapsed, time.Second, "a Retry-After below the ceiling must still be honoured")
+}
+
+// A Retry-After of 0 indicates that rate limiting has elapsed and the operation can be retried
+// immediately. RetryWithBackoff must honor it without falling back to exponential backoff or jitter.
+func TestRetryWithBackoff_HonoursRetryAfterZero(t *testing.T) {
+	cfg := RetryConfig{
+		MaxAttempts: 2,
+		InitialWait: 200 * time.Millisecond,
+		MaxWait:     500 * time.Millisecond,
+		Backoff:     2.0,
+	}
+	rateLimited := errors.New("429 Too Many Requests, Retry-After: 0")
+
+	attempts := 0
+	start := time.Now()
+	res, err := RetryWithBackoff(context.Background(), "source_resolution", cfg, IsRateLimitError,
+		func(context.Context) (string, error) {
+			attempts++
+			if attempts == 1 {
+				return "", rateLimited
+			}
+			return "success", nil
+		})
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, "success", res)
+	assert.Equal(t, 2, attempts)
+	assert.Less(t, elapsed, 100*time.Millisecond,
+		"Retry-After: 0 must retry immediately without waiting for InitialWait (took %s)", elapsed)
 }
 
 // A config that never sets MaxRetryAfter still gets a bound rather than an open-ended wait.
