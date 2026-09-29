@@ -34,6 +34,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"go.opentelemetry.io/otel"
 )
 
@@ -448,8 +449,39 @@ func (g *GrypeAdapter) discardLoadResult(ctx context.Context, store vulnerabilit
 
 const dummyLayer = "generatedlayer"
 
+// ApplyVEX applies external VEX documents to Grype matches.
+func (g *GrypeAdapter) ApplyVEX(
+	documents []vexbatch.Document,
+	pkgContext *pkg.Context,
+	matches *match.Matches,
+	ignoredMatches []match.IgnoredMatch,
+	ignoreRules []match.IgnoreRule,
+) (*match.Matches, []match.IgnoredMatch, error) {
+	return vexbatch.Apply(
+		documents,
+		pkgContext,
+		matches,
+		ignoredMatches,
+		ignoreRules,
+	)
+}
+
 // ScanSBOM generates a CVE manifest by scanning an SBOM
 func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	return g.scanSBOM(ctx, sbom, nil)
+}
+
+// ScanSBOMWithVEX scans an SBOM and applies the supplied external VEX documents
+// before compiling the Grype results.
+func (g *GrypeAdapter) ScanSBOMWithVEX(
+	ctx context.Context,
+	sbom domain.SBOM,
+	documents []vexbatch.Document,
+) (domain.CVEManifest, error) {
+	return g.scanSBOM(ctx, sbom, documents)
+}
+
+func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents []vexbatch.Document) (domain.CVEManifest, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "GrypeAdapter.ScanSBOM")
 	defer span.End()
 
@@ -493,6 +525,24 @@ func (g *GrypeAdapter) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.C
 	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		return domain.CVEManifest{}, err
+	}
+
+	if len(documents) > 0 {
+		logger.L().Debug("applying external VEX documents",
+			helpers.String("name", sbom.Name),
+			helpers.Int("documents", len(documents)),
+		)
+
+		remainingMatches, ignoredMatches, err = vexbatch.Apply(
+			documents,
+			&pkgContext,
+			remainingMatches,
+			ignoredMatches,
+			nil,
+		)
+		if err != nil {
+			return domain.CVEManifest{}, err
+		}
 	}
 
 	logger.L().Debug("compiling results",

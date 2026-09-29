@@ -13,6 +13,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -91,5 +92,43 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			assert.Equal(t, string(config.CVEMatchingOn), got.Annotations[CVEMatchingModeMetadataKey])
 			assert.NotContains(t, got.Annotations, VendorTrustedMatchMetadataKey)
 		})
+	}
+}
+
+func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
+	g, terminate, err := NewGrypeAdapterFixedDB()
+	if errors.Is(err, ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
+	require.NoError(t, err)
+	defer terminate()
+
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	g.Ready(ctx)
+
+	sbom := domain.SBOM{
+		Name:               "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		SBOMCreatorVersion: "TODO",
+		Content:            fileToSBOM("testdata/alpine-sbom.json"),
+	}
+
+	documents := []vexbatch.Document{
+		{
+			Format: vexbatch.FormatOpenVEX,
+			Path:   "../../internal/vexbatch/testdata/openvex.json",
+		},
+	}
+
+	got, err := g.ScanSBOMWithVEX(ctx, sbom, documents)
+	require.NoError(t, err)
+	require.NotNil(t, got.Content)
+
+	for _, m := range got.Content.Matches {
+		assert.NotEqual(t, "CVE-2023-1255", m.Vulnerability.ID,
+			"VEX-suppressed vulnerability must not remain in Matches")
 	}
 }
