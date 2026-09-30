@@ -68,6 +68,32 @@ var (
 	testNet3 = mustParseCIDR("203.0.113.0/24")
 )
 
+// ietfProtocolAssignments is RFC 6890's 192.0.0.0/24, reserved for IETF Protocol
+// Assignments (including RFC 7335 DS-Lite 192.0.0.0/29, RFC 7600 dummy address
+// 192.0.0.8/32, and RFC 7050 / RFC 8880 NAT64 discovery 192.0.0.170-171/32).
+// Note: While IANA marks RFC 7723 (192.0.0.9, PCP Anycast) and RFC 8155 (192.0.0.10,
+// TURN Anycast) as globally reachable, safefetch conservatively rejects the entire
+// /24 prefix because these are protocol-discovery anycast addresses and never valid
+// HTTPS VEX feed hosts.
+var ietfProtocolAssignments = mustParseCIDR("192.0.0.0/24")
+
+// ipv6DocumentationExt is RFC 9637's 3fff::/20, expanding the IPv6 documentation
+// address space alongside RFC 3849's 2001:db8::/32. RFC 9637 classifies this
+// range as not globally reachable.
+var ipv6DocumentationExt = mustParseCIDR("3fff::/20")
+
+// ipv6DummyPrefix is RFC 9780's 100:0:0:1::/64, allocated as a dummy prefix for
+// discard and testing. RFC 9780 classifies this range as not globally reachable.
+var ipv6DummyPrefix = mustParseCIDR("100:0:0:1::/64")
+
+// srv6SIDs is RFC 9602's 5f00::/16, allocated for Segment Routing over IPv6 (SRv6)
+// Segment Identifiers. RFC 9602 designates this range as not globally reachable.
+var srv6SIDs = mustParseCIDR("5f00::/16")
+
+// deprecatedORCHID is RFC 4843's 2001:10::/28, deprecated and non-routable on the
+// public internet.
+var deprecatedORCHID = mustParseCIDR("2001:10::/28")
+
 // The IPv6 transition mechanisms below each carry an IPv4 address inside an IPv6 one,
 // and a packet sent to them is delivered to that IPv4 destination. net.IP.To4 unwraps
 // only the IPv4-mapped form (::ffff:a.b.c.d), so for these the checks in checkIPAllowed
@@ -238,6 +264,11 @@ func checkIPAllowed(ip net.IP) error {
 		testNet1.Contains(ip) ||
 		testNet2.Contains(ip) ||
 		testNet3.Contains(ip) ||
+		ietfProtocolAssignments.Contains(ip) ||
+		ipv6DocumentationExt.Contains(ip) ||
+		ipv6DummyPrefix.Contains(ip) ||
+		srv6SIDs.Contains(ip) ||
+		deprecatedORCHID.Contains(ip) ||
 		nat64LocalUse.Contains(ip) {
 		return fmt.Errorf("%w: %s", ErrBlockedIP, ip)
 	}
