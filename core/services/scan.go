@@ -1034,6 +1034,7 @@ func credentialsFromAuth(auth string) (username, password string) {
 
 // parseAuthorityFromServerAddress extracts the authority host:port from a server address.
 func parseAuthorityFromServerAddress(serverAddress string) string {
+	serverAddress = strings.TrimSpace(serverAddress)
 	if serverAddress == "" {
 		return ""
 	}

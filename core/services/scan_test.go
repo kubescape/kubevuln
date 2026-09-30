@@ -1609,6 +1609,15 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("HTTPS://index.docker.io/v1/"))
 	assert.Equal(t, "registry.example.com", parseAuthorityFromServerAddress("HTTP://registry.example.com/v2/"))
 	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("HttPs://quay.io:5000/v2/"))
+
+	// Leading and trailing whitespace must be stripped before scheme detection and URL
+	// parsing. A server address copied from a config file or credential helper may carry
+	// surrounding spaces; without trimming, " https://..." fails the HasPrefix check and
+	// is cut at the first slash, returning " https:" instead of the host.
+	assert.Equal(t, "", parseAuthorityFromServerAddress("   "))
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("  https://index.docker.io/v1/  "))
+	assert.Equal(t, "ghcr.io", parseAuthorityFromServerAddress("ghcr.io "))
+	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress(" quay.io"))
 }
 
 // The auth field is the canonical one; username and password are supplementary and an entry
