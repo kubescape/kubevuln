@@ -2239,6 +2239,26 @@ func TestAPIServerStore_StoreSBOMFiltered_transientError(t *testing.T) {
 	require.ErrorIs(t, err, injectedErr)
 }
 
+// TestAPIServerStore_DeleteSBOM_joinsErrors verifies that DeleteSBOM returns both the
+// unfiltered and filtered deletion errors when both operations fail. Previously the
+// filtered error was silently dropped if the unfiltered deletion had already failed.
+func TestAPIServerStore_DeleteSBOM_joinsErrors(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	syftErr := apierrors.NewInternalError(fmt.Errorf("sbomsyfts delete failed"))
+	filteredErr := apierrors.NewInternalError(fmt.Errorf("sbomsyftfiltereds delete failed"))
+	clientset.PrependReactor("delete", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, syftErr
+	})
+	clientset.PrependReactor("delete", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, filteredErr
+	})
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+	err := a.DeleteSBOM(context.TODO(), name)
+	require.Error(t, err)
+	require.ErrorIs(t, err, syftErr, "unfiltered SBOM deletion error must be included")
+	require.ErrorIs(t, err, filteredErr, "filtered SBOM deletion error must not be dropped")
+}
+
 func TestAPIServerStore_StoreCVESummary_transientError(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
