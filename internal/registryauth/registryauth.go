@@ -89,9 +89,14 @@ func (GCP) Credentials(ctx context.Context, imageID string) (*image.RegistryCred
 }
 
 // IsGCPRegistry reports whether imageID is hosted on GCR or Artifact Registry.
+// Regional Artifact Registry endpoints use a region prefix (e.g. us-docker.pkg.dev,
+// europe-docker.pkg.dev) while the global/base host is docker.pkg.dev. Both forms
+// must be matched so ambient GCP credentials are resolved for all AR endpoints.
 func IsGCPRegistry(imageID string) bool {
 	h := host(imageID)
-	return h == "gcr.io" || strings.HasSuffix(h, ".gcr.io") || strings.HasSuffix(h, "-docker.pkg.dev")
+	return h == "gcr.io" || strings.HasSuffix(h, ".gcr.io") ||
+		h == "docker.pkg.dev" || strings.HasSuffix(h, ".docker.pkg.dev") ||
+		strings.HasSuffix(h, "-docker.pkg.dev")
 }
 
 func gcpCredentials(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {

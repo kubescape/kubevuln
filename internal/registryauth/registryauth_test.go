@@ -29,6 +29,12 @@ func TestIsGCPRegistry(t *testing.T) {
 		{"US-DOCKER.PKG.DEV/foo/bar", true},
 		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
 		{"EUROPE-WEST1-DOCKER.PKG.DEV/project/repo/image:tag", true},
+		// The base/global Artifact Registry host docker.pkg.dev does not contain a hyphen,
+		// so it was not matched by the HasSuffix("-docker.pkg.dev") check alone.
+		{"docker.pkg.dev/my-project/my-repo/image:tag", true},
+		{"DOCKER.PKG.DEV/my-project/my-repo/image:tag", true},
+		// Subdomain of docker.pkg.dev (e.g. a custom domain fronting AR).
+		{"custom.docker.pkg.dev/project/repo/image:tag", true},
 		{"quay.io/foo/bar", false},
 		{"quay.io/foo/bar-docker.pkg.dev/x", false},
 		{"index.docker.io/library/alpine", false},
