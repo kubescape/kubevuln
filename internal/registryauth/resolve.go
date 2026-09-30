@@ -65,12 +65,13 @@ func ResolveSource[T any](ctx context.Context, component string, get Getter[T], 
 
 	src, err := get(ctx, pullRef, &opts)
 
-	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") {
+	tag := strings.TrimSpace(imageTag)
+	if err != nil && strings.Contains(err.Error(), "MANIFEST_UNKNOWN") && tag != "" && tag != strings.TrimSpace(imageID) {
 		usedFallback = true
 		logger.L().Debug("got MANIFEST_UNKNOWN, retrying with imageTag",
-			helpers.String("imageTag", imageTag),
+			helpers.String("imageTag", tag),
 			helpers.String("imageID", imageID))
-		pullRef = imageTag
+		pullRef = tag
 		src, err = get(ctx, pullRef, &opts)
 	}
 
