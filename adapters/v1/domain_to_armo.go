@@ -259,13 +259,13 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "GHSA-"):
 		return "https://github.com/advisories/" + id
 
-	case strings.HasPrefix(id, "RHSA-"):
+	case strings.HasPrefix(id, "RHSA-"), strings.HasPrefix(id, "RHBA-"), strings.HasPrefix(id, "RHEA-"):
 		return "https://access.redhat.com/errata/" + id
 
 	case strings.HasPrefix(id, "USN-"):
 		return "https://ubuntu.com/security/notices/" + id + "/"
 
-	case strings.HasPrefix(id, "DSA-"):
+	case strings.HasPrefix(id, "DSA-"), strings.HasPrefix(id, "DLA-"):
 		return "https://security-tracker.debian.org/tracker/" + id
 
 	case strings.HasPrefix(id, "ELSA-"):
@@ -291,7 +291,7 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "RUSTSEC-"):
 		return "https://rustsec.org/advisories/" + id + ".html"
 
-	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"):
+	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"), strings.HasPrefix(id, "MAL-"):
 		return "https://osv.dev/vulnerability/" + id
 
 	default:
