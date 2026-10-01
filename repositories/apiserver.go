@@ -2574,9 +2574,9 @@ func (a *APIServerStore) DeleteSBOM(ctx context.Context, name string) error {
 	err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		logger.L().Ctx(ctx).Warning("failed to delete filtered SBOM", helpers.Error(err), helpers.String("name", name))
-		if deleteErr == nil {
-			deleteErr = err
-		}
+		// Join both errors so neither is silently dropped: when both deletions fail the
+		// caller sees the combined message and can inspect each failure individually.
+		deleteErr = stderrors.Join(deleteErr, err)
 	}
 
 	return deleteErr
