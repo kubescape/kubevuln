@@ -161,3 +161,11 @@ func TestToDomain_ReportsMarshalFailure(t *testing.T) {
 	assert.Nil(t, doc)
 	assert.Contains(t, err.Error(), "NaN")
 }
+
+func TestToDomain_EmptySBOM(t *testing.T) {
+	doc, err := ToDomain(sbom.SBOM{})
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.Empty(t, doc.Artifacts)
+}
+

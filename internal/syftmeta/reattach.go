@@ -76,6 +76,9 @@ func ToDomain(sbomSBOM sbom.SBOM) (*v1beta1.SyftDocument, error) {
 	if err := json.Unmarshal(b, &syftDoc); err != nil {
 		return nil, err
 	}
+	if syftDoc == nil {
+		return nil, nil
+	}
 	Reattach(syftDoc.Artifacts, doc.Artifacts)
 
 	return syftDoc, nil
