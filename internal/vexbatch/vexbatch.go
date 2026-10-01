@@ -36,7 +36,7 @@ func Apply(
 	var order []Format
 
 	for _, document := range documents {
-		format := Format(strings.ToLower(string(document.Format)))
+		format := Format(strings.ToLower(strings.TrimSpace(string(document.Format))))
 		switch format {
 		case FormatOpenVEX, FormatCSAF:
 		default:
