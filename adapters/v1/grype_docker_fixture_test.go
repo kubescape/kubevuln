@@ -116,10 +116,28 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 		Content:            fileToSBOM("testdata/alpine-sbom.json"),
 	}
 
+	baseline, err := g.ScanSBOM(ctx, sbom)
+	require.NoError(t, err)
+
+	var baselineCrypto, baselineSSL bool
+	for _, m := range baseline.Content.Matches {
+		if m.Vulnerability.ID != "CVE-2023-1255" {
+			continue
+		}
+		if m.Artifact.Name == "libcrypto3" {
+			baselineCrypto = true
+		}
+		if m.Artifact.Name == "libssl3" {
+			baselineSSL = true
+		}
+	}
+	require.True(t, baselineCrypto, "baseline must contain CVE-2023-1255 for libcrypto3")
+	require.True(t, baselineSSL, "baseline must contain CVE-2023-1255 for libssl3")
+
 	documents := []vexbatch.Document{
 		{
 			Format: vexbatch.FormatOpenVEX,
-			Path:   "../../internal/vexbatch/testdata/openvex.json",
+			Path:   "testdata/external-vex-alpine.json",
 		},
 	}
 
@@ -127,8 +145,19 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.Content)
 
-	for _, m := range got.Content.Matches {
-		assert.NotEqual(t, "CVE-2023-1255", m.Vulnerability.ID,
-			"VEX-suppressed vulnerability must not remain in Matches")
+	var cryptoIgnored, sslRemaining bool
+	for _, m := range got.Content.IgnoredMatches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			cryptoIgnored = true
+		}
 	}
+
+	for _, m := range got.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libssl3" {
+			sslRemaining = true
+		}
+	}
+
+	assert.True(t, cryptoIgnored, "VEX-suppressed libcrypto3 finding must move to IgnoredMatches")
+	assert.True(t, sslRemaining, "unrelated libssl3 finding must remain in Matches")
 }
