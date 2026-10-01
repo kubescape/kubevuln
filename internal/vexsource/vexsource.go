@@ -3,6 +3,7 @@ package vexsource
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/kubevuln/internal/safefetch"
 	"github.com/kubescape/kubevuln/internal/vexvalidate"
@@ -21,6 +22,7 @@ type Document struct {
 
 // Fetch retrieves and validates the VEX document from the source.
 func (s Source) Fetch(ctx context.Context, fetcher *safefetch.Fetcher) (Document, error) {
+	s.URL = strings.TrimSpace(s.URL)
 	if s.URL == "" {
 		return Document{}, fmt.Errorf("vexsource: URL is empty")
 	}
