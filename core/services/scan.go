@@ -983,8 +983,10 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 		if cred.ServerAddress != "" {
 			rc.Authority = parseAuthorityFromServerAddress(cred.ServerAddress)
 		}
-		if cred.RegistryToken != "" {
-			rc.Token = cred.RegistryToken
+		if token := strings.TrimSpace(cred.RegistryToken); token != "" {
+			rc.Token = token
+		} else if token := strings.TrimSpace(cred.IdentityToken); token != "" {
+			rc.Token = token
 		}
 		username, password := cred.Username, cred.Password
 		// Consulted whenever the pair is incomplete, not only when both halves are
