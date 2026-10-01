@@ -74,7 +74,7 @@ func TestIsAuthDenied(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isAuthDenied(tt.err))
+			assert.Equal(t, tt.want, IsAuthDenied(tt.err))
 		})
 	}
 }
@@ -172,6 +172,41 @@ func TestResolveSource_RetriesTagOnManifestUnknown(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "repo:latest", src.ref)
 	assert.Equal(t, []string{"repo@sha256:deadbeef", "repo:latest"}, tried)
+}
+
+func TestResolveSource_DoesNotRetryManifestUnknownWhenTagEmpty(t *testing.T) {
+	manifestErr := errors.New("MANIFEST_UNKNOWN: manifest unknown")
+	var tried []string
+	get := func(_ context.Context, ref string, _ *image.RegistryOptions) (fakeSource, error) {
+		tried = append(tried, ref)
+		return fakeSource{}, manifestErr
+	}
+
+	for _, emptyTag := range []string{"", "   "} {
+		tried = nil
+		src, err := ResolveSource(context.Background(), "in_process", get,
+			"repo@sha256:deadbeef", emptyTag, image.RegistryOptions{})
+
+		require.ErrorIs(t, err, manifestErr)
+		assert.Equal(t, "", src.ref)
+		assert.Equal(t, []string{"repo@sha256:deadbeef"}, tried)
+	}
+}
+
+func TestResolveSource_DoesNotRetryManifestUnknownWhenTagMatchesID(t *testing.T) {
+	manifestErr := errors.New("MANIFEST_UNKNOWN: manifest unknown")
+	var tried []string
+	get := func(_ context.Context, ref string, _ *image.RegistryOptions) (fakeSource, error) {
+		tried = append(tried, ref)
+		return fakeSource{}, manifestErr
+	}
+
+	src, err := ResolveSource(context.Background(), "in_process", get,
+		"repo:latest", "repo:latest", image.RegistryOptions{})
+
+	require.ErrorIs(t, err, manifestErr)
+	assert.Equal(t, "", src.ref)
+	assert.Equal(t, []string{"repo:latest"}, tried)
 }
 
 // A registry that refuses our credentials may still serve the image anonymously, so a 401

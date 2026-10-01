@@ -492,7 +492,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if !s.sbomGeneration && sbom.Content == nil {
 			logger.L().Ctx(ctx).Warning("missing SBOM",
 				helpers.String("imageSlug", workload.ImageSlug))
-			return domain.ErrMissingSBOM
+			return &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: domain.ErrMissingSBOM}
 		}
 
 		// do not process timed out SBOM
@@ -1014,7 +1014,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 // produces entries where only auth is set, so falling back to it here is required for those
 // credentials to reach the registry pull at all, rather than being silently dropped.
 func credentialsFromAuth(auth string) (username, password string) {
-	decoded, err := base64.StdEncoding.DecodeString(auth)
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(auth))
 	if err != nil {
 		return "", ""
 	}
@@ -1035,7 +1035,8 @@ func parseAuthorityFromServerAddress(serverAddress string) string {
 	// letters. Treating http-registry.internal as a URL sends it to url.Parse, which
 	// returns an empty Host for a string with no scheme, so the whole thing came back
 	// as the authority with its path still attached and matched no registry.
-	if !strings.HasPrefix(serverAddress, "http://") && !strings.HasPrefix(serverAddress, "https://") {
+	lower := strings.ToLower(serverAddress)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		res, _, _ := strings.Cut(serverAddress, "/")
 		return res
 	}

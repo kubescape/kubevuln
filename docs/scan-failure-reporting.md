@@ -14,7 +14,14 @@ A report is sent from each scan entry point after the operation's existing retri
   regardless of status, the one entry point that didn't check for it. It now checks and reports
   the failure the same way the other three do.
 - `ScanCVE()` — an SBOM exists but CVE matching failed.
-- `ScanCP()` — continuous-protection scan failures (may cover several images per scan).
+- `ScanCP()` — continuous-protection scan failures (may cover several images per scan). One
+  exception: a `ContainerProfile` with no image identity (`Spec.ImageID`/`ImageTag` both empty)
+  is skipped with no scan attempt and no report — in practice this is
+  [kubescape/node-agent](https://github.com/kubescape/node-agent)'s "host" pseudo-workload
+  (`GetContainerRelevancyScans` in `adapters/v1/container_profile.go`), a real `ContainerProfile`
+  (valid WLID/InstanceID, reaches `Completed`/`Learning` + `completion=Full` like any other) that
+  simply has no container image to scan for CVEs. Reporting this as a scan failure would be
+  permanently unactionable noise: there is no image, so there is nothing a user could fix.
 - `ScanRegistry()` — registry image scan failures (reported at image level, no workload context).
 
 Reporting is **fire-and-forget**: a failure to send the report is logged and does not fail or

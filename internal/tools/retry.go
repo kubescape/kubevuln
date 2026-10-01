@@ -93,7 +93,8 @@ func IsRateLimitError(err error) bool {
 }
 
 // ParseRetryAfter attempts to extract a Retry-After duration from error text or header strings.
-// Supports both numeric seconds ("120") and HTTP-date formats (RFC1123/RFC1123Z).
+// Supports both numeric seconds (RFC 9110 § 10.2.3 delay-seconds, non-negative) and HTTP-date formats.
+// Past dates and zero seconds are treated as zero duration (immediate retry).
 func ParseRetryAfter(err error) (time.Duration, bool) {
 	if err == nil {
 		return 0, false
@@ -105,7 +106,7 @@ func ParseRetryAfter(err error) (time.Duration, bool) {
 		fields := strings.Fields(sub)
 		if len(fields) > 0 {
 			token := strings.Trim(fields[0], ";,")
-			if seconds, parseErr := strconv.ParseInt(token, 10, 64); parseErr == nil && seconds > 0 && seconds <= maxRetryAfterSeconds {
+			if seconds, parseErr := strconv.ParseInt(token, 10, 64); parseErr == nil && seconds >= 0 && seconds <= maxRetryAfterSeconds {
 				return time.Duration(seconds) * time.Second, true
 			}
 		}
@@ -113,15 +114,24 @@ func ParseRetryAfter(err error) (time.Duration, bool) {
 		if endIdx := strings.IndexAny(sub, "\r\n"); endIdx != -1 {
 			dateStr = strings.TrimSpace(sub[:endIdx])
 		}
-		if t, parseErr := time.Parse(time.RFC1123, dateStr); parseErr == nil {
-			if d := time.Until(t); d > 0 {
-				return d, true
-			}
+		var parsedTime time.Time
+		var hasTime bool
+		if t, parseErr := http.ParseTime(dateStr); parseErr == nil {
+			parsedTime = t
+			hasTime = true
+		} else if t, parseErr := time.Parse(time.RFC1123, dateStr); parseErr == nil {
+			parsedTime = t
+			hasTime = true
+		} else if t, parseErr := time.Parse(time.RFC1123Z, dateStr); parseErr == nil {
+			parsedTime = t
+			hasTime = true
 		}
-		if t, parseErr := time.Parse(time.RFC1123Z, dateStr); parseErr == nil {
-			if d := time.Until(t); d > 0 {
-				return d, true
+		if hasTime {
+			wait := time.Until(parsedTime)
+			if wait < 0 {
+				wait = 0
 			}
+			return wait, true
 		}
 	}
 	return 0, false

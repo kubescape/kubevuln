@@ -116,6 +116,12 @@ type APIServerStore struct {
 	// same as securityExceptionListCache above.
 	labelsCache *cache.Cache
 
+	// labelsEntries backs the compare-and-swap that prevents an in-flight Get() from
+	// silently restoring stale labels to the cache after an informer invalidation ran.
+	// Bounded to active in-flight refreshes via reference tracking under labelsEntriesMu.
+	labelsEntriesMu sync.Mutex
+	labelsEntries   map[string]*labelsCacheEntry
+
 	// securityExceptionCacheEntries backs the compare-and-swap that keeps a List() in flight
 	// when a CRD change invalidates its cache key from silently re-populating the cache with
 	// its now-stale result afterward — see securityExceptionCacheEntry's doc comment and #733.
@@ -139,6 +145,14 @@ type APIServerStore struct {
 
 	securityExceptionInformerMu   sync.Mutex
 	securityExceptionInformerStop context.CancelFunc
+
+	labelsInformerMu   sync.Mutex
+	labelsInformerStop context.CancelFunc
+
+	// labelsCacheBeforeSetHook, if set, is called synchronously inside trySetLabelsCache
+	// while holding labelsEntriesMu right after validating generation, before writing to labelsCache.
+	// Tests use it as a deterministic barrier to verify atomic publication against invalidation.
+	labelsCacheBeforeSetHook func()
 }
 
 // securityExceptionCacheEntry pairs a cache key's invalidation generation with the mutex that
@@ -203,6 +217,62 @@ func (a *APIServerStore) trySetSecurityExceptionCache(cacheKey string, seenGener
 		return
 	}
 	a.securityExceptionListCache.Set(cacheKey, value, securityExceptionListCacheTTL)
+}
+
+type labelsCacheEntry struct {
+	generation uint64
+	refreshes  uint32
+}
+
+func (a *APIServerStore) invalidateLabelsCacheKey(cacheKey string) {
+	a.labelsEntriesMu.Lock()
+	defer a.labelsEntriesMu.Unlock()
+	if a.labelsEntries != nil {
+		if entry, ok := a.labelsEntries[cacheKey]; ok {
+			entry.generation++
+		}
+	}
+	if a.labelsCache != nil {
+		a.labelsCache.Delete(cacheKey)
+	}
+}
+
+func (a *APIServerStore) beginLabelsCacheRefresh(cacheKey string) uint64 {
+	a.labelsEntriesMu.Lock()
+	defer a.labelsEntriesMu.Unlock()
+	if a.labelsEntries == nil {
+		a.labelsEntries = make(map[string]*labelsCacheEntry)
+	}
+	entry, ok := a.labelsEntries[cacheKey]
+	if !ok {
+		entry = &labelsCacheEntry{}
+		a.labelsEntries[cacheKey] = entry
+	}
+	entry.refreshes++
+	return entry.generation
+}
+
+func (a *APIServerStore) trySetLabelsCache(cacheKey string, seenGeneration uint64, value interface{}) {
+	a.labelsEntriesMu.Lock()
+	defer a.labelsEntriesMu.Unlock()
+	if a.labelsEntries != nil {
+		if entry, ok := a.labelsEntries[cacheKey]; ok {
+			if entry.refreshes > 0 {
+				entry.refreshes--
+			}
+			if value != nil && entry.generation == seenGeneration {
+				if a.labelsCacheBeforeSetHook != nil {
+					a.labelsCacheBeforeSetHook()
+				}
+				if a.labelsCache != nil {
+					a.labelsCache.Set(cacheKey, value, labelsCacheTTL)
+				}
+			}
+			if entry.refreshes == 0 {
+				delete(a.labelsEntries, cacheKey)
+			}
+		}
+	}
 }
 
 var (
@@ -416,6 +486,76 @@ func (a *APIServerStore) EnableSecurityExceptionCacheInvalidation(ctx context.Co
 	}
 
 	a.securityExceptionInformerStop = cancel
+	go factory.Start(watchCtx.Done())
+}
+
+// EnableLabelsCacheInvalidation starts background informers to invalidate cached workload
+// and namespace labels in labelsCache when label updates or object deletions occur on the cluster.
+func (a *APIServerStore) EnableLabelsCacheInvalidation(ctx context.Context) {
+	if a == nil || a.DynamicClient == nil || a.labelsCache == nil {
+		return
+	}
+
+	a.labelsInformerMu.Lock()
+	defer a.labelsInformerMu.Unlock()
+
+	if a.labelsInformerStop != nil {
+		return
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(a.DynamicClient, 0, metav1.NamespaceAll, nil)
+
+	if _, err := factory.ForResource(namespaceGVR).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			uOld := unstructuredFromEvent(oldObj)
+			uNew := unstructuredFromEvent(newObj)
+			if uNew != nil && (uOld == nil || !reflect.DeepEqual(uOld.GetLabels(), uNew.GetLabels())) {
+				a.InvalidateNamespaceLabelsCache(uNew.GetName())
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			if u := unstructuredFromEvent(obj); u != nil {
+				a.InvalidateNamespaceLabelsCache(u.GetName())
+			}
+		},
+	}); err != nil {
+		cancel()
+		logger.L().Warning("failed to register Namespace labels cache invalidation handler", helpers.Error(err))
+		return
+	}
+
+	workloadGVRs := []schema.GroupVersionResource{
+		{Group: "", Version: "v1", Resource: "pods"},
+		{Group: "", Version: "v1", Resource: "replicationcontrollers"},
+		{Group: "apps", Version: "v1", Resource: "deployments"},
+		{Group: "apps", Version: "v1", Resource: "replicasets"},
+		{Group: "apps", Version: "v1", Resource: "statefulsets"},
+		{Group: "apps", Version: "v1", Resource: "daemonsets"},
+		{Group: "batch", Version: "v1", Resource: "jobs"},
+		{Group: "batch", Version: "v1", Resource: "cronjobs"},
+	}
+
+	for _, gvr := range workloadGVRs {
+		if _, err := factory.ForResource(gvr).Informer().AddEventHandler(k8scache.ResourceEventHandlerFuncs{
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				uOld := unstructuredFromEvent(oldObj)
+				uNew := unstructuredFromEvent(newObj)
+				if uNew != nil && (uOld == nil || !reflect.DeepEqual(uOld.GetLabels(), uNew.GetLabels())) {
+					a.InvalidateWorkloadLabelsCache(uNew.GetNamespace(), uNew.GetKind(), uNew.GetName())
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				if u := unstructuredFromEvent(obj); u != nil {
+					a.InvalidateWorkloadLabelsCache(u.GetNamespace(), u.GetKind(), u.GetName())
+				}
+			},
+		}); err != nil {
+			logger.L().Warning("failed to register workload labels cache invalidation handler", helpers.String("resource", gvr.Resource), helpers.Error(err))
+		}
+	}
+
+	a.labelsInformerStop = cancel
 	go factory.Start(watchCtx.Done())
 }
 
@@ -758,8 +898,11 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		}
 	}
 
+	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
+		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -769,12 +912,11 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// Propagate NotFound as an error (rather than nil labels) so the caller
 		// fails closed: a negative objectSelector must not match a workload that
 		// could not be resolved.
+		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	if a.labelsCache != nil {
-		a.labelsCache.Set(cacheKey, labels, labelsCacheTTL)
-	}
+	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
 	return labels, nil
 }
 
@@ -794,19 +936,36 @@ func (a *APIServerStore) GetNamespaceLabels(ctx context.Context, name string) (m
 		}
 	}
 
+	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	obj, err := a.DynamicClient.Resource(namespaceGVR).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
 		// Propagate NotFound as an error so the caller fails closed (see
 		// GetWorkloadLabels).
+		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	if a.labelsCache != nil {
-		a.labelsCache.Set(cacheKey, labels, labelsCacheTTL)
-	}
+	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
 	return labels, nil
+}
+
+// InvalidateWorkloadLabelsCache invalidates a workload's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateWorkloadLabelsCache(namespace, kind, name string) {
+	if namespace != "" && kind != "" && name != "" {
+		cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
+		a.invalidateLabelsCacheKey(cacheKey)
+	}
+}
+
+// InvalidateNamespaceLabelsCache invalidates a namespace's cached labels in labelsCache.
+func (a *APIServerStore) InvalidateNamespaceLabelsCache(name string) {
+	if name != "" {
+		cacheKey := namespaceLabelsCacheKeyPrefix + name
+		a.invalidateLabelsCacheKey(cacheKey)
+	}
 }
 
 func (a *APIServerStore) GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error) {
@@ -1075,13 +1234,11 @@ func enrichSummaryManifestObjectLabels(ctx context.Context, labels map[string]st
 
 	workloadKind := wlid.GetKindFromWlid(workload.Wlid)
 	if workloadKind != "" {
-		groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind)
-		if err != nil {
-			return nil, err
+		if groupVersionScheme, err := k8sinterface.GetGroupVersionResource(workloadKind); err == nil {
+			enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
+			enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
 		}
 
-		enrichedLabels[helpersv1.ApiGroupMetadataKey] = groupVersionScheme.Group
-		enrichedLabels[helpersv1.ApiVersionMetadataKey] = groupVersionScheme.Version
 		enrichedLabels[helpersv1.RelatedKindMetadataKey] = strings.ToLower(workloadKind)
 		enrichedLabels[helpersv1.RelatedNameMetadataKey] = wlid.GetNameFromWlid(workload.Wlid)
 		enrichedLabels[helpersv1.RelatedNamespaceMetadataKey] = wlid.GetNamespaceFromWlid(workload.Wlid)
@@ -1558,14 +1715,19 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 // matches the SourceKind rather than inferring provenance from rule shape, ensuring
 // that only explicit CRD-driven rules receive the SecurityException impact statement.
 // isOwnIgnoreRule reports whether an ignored match was suppressed by our own exception
-// machinery. buildIgnoreRule writes exactly one rule per suppression and never sets Package,
-// while Grype expresses its own ignore rules in terms of a package, so one carrying a package
-// did not come from us.
+// machinery. buildIgnoreRules never sets Package on the rules it writes, while Grype
+// expresses its own ignore rules in terms of a package, so a match where any rule
+// carries a package did not come from us.
 func isOwnIgnoreRule(m v1beta1.IgnoredMatch) bool {
-	if len(m.AppliedIgnoreRules) != 1 {
+	if len(m.AppliedIgnoreRules) == 0 {
 		return false
 	}
-	return m.AppliedIgnoreRules[0].Package == nil
+	for _, rule := range m.AppliedIgnoreRules {
+		if rule.Package != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // securityExceptionIgnoreRule can face more than one candidate: buildIgnoreRule
@@ -2412,9 +2574,9 @@ func (a *APIServerStore) DeleteSBOM(ctx context.Context, name string) error {
 	err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		logger.L().Ctx(ctx).Warning("failed to delete filtered SBOM", helpers.Error(err), helpers.String("name", name))
-		if deleteErr == nil {
-			deleteErr = err
-		}
+		// Join both errors so neither is silently dropped: when both deletions fail the
+		// caller sees the combined message and can inspect each failure individually.
+		deleteErr = stderrors.Join(deleteErr, err)
 	}
 
 	return deleteErr

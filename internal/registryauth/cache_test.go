@@ -405,3 +405,14 @@ func TestCredentialCache_AbandonedCallerRecordsNoOutcome(t *testing.T) {
 	assert.Contains(t, body, `kubevuln_registry_auth_cache_total{result="miss",strategy="ecr"} 1`,
 		"the only miss is the in-flight fetch, not the caller that walked away from it")
 }
+
+func TestCredentialCache_NilCredentialsDoesNotPanic(t *testing.T) {
+	c := newCredentialCache("test")
+	fetch := func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return nil, time.Time{}, nil
+	}
+
+	creds, err := c.get(context.Background(), "nil_key", fetch)
+	assert.NoError(t, err)
+	assert.Nil(t, creds)
+}

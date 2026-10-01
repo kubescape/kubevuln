@@ -1624,6 +1624,9 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	// address came back with its path still attached and matched no registry.
 	assert.Equal(t, "http-registry.internal", parseAuthorityFromServerAddress("http-registry.internal/v2/"))
 	assert.Equal(t, "httpsregistry.example.com", parseAuthorityFromServerAddress("httpsregistry.example.com/v2/"))
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("HTTPS://index.docker.io/v1/"))
+	assert.Equal(t, "registry.example.com", parseAuthorityFromServerAddress("HTTP://registry.example.com/v2/"))
+	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("HttPs://quay.io:5000/v2/"))
 }
 
 // The auth field is the canonical one; username and password are supplementary and an entry
@@ -3605,6 +3608,9 @@ func TestScanService_MissingSBOM_NoFlowScansANilSBOM(t *testing.T) {
 		err = s.ScanRegistry(ctx)
 
 		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		var scanErr *domain.ScanError
+		require.ErrorAs(t, err, &scanErr)
+		assert.Equal(t, scanfailure.ReasonUnexpected, scanErr.Reason)
 		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
 	})
 
@@ -3621,6 +3627,9 @@ func TestScanService_MissingSBOM_NoFlowScansANilSBOM(t *testing.T) {
 		err = s.ScanCVE(ctx)
 
 		assert.ErrorIs(t, err, domain.ErrMissingSBOM)
+		var scanErr *domain.ScanError
+		require.ErrorAs(t, err, &scanErr)
+		assert.Equal(t, scanfailure.ReasonUnexpected, scanErr.Reason)
 		assert.Empty(t, scanner.got, "no SBOM may reach the CVE scanner when none was produced")
 	})
 }
@@ -3765,4 +3774,57 @@ func TestScanService_CachedTooLargeSBOM_ReusedWithoutRegeneration(t *testing.T) 
 		assert.NotEqual(t, helpersv1.TooLarge, gotSBOM.Status, "cached marker with changed limit must be invalidated")
 		assert.Equal(t, 1, countingCreator.calls, "CreateSBOM must be called when cached marker limit does not match")
 	})
+}
+
+func TestCredentialsFromAuth_WhitespaceAndNewlines(t *testing.T) {
+	tests := []struct {
+		name         string
+		auth         string
+		wantUsername string
+		wantPassword string
+	}{
+		{
+			name:         "clean base64",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass")),
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "trailing newline",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass")) + "\n",
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "trailing CRLF",
+			auth:         base64.StdEncoding.EncodeToString([]byte("user:pass")) + "\r\n",
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "leading and trailing spaces and tabs",
+			auth:         "  \t" + base64.StdEncoding.EncodeToString([]byte("user:pass")) + "  \n",
+			wantUsername: "user",
+			wantPassword: "pass",
+		},
+		{
+			name:         "invalid base64 returns empty",
+			auth:         "not-base64",
+			wantUsername: "",
+			wantPassword: "",
+		},
+		{
+			name:         "missing colon returns empty",
+			auth:         base64.StdEncoding.EncodeToString([]byte("userpass")),
+			wantUsername: "",
+			wantPassword: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u, p := credentialsFromAuth(tt.auth)
+			assert.Equal(t, tt.wantUsername, u)
+			assert.Equal(t, tt.wantPassword, p)
+		})
+	}
 }

@@ -31,10 +31,20 @@ func TestCheckIPAllowed(t *testing.T) {
 		{"unspecified IPv4", "0.0.0.0", true},
 		{"unspecified IPv6", "::", true},
 		{"multicast", "224.0.0.1", true},
+		{"limited broadcast IPv4 (255.255.255.255)", "255.255.255.255", true},
 		{"real public IPv4 (Google DNS)", "8.8.8.8", false},
 		{"real public IPv4 (Cloudflare DNS)", "1.1.1.1", false},
 		{"carrier-grade NAT / cloud internal (100.64.0.0/10)", "100.64.0.1", true},
 		{"0.0.0.0/8 (routes to localhost on Linux)", "0.0.0.1", true},
+		{"RFC 1112 reserved / Class E (240.0.0.0/4)", "240.0.0.1", true},
+		{"RFC 2544 benchmark testing (198.18.0.0/15)", "198.18.0.1", true},
+		{"RFC 5180 IPv6 benchmark testing (2001:2::/48)", "2001:2::1", true},
+		{"RFC 6666 IPv6 discard-only (100::/64)", "100::1", true},
+		{"RFC 3849 IPv6 documentation (2001:db8::/32)", "2001:db8::1", true},
+		{"RFC 7526 deprecated 6to4 relay anycast (192.88.99.0/24)", "192.88.99.1", true},
+		{"RFC 5737 TEST-NET-1 (192.0.2.0/24)", "192.0.2.1", true},
+		{"RFC 5737 TEST-NET-2 (198.51.100.0/24)", "198.51.100.1", true},
+		{"RFC 5737 TEST-NET-3 (203.0.113.0/24)", "203.0.113.1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -154,6 +164,10 @@ func TestCheckIPAllowed_EmbeddedIPv4(t *testing.T) {
 		{"IPv4-compatible to cloud metadata", "::a9fe:a9fe", true},
 		{"IPv4-translated to cloud metadata", "::ffff:0:a9fe:a9fe", true},
 		{"IPv4-mapped to loopback", "::ffff:127.0.0.1", true},
+		{"NAT64 well-known to RFC 1112 reserved", "64:ff9b::f000:1", true},
+		{"NAT64 well-known to RFC 2544 benchmark testing", "64:ff9b::c612:1", true},
+		{"NAT64 well-known to RFC 7526 deprecated 6to4 relay anycast", "64:ff9b::c058:6301", true},
+		{"NAT64 well-known to RFC 5737 TEST-NET-1", "64:ff9b::c000:201", true},
 
 		// the embedded address is what decides it, so translation to a genuinely
 		// public host stays reachable: on an IPv6-only cluster NAT64 is how it is
@@ -211,6 +225,13 @@ func TestNew_DialBlocksAddress(t *testing.T) {
 		{"carrier-grade NAT", "100.64.0.1:443"},
 		{"0.0.0.0/8, routes to localhost on Linux", "0.0.0.1:443"},
 		{"NAT64 to cloud metadata", "[64:ff9b::a9fe:a9fe]:443"},
+		{"RFC 1112 reserved address", "240.0.0.1:443"},
+		{"RFC 2544 benchmark testing address", "198.18.0.1:443"},
+		{"RFC 5180 IPv6 benchmark testing address", "[2001:2::1]:443"},
+		{"RFC 6666 IPv6 discard-only address", "[100::1]:443"},
+		{"RFC 3849 IPv6 documentation address", "[2001:db8::1]:443"},
+		{"RFC 7526 deprecated 6to4 relay anycast address", "192.88.99.1:443"},
+		{"RFC 5737 TEST-NET-1 address", "192.0.2.1:443"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

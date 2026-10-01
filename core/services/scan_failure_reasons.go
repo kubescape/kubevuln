@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/registryauth"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 )
 
@@ -84,9 +85,9 @@ func classifySBOMError(err error) string {
 	switch {
 	case strings.Contains(errStr, "401 Unauthorized") || strings.Contains(errStr, "403 Forbidden"):
 		return scanfailure.ReasonImageAuthFailed
-	case strings.Contains(errStr, "UNAUTHORIZED"):
-		// uppercase code, same rationale as MANIFEST_UNKNOWN below: stable across registries
-		// even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
+	case registryauth.IsAuthDenied(err) || strings.Contains(errStr, "UNAUTHORIZED"):
+		// uppercase code / OCI diagnostic boundary, same rationale as MANIFEST_UNKNOWN below:
+		// stable across registries even when the typed *transport.Error doesn't survive (e.g. crossing gRPC to the sidecar).
 		return scanfailure.ReasonImageAuthFailed
 	case strings.Contains(errStr, "404 Not Found") ||
 		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
@@ -125,6 +126,8 @@ func classifySBOMError(err error) string {
 // memory-limit annotation — classifySBOMStatusWithAnnotation handles that case.
 func classifySBOMStatus(status string) string {
 	switch status {
+	case helpersv1.Unauthorize:
+		return scanfailure.ReasonImageAuthFailed
 	case helpersv1.TooLarge:
 		return scanfailure.ReasonImageTooLarge
 	case helpersv1.Incomplete:

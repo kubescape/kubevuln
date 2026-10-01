@@ -1537,6 +1537,21 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 			},
 		},
 		{
+			k8sResourceType:      "rollout",
+			k8sResourceGroup:     "",
+			k8sResourceVersion:   "",
+			k8sResourceName:      "frontend",
+			k8sResourceNamespace: "prod",
+			labels:               make(map[string]string),
+			workload: domain.ScanCommand{
+				ImageHash:     "sha256:ead0a4a53df89fd173874b46093b6e62d8c72967bbf606d672c9e8c9b601a4fc",
+				InstanceID:    "",
+				Wlid:          "wlid://cluster-aaa/namespace-prod/rollout-frontend",
+				ImageTag:      "registry.k8s.io/coredns/coredns:v1.10.1",
+				ContainerName: "contNameRollout",
+			},
+		},
+		{
 			k8sResourceType:      "",
 			k8sResourceGroup:     "",
 			k8sResourceVersion:   "",
@@ -1560,15 +1575,25 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		assert.NoError(t, err)
 
 		if tests[i].workload.Wlid != "" {
-			val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
-			assert.True(t, exist)
-			assert.Equal(t, tests[i].k8sResourceGroup, val)
+			if tests[i].k8sResourceGroup != "" {
+				val, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+				assert.True(t, exist)
+				assert.Equal(t, tests[i].k8sResourceGroup, val)
+			} else {
+				_, exist := enrichedLabels[helpersv1.ApiGroupMetadataKey]
+				assert.False(t, exist)
+			}
 
-			val, exist = enrichedLabels[helpersv1.ApiVersionMetadataKey]
-			assert.True(t, exist)
-			assert.Equal(t, tests[i].k8sResourceVersion, val)
+			if tests[i].k8sResourceVersion != "" {
+				val, exist := enrichedLabels[helpersv1.ApiVersionMetadataKey]
+				assert.True(t, exist)
+				assert.Equal(t, tests[i].k8sResourceVersion, val)
+			} else {
+				_, exist := enrichedLabels[helpersv1.ApiVersionMetadataKey]
+				assert.False(t, exist)
+			}
 
-			val, exist = enrichedLabels[helpersv1.RelatedKindMetadataKey]
+			val, exist := enrichedLabels[helpersv1.RelatedKindMetadataKey]
 			assert.True(t, exist)
 			assert.Equal(t, tests[i].k8sResourceType, val)
 
@@ -1597,6 +1622,9 @@ func TestAPIServerStore_enrichSummaryManifestObjectLabels(t *testing.T) {
 		assert.Equal(t, tests[i].workload.ContainerName, val)
 	}
 
+	// Test error when domain.WorkloadKey is missing from context
+	_, err := enrichSummaryManifestObjectLabels(context.Background(), make(map[string]string), true)
+	assert.Error(t, err)
 }
 
 func TestAPIServerStore_StoreCVESummary_EmptyWlid(t *testing.T) {
@@ -2209,6 +2237,26 @@ func TestAPIServerStore_StoreSBOMFiltered_transientError(t *testing.T) {
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, true)
 	require.ErrorIs(t, err, injectedErr)
+}
+
+// TestAPIServerStore_DeleteSBOM_joinsErrors verifies that DeleteSBOM returns both the
+// unfiltered and filtered deletion errors when both operations fail. Previously the
+// filtered error was silently dropped if the unfiltered deletion had already failed.
+func TestAPIServerStore_DeleteSBOM_joinsErrors(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	syftErr := apierrors.NewInternalError(fmt.Errorf("sbomsyfts delete failed"))
+	filteredErr := apierrors.NewInternalError(fmt.Errorf("sbomsyftfiltereds delete failed"))
+	clientset.PrependReactor("delete", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, syftErr
+	})
+	clientset.PrependReactor("delete", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, filteredErr
+	})
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+	err := a.DeleteSBOM(context.TODO(), name)
+	require.Error(t, err)
+	require.ErrorIs(t, err, syftErr, "unfiltered SBOM deletion error must be included")
+	require.ErrorIs(t, err, filteredErr, "filtered SBOM deletion error must not be dropped")
 }
 
 func TestAPIServerStore_StoreCVESummary_transientError(t *testing.T) {
@@ -3709,6 +3757,274 @@ func TestAPIServerStore_GetNamespaceLabels_DoesNotCacheFailures(t *testing.T) {
 	assert.Equal(t, map[string]string{"team": "platform"}, labels)
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
+
+func TestAPIServerStore_InvalidateLabelsCache(t *testing.T) {
+	dep := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "deploy-x",
+			"namespace": "ns-y",
+			"labels":    map[string]interface{}{"env": "prod"},
+		},
+	}}
+	rc := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ReplicationController",
+		"metadata": map[string]interface{}{
+			"name":      "rc-x",
+			"namespace": "ns-y",
+			"labels":    map[string]interface{}{"tier": "frontend"},
+		},
+	}}
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":   "ns-y",
+			"labels": map[string]interface{}{"team": "sec"},
+		},
+	}}
+	dynClient := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), dep, rc, ns)
+
+	a := &APIServerStore{
+		DynamicClient: dynClient,
+		Namespace:     "kubescape",
+		labelsCache:   cache.New(time.Minute),
+	}
+
+	// Initial fetch - populates cache
+	labels, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "prod"}, labels)
+
+	rcLabels, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "frontend"}, rcLabels)
+
+	nsLabels, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "sec"}, nsLabels)
+
+	// Update underlying objects in K8s dynamic client
+	depUpdated := dep.DeepCopy()
+	depUpdated.SetLabels(map[string]string{"env": "staging"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}).Namespace("ns-y").Update(context.TODO(), depUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	rcUpdated := rc.DeepCopy()
+	rcUpdated.SetLabels(map[string]string{"tier": "backend"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "", Version: "v1", Resource: "replicationcontrollers"}).Namespace("ns-y").Update(context.TODO(), rcUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	nsUpdated := ns.DeepCopy()
+	nsUpdated.SetLabels(map[string]string{"team": "dev"})
+	_, err = dynClient.Resource(schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}).Update(context.TODO(), nsUpdated, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	// Cache still serves stale labels before invalidation
+	labelsStale, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "prod"}, labelsStale)
+
+	rcLabelsStale, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "frontend"}, rcLabelsStale)
+
+	nsLabelsStale, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "sec"}, nsLabelsStale)
+
+	// Invalidate cache
+	a.InvalidateWorkloadLabelsCache("ns-y", "Deployment", "deploy-x")
+	a.InvalidateWorkloadLabelsCache("ns-y", "ReplicationController", "rc-x")
+	a.InvalidateNamespaceLabelsCache("ns-y")
+
+	// Re-fetch returns refreshed labels
+	labelsRefreshed, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "Deployment", "deploy-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"env": "staging"}, labelsRefreshed)
+
+	rcLabelsRefreshed, err := a.GetWorkloadLabels(context.TODO(), "ns-y", "ReplicationController", "rc-x")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"tier": "backend"}, rcLabelsRefreshed)
+
+	nsLabelsRefreshed, err := a.GetNamespaceLabels(context.TODO(), "ns-y")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "dev"}, nsLabelsRefreshed)
+}
+
+func TestAPIServerStore_InvalidateLabelsCache_InFlightReadDoesNotOverwriteInvalidation(t *testing.T) {
+	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+
+	// 1. Workload labels: snapshot generation as if Get() started
+	workloadKey := workloadLabelsCacheKeyPrefix + "ns-a/Deployment/deploy-a"
+	seenGenWorkload := a.beginLabelsCacheRefresh(workloadKey)
+
+	// Informer invalidates before Get() completes
+	a.InvalidateWorkloadLabelsCache("ns-a", "Deployment", "deploy-a")
+
+	// Get() completes with stale labels and tries to set cache
+	a.trySetLabelsCache(workloadKey, seenGenWorkload, map[string]string{"env": "old"})
+
+	// Stale write should be rejected because generation changed
+	_, ok := a.labelsCache.Get(workloadKey)
+	assert.False(t, ok, "an in-flight workload GET must not restore stale labels after invalidation")
+
+	// Entry must be deleted from labelsEntries when refreshes reach 0
+	a.labelsEntriesMu.Lock()
+	_, exists := a.labelsEntries[workloadKey]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries must be cleaned up when no in-flight refreshes remain")
+
+	// 2. Namespace labels: snapshot generation as if Get() started
+	nsKey := namespaceLabelsCacheKeyPrefix + "ns-a"
+	seenGenNS := a.beginLabelsCacheRefresh(nsKey)
+
+	// Informer invalidates before Get() completes
+	a.InvalidateNamespaceLabelsCache("ns-a")
+
+	// Get() completes with stale labels and tries to set cache
+	a.trySetLabelsCache(nsKey, seenGenNS, map[string]string{"team": "old"})
+
+	// Stale write should be rejected because generation changed
+	_, ok = a.labelsCache.Get(nsKey)
+	assert.False(t, ok, "an in-flight namespace GET must not restore stale labels after invalidation")
+
+	// Entry must be deleted from labelsEntries when refreshes reach 0
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[nsKey]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries must be cleaned up when no in-flight refreshes remain")
+}
+
+func TestAPIServerStore_LabelsCache_LifecycleAndCleanup(t *testing.T) {
+	a := &APIServerStore{labelsCache: cache.New(time.Minute)}
+	key := workloadLabelsCacheKeyPrefix + "default/Pod/test-pod"
+
+	// 1. Successful refresh: caches value and cleans up entry from map
+	gen := a.beginLabelsCacheRefresh(key)
+	a.trySetLabelsCache(key, gen, map[string]string{"app": "v1"})
+
+	cached, ok := a.labelsCache.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"app": "v1"}, cached)
+
+	a.labelsEntriesMu.Lock()
+	_, exists := a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be removed after successful refresh completes")
+
+	// 2. Error/nil refresh: does not cache and cleans up entry
+	genErr := a.beginLabelsCacheRefresh(key)
+	a.trySetLabelsCache(key, genErr, nil)
+
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be removed when refresh encounters error (nil value)")
+
+	// 3. Multi-reader with invalidation interleaving:
+	// Reader 1 begins before invalidation
+	gen1 := a.beginLabelsCacheRefresh(key)
+
+	// Invalidation occurs
+	a.invalidateLabelsCacheKey(key)
+
+	// Reader 2 begins after invalidation
+	gen2 := a.beginLabelsCacheRefresh(key)
+
+	// Reader 1 completes with stale labels -> rejected, entry still kept for Reader 2
+	a.trySetLabelsCache(key, gen1, map[string]string{"app": "stale"})
+	_, ok = a.labelsCache.Get(key)
+	assert.False(t, ok, "stale read from Reader 1 must be rejected")
+
+	a.labelsEntriesMu.Lock()
+	entry, exists := a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	require.True(t, exists, "labelsEntries entry must remain while Reader 2 is in-flight")
+	assert.Equal(t, uint32(1), entry.refreshes)
+
+	// Reader 2 completes with fresh labels -> accepted and entry cleaned up
+	a.trySetLabelsCache(key, gen2, map[string]string{"app": "fresh"})
+	cached, ok = a.labelsCache.Get(key)
+	require.True(t, ok)
+	assert.Equal(t, map[string]string{"app": "fresh"}, cached)
+
+	a.labelsEntriesMu.Lock()
+	_, exists = a.labelsEntries[key]
+	a.labelsEntriesMu.Unlock()
+	assert.False(t, exists, "labelsEntries entry must be deleted after all in-flight refreshes finish")
+}
+
+func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing.T) {
+	lblCache := cache.New(time.Minute)
+	t.Cleanup(lblCache.Close)
+
+	// 1. Deterministic barrier-controlled publication test.
+	// We set labelsCacheBeforeSetHook to run right after generation validation while holding labelsEntriesMu.
+	// A concurrent invalidation is triggered while at this hook.
+	// Because cache publication and generation validation are atomic under labelsEntriesMu,
+	// the invalidator cannot run in a gap between validation and Set; it must serialize after trySetLabelsCache,
+	// properly evicting the newly written stale cache entry.
+	{
+		a := &APIServerStore{labelsCache: lblCache}
+		key := workloadLabelsCacheKeyPrefix + "default/Deployment/deploy-atomic"
+
+		gen := a.beginLabelsCacheRefresh(key)
+
+		hookEntered := make(chan struct{})
+		invalidationDone := make(chan struct{})
+
+		a.labelsCacheBeforeSetHook = func() {
+			if a.labelsEntriesMu.TryLock() {
+				a.labelsEntriesMu.Unlock()
+				assert.Fail(t, "labelsEntriesMu must be held during publication")
+			}
+			close(hookEntered)
+		}
+
+		go func() {
+			<-hookEntered
+			a.InvalidateWorkloadLabelsCache("default", "Deployment", "deploy-atomic")
+			close(invalidationDone)
+		}()
+
+		a.trySetLabelsCache(key, gen, map[string]string{"env": "stale"})
+		<-invalidationDone
+
+		// After invalidation has completed, the cache MUST NOT contain stale labels
+		_, ok := a.labelsCache.Get(key)
+		assert.False(t, ok, "stale labels must never remain in cache after invalidation")
+
+		a.labelsEntriesMu.Lock()
+		_, exists := a.labelsEntries[key]
+		a.labelsEntriesMu.Unlock()
+		assert.False(t, exists, "labelsEntries must be cleanly reclaimed")
+	}
+
+	// 2. Invalidation when no in-flight calls are active (zero in-flight refreshes)
+	{
+		a := &APIServerStore{labelsCache: lblCache}
+		key := workloadLabelsCacheKeyPrefix + "default/Deployment/idle-deploy"
+
+		// Prime cache with an existing entry
+		a.labelsCache.Set(key, map[string]string{"env": "prod"}, time.Minute)
+
+		// Invalidate with no active in-flight refreshes in labelsEntries
+		a.InvalidateWorkloadLabelsCache("default", "Deployment", "idle-deploy")
+
+		// Cached entry must be evicted
+		_, ok := a.labelsCache.Get(key)
+		assert.False(t, ok, "cached labels must be evicted even when no in-flight refreshes exist")
+
+		a.labelsEntriesMu.Lock()
+		_, exists := a.labelsEntries[key]
+		a.labelsEntriesMu.Unlock()
+		assert.False(t, exists, "labelsEntries must remain empty when invalidating with no in-flight refreshes")
+	}
+}
+
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()

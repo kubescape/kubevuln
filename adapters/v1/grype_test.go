@@ -314,20 +314,31 @@ func Test_grypeAdapter_Ready_recoversFromStuckWarmUpdate(t *testing.T) {
 	close(stuck)
 	require.Eventually(t, func() bool {
 		g.mu.Lock()
-		g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+		if g.store == newStore {
+			g.mu.Unlock()
+			return true
+		}
 		updating := g.updating
+		if !updating {
+			g.nextUpdateAttempt = time.Now().Add(-time.Minute)
+		}
 		g.mu.Unlock()
 		if !updating {
 			g.Ready(ctx)
 		}
 		g.mu.RLock()
-		defer g.mu.RUnlock()
-		return g.store == newStore
+		installed := g.store == newStore
+		g.mu.RUnlock()
+		return installed
 	}, 3*time.Second, 15*time.Millisecond, "once the stuck load releases loadMu, a retry installs a fresh DB")
 
 	g.mu.RLock()
 	assert.Equal(t, int32(2), atomic.LoadInt32(&loadCalls), "exactly one load ran after the stuck one was released")
 	g.mu.RUnlock()
+
+	// A subsequent Ready() probe must keep serving and not launch any further load.
+	require.True(t, g.Ready(ctx), "pod stays Ready after new store is installed")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&loadCalls), "no additional load launched after new store is installed")
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&oldStore.closed) == 1

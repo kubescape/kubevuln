@@ -31,6 +31,43 @@ var carrierGradeNAT = mustParseCIDR("100.64.0.0/10")
 // working bypass of the loopback check if left unhandled.
 var thisHostOnThisNetwork = mustParseCIDR("0.0.0.0/8")
 
+// ipv4Reserved is RFC 1112's 240.0.0.0/4 (formerly Class E), reserved for
+// future use. net.IP.IsPrivate() does not cover this range, and while
+// 255.255.255.255 is the limited broadcast address, the entire /4 block
+// is designated non-routable on the public internet by RFC 6890.
+var ipv4Reserved = mustParseCIDR("240.0.0.0/4")
+
+// benchmarkTesting is RFC 2544's 198.18.0.0/15, allocated for benchmark tests
+// of network interconnect devices. RFC 6890 classifies this range as not
+// globally routable.
+var benchmarkTesting = mustParseCIDR("198.18.0.0/15")
+
+// ipv6BenchmarkTesting is RFC 5180's 2001:2::/48, allocated for benchmark tests
+// of IPv6 network interconnect devices (the IPv6 counterpart to RFC 2544's 198.18.0.0/15).
+// RFC 6890 classifies this range as not globally routable.
+var ipv6BenchmarkTesting = mustParseCIDR("2001:2::/48")
+
+// ipv6DiscardOnly is RFC 6666's 100::/64, allocated as a discard-only prefix for
+// routing discard traffic. RFC 6890 classifies this range as not globally routable.
+var ipv6DiscardOnly = mustParseCIDR("100::/64")
+
+// ipv6Documentation is RFC 3849's 2001:db8::/32, reserved for documentation and
+// example configurations. RFC 6890 classifies this range as not globally routable.
+var ipv6Documentation = mustParseCIDR("2001:db8::/32")
+
+// sixToFourRelayAnycast is RFC 3068's 192.88.99.0/24, formally deprecated and made
+// non-routable on the public internet by RFC 7526.
+var sixToFourRelayAnycast = mustParseCIDR("192.88.99.0/24")
+
+// ipv4Documentation represents RFC 5737's TEST-NET-1 (192.0.2.0/24), TEST-NET-2
+// (198.51.100.0/24), and TEST-NET-3 (203.0.113.0/24), reserved for documentation.
+// RFC 6890 classifies these ranges as not globally routable.
+var (
+	testNet1 = mustParseCIDR("192.0.2.0/24")
+	testNet2 = mustParseCIDR("198.51.100.0/24")
+	testNet3 = mustParseCIDR("203.0.113.0/24")
+)
+
 // The IPv6 transition mechanisms below each carry an IPv4 address inside an IPv6 one,
 // and a packet sent to them is delivered to that IPv4 destination. net.IP.To4 unwraps
 // only the IPv4-mapped form (::ffff:a.b.c.d), so for these the checks in checkIPAllowed
@@ -189,8 +226,18 @@ func checkIPAllowed(ip net.IP) error {
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
 		ip.IsMulticast() ||
+		ip.Equal(net.IPv4bcast) ||
 		carrierGradeNAT.Contains(ip) ||
 		thisHostOnThisNetwork.Contains(ip) ||
+		ipv4Reserved.Contains(ip) ||
+		benchmarkTesting.Contains(ip) ||
+		ipv6BenchmarkTesting.Contains(ip) ||
+		ipv6DiscardOnly.Contains(ip) ||
+		ipv6Documentation.Contains(ip) ||
+		sixToFourRelayAnycast.Contains(ip) ||
+		testNet1.Contains(ip) ||
+		testNet2.Contains(ip) ||
+		testNet3.Contains(ip) ||
 		nat64LocalUse.Contains(ip) {
 		return fmt.Errorf("%w: %s", ErrBlockedIP, ip)
 	}

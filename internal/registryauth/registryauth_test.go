@@ -22,9 +22,13 @@ func TestIsGCPRegistry(t *testing.T) {
 		want    bool
 	}{
 		{"gcr.io/foo/bar", true},
+		{"GCR.IO/foo/bar", true},
 		{"us.gcr.io/foo/bar", true},
+		{"US.GCR.IO/foo/bar", true},
 		{"us-docker.pkg.dev/foo/bar", true},
+		{"US-DOCKER.PKG.DEV/foo/bar", true},
 		{"europe-west1-docker.pkg.dev/project/repo/image:tag", true},
+		{"EUROPE-WEST1-DOCKER.PKG.DEV/project/repo/image:tag", true},
 		{"quay.io/foo/bar", false},
 		{"quay.io/foo/bar-docker.pkg.dev/x", false},
 		{"index.docker.io/library/alpine", false},
@@ -44,6 +48,7 @@ func TestECRMatchesAndRegion(t *testing.T) {
 		wantRegion string
 	}{
 		{name: "standard", imageID: "123456789012.dkr.ecr.us-east-1.amazonaws.com/team/app:v1", wantRegion: "us-east-1"},
+		{name: "standard uppercase", imageID: "123456789012.DKR.ECR.US-EAST-1.AMAZONAWS.COM/team/app:v1", wantRegion: "us-east-1"},
 		{name: "with digest", imageID: "123456789012.dkr.ecr.eu-west-2.amazonaws.com/app@sha256:abc", wantRegion: "eu-west-2"},
 		{name: "fips", imageID: "123456789012.dkr.ecr-fips.us-gov-west-1.amazonaws.com/app:v1", wantRegion: "us-gov-west-1"},
 		{name: "china partition", imageID: "123456789012.dkr.ecr.cn-north-1.amazonaws.com.cn/app:v1", wantRegion: "cn-north-1"},
