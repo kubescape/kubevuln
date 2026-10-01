@@ -527,6 +527,31 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 	}
 }
 
+func Test_registryScanCommandToScanCommand_WhitespacePadding(t *testing.T) {
+	canonicalCmd := wssc.RegistryScanCommand{
+		ImageScanParams: wssc.ImageScanParams{
+			ImageTag: "docker.io/library/nginx:1.14.1",
+			JobID:    "job-canonical",
+		},
+	}
+	paddedCmd := wssc.RegistryScanCommand{
+		ImageScanParams: wssc.ImageScanParams{
+			ImageTag: "  docker.io/library/nginx:1.14.1  ",
+			JobID:    "job-padded",
+		},
+	}
+
+	canonicalScan := registryScanCommandToScanCommand(canonicalCmd)
+	paddedScan := registryScanCommandToScanCommand(paddedCmd)
+
+	assert.Equal(t, canonicalScan.ImageTagNormalized, paddedScan.ImageTagNormalized,
+		"padded image reference must produce the same normalized tag as its canonical counterpart")
+	assert.Equal(t, canonicalScan.ImageSlug, paddedScan.ImageSlug,
+		"padded image reference must produce the same storage slug as its canonical counterpart")
+	assert.Equal(t, "docker.io/library/nginx:1.14.1", paddedScan.ImageTagNormalized)
+}
+
+
 type contextSpyScanService struct {
 	lastGenerateSBOMCtx context.Context
 	lastScanCPCtx       context.Context
