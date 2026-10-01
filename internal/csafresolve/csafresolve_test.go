@@ -182,3 +182,16 @@ func TestResolve_PURLUnderFullProductNames_NotBranches(t *testing.T) {
 	require.NoError(t, err, "a purl declared under full_product_names should resolve, not return ErrNoPURL")
 	assert.Equal(t, "pkg:rpm/redhat/some-package", got)
 }
+
+func TestResolve_NilResolverAndTreeGuards(t *testing.T) {
+	var nilResolver *Resolver
+	_, err := nilResolver.Resolve("composite:pkg")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoRelationship)
+
+	emptyResolver := &Resolver{}
+	_, err = emptyResolver.Resolve("composite:pkg")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoRelationship)
+}
+

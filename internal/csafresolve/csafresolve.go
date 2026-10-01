@@ -85,6 +85,9 @@ func New(tree *csaf.ProductTree) *Resolver {
 // "red_hat_enterprise_linux_10:xz"), or an error explaining why it could
 // not be resolved.
 func (r *Resolver) Resolve(compositeID string) (string, error) {
+	if r == nil || r.compositeToRef == nil || r.tree == nil {
+		return "", fmt.Errorf("%w: %q", ErrNoRelationship, compositeID)
+	}
 	ref, ok := r.compositeToRef[compositeID]
 	if !ok {
 		return "", fmt.Errorf("%w: %q", ErrNoRelationship, compositeID)
