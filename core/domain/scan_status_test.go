@@ -89,7 +89,8 @@ func TestUpdateScanPhase_RefusesWhatItShould(t *testing.T) {
 
 	t.Run("a nil context is a safe no-op", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			UpdateScanPhase(nil, "cve_matching")
+			var nilCtx context.Context
+			UpdateScanPhase(nilCtx, "cve_matching")
 		})
 	})
 }
