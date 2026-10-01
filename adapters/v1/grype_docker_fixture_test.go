@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/vexbatch"
@@ -111,7 +112,10 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 	g.Ready(ctx)
 
 	sbom := domain.SBOM{
-		Name:               "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		Name: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		},
 		SBOMCreatorVersion: "TODO",
 		Content:            fileToSBOM("testdata/alpine-sbom.json"),
 	}
@@ -160,4 +164,34 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 
 	assert.True(t, cryptoIgnored, "VEX-suppressed libcrypto3 finding must move to IgnoredMatches")
 	assert.True(t, sslRemaining, "unrelated libssl3 finding must remain in Matches")
+
+	missingIdentitySBOM := sbom
+	missingIdentitySBOM.Annotations = nil
+
+	missingIdentity, err := g.ScanSBOMWithVEX(ctx, missingIdentitySBOM, documents)
+	require.NoError(t, err)
+
+	var missingIdentityCrypto bool
+	for _, m := range missingIdentity.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			missingIdentityCrypto = true
+		}
+	}
+	assert.True(t, missingIdentityCrypto, "VEX must not suppress findings when scan identity is missing")
+
+	mismatchedIdentitySBOM := sbom
+	mismatchedIdentitySBOM.Annotations = map[string]string{
+		helpersv1.ImageIDMetadataKey: "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+	}
+
+	mismatchedIdentity, err := g.ScanSBOMWithVEX(ctx, mismatchedIdentitySBOM, documents)
+	require.NoError(t, err)
+
+	var mismatchedIdentityCrypto bool
+	for _, m := range mismatchedIdentity.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			mismatchedIdentityCrypto = true
+		}
+	}
+	assert.True(t, mismatchedIdentityCrypto, "VEX must not suppress findings for a mismatched scan identity")
 }
