@@ -1715,14 +1715,19 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 // matches the SourceKind rather than inferring provenance from rule shape, ensuring
 // that only explicit CRD-driven rules receive the SecurityException impact statement.
 // isOwnIgnoreRule reports whether an ignored match was suppressed by our own exception
-// machinery. buildIgnoreRule writes exactly one rule per suppression and never sets Package,
-// while Grype expresses its own ignore rules in terms of a package, so one carrying a package
-// did not come from us.
+// machinery. buildIgnoreRules never sets Package on the rules it writes, while Grype
+// expresses its own ignore rules in terms of a package, so a match where any rule
+// carries a package did not come from us.
 func isOwnIgnoreRule(m v1beta1.IgnoredMatch) bool {
-	if len(m.AppliedIgnoreRules) != 1 {
+	if len(m.AppliedIgnoreRules) == 0 {
 		return false
 	}
-	return m.AppliedIgnoreRules[0].Package == nil
+	for _, rule := range m.AppliedIgnoreRules {
+		if rule.Package != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // securityExceptionIgnoreRule can face more than one candidate: buildIgnoreRule

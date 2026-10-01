@@ -533,18 +533,36 @@ func TestIgnoredMatchAssessment_AttributesBySource(t *testing.T) {
 			want:  securityExceptionImpactStatement,
 		},
 		{
-			// What buildIgnoreRule leaves behind for a backend-delivered policy: the
+			// What buildIgnoreRules leaves behind for a backend-delivered policy: the
 			// vulnerability id and nothing else.
 			name:  "backend-delivered exception policy",
 			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228"}},
 			want:  cloudExceptionImpactStatement,
 		},
 		{
-			// Grype states its own ignore rules against a package, which buildIgnoreRule
+			// Multiple backend-delivered policies matching the same vulnerability: each
+			// policy contributes an IgnoreRule with only the vulnerability id.
+			name: "multiple backend-delivered exception policies",
+			rules: []v1beta1.IgnoreRule{
+				{Vulnerability: "CVE-2021-44228"},
+				{Vulnerability: "CVE-2021-44228"},
+			},
+			want: cloudExceptionImpactStatement,
+		},
+		{
+			// Grype states its own ignore rules against a package, which buildIgnoreRules
 			// never sets. Nothing produces this today; #387 is what would.
 			name:  "not ours",
 			rules: []v1beta1.IgnoreRule{{Vulnerability: "CVE-2021-44228", Package: &v1beta1.IgnoreRulePackage{Name: "tar"}}},
 			want:  externalIgnoreImpactStatement,
+		},
+		{
+			name: "mixed rules with external package rule",
+			rules: []v1beta1.IgnoreRule{
+				{Vulnerability: "CVE-2021-44228"},
+				{Vulnerability: "CVE-2021-44228", Package: &v1beta1.IgnoreRulePackage{Name: "tar"}},
+			},
+			want: externalIgnoreImpactStatement,
 		},
 	}
 
