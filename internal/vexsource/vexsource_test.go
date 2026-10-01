@@ -50,11 +50,21 @@ func TestSourceFetch(t *testing.T) {
 }
 
 func TestSourceFetch_EmptyURL(t *testing.T) {
-	source := Source{}
-
-	_, err := source.Fetch(context.Background(), safefetch.New())
-
-	require.EqualError(t, err, "vexsource: URL is empty")
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{name: "empty string", url: ""},
+		{name: "whitespace only spaces", url: "   "},
+		{name: "whitespace only tabs and newlines", url: " \t\n "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := Source{URL: tt.url}
+			_, err := source.Fetch(context.Background(), safefetch.New())
+			require.EqualError(t, err, "vexsource: URL is empty")
+		})
+	}
 }
 
 func TestSourceFetch_NilFetcher(t *testing.T) {
