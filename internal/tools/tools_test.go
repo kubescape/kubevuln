@@ -151,6 +151,20 @@ func TestNormalizeReference(t *testing.T) {
 			},
 			want: "public-registry.systest-ns-na6n:5000/nginx:test",
 		},
+		{
+			name: "image tag with leading and trailing whitespace",
+			args: args{
+				ref: "  nginx:latest  ",
+			},
+			want: "docker.io/library/nginx:latest",
+		},
+		{
+			name: "repo image tag with newline and spaces",
+			args: args{
+				ref: "\n docker.io/library/alpine:3.19 \t",
+			},
+			want: "docker.io/library/alpine:3.19",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

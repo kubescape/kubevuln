@@ -272,6 +272,7 @@ func StartPeriodicTempDirSweep(stop <-chan struct{}, dir, prefix string, olderTh
 }
 
 func NormalizeReference(ref string) string {
+	ref = strings.TrimSpace(ref)
 	n, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
 		return ref
