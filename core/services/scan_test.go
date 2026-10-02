@@ -1677,6 +1677,65 @@ func Test_registryCredentialsFromCredentialsList_incompletePair(t *testing.T) {
 	}
 }
 
+func Test_registryCredentialsFromCredentialsList_identityToken(t *testing.T) {
+	tests := []struct {
+		name      string
+		cred      registry.AuthConfig
+		wantToken string
+	}{
+		{
+			name: "identityToken is used when registryToken is empty",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				IdentityToken: "oauth2_refresh_token",
+			},
+			wantToken: "oauth2_refresh_token",
+		},
+		{
+			name: "registryToken takes precedence over identityToken",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				RegistryToken: "bearer_token",
+				IdentityToken: "oauth2_refresh_token",
+			},
+			wantToken: "bearer_token",
+		},
+		{
+			name: "whitespace in identityToken is trimmed",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				IdentityToken: "  trimmed_identity_token  ",
+			},
+			wantToken: "trimmed_identity_token",
+		},
+		{
+			name: "whitespace-only registryToken falls back to identityToken",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				RegistryToken: "   ",
+				IdentityToken: "valid_id_token",
+			},
+			wantToken: "valid_id_token",
+		},
+		{
+			name: "empty tokens produce empty Token field",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				Username:      "user",
+				Password:      "pass",
+			},
+			wantToken: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList([]registry.AuthConfig{tt.cred})
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantToken, got[0].Token)
+		})
+	}
+}
+
 func Test_filterSBOM(t *testing.T) {
 	nginxSBOM := domain.SBOM{
 		Name: "nginx-sbom",
