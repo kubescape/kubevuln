@@ -167,6 +167,16 @@ func TestClassifySBOMError(t *testing.T) {
 			expected: scanfailure.ReasonImageNotFound,
 		},
 		{
+			name:     "TAG_UNKNOWN tag not found",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/tags/list: TAG_UNKNOWN: tag not found"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
+			name:     "TAG_INVALID invalid tag reference",
+			err:      fmt.Errorf("GET https://registry.io/v2/app/manifests/bad_tag!: TAG_INVALID: invalid tag reference"),
+			expected: scanfailure.ReasonImageNotFound,
+		},
+		{
 			name:     "MANIFEST_SCHEMA_UNSUPPORTED uppercase code",
 			err:      fmt.Errorf("creating SBOM: oci-registry: GET https://index.docker.io/v2/app/manifests/sha256:abc: MANIFEST_SCHEMA_UNSUPPORTED: manifest schema unsupported"),
 			expected: scanfailure.ReasonImageSchemaUnsupported,
