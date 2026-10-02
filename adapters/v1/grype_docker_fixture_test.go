@@ -11,8 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kinbiko/jsonassert"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,4 +94,134 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			assert.NotContains(t, got.Annotations, VendorTrustedMatchMetadataKey)
 		})
 	}
+}
+
+func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
+	g, terminate, err := NewGrypeAdapterFixedDB()
+	if errors.Is(err, ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
+	require.NoError(t, err)
+	defer terminate()
+
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, time.Now().Unix())
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
+
+	g.Ready(ctx)
+
+	sbom := domain.SBOM{
+		Name: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+		},
+		SBOMCreatorVersion: "TODO",
+		Content:            fileToSBOM("testdata/alpine-sbom.json"),
+	}
+
+	baseline, err := g.ScanSBOM(ctx, sbom)
+	require.NoError(t, err)
+
+	var baselineCrypto, baselineSSL bool
+	for _, m := range baseline.Content.Matches {
+		if m.Vulnerability.ID != "CVE-2023-1255" {
+			continue
+		}
+		if m.Artifact.Name == "libcrypto3" {
+			baselineCrypto = true
+		}
+		if m.Artifact.Name == "libssl3" {
+			baselineSSL = true
+		}
+	}
+	require.True(t, baselineCrypto, "baseline must contain CVE-2023-1255 for libcrypto3")
+	require.True(t, baselineSSL, "baseline must contain CVE-2023-1255 for libssl3")
+
+	documents := []vexbatch.Document{
+		{
+			Format: vexbatch.FormatOpenVEX,
+			Path:   "testdata/external-vex-alpine.json",
+		},
+	}
+
+	got, err := g.ScanSBOMWithVEX(ctx, sbom, documents)
+	require.NoError(t, err)
+	require.NotNil(t, got.Content)
+
+	var cryptoIgnored, sslRemaining bool
+	for _, m := range got.Content.IgnoredMatches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			cryptoIgnored = true
+		}
+	}
+
+	for _, m := range got.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libssl3" {
+			sslRemaining = true
+		}
+	}
+
+	assert.True(t, cryptoIgnored, "VEX-suppressed libcrypto3 finding must move to IgnoredMatches")
+	assert.True(t, sslRemaining, "unrelated libssl3 finding must remain in Matches")
+
+	missingIdentityContent := *sbom.Content
+	var missingSourceMetadata map[string]interface{}
+	require.NoError(t, json.Unmarshal(missingIdentityContent.SyftSource.Metadata, &missingSourceMetadata))
+
+	missingSourceMetadata["repoDigests"] = []string{}
+	missingSourceMetadata["tags"] = []string{}
+
+	missingIdentityContent.SyftSource.Metadata, err = json.Marshal(missingSourceMetadata)
+	require.NoError(t, err)
+
+	missingIdentitySBOM := sbom
+	missingIdentitySBOM.Content = &missingIdentityContent
+	missingIdentitySBOM.Annotations = map[string]string{
+		helpersv1.ImageIDMetadataKey: sbom.Annotations[helpersv1.ImageIDMetadataKey],
+	}
+
+	missingIdentity, err := g.ScanSBOMWithVEX(ctx, missingIdentitySBOM, documents)
+	require.NoError(t, err)
+
+	var missingIdentityCrypto bool
+	for _, m := range missingIdentity.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			missingIdentityCrypto = true
+		}
+	}
+	assert.True(t, missingIdentityCrypto, "VEX must not suppress findings when scan identity is missing")
+
+	mismatchedContent := *sbom.Content
+	var sourceTarget map[string]interface{}
+	require.NoError(t, json.Unmarshal(mismatchedContent.SyftSource.Metadata, &sourceTarget))
+
+	sourceTarget["repoDigests"] = []string{
+		"library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+	}
+	sourceTarget["tags"] = []string{
+		"library/alpine:unrelated",
+	}
+	sourceTarget["userInput"] = "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	sourceTarget["manifestDigest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+	mismatchedContent.SyftSource.Metadata, err = json.Marshal(sourceTarget)
+	require.NoError(t, err)
+
+	mismatchedIdentitySBOM := sbom
+	mismatchedIdentitySBOM.Content = &mismatchedContent
+	mismatchedIdentitySBOM.Annotations = map[string]string{
+		helpersv1.ImageIDMetadataKey: "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+	}
+
+	mismatchedIdentity, err := g.ScanSBOMWithVEX(ctx, mismatchedIdentitySBOM, documents)
+	require.NoError(t, err)
+
+	var mismatchedIdentityCrypto bool
+	for _, m := range mismatchedIdentity.Content.Matches {
+		if m.Vulnerability.ID == "CVE-2023-1255" && m.Artifact.Name == "libcrypto3" {
+			mismatchedIdentityCrypto = true
+		}
+	}
+	assert.True(t, mismatchedIdentityCrypto, "VEX must not suppress findings for a mismatched scan identity")
 }

@@ -3,6 +3,7 @@ package vexsource
 import (
 	"context"
 	"fmt"
+
 	"strings"
 
 	"github.com/kubescape/kubevuln/internal/safefetch"

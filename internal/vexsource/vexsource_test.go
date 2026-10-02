@@ -50,6 +50,11 @@ func TestSourceFetch(t *testing.T) {
 }
 
 func TestSourceFetch_EmptyURL(t *testing.T) {
+	source := Source{}
+
+	_, err := source.Fetch(context.Background(), safefetch.New())
+
+	require.EqualError(t, err, "vexsource: URL is empty")
 	tests := []struct {
 		name string
 		url  string
