@@ -27,6 +27,7 @@ import (
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/syft/syft/source"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -527,7 +528,8 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 		return domain.CVEManifest{}, err
 	}
 
-	if len(documents) > 0 && sbom.Annotations[helpersv1.ImageIDMetadataKey] != "" {
+	imageMetadata, ok := s.Source.Metadata.(source.ImageMetadata)
+	if len(documents) > 0 && ok && (len(imageMetadata.Tags) > 0 || len(imageMetadata.RepoDigests) > 0) {
 		logger.L().Debug("applying external VEX documents",
 			helpers.String("name", sbom.Name),
 			helpers.Int("documents", len(documents)),

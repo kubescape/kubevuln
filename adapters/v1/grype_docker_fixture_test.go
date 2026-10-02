@@ -179,7 +179,24 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 	}
 	assert.True(t, missingIdentityCrypto, "VEX must not suppress findings when scan identity is missing")
 
+	mismatchedContent := *sbom.Content
+	var sourceTarget map[string]interface{}
+	require.NoError(t, json.Unmarshal(mismatchedContent.Source.Target, &sourceTarget))
+
+	sourceTarget["repoDigests"] = []string{
+		"library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+	}
+	sourceTarget["tags"] = []string{
+		"library/alpine:unrelated",
+	}
+	sourceTarget["userInput"] = "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	sourceTarget["manifestDigest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+	mismatchedContent.Source.Target, err = json.Marshal(sourceTarget)
+	require.NoError(t, err)
+
 	mismatchedIdentitySBOM := sbom
+	mismatchedIdentitySBOM.Content = &mismatchedContent
 	mismatchedIdentitySBOM.Annotations = map[string]string{
 		helpersv1.ImageIDMetadataKey: "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
 	}
