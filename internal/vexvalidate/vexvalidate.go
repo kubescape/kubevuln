@@ -29,11 +29,6 @@ var (
 	// does not identify it as an OpenVEX document.
 	ErrInvalidContext = errors.New("vexvalidate: document has no valid @context")
 
-	// ErrNoStatements is returned when the document has zero statements. A
-	// VEX document that asserts nothing is not useful to anything that
-	// would consume it.
-	ErrNoStatements = errors.New("vexvalidate: document has no statements")
-
 	// ErrInvalidStatement is returned when a statement fails go-vex's own,
 	// stricter Statement.Validate() - an invalid status, or a status paired
 	// with fields that status does not allow (e.g. not_affected with no
@@ -126,9 +121,16 @@ func vulnerabilityIsAnonymous(v vex.Vulnerability) bool {
 }
 
 // Validate parses data as an OpenVEX document and checks it is genuinely
-// real: a valid @context, at least one statement, and every statement
-// passing go-vex's own, stricter Statement.Validate() with at least one
-// product that actually identifies something.
+// real: a valid @context, and every statement passing go-vex's own, stricter
+// Statement.Validate() with at least one product that actually identifies
+// something.
+//
+// A document carrying no statements is valid. kubevuln publishes one for every
+// image that scans clean, and "we scanned this and found nothing" is a real
+// assertion rather than an empty one. Rejecting it here would mean rejecting
+// documents kubescape itself produces, which is exactly what #387 goes on to
+// fetch. A zero-statement document also suppresses nothing, so accepting one
+// costs a consumer nothing.
 //
 // Validate deliberately reuses go-vex's own Statement.Validate() rather than
 // re-implementing a subset of its rules, so this package cannot drift out of
@@ -141,10 +143,6 @@ func Validate(data []byte) error {
 
 	if !hasValidContext(doc.Context) {
 		return ErrInvalidContext
-	}
-
-	if len(doc.Statements) == 0 {
-		return ErrNoStatements
 	}
 
 	for i := range doc.Statements {

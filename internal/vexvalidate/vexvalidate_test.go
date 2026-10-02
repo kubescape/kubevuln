@@ -120,27 +120,48 @@ func TestValidate_LookalikeContext_Rejected(t *testing.T) {
 	}
 }
 
-func TestValidate_NoStatements_Rejected(t *testing.T) {
-	doc := `{"@context": "https://openvex.dev/ns/v0.2.0", "author": "test", "statements": []}`
-	err := Validate([]byte(doc))
-	if !errors.Is(err, ErrNoStatements) {
-		t.Fatalf("expected ErrNoStatements, got: %v", err)
+// A document with no statements is accepted: kubevuln publishes one for every
+// image that scans clean, and those documents are fetched back once external VEX
+// sources are consumed. The three spellings an empty document can take all have
+// to pass, since the shape depends on who serialised it.
+func TestValidate_ZeroStatements_Accepted(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{
+			name: "empty array",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "author": "test", "statements": []}`,
+		},
+		{
+			name: "field absent entirely",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "author": "test"}`,
+		},
+		{
+			name: "explicit null",
+			doc:  `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": null}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := Validate([]byte(tt.doc)); err != nil {
+				t.Fatalf("a zero-statement document must be accepted, got: %v", err)
+			}
+		})
 	}
 }
 
-func TestValidate_MissingStatementsField_Rejected(t *testing.T) {
-	doc := `{"@context": "https://openvex.dev/ns/v0.2.0", "author": "test"}`
-	err := Validate([]byte(doc))
-	if !errors.Is(err, ErrNoStatements) {
-		t.Fatalf("expected ErrNoStatements when the field is absent entirely, got: %v", err)
-	}
-}
+// TestValidate_CleanImageDocument is the case from #923: the document kubevuln
+// publishes for an image that scans clean, exactly as createVEX emits it, has to
+// pass the validator that decides whether a fetched document is trustworthy.
+func TestValidate_CleanImageDocument(t *testing.T) {
+	doc := `{"@context":"https://openvex.dev/ns/v0.2.0","@id":"https://openvex.dev/docs/public/vex-14e85ecc",` +
+		`"author":"kubescape.io","timestamp":"2026-09-29T00:00:00Z","last_updated":"2026-09-29T00:00:00Z",` +
+		`"version":0,"tooling":"kubescape-vulnerability-analyzer","statements":[]}`
 
-func TestValidate_NullStatementsField_Rejected(t *testing.T) {
-	doc := `{"@context": "https://openvex.dev/ns/v0.2.0", "statements": null}`
-	err := Validate([]byte(doc))
-	if !errors.Is(err, ErrNoStatements) {
-		t.Fatalf("expected ErrNoStatements for an explicit null, got: %v", err)
+	if err := Validate([]byte(doc)); err != nil {
+		t.Fatalf("kubevuln must not publish a document its own validator rejects, got: %v", err)
 	}
 }
 
