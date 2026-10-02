@@ -165,8 +165,21 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 	assert.True(t, cryptoIgnored, "VEX-suppressed libcrypto3 finding must move to IgnoredMatches")
 	assert.True(t, sslRemaining, "unrelated libssl3 finding must remain in Matches")
 
+	missingIdentityContent := *sbom.Content
+	var missingSourceMetadata map[string]interface{}
+	require.NoError(t, json.Unmarshal(missingIdentityContent.SyftSource.Metadata, &missingSourceMetadata))
+
+	missingSourceMetadata["repoDigests"] = []string{}
+	missingSourceMetadata["tags"] = []string{}
+
+	missingIdentityContent.SyftSource.Metadata, err = json.Marshal(missingSourceMetadata)
+	require.NoError(t, err)
+
 	missingIdentitySBOM := sbom
-	missingIdentitySBOM.Annotations = nil
+	missingIdentitySBOM.Content = &missingIdentityContent
+	missingIdentitySBOM.Annotations = map[string]string{
+		helpersv1.ImageIDMetadataKey: sbom.Annotations[helpersv1.ImageIDMetadataKey],
+	}
 
 	missingIdentity, err := g.ScanSBOMWithVEX(ctx, missingIdentitySBOM, documents)
 	require.NoError(t, err)
@@ -181,7 +194,7 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 
 	mismatchedContent := *sbom.Content
 	var sourceTarget map[string]interface{}
-	require.NoError(t, json.Unmarshal(mismatchedContent.Source.Target, &sourceTarget))
+	require.NoError(t, json.Unmarshal(mismatchedContent.SyftSource.Metadata, &sourceTarget))
 
 	sourceTarget["repoDigests"] = []string{
 		"library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -192,7 +205,7 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 	sourceTarget["userInput"] = "library/alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	sourceTarget["manifestDigest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
-	mismatchedContent.Source.Target, err = json.Marshal(sourceTarget)
+	mismatchedContent.SyftSource.Metadata, err = json.Marshal(sourceTarget)
 	require.NoError(t, err)
 
 	mismatchedIdentitySBOM := sbom
