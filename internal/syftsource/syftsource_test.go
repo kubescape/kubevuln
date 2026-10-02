@@ -155,6 +155,9 @@ func TestFormatResolvedPlatform(t *testing.T) {
 		{name: "arch known, os unknown", arch: "amd64", want: ""},
 		{name: "os known, arch unknown", os: "linux", want: ""},
 		{name: "variant without arch", variant: "v7", want: ""},
+		{name: "whitespace-only os returns empty", os: "  ", arch: "amd64", want: ""},
+		{name: "whitespace-only arch returns empty", os: "linux", arch: " \t ", want: ""},
+		{name: "fields with surrounding whitespace are trimmed", os: " linux ", arch: " amd64 ", variant: " v8 ", want: "linux/amd64/v8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
