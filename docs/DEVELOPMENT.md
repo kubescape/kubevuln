@@ -24,7 +24,7 @@ This guide covers setting up a development environment, building, testing, and c
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.24+ | Build and run |
+| Go | 1.26+ | Build and run |
 | Git | 2.x+ | Source control |
 | Make | 3.x+ | Build automation |
 | Docker | 20.x+ | Container builds |
@@ -38,15 +38,15 @@ This guide covers setting up a development environment, building, testing, and c
 | golangci-lint | Code linting |
 | dlv | Go debugger |
 
-### Install Go 1.24+
+### Install Go 1.26+
 
 ```bash
 # Download (adjust version as needed)
-wget https://go.dev/dl/go1.24.1.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
 
 # Install
 sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.24.1.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
 
 # Add to PATH (add to ~/.bashrc or ~/.zshrc)
 export PATH=$PATH:/usr/local/go/bin
@@ -55,7 +55,7 @@ export PATH=$PATH:$GOPATH/bin
 
 # Verify
 go version
-# Output: go version go1.24.1 linux/amd64
+# Output: go version go1.26.0 linux/amd64
 ```
 
 ---
