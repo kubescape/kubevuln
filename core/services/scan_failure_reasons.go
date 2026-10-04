@@ -132,6 +132,8 @@ func classifySBOMStatus(status string) string {
 		return scanfailure.ReasonImageTooLarge
 	case helpersv1.Incomplete:
 		return scanfailure.ReasonSBOMIncomplete
+	case helpersv1.UnsupportedSchema:
+		return scanfailure.ReasonImageSchemaUnsupported
 	default:
 		return scanfailure.ReasonSBOMGenerationFailed
 	}
