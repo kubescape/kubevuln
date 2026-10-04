@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gocsaf/csaf/v3/csaf"
+	"github.com/kubescape/kubevuln/internal/vexdoc"
 	"github.com/openvex/go-vex/pkg/vex"
 )
 
@@ -173,5 +175,23 @@ func Validate(data []byte) error {
 		}
 	}
 
+	return nil
+}
+
+
+// ValidateCSAF parses a CSAF 2.0 advisory using the same upstream validator
+// used by kubevuln's CSAF matching support. The input is written to a
+// short-lived, owner-readable file because gocsaf/csaf exposes its validating
+// loader as a file-based API.
+func ValidateCSAF(data []byte) error {
+	path, cleanup, err := vexdoc.WriteToTempFile(data)
+	if err != nil {
+		return fmt.Errorf("vexvalidate: staging CSAF document: %w", err)
+	}
+	defer cleanup()
+
+	if _, err := csaf.LoadAdvisory(path); err != nil {
+		return fmt.Errorf("vexvalidate: invalid CSAF document: %w", err)
+	}
 	return nil
 }

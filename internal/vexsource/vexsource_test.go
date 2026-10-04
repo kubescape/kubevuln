@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/kubescape/kubevuln/internal/safefetch"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"github.com/kubescape/kubevuln/internal/vexvalidate"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +49,13 @@ func TestSourceFetch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, source.URL, document.URL)
 	require.JSONEq(t, validOpenVEX, string(document.Data))
+	require.Equal(t, vexbatch.FormatOpenVEX, document.Format)
+
+	batch, cleanup, err := document.BatchDocument()
+	require.NoError(t, err)
+	defer cleanup()
+	require.Equal(t, vexbatch.FormatOpenVEX, batch.Format)
+	require.NotEmpty(t, batch.Path)
 }
 
 func TestSourceFetch_EmptyURL(t *testing.T) {
@@ -106,4 +115,55 @@ func TestSourceFetch_InvalidVEX(t *testing.T) {
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, vexvalidate.ErrInvalidContext))
+}
+
+
+func TestSourceFetch_CSAF(t *testing.T) {
+	csafDocument, err := os.ReadFile("../csafresolve/testdata/redhat-cve-2024-3094.json")
+	require.NoError(t, err)
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(csafDocument)
+	}))
+	defer server.Close()
+
+	source := Source{URL: server.URL, Format: vexbatch.FormatCSAF}
+	fetcher := &safefetch.Fetcher{Client: server.Client(), MaxBytes: 10 << 20}
+
+	document, err := source.Fetch(context.Background(), fetcher)
+	require.NoError(t, err)
+	require.Equal(t, vexbatch.FormatCSAF, document.Format)
+
+	batch, cleanup, err := document.BatchDocument()
+	require.NoError(t, err)
+	defer cleanup()
+	require.Equal(t, vexbatch.FormatCSAF, batch.Format)
+	require.NotEmpty(t, batch.Path)
+}
+
+func TestSourceFetch_UnsupportedFormat(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(validOpenVEX))
+	}))
+	defer server.Close()
+
+	source := Source{URL: server.URL, Format: vexbatch.Format("xml")}
+	fetcher := &safefetch.Fetcher{Client: server.Client(), MaxBytes: 1 << 20}
+
+	_, err := source.Fetch(context.Background(), fetcher)
+	require.EqualError(t, err, "vexsource: unsupported format \"xml\"")
+}
+
+func TestSourceFetch_InvalidCSAF(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{\"document\":{\"category\":\"not-csaf\"}}"))
+	}))
+	defer server.Close()
+
+	source := Source{URL: server.URL, Format: vexbatch.FormatCSAF}
+	fetcher := &safefetch.Fetcher{Client: server.Client(), MaxBytes: 1 << 20}
+
+	_, err := source.Fetch(context.Background(), fetcher)
+	require.Error(t, err)
 }
