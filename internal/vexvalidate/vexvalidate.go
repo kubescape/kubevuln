@@ -183,15 +183,21 @@ func Validate(data []byte) error {
 // used by kubevuln's CSAF matching support. The input is written to a
 // short-lived, owner-readable file because gocsaf/csaf exposes its validating
 // loader as a file-based API.
-func ValidateCSAF(data []byte) error {
+func ValidateCSAF(data []byte) (err error) {
 	path, cleanup, err := vexdoc.WriteToTempFile(data)
 	if err != nil {
 		return fmt.Errorf("vexvalidate: staging CSAF document: %w", err)
 	}
 	defer cleanup()
 
-	if _, err := csaf.LoadAdvisory(path); err != nil {
-		return fmt.Errorf("vexvalidate: invalid CSAF document: %w", err)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("vexvalidate: invalid CSAF document: upstream validator panicked: %v", recovered)
+		}
+	}()
+
+	if _, loadErr := csaf.LoadAdvisory(path); loadErr != nil {
+		return fmt.Errorf("vexvalidate: invalid CSAF document: %w", loadErr)
 	}
 	return nil
 }
