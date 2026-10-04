@@ -2,10 +2,12 @@ package vexsource
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubevuln/internal/safefetch"
@@ -166,4 +168,54 @@ func TestSourceFetch_InvalidCSAF(t *testing.T) {
 
 	_, err := source.Fetch(context.Background(), fetcher)
 	require.Error(t, err)
+}
+
+
+func TestSourceFetch_MalformedCSAFRevisionHistory(t *testing.T) {
+	csafDocument := malformedCSAFDocument(t, func(document map[string]any) {
+		tracking := document["tracking"].(map[string]any)
+		tracking["revision_history"] = []any{nil}
+	})
+	assertMalformedCSAFRejected(t, csafDocument)
+}
+
+func TestSourceFetch_MalformedCSAFVulnerabilities(t *testing.T) {
+	csafDocument := malformedCSAFDocument(t, func(document map[string]any) {
+		document["vulnerabilities"] = []any{nil}
+	})
+	assertMalformedCSAFRejected(t, csafDocument)
+}
+
+func malformedCSAFDocument(t *testing.T, mutate func(map[string]any)) []byte {
+	data, err := os.ReadFile("../csafresolve/testdata/redhat-cve-2024-3094.json")
+	require.NoError(t, err)
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(data, &envelope))
+
+	document, ok := envelope["document"].(map[string]any)
+	require.True(t, ok)
+	mutate(document)
+
+	data, err = json.Marshal(envelope)
+	require.NoError(t, err)
+	return data
+}
+
+func assertMalformedCSAFRejected(t *testing.T, csafDocument []byte) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(csafDocument)
+	}))
+	defer server.Close()
+
+	source := Source{URL: server.URL, Format: vexbatch.FormatCSAF}
+	fetcher := &safefetch.Fetcher{Client: server.Client(), MaxBytes: 10 << 20}
+
+	var err error
+	require.NotPanics(t, func() {
+		_, err = source.Fetch(context.Background(), fetcher)
+	})
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "invalid CSAF document"))
 }
