@@ -14,6 +14,7 @@
 package vexvalidate
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -184,6 +185,10 @@ func Validate(data []byte) error {
 // short-lived, owner-readable file because gocsaf/csaf exposes its validating
 // loader as a file-based API.
 func ValidateCSAF(data []byte) (err error) {
+	if err := rejectMalformedCSAFArrays(data); err != nil {
+		return err
+	}
+
 	path, cleanup, err := vexdoc.WriteToTempFile(data)
 	if err != nil {
 		return fmt.Errorf("vexvalidate: staging CSAF document: %w", err)
@@ -199,5 +204,34 @@ func ValidateCSAF(data []byte) (err error) {
 	if _, loadErr := csaf.LoadAdvisory(path); loadErr != nil {
 		return fmt.Errorf("vexvalidate: invalid CSAF document: %w", loadErr)
 	}
+	return nil
+}
+
+func rejectMalformedCSAFArrays(data []byte) error {
+	var envelope struct {
+		Document struct {
+			Tracking struct {
+				RevisionHistory []json.RawMessage `json:"revision_history"`
+			} `json:"tracking"`
+			Vulnerabilities []json.RawMessage `json:"vulnerabilities"`
+		} `json:"document"`
+	}
+
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return fmt.Errorf("vexvalidate: invalid CSAF document: parsing JSON: %w", err)
+	}
+
+	for _, entry := range envelope.Document.Tracking.RevisionHistory {
+		if string(entry) == "null" {
+			return errors.New("vexvalidate: invalid CSAF document: tracking.revision_history contains null entry")
+		}
+	}
+
+	for _, entry := range envelope.Document.Vulnerabilities {
+		if string(entry) == "null" {
+			return errors.New("vexvalidate: invalid CSAF document: vulnerabilities contains null entry")
+		}
+	}
+
 	return nil
 }
