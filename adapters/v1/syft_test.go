@@ -33,14 +33,10 @@ import (
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/syftmeta"
 	"github.com/kubescape/kubevuln/internal/syftsource"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func fileContent(path string) []byte {
-	b, _ := os.ReadFile(path)
-	return b
-}
 
 func Test_syftAdapter_Version(t *testing.T) {
 	s := NewSyftAdapter(5*time.Minute, 512*1024*1024, 20*1024*1024, false, nil)
@@ -50,7 +46,7 @@ func Test_syftAdapter_Version(t *testing.T) {
 
 func Test_syftAdapter_transformations(t *testing.T) {
 	// Load from file
-	b := fileContent("testdata/alpine-sbom.json")
+	b := testfixture.Bytes("testdata/alpine-sbom.json")
 
 	// Convert to model.Document
 	var d model.Document

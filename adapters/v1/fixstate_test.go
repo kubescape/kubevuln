@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/google/uuid"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,7 +190,7 @@ func alpineMatch(t *testing.T) v1beta1.Match {
 	t.Helper()
 
 	var doc v1beta1.GrypeDocument
-	require.NoError(t, json.Unmarshal(fileContent("testdata/alpine-cve.format.json"), &doc))
+	require.NoError(t, json.Unmarshal(testfixture.Bytes("testdata/alpine-cve.format.json"), &doc))
 
 	for _, m := range doc.Matches {
 		if m.Vulnerability.ID != "CVE-2024-13176" {

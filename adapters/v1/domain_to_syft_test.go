@@ -2,6 +2,7 @@ package v1
 
 import (
 	"errors"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +32,7 @@ func Test_domainJSONToSyft(t *testing.T) {
 		{
 			name: "valid alpine SBOM",
 			args: args{
-				data: fileContent("testdata/alpine-sbom.json"),
+				data: testfixture.Bytes("testdata/alpine-sbom.json"),
 			},
 			want: want{
 				artifacts:             15,
@@ -45,7 +46,7 @@ func Test_domainJSONToSyft(t *testing.T) {
 		}, {
 			name: "valid nginx SBOM",
 			args: args{
-				data: fileContent("testdata/nginx-sbom.json"),
+				data: testfixture.Bytes("testdata/nginx-sbom.json"),
 			},
 			want: want{
 				artifacts:             109,
@@ -59,7 +60,7 @@ func Test_domainJSONToSyft(t *testing.T) {
 		}, {
 			name: "valid hello-world SBOM",
 			args: args{
-				data: fileContent("testdata/hello-world-sbom.json"),
+				data: testfixture.Bytes("testdata/hello-world-sbom.json"),
 			},
 			want: want{
 				artifacts:             0,
