@@ -249,6 +249,11 @@ func TestClassifySBOMStatus(t *testing.T) {
 			expected: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
+			name:     "UnsupportedSchema status",
+			status:   helpersv1.UnsupportedSchema,
+			expected: scanfailure.ReasonImageSchemaUnsupported,
+		},
+		{
 			name:     "unknown status falls back to generic",
 			status:   "SomeOtherStatus",
 			expected: scanfailure.ReasonSBOMGenerationFailed,
