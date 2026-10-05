@@ -213,8 +213,8 @@ func rejectMalformedCSAFArrays(data []byte) error {
 			Tracking struct {
 				RevisionHistory []json.RawMessage `json:"revision_history"`
 			} `json:"tracking"`
-			Vulnerabilities []json.RawMessage `json:"vulnerabilities"`
 		} `json:"document"`
+		Vulnerabilities []json.RawMessage `json:"vulnerabilities"`
 	}
 
 	if err := json.Unmarshal(data, &envelope); err != nil {
