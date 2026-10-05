@@ -969,7 +969,7 @@ func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domai
 func credentialsLog(credentials []domain.RegistryCredentials) string {
 	var sb strings.Builder
 	for _, rc := range credentials {
-		sb.WriteString(fmt.Sprintf("[Authority: %s, Username: %s, Password: *** (%d), Token: *** (%d)]", rc.Authority, rc.Username, len(rc.Password), len(rc.Token)))
+		sb.WriteString(fmt.Sprintf("[Authority: %s, Username: %s, Password: *** (%d), Token: *** (%d), IdentityToken: *** (%d)]", rc.Authority, rc.Username, len(rc.Password), len(rc.Token), len(rc.IdentityToken)))
 	}
 
 	return sb.String()
@@ -986,6 +986,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 		if cred.RegistryToken != "" {
 			rc.Token = cred.RegistryToken
 		}
+		rc.IdentityToken = cred.IdentityToken
 		username, password := cred.Username, cred.Password
 		// Consulted whenever the pair is incomplete, not only when both halves are
 		// missing: an entry carrying a username but no password is still an entry whose

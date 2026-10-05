@@ -116,19 +116,20 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	}
 
 	// Build registry credentials
-	credentials := make([]image.RegistryCredentials, len(req.Credentials))
+	credentials := make([]domain.RegistryCredentials, len(req.Credentials))
 	for i, c := range req.Credentials {
-		credentials[i] = image.RegistryCredentials{
-			Authority: c.Authority,
-			Username:  c.Username,
-			Password:  c.Password,
-			Token:     c.Token,
+		credentials[i] = domain.RegistryCredentials{
+			Authority:     c.Authority,
+			Username:      c.Username,
+			Password:      c.Password,
+			Token:         c.Token,
+			IdentityToken: c.IdentityToken,
 		}
 	}
 	registryOptions := image.RegistryOptions{
 		InsecureSkipTLSVerify: req.InsecureSkipTlsVerify,
 		InsecureUseHTTP:       req.InsecureUseHttp,
-		Credentials:           credentials,
+		Credentials:           registryauth.Credentials(credentials),
 	}
 
 	// timeout bounds both the pull below and SBOM generation further down, as two independent
