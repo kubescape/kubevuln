@@ -227,7 +227,7 @@ func rejectMalformedCSAFArrays(data []byte) error {
 		}
 	}
 
-	for _, entry := range envelope.Document.Vulnerabilities {
+	for _, entry := range envelope.Vulnerabilities {
 		if string(entry) == "null" {
 			return errors.New("vexvalidate: invalid CSAF document: vulnerabilities contains null entry")
 		}
