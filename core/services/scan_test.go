@@ -1659,6 +1659,54 @@ func Test_registryCredentialsFromCredentialsList_incompletePair(t *testing.T) {
 	}
 }
 
+func Test_registryCredentialsFromCredentialsList_identityToken(t *testing.T) {
+	tests := []struct {
+		name              string
+		cred              registry.AuthConfig
+		wantToken         string
+		wantIdentityToken string
+	}{
+		{
+			name: "identityToken is kept separate and not used as a bearer token",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				Username:      "00000000-0000-0000-0000-000000000000",
+				IdentityToken: "refresh-token",
+			},
+			wantToken:         "",
+			wantIdentityToken: "refresh-token",
+		},
+		{
+			name: "registryToken and identityToken are both carried",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				RegistryToken: "access-token",
+				IdentityToken: "refresh-token",
+			},
+			wantToken:         "access-token",
+			wantIdentityToken: "refresh-token",
+		},
+		{
+			name: "no identityToken leaves the field empty",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				Username:      "user",
+				Password:      "pass",
+			},
+			wantToken:         "",
+			wantIdentityToken: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList([]registry.AuthConfig{tt.cred})
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantToken, got[0].Token)
+			assert.Equal(t, tt.wantIdentityToken, got[0].IdentityToken)
+		})
+	}
+}
+
 func Test_filterSBOM(t *testing.T) {
 	nginxSBOM := domain.SBOM{
 		Name: "nginx-sbom",
