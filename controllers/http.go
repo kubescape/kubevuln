@@ -517,6 +517,7 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 	ctx, err := h.scanService.ValidateScanCVE(ctx, newScan)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
+			helpers.String("wlid", newScan.Wlid),
 			helpers.String("imageSlug", newScan.ImageSlug),
 			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
 			helpers.String("imageHash", newScan.ImageHash))
