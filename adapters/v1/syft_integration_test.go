@@ -11,6 +11,7 @@ import (
 	"github.com/kinbiko/jsonassert"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,7 +195,7 @@ func Test_syftAdapter_CreateSBOM(t *testing.T) {
 			if tt.format != "" {
 				//os.WriteFile(tt.format, content, 0644)
 				ja := jsonassert.New(t)
-				ja.Assert(string(content), string(fileContent(tt.format)))
+				ja.Assert(string(content), string(testfixture.Bytes(tt.format)))
 			}
 		})
 	}

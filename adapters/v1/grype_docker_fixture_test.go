@@ -14,6 +14,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -33,12 +34,6 @@ func Test_grypeAdapter_DBVersion(t *testing.T) {
 	assert.Equal(t, "8947f666e75c337773be86e0c6f7f4739c7549184aa994ae6236d5dbe666523b", version)
 }
 
-func fileToSBOM(path string) *v1beta1.SyftDocument {
-	sbom := v1beta1.SyftDocument{}
-	_ = json.Unmarshal(fileContent(path), &sbom)
-	return &sbom
-}
-
 func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -51,7 +46,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			sbom: domain.SBOM{
 				Name:               "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/alpine-sbom.json"),
+				Content:            testfixture.Load[v1beta1.SyftDocument]("testdata/alpine-sbom.json"),
 			},
 			format: "testdata/alpine-cve.format.json",
 		},
@@ -60,7 +55,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			sbom: domain.SBOM{
 				Name:               "927669769708707a6ec583b2f4f93eeb4d5b59e27d793a6e99134e505dac6c3c",
 				SBOMCreatorVersion: "TODO",
-				Content:            fileToSBOM("testdata/nginx-filtered-sbom.json"),
+				Content:            testfixture.Load[v1beta1.SyftDocument]("testdata/nginx-filtered-sbom.json"),
 			},
 			format: "testdata/nginx-filtered-cve.format.json",
 		},
@@ -87,7 +82,7 @@ func Test_grypeAdapter_ScanSBOM(t *testing.T) {
 			//os.WriteFile(tt.format, content, 0644)
 			require.NoError(t, err)
 			ja := jsonassert.New(t)
-			ja.Assert(string(content), string(fileContent(tt.format)))
+			ja.Assert(string(content), string(testfixture.Bytes(tt.format)))
 			// observability: adapter runs in CVEMatchingOn here (non-trusted scan),
 			// so the mode is annotated but the vendor-trusted flag is not.
 			assert.Equal(t, string(config.CVEMatchingOn), got.Annotations[CVEMatchingModeMetadataKey])
@@ -117,7 +112,7 @@ func Test_grypeAdapter_ScanSBOMWithVEX(t *testing.T) {
 			helpersv1.ImageIDMetadataKey: "library/alpine@sha256:e2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
 		},
 		SBOMCreatorVersion: "TODO",
-		Content:            fileToSBOM("testdata/alpine-sbom.json"),
+		Content:            testfixture.Load[v1beta1.SyftDocument]("testdata/alpine-sbom.json"),
 	}
 
 	baseline, err := g.ScanSBOM(ctx, sbom)

@@ -3,12 +3,10 @@ package services
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -29,6 +27,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -957,23 +956,6 @@ func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 	})
 }
 
-func fileContent(path string) []byte {
-	b, _ := os.ReadFile(path)
-	return b
-}
-
-func fileToSyftDocument(path string) *v1beta1.SyftDocument {
-	sbom := v1beta1.SyftDocument{}
-	_ = json.Unmarshal(fileContent(path), &sbom)
-	return &sbom
-}
-
-func fileToContainerProfile(path string) v1beta1.ContainerProfile {
-	ap := v1beta1.ContainerProfile{}
-	_ = json.Unmarshal(fileContent(path), &ap)
-	return ap
-}
-
 func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1685,7 +1667,7 @@ func Test_filterSBOM(t *testing.T) {
 			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
 			helpersv1.StatusMetadataKey:   helpersv1.Learning,
 		},
-		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+		Content: testfixture.Load[v1beta1.SyftDocument]("../../adapters/v1/testdata/nginx-sbom.json"),
 	}
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
@@ -1832,7 +1814,7 @@ func BenchmarkFilterSBOM(b *testing.B) {
 			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
 			helpersv1.StatusMetadataKey:   helpersv1.Learning,
 		},
-		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+		Content: testfixture.Load[v1beta1.SyftDocument]("../../adapters/v1/testdata/nginx-sbom.json"),
 	}
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",

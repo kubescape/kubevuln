@@ -1378,5 +1378,3 @@ func TestDomainToArmo_RelatedVulnerabilities_FirstNonEmptyDescription(t *testing
 	require.Len(t, results, 1)
 	assert.Equal(t, "valid fallback description from second related vulnerability", results[0].Vulnerability.Description)
 }
-
-
