@@ -172,7 +172,8 @@ func TestSourceFetch_InvalidCSAF(t *testing.T) {
 
 
 func TestSourceFetch_MalformedCSAFRevisionHistory(t *testing.T) {
-	csafDocument := malformedCSAFDocument(t, func(document map[string]any) {
+	csafDocument := malformedCSAFDocument(t, func(envelope map[string]any) {
+		document := envelope["document"].(map[string]any)
 		tracking := document["tracking"].(map[string]any)
 		tracking["revision_history"] = []any{nil}
 	})
@@ -180,8 +181,8 @@ func TestSourceFetch_MalformedCSAFRevisionHistory(t *testing.T) {
 }
 
 func TestSourceFetch_MalformedCSAFVulnerabilities(t *testing.T) {
-	csafDocument := malformedCSAFDocument(t, func(document map[string]any) {
-		document["vulnerabilities"] = []any{nil}
+	csafDocument := malformedCSAFDocument(t, func(envelope map[string]any) {
+		envelope["vulnerabilities"] = []any{nil}
 	})
 	assertMalformedCSAFRejected(t, csafDocument)
 }
@@ -193,9 +194,7 @@ func malformedCSAFDocument(t *testing.T, mutate func(map[string]any)) []byte {
 	var envelope map[string]any
 	require.NoError(t, json.Unmarshal(data, &envelope))
 
-	document, ok := envelope["document"].(map[string]any)
-	require.True(t, ok)
-	mutate(document)
+	mutate(envelope)
 
 	data, err = json.Marshal(envelope)
 	require.NoError(t, err)
