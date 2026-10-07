@@ -41,6 +41,30 @@ func TestIsGCPRegistry(t *testing.T) {
 	}
 }
 
+func TestIsACRRegistry(t *testing.T) {
+	tests := []struct {
+		imageID string
+		want    bool
+	}{
+		{"myregistry.azurecr.io/foo/bar", true},
+		{"MYREGISTRY.AZURECR.IO/foo/bar", true},
+		{"azurecr.io/foo/bar", false},
+		{"myregistry.azurecr.cn/foo/bar", true},
+		{"myregistry.azurecr.us/foo/bar", true},
+		{"myregistry.azurecr.de/foo/bar", true},
+		{"quay.io/myregistry.azurecr.io/bar", false},
+		{"evilazurecr.io/foo/bar", false},
+		{"index.docker.io/library/alpine", false},
+		{"gcr.io/foo/bar", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.imageID, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsACRRegistry(tt.imageID))
+		})
+	}
+}
+
 func TestECRMatchesAndRegion(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -233,6 +257,7 @@ func TestFor(t *testing.T) {
 	}{
 		{name: "gcp", imageID: "gcr.io/foo/bar", wantFound: true, wantStrategy: metrics.FallbackStrategyGCPADC},
 		{name: "ecr", imageID: "123456789012.dkr.ecr.us-east-1.amazonaws.com/app:v1", wantFound: true, wantStrategy: metrics.FallbackStrategyECR},
+		{name: "acr", imageID: "myregistry.azurecr.io/app:v1", wantFound: true, wantStrategy: metrics.FallbackStrategyACR},
 		{name: "neither", imageID: "index.docker.io/library/alpine", wantFound: false},
 	}
 	for _, tt := range tests {
@@ -267,5 +292,49 @@ func TestGCPCredentialsFailurePropagates(t *testing.T) {
 	GCPCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
 
 	_, err := GCP{}.Credentials(context.Background(), "gcr.io/foo/bar")
+	assert.ErrorIs(t, err, want)
+}
+
+// ACR credentials are cached per registry host: Workload Identity federation can map different
+// identities or tenant contexts across separate registries, so one host's cached token
+// must never be handed out for another host.
+func TestACRCredentialsIsolatesCacheAcrossHosts(t *testing.T) {
+	orig := ACRCredsFn
+	defer func() { ACRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	var calls int32
+	ACRCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+		n := atomic.AddInt32(&calls, 1)
+		return &image.RegistryCredentials{Username: "00000000-0000-0000-0000-000000000000", Password: string(rune('a' + n))}, time.Now().Add(time.Hour), nil
+	}
+
+	hostA := "registrya.azurecr.io/foo/bar:v1"
+	hostB := "registryb.azurecr.io/foo/bar:v1"
+
+	credsA, err := ACR{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	credsB, err := ACR{}.Credentials(context.Background(), hostB)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(2), calls, "different ACR hosts must each fetch their own credentials")
+	assert.NotEqual(t, credsA.Password, credsB.Password)
+
+	// Second fetch should be served from cache
+	credsA2, err := ACR{}.Credentials(context.Background(), hostA)
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), calls, "repeat fetch for already-cached host must not refetch")
+	assert.Same(t, credsA, credsA2)
+}
+
+func TestACRCredentialsFailurePropagates(t *testing.T) {
+	orig := ACRCredsFn
+	defer func() { ACRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	want := errors.New("ambient Azure credentials unavailable")
+	ACRCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
+
+	_, err := ACR{}.Credentials(context.Background(), "myreg.azurecr.io/foo/bar")
 	assert.ErrorIs(t, err, want)
 }

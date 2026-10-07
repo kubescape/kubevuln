@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
@@ -52,7 +54,7 @@ type Provider interface {
 
 // Providers is the ordered list of fallbacks consulted on a 401 Unauthorized, before
 // falling back to anonymous access.
-var Providers = []Provider{GCP{}, ECR{}}
+var Providers = []Provider{GCP{}, ECR{}, ACR{}}
 
 // For returns the first provider matching imageID, if any.
 func For(imageID string) (Provider, bool) {
@@ -199,10 +201,63 @@ func credentialsFromAuthorizationToken(out *ecr.GetAuthorizationTokenOutput) (*i
 // live AWS environment.
 var ECRCredsFn = ecrCredentials
 
-// ResetCaches clears both providers' cached credentials. Tests that override
-// GCPCredsFn/ECRCredsFn need this so the next Credentials() call actually reaches the
+// ACR resolves credentials for Azure Container Registry hosts via the ambient Azure
+// credential chain (DefaultAzureCredential: Workload Identity, Managed Identity, Azure CLI, env vars).
+type ACR struct{}
+
+func (ACR) Matches(imageID string) bool { return IsACRRegistry(imageID) }
+
+func (ACR) Strategy() string { return metrics.FallbackStrategyACR }
+
+// acrCache is keyed by registry host: Workload Identity federation can map different
+// identities or tenant contexts across separate registries, so keying by host keeps each
+// registry's credentials isolated.
+var acrCache = newCredentialCache(metrics.FallbackStrategyACR)
+
+func (ACR) Credentials(ctx context.Context, imageID string) (*image.RegistryCredentials, error) {
+	return acrCache.get(ctx, host(imageID), ACRCredsFn)
+}
+
+// IsACRRegistry reports whether imageID is hosted on Azure Container Registry.
+// Handles standard public cloud (.azurecr.io) as well as sovereign Azure clouds
+// (.azurecr.cn for China, .azurecr.us for US Gov, and .azurecr.de for Germany).
+func IsACRRegistry(imageID string) bool {
+	h := host(imageID)
+	return strings.HasSuffix(h, ".azurecr.io") ||
+		strings.HasSuffix(h, ".azurecr.cn") ||
+		strings.HasSuffix(h, ".azurecr.us") ||
+		strings.HasSuffix(h, ".azurecr.de")
+}
+
+func acrCredentials(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: []string{"https://containerregistry.azure.net/.default"},
+	})
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	// ACR accepts an Entra ID (AAD) access token using 00000000-0000-0000-0000-000000000000
+	// as username and the OAuth access token as password.
+	return &image.RegistryCredentials{
+		Username: "00000000-0000-0000-0000-000000000000",
+		Password: token.Token,
+	}, token.ExpiresOn, nil
+}
+
+// ACRCredsFn is an indirection over acrCredentials so callers can be unit-tested without a
+// live Azure environment.
+var ACRCredsFn credentialFetch = acrCredentials
+
+// ResetCaches clears all providers' cached credentials. Tests that override
+// GCPCredsFn/ECRCredsFn/ACRCredsFn need this so the next Credentials() call actually reaches the
 // override instead of returning a value an earlier test already cached.
 func ResetCaches() {
 	gcpCache.reset()
 	ecrCache.reset()
+	acrCache.reset()
 }
+
