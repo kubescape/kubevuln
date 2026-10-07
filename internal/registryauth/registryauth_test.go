@@ -3,11 +3,18 @@ package registryauth
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
@@ -295,6 +302,311 @@ func TestGCPCredentialsFailurePropagates(t *testing.T) {
 	assert.ErrorIs(t, err, want)
 }
 
+func TestACRCloudConfig(t *testing.T) {
+	tests := []struct {
+		name          string
+		host          string
+		wantScope     string
+		wantAuthority string
+	}{
+		{
+			name:          "public commercial cloud",
+			host:          "myregistry.azurecr.io",
+			wantScope:     "https://containerregistry.azure.net/.default",
+			wantAuthority: cloud.AzurePublic.ActiveDirectoryAuthorityHost,
+		},
+		{
+			name:          "china cloud",
+			host:          "myregistry.azurecr.cn",
+			wantScope:     "https://containerregistry.azure.cn/.default",
+			wantAuthority: cloud.AzureChina.ActiveDirectoryAuthorityHost,
+		},
+		{
+			name:          "us government cloud",
+			host:          "myregistry.azurecr.us",
+			wantScope:     "https://containerregistry.azure.us/.default",
+			wantAuthority: cloud.AzureGovernment.ActiveDirectoryAuthorityHost,
+		},
+		{
+			name:          "germany legacy cloud",
+			host:          "myregistry.azurecr.de",
+			wantScope:     "https://containerregistry.azure.de/.default",
+			wantAuthority: "https://login.microsoftonline.de/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, scope := acrCloudConfig(tt.host)
+			assert.Equal(t, tt.wantScope, scope)
+			assert.Equal(t, tt.wantAuthority, opts.Cloud.ActiveDirectoryAuthorityHost)
+		})
+	}
+}
+
+func testJWTWithExpiry(exp time.Time) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"none"}`))
+	claims, _ := json.Marshal(map[string]int64{"exp": exp.Unix()})
+	payload := base64.RawURLEncoding.EncodeToString(claims)
+	return fmt.Sprintf("%s.%s.signature", header, payload)
+}
+
+func TestACRExchange_Successful(t *testing.T) {
+	expectedEntraToken := "entra-access-token-123"
+	expectedRefreshToken := testJWTWithExpiry(time.Now().Add(2 * time.Hour))
+
+	var receivedMethod, receivedContentType, receivedGrantType, receivedService, receivedAccessToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth2/exchange" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		receivedMethod = r.Method
+		receivedContentType = r.Header.Get("Content-Type")
+		_ = r.ParseForm()
+		receivedGrantType = r.PostForm.Get("grant_type")
+		receivedService = r.PostForm.Get("service")
+		receivedAccessToken = r.PostForm.Get("access_token")
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"refresh_token": expectedRefreshToken})
+	}))
+	defer server.Close()
+
+	serverHost := strings.TrimPrefix(server.URL, "http://")
+
+	origHTTP := acrHTTPClient
+	origTokenFn := ACRTokenFn
+	defer func() {
+		acrHTTPClient = origHTTP
+		ACRTokenFn = origTokenFn
+		ResetCaches()
+	}()
+	ResetCaches()
+
+	acrHTTPClient = server.Client()
+	ACRTokenFn = func(_ context.Context, _ string) (string, time.Time, error) {
+		return expectedEntraToken, time.Now().Add(time.Hour), nil
+	}
+
+	creds, expiry, err := acrCredentials(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodPost, receivedMethod)
+	assert.Equal(t, "application/x-www-form-urlencoded", receivedContentType)
+	assert.Equal(t, "access_token", receivedGrantType)
+	assert.Equal(t, serverHost, receivedService)
+	assert.Equal(t, expectedEntraToken, receivedAccessToken)
+
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", creds.Username)
+	assert.Equal(t, expectedRefreshToken, creds.Password)
+	assert.False(t, expiry.IsZero())
+}
+
+// ACR's protocol contract requires exchanging the Entra ID access token at /oauth2/exchange
+// for an ACR refresh token and using that as the password with the all-zero username.
+// Sending the raw Entra token directly as the basic-auth password must fail against the registry's
+// token endpoint, while the exchanged refresh token must succeed.
+func TestACRExchange_RejectionOfUnexchangedToken(t *testing.T) {
+	rawEntraToken := "raw-entra-token-abc"
+	exchangedRefreshToken := testJWTWithExpiry(time.Now().Add(time.Hour))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth2/exchange":
+			_ = r.ParseForm()
+			if r.PostForm.Get("access_token") == rawEntraToken {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"refresh_token": exchangedRefreshToken})
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/oauth2/token":
+			user, pass, ok := r.BasicAuth()
+			if ok && user == "00000000-0000-0000-0000-000000000000" && pass == exchangedRefreshToken {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "registry-pull-token"})
+				return
+			}
+			w.Header().Set("Www-Authenticate", `Bearer realm="fake",service="fake"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	// 1. Verify unexchanged Entra token is rejected by the registry's token endpoint
+	reqUnexchanged, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/oauth2/token", nil)
+	reqUnexchanged.SetBasicAuth("00000000-0000-0000-0000-000000000000", rawEntraToken)
+	resp1, err := server.Client().Do(reqUnexchanged)
+	require.NoError(t, err)
+	defer resp1.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp1.StatusCode, "unexchanged Entra access token must be rejected as basic password")
+
+	// 2. Perform the exchange and verify the exchanged refresh token is accepted
+	origHTTP := acrHTTPClient
+	defer func() { acrHTTPClient = origHTTP }()
+	acrHTTPClient = server.Client()
+
+	refreshToken, _, err := exchangeACRRefreshToken(context.Background(), server.URL, rawEntraToken)
+	require.NoError(t, err)
+	assert.Equal(t, exchangedRefreshToken, refreshToken)
+
+	reqExchanged, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/oauth2/token", nil)
+	reqExchanged.SetBasicAuth("00000000-0000-0000-0000-000000000000", refreshToken)
+	resp2, err := server.Client().Do(reqExchanged)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode, "exchanged ACR refresh token must authenticate successfully")
+}
+
+func TestACRExchange_FailurePropagates(t *testing.T) {
+	tests := []struct {
+		name       string
+		handler    http.HandlerFunc
+		wantErrMsg string
+	}{
+		{
+			name: "http 401 unauthorized",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("invalid access_token"))
+			},
+			wantErrMsg: "ACR exchange returned HTTP 401",
+		},
+		{
+			name: "http 500 internal server error",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("service unavailable"))
+			},
+			wantErrMsg: "ACR exchange returned HTTP 500",
+		},
+		{
+			name: "malformed json response",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte("{invalid-json"))
+			},
+			wantErrMsg: "decoding ACR exchange response",
+		},
+		{
+			name: "empty refresh token in response",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"refresh_token": ""})
+			},
+			wantErrMsg: "empty refresh_token",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.handler)
+			defer server.Close()
+
+			origHTTP := acrHTTPClient
+			defer func() { acrHTTPClient = origHTTP }()
+			acrHTTPClient = server.Client()
+
+			_, _, err := exchangeACRRefreshToken(context.Background(), server.URL, "dummy-token")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErrMsg)
+		})
+	}
+}
+
+func TestACRExchange_TokenExpiryBounding(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+
+	t.Run("refresh token expiry earlier than entra expiry", func(t *testing.T) {
+		entraExp := now.Add(2 * time.Hour)
+		refreshExp := now.Add(30 * time.Minute)
+
+		origTokenFn := ACRTokenFn
+		origExchangeFn := ACRExchangeFn
+		defer func() {
+			ACRTokenFn = origTokenFn
+			ACRExchangeFn = origExchangeFn
+		}()
+
+		ACRTokenFn = func(_ context.Context, _ string) (string, time.Time, error) {
+			return "token", entraExp, nil
+		}
+		ACRExchangeFn = func(_ context.Context, _, _ string) (string, time.Time, error) {
+			return "refresh", refreshExp, nil
+		}
+
+		_, expiry, err := acrCredentials(context.Background(), "myreg.azurecr.io")
+		require.NoError(t, err)
+		assert.Equal(t, refreshExp, expiry)
+	})
+
+	t.Run("entra expiry earlier than refresh token expiry", func(t *testing.T) {
+		entraExp := now.Add(20 * time.Minute)
+		refreshExp := now.Add(2 * time.Hour)
+
+		origTokenFn := ACRTokenFn
+		origExchangeFn := ACRExchangeFn
+		defer func() {
+			ACRTokenFn = origTokenFn
+			ACRExchangeFn = origExchangeFn
+		}()
+
+		ACRTokenFn = func(_ context.Context, _ string) (string, time.Time, error) {
+			return "token", entraExp, nil
+		}
+		ACRExchangeFn = func(_ context.Context, _, _ string) (string, time.Time, error) {
+			return "refresh", refreshExp, nil
+		}
+
+		_, expiry, err := acrCredentials(context.Background(), "myreg.azurecr.io")
+		require.NoError(t, err)
+		assert.Equal(t, entraExp, expiry)
+	})
+}
+
+// Concurrent scans against the same ACR host must collapse into a single fetch,
+// preventing rate limiting on Azure Entra ID and /oauth2/exchange under load.
+func TestACRCredentials_ConcurrentMissesCollapseToOneFetch(t *testing.T) {
+	orig := ACRCredsFn
+	defer func() { ACRCredsFn = orig; ResetCaches() }()
+	ResetCaches()
+
+	const n = 20
+	var calls, joined int32
+	allJoined := make(chan struct{})
+
+	// onMiss barrier guarantees all n callers have reached the miss path before the fetch completes
+	acrCache.onMiss = func() {
+		if atomic.AddInt32(&joined, 1) == n {
+			close(allJoined)
+		}
+	}
+
+	ACRCredsFn = func(ctx context.Context, host string) (*image.RegistryCredentials, time.Time, error) {
+		atomic.AddInt32(&calls, 1)
+		<-allJoined
+		return &image.RegistryCredentials{Username: "00000000-0000-0000-0000-000000000000", Password: "shared-token"}, time.Now().Add(time.Hour), nil
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	results := make([]*image.RegistryCredentials, n)
+	for i := 0; i < n; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			creds, err := ACR{}.Credentials(context.Background(), "concurrent.azurecr.io/app:v1")
+			require.NoError(t, err)
+			results[idx] = creds
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent cache misses must collapse into exactly one upstream fetch")
+	for i := 0; i < n; i++ {
+		assert.Equal(t, "shared-token", results[i].Password)
+	}
+}
+
 // ACR credentials are cached per registry host: Workload Identity federation can map different
 // identities or tenant contexts across separate registries, so one host's cached token
 // must never be handed out for another host.
@@ -304,9 +616,9 @@ func TestACRCredentialsIsolatesCacheAcrossHosts(t *testing.T) {
 	ResetCaches()
 
 	var calls int32
-	ACRCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) {
+	ACRCredsFn = func(_ context.Context, host string) (*image.RegistryCredentials, time.Time, error) {
 		n := atomic.AddInt32(&calls, 1)
-		return &image.RegistryCredentials{Username: "00000000-0000-0000-0000-000000000000", Password: string(rune('a' + n))}, time.Now().Add(time.Hour), nil
+		return &image.RegistryCredentials{Username: "00000000-0000-0000-0000-000000000000", Password: fmt.Sprintf("%s-%d", host, n)}, time.Now().Add(time.Hour), nil
 	}
 
 	hostA := "registrya.azurecr.io/foo/bar:v1"
@@ -333,7 +645,7 @@ func TestACRCredentialsFailurePropagates(t *testing.T) {
 	ResetCaches()
 
 	want := errors.New("ambient Azure credentials unavailable")
-	ACRCredsFn = func(context.Context) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
+	ACRCredsFn = func(context.Context, string) (*image.RegistryCredentials, time.Time, error) { return nil, time.Time{}, want }
 
 	_, err := ACR{}.Credentials(context.Background(), "myreg.azurecr.io/foo/bar")
 	assert.ErrorIs(t, err, want)
