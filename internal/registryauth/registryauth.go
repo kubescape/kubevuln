@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -242,32 +243,60 @@ func IsACRRegistry(imageID string) bool {
 		strings.HasSuffix(h, ".azurecr.de")
 }
 
-// acrCloudConfig returns the Azure cloud configuration (authority) and token scope
-// matching the registry's sovereign or public cloud domain.
-func acrCloudConfig(h string) (azcore.ClientOptions, string) {
+// acrCloudConfig returns the Azure cloud configuration (authority), token scope,
+// and cloud identifier matching the registry's sovereign or public cloud domain.
+func acrCloudConfig(h string) (azcore.ClientOptions, string, string) {
 	lower := strings.ToLower(h)
 	switch {
 	case strings.HasSuffix(lower, ".azurecr.cn"):
-		return azcore.ClientOptions{Cloud: cloud.AzureChina}, "https://containerregistry.azure.cn/.default"
+		return azcore.ClientOptions{Cloud: cloud.AzureChina}, "https://containerregistry.azure.cn/.default", "china"
 	case strings.HasSuffix(lower, ".azurecr.us"):
-		return azcore.ClientOptions{Cloud: cloud.AzureGovernment}, "https://containerregistry.azure.us/.default"
+		return azcore.ClientOptions{Cloud: cloud.AzureGovernment}, "https://containerregistry.azure.us/.default", "usgov"
 	case strings.HasSuffix(lower, ".azurecr.de"):
 		return azcore.ClientOptions{
 			Cloud: cloud.Configuration{
 				ActiveDirectoryAuthorityHost: "https://login.microsoftonline.de/",
 			},
-		}, "https://containerregistry.azure.de/.default"
+		}, "https://containerregistry.azure.de/.default", "germany"
 	default:
-		return azcore.ClientOptions{Cloud: cloud.AzurePublic}, "https://containerregistry.azure.net/.default"
+		return azcore.ClientOptions{Cloud: cloud.AzurePublic}, "https://containerregistry.azure.net/.default", "public"
 	}
+}
+
+var (
+	azureCredsMu sync.RWMutex
+	azureCreds   = make(map[string]*azidentity.DefaultAzureCredential)
+)
+
+// getOrCreateAzureCredential caches and reuses DefaultAzureCredential instances per cloud.
+func getOrCreateAzureCredential(opts azcore.ClientOptions, cloudKey string) (*azidentity.DefaultAzureCredential, error) {
+	azureCredsMu.RLock()
+	cred, ok := azureCreds[cloudKey]
+	azureCredsMu.RUnlock()
+	if ok {
+		return cred, nil
+	}
+
+	azureCredsMu.Lock()
+	defer azureCredsMu.Unlock()
+	if cred, ok := azureCreds[cloudKey]; ok {
+		return cred, nil
+	}
+
+	cred, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+		ClientOptions: opts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	azureCreds[cloudKey] = cred
+	return cred, nil
 }
 
 // defaultACRTokenFetch retrieves an ambient Entra ID access token configured for the target ACR cloud.
 func defaultACRTokenFetch(ctx context.Context, host string) (string, time.Time, error) {
-	clientOpts, scope := acrCloudConfig(host)
-	cred, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
-		ClientOptions: clientOpts,
-	})
+	clientOpts, scope, cloudKey := acrCloudConfig(host)
+	cred, err := getOrCreateAzureCredential(clientOpts, cloudKey)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -283,7 +312,12 @@ func defaultACRTokenFetch(ctx context.Context, host string) (string, time.Time, 
 // ACRTokenFn fetches an Entra ID access token for the given ACR host. Overridable in tests.
 var ACRTokenFn = defaultACRTokenFetch
 
-var acrHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var acrHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 // exchangeACRRefreshToken exchanges an Entra ID access token at the ACR registry's
 // /oauth2/exchange endpoint for an ACR refresh token, per Azure's AAD OAuth specification:
@@ -401,4 +435,7 @@ func ResetCaches() {
 	gcpCache.reset()
 	ecrCache.reset()
 	acrCache.reset()
+	azureCredsMu.Lock()
+	azureCreds = make(map[string]*azidentity.DefaultAzureCredential)
+	azureCredsMu.Unlock()
 }

@@ -336,7 +336,7 @@ func TestACRCloudConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts, scope := acrCloudConfig(tt.host)
+			opts, scope, _ := acrCloudConfig(tt.host)
 			assert.Equal(t, tt.wantScope, scope)
 			assert.Equal(t, tt.wantAuthority, opts.Cloud.ActiveDirectoryAuthorityHost)
 		})
@@ -457,6 +457,17 @@ func TestACRExchange_RejectionOfUnexchangedToken(t *testing.T) {
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusOK, resp2.StatusCode, "exchanged ACR refresh token must authenticate successfully")
+}
+
+func TestACRExchange_RedirectsNotFollowed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.com/leak", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	_, _, err := exchangeACRRefreshToken(context.Background(), server.URL, "sensitive-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ACR exchange returned HTTP 307")
 }
 
 func TestACRExchange_FailurePropagates(t *testing.T) {
