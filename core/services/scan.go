@@ -235,6 +235,12 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	var lastFailure *domain.ScanError
 
 	for _, scan := range scans {
+		if scan.HostNodeName != "" {
+			if err := s.scanHostCP(mainCtx, workload, scan); err != nil {
+				return err
+			}
+			continue
+		}
 		imageTagNormalized := tools.NormalizeReference(scan.ImageTag)
 		slug, err := names.ImageInfoToSlug(imageTagNormalized, scan.ImageID)
 		if err != nil {

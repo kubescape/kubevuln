@@ -60,17 +60,7 @@ func TestGetContainerRelevancyScans_DoesNotMutateStoredProfile(t *testing.T) {
 	assert.Equal(t, map[string]string{"foo": "bar"}, stored.Labels)
 }
 
-// TestGetContainerRelevancyScans_HostProfileSkippedCleanly covers
-// kubescape/node-agent's "host" pseudo-workload: a real ContainerProfile
-// (Completed/Learning status, completion=Full, a real WLID/InstanceID) that
-// nonetheless has no image identity, since it isn't backed by a container
-// image at all. Before this fix, ScanCP's slug computation
-// (names.ImageInfoToSlug("", "")) failed for exactly this profile, logging a
-// "service error - ScanCP" for every node running host monitoring. This must
-// resolve as "nothing to scan" (empty scans, no error), not a scan failure --
-// ScanCP only reports an error when at least one scan entry failed, so an
-// empty result here is silently and correctly a no-op there.
-func TestGetContainerRelevancyScans_HostProfileSkippedCleanly(t *testing.T) {
+func TestGetContainerRelevancyScans_HostInventoryTarget(t *testing.T) {
 	profile := v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "node-host-pool-abc123-host-75fa-00ca",
@@ -78,7 +68,7 @@ func TestGetContainerRelevancyScans_HostProfileSkippedCleanly(t *testing.T) {
 			Annotations: map[string]string{
 				helpersv1.CompletionMetadataKey: helpersv1.Full,
 				helpersv1.StatusMetadataKey:     helpersv1.Learning,
-				helpersv1.InstanceIDMetadataKey: "apiVersion-v1/namespace-host/kind-Node/name-pool-abc123/hostName-host",
+				helpersv1.InstanceIDMetadataKey: "apiVersion-v1/namespace-host/kind-Node/name-host-pool-abc123/containerName-host",
 				helpersv1.WlidMetadataKey:       "wlid://cluster-unknown/namespace-host/host-pool-abc123",
 			},
 		},
@@ -92,8 +82,9 @@ func TestGetContainerRelevancyScans_HostProfileSkippedCleanly(t *testing.T) {
 	require.NoError(t, repo.StoreContainerProfile(context.TODO(), profile))
 
 	scans, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.TODO(), "kubescape", "node-host-pool-abc123-host-75fa-00ca", true)
-	require.NoError(t, err, "a profile with no image identity must be skipped cleanly, not reported as a scan failure")
-	assert.Empty(t, scans)
+	require.NoError(t, err)
+	require.Len(t, scans, 1)
+	assert.Equal(t, "pool-abc123", scans[0].HostNodeName)
 }
 
 // TestGetContainerRelevancyScans_RealProfileWithMissingImageIDStillReturnsScan
@@ -124,4 +115,35 @@ func TestGetContainerRelevancyScans_NotFound(t *testing.T) {
 	_, err = NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.TODO(), "default", "non-existent-profile", true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "container profile default/non-existent-profile not found")
+}
+
+func TestGetContainerRelevancyScans_HostIdentityConflicts(t *testing.T) {
+	for _, tc := range []struct{ name, instance, wlid, image string }{
+		{"wrong node", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/namespace-host/host-node-b", ""},
+		{"wrong container", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-other", "wlid://cluster-test/namespace-host/host-node-a", ""},
+		{"missing prefix", "apiVersion-v1/namespace-host/kind-Node/name-node-a/containerName-host", "wlid://cluster-test/namespace-host/host-node-a", ""},
+		{"image present", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/namespace-host/host-node-a", "image:tag"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := validContainerProfile("profile", "kubescape", nil)
+			profile.Spec.ImageID = ""
+			profile.Spec.ImageTag = tc.image
+			profile.Annotations[helpersv1.InstanceIDMetadataKey] = tc.instance
+			profile.Annotations[helpersv1.WlidMetadataKey] = tc.wlid
+			repo := repositories.NewMemoryStorage(false, false)
+			require.NoError(t, repo.StoreContainerProfile(context.Background(), profile))
+			_, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.Background(), "kubescape", "profile", true)
+			require.ErrorContains(t, err, "invalid host container profile identity")
+		})
+	}
+}
+func TestGetContainerRelevancyScans_UnknownImagelessSkipped(t *testing.T) {
+	profile := validContainerProfile("profile", "kubescape", nil)
+	profile.Spec.ImageID = ""
+	profile.Spec.ImageTag = ""
+	repo := repositories.NewMemoryStorage(false, false)
+	require.NoError(t, repo.StoreContainerProfile(context.Background(), profile))
+	scans, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.Background(), "kubescape", "profile", true)
+	require.NoError(t, err)
+	require.Empty(t, scans)
 }

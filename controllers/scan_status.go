@@ -293,3 +293,17 @@ func (s *scanStatusStore) get(jobID string) (domain.ScanStatus, bool) {
 	s.mu.Unlock()
 	return domain.ScanStatus{}, false
 }
+
+// markInventoryWaiting retains the logical job timestamps and admission identity.
+func (s *scanStatusStore) markInventoryWaiting(jobID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, ok := s.items[jobID]
+	if !ok || isTerminal(status.State) {
+		return
+	}
+	status.State = domain.ScanStateQueued
+	status.Phase = "waiting_for_host_sbom"
+	status.UpdatedAt = time.Now().UTC()
+	s.items[jobID] = status
+}
