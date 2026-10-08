@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/mod/semver"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -57,7 +59,8 @@ func (a *APIServerStore) GetHostSBOM(ctx context.Context, node string) (domain.S
 		if ctx.Err() != nil {
 			return domain.SBOM{}, ctx.Err()
 		}
-		if errors.Is(err, context.DeadlineExceeded) || apierrors.IsNotFound(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) {
+		transportFailure := utilnet.IsTimeout(err) || utilnet.IsConnectionRefused(err) || utilnet.IsConnectionReset(err) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+		if transportFailure || errors.Is(err, context.DeadlineExceeded) || apierrors.IsNotFound(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) {
 			return domain.SBOM{}, fmt.Errorf("%w: %s: %w", domain.ErrHostInventoryPending, name, err)
 		}
 		return domain.SBOM{}, fmt.Errorf("get host inventory %s: %w", name, err)

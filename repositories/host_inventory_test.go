@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,6 +183,45 @@ func TestGetHostSBOMAPIErrors(t *testing.T) {
 			require.Equal(t, tc.pending, errors.Is(err, domain.ErrHostInventoryPending))
 			require.Len(t, client.Actions(), 1)
 			require.Equal(t, "get", client.Actions()[0].GetVerb())
+		})
+	}
+}
+
+func TestGetHostSBOMTransportErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		pending bool
+	}{
+		{"connection refused", syscall.ECONNREFUSED, true},
+		{"connection reset", syscall.ECONNRESET, true},
+		{"EOF", io.EOF, true},
+		{"unexpected EOF", io.ErrUnexpectedEOF, true},
+		{"network timeout", syscall.ETIMEDOUT, true},
+		{"permanent transport failure", errors.New("invalid transport configuration"), false},
+		{"forbidden", apierrors.NewForbidden(schema.GroupResource{Resource: "sbomsyfts"}, "host", errors.New("denied")), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, cancelParent := range []bool{false, true} {
+				ctx, cancel := context.WithCancel(context.Background())
+				client := newFakeStorageClientset()
+				wrapped := &url.Error{Op: "Get", URL: "https://storage.example", Err: &net.OpError{Op: "read", Net: "tcp", Err: tc.err}}
+				client.PrependReactor("get", "sbomsyfts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					if cancelParent {
+						cancel()
+					}
+					return true, nil, wrapped
+				})
+				_, err := newFakeAPIServerStore("kubescape", client.SpdxV1beta1()).GetHostSBOM(ctx, "node.a")
+				cancel()
+				if cancelParent {
+					require.ErrorIs(t, err, context.Canceled)
+					require.NotErrorIs(t, err, domain.ErrHostInventoryPending)
+				} else {
+					require.ErrorIs(t, err, tc.err)
+					require.Equal(t, tc.pending, errors.Is(err, domain.ErrHostInventoryPending))
+				}
+			}
 		})
 	}
 }
