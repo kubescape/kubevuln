@@ -123,6 +123,12 @@ func TestGetContainerRelevancyScans_HostIdentityConflicts(t *testing.T) {
 		{"wrong container", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-other", "wlid://cluster-test/namespace-host/host-node-a", ""},
 		{"missing prefix", "apiVersion-v1/namespace-host/kind-Node/name-node-a/containerName-host", "wlid://cluster-test/namespace-host/host-node-a", ""},
 		{"image present", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/namespace-host/host-node-a", "image:tag"},
+		{"extra path", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster/extra/namespace-host/host-node-a", ""},
+		{"missing cluster", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-/namespace-host/host-node-a", ""},
+		{"missing namespace", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/host-node-a", ""},
+		{"wrong namespace", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/namespace-other/host-node-a", ""},
+		{"wrong kind", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://cluster-test/namespace-host/deployment-node-a", ""},
+		{"missing cluster prefix", "apiVersion-v1/namespace-host/kind-Node/name-host-node-a/containerName-host", "wlid://test/namespace-host/host-node-a", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profile := validContainerProfile("profile", "kubescape", nil)
@@ -132,9 +138,30 @@ func TestGetContainerRelevancyScans_HostIdentityConflicts(t *testing.T) {
 			profile.Annotations[helpersv1.WlidMetadataKey] = tc.wlid
 			repo := repositories.NewMemoryStorage(false, false)
 			require.NoError(t, repo.StoreContainerProfile(context.Background(), profile))
-			_, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.Background(), "kubescape", "profile", true)
+			scans, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.Background(), "kubescape", "profile", true)
 			require.ErrorContains(t, err, "invalid host container profile identity")
+			require.Empty(t, scans, "invalid identities must not produce scan work")
 		})
+	}
+}
+
+func TestGetContainerRelevancyScans_HostProducerIdentity(t *testing.T) {
+	for _, node := range []string{"node-a", "ip-10-21-78-176.ec2.internal"} {
+		for _, containerKey := range []string{"hostName", "containerName"} {
+			t.Run(node+"/"+containerKey, func(t *testing.T) {
+				profile := validContainerProfile("profile", "kubescape", nil)
+				profile.Spec.ImageID, profile.Spec.ImageTag = "", ""
+				profile.Annotations[helpersv1.InstanceIDMetadataKey] = "apiVersion-v1/namespace-host/kind-Node/name-host-" + node + "/" + containerKey + "-host"
+				profile.Annotations[helpersv1.WlidMetadataKey] = "wlid://cluster-unknown/namespace-host/host-" + node
+				repo := repositories.NewMemoryStorage(false, false)
+				require.NoError(t, repo.StoreContainerProfile(context.Background(), profile))
+				scans, err := NewContainerProfileAdapter(repo).GetContainerRelevancyScans(context.Background(), "kubescape", "profile", true)
+				require.NoError(t, err)
+				require.Len(t, scans, 1)
+				require.Equal(t, node, scans[0].HostNodeName)
+				require.Equal(t, profile.Annotations[helpersv1.WlidMetadataKey], scans[0].Wlid)
+			})
+		}
 	}
 }
 func TestGetContainerRelevancyScans_UnknownImagelessSkipped(t *testing.T) {

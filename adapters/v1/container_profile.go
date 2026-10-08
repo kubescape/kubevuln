@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -67,11 +68,12 @@ func (a *ContainerProfileAdapter) GetContainerRelevancyScans(ctx context.Context
 	hostWLID := strings.HasPrefix(wlid, "wlid://") && strings.Contains(wlid, "/namespace-host/host-")
 	if kind == "Node" || hostWLID {
 		node := strings.TrimPrefix(instanceID.GetName(), "host-")
-		expectedSuffix := "/namespace-host/host-" + node
+		cluster := wlidpkg.GetClusterFromWlid(wlid)
+		expectedWLID := "wlid://cluster-" + cluster + "/namespace-host/host-" + node
 		if kind != "Node" || identityLabels[helpersv1.RelatedNamespaceMetadataKey] != "host" ||
 			!strings.HasPrefix(instanceID.GetName(), "host-") || node == "" ||
 			instanceID.GetContainerName() != "host" || !hostWLID ||
-			!strings.HasSuffix(wlid, expectedSuffix) || strings.Contains(node, "/") ||
+			wlidpkg.IsWlidValid(wlid) != nil || cluster == "" || wlid != expectedWLID || strings.Contains(node, "/") ||
 			containerProfile.Spec.ImageID != "" || containerProfile.Spec.ImageTag != "" {
 			return nil, fmt.Errorf("invalid host container profile identity: %s/%s", namespace, name)
 		}
