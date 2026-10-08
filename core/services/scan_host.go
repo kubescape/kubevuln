@@ -175,6 +175,9 @@ func filterHostSBOM(sbom domain.SBOM, scan ports.ContainerRelevancyScan) (domain
 	if labels == nil {
 		labels = make(map[string]string)
 	}
+	// Inventory ownership was validated by the reader and must take precedence
+	// over profile labels on every derived host result.
+	maps.Copy(labels, sbom.Labels)
 	filtered, err := filterSBOM(normalized, scan.InstanceID, scan.Wlid, paths, labels, scan.Completion)
 	if err != nil {
 		return domain.SBOM{}, err
@@ -193,7 +196,7 @@ func filterHostSBOM(sbom domain.SBOM, scan ports.ContainerRelevancyScan) (domain
 // or interpreting a mount root such as /host. Placeholders remain literal.
 func normalizeHostPath(value string) (string, error) {
 	invalid := func() (string, error) { return "", fmt.Errorf("invalid host path %q", value) }
-	if value == "" || strings.ContainsAny(value, "\x00\\") || strings.HasPrefix(value, "//") {
+	if value == "" || strings.ContainsRune(value, '\x00') || strings.HasPrefix(value, "//") {
 		return invalid()
 	}
 	var segments []string

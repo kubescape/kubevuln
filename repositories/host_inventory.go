@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -48,12 +50,14 @@ func (a *APIServerStore) GetHostSBOM(ctx context.Context, node string) (domain.S
 		return domain.SBOM{}, fmt.Errorf("%w: invalid node name", domain.ErrHostInventoryUnavailable)
 	}
 	name := hostInventoryIdentifier("host-", node)
-	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	manifest, err := a.StorageClient.SBOMSyfts(a.Namespace).Get(getCtx, name, metav1.GetOptions{})
 	if err != nil {
 		if ctx.Err() != nil {
 			return domain.SBOM{}, ctx.Err()
 		}
-		if apierrors.IsNotFound(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) {
+		if errors.Is(err, context.DeadlineExceeded) || apierrors.IsNotFound(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) {
 			return domain.SBOM{}, fmt.Errorf("%w: %s: %w", domain.ErrHostInventoryPending, name, err)
 		}
 		return domain.SBOM{}, fmt.Errorf("get host inventory %s: %w", name, err)

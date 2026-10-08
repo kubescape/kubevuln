@@ -4,19 +4,73 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+type hostInventoryRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f hostInventoryRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestGetHostSBOMBoundedLookup(t *testing.T) {
+	for _, cancelParent := range []bool{false, true} {
+		name := "lookup timeout is pending"
+		if cancelParent {
+			name = "parent cancellation is terminal"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started := time.Now()
+			requests := 0
+			client, err := spdxv1beta1.NewForConfigAndClient(&rest.Config{Host: "https://storage.example"}, &http.Client{
+				Transport: hostInventoryRoundTripper(func(req *http.Request) (*http.Response, error) {
+					requests++
+					require.Equal(t, http.MethodGet, req.Method)
+					require.True(t, strings.HasSuffix(req.URL.Path, "/sbomsyfts/"+hostInventoryIdentifier("host-", "node.a")))
+					deadline, ok := req.Context().Deadline()
+					require.True(t, ok, "even the first lookup must have a deadline")
+					require.False(t, deadline.Before(started.Add(30*time.Second)))
+					require.False(t, deadline.After(time.Now().Add(30*time.Second)))
+					if cancelParent {
+						cancel()
+					}
+					// Exercise the real typed client's error wrapping without waiting
+					// for the 30-second I/O deadline to elapse.
+					return nil, context.DeadlineExceeded
+				}),
+			})
+			require.NoError(t, err)
+			repo := &APIServerStore{Namespace: "kubescape", StorageClient: client}
+			_, err = repo.GetHostSBOM(ctx, "node.a")
+			require.Equal(t, 1, requests)
+			if cancelParent {
+				require.ErrorIs(t, err, context.Canceled)
+				require.NotErrorIs(t, err, domain.ErrHostInventoryPending)
+			} else {
+				require.NoError(t, ctx.Err())
+				require.ErrorIs(t, err, domain.ErrHostInventoryPending)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			}
+		})
+	}
+}
 
 func TestHostInventoryIdentifierProducerGolden(t *testing.T) {
 	for _, tc := range []struct{ node, base, hash string }{
@@ -99,6 +153,11 @@ func TestGetHostSBOMPendingAndInvalid(t *testing.T) {
 	cancel()
 	_, err = repo.GetHostSBOM(ctx, "node.a")
 	require.ErrorIs(t, err, context.Canceled)
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	_, err = repo.GetHostSBOM(expired, "node.a")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotErrorIs(t, err, domain.ErrHostInventoryPending)
 }
 
 func TestGetHostSBOMAPIErrors(t *testing.T) {

@@ -44,6 +44,10 @@ func hostFixture(t *testing.T) (domain.SBOM, ports.ContainerRelevancyScan) {
 }
 func TestFilterHostSBOM(t *testing.T) {
 	sbom, scan := hostFixture(t)
+	scan.Labels["kubescape.io/host"] = "misleading-profile-host"
+	scan.Labels["kubescape.io/node-name"] = "misleading-profile-node"
+	scan.Labels["profile-only"] = "retained"
+	sbom.Labels["inventory-only"] = "retained"
 	before := cloneHostSBOM(sbom)
 	scan.RelevantFiles.Add("opt/cache/⋯/file")
 	filtered, err := filterHostSBOM(sbom, scan)
@@ -55,20 +59,64 @@ func TestFilterHostSBOM(t *testing.T) {
 	require.Equal(t, "usr/bin/tool", filtered.Content.Files[0].Location.RealPath)
 	require.Len(t, filtered.Content.ArtifactRelationships, 3)
 	require.Equal(t, helpersv1.HostArtifactType, filtered.Labels[helpersv1.ArtifactTypeMetadataKey])
+	require.Equal(t, sbom.Labels["kubescape.io/host"], filtered.Labels["kubescape.io/host"])
+	require.Equal(t, sbom.Labels["kubescape.io/node-name"], filtered.Labels["kubescape.io/node-name"])
+	require.Equal(t, "retained", filtered.Labels["profile-only"])
+	require.Equal(t, "retained", filtered.Labels["inventory-only"])
 	require.Equal(t, "10", filtered.Annotations[domain.HostInventoryResourceVersionAnnotationKey])
 	filtered.Labels["mutated"] = "yes"
 	filtered.Annotations["mutated"] = "yes"
 	filtered.Content.SyftSource.Metadata[0] = 'x'
 	require.Equal(t, before, sbom)
 	require.Empty(t, scan.Labels["mutated"])
+	require.Equal(t, "misleading-profile-host", scan.Labels["kubescape.io/host"])
+	require.Equal(t, "misleading-profile-node", scan.Labels["kubescape.io/node-name"])
 }
+func TestFilterHostSBOMPOSIXBackslashes(t *testing.T) {
+	sbom, scan := hostFixture(t)
+	const escapedPath = `usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice`
+	sbom.Content.Files[0].Location.RealPath = escapedPath
+	scan.RelevantFiles = mapset.NewSet("/" + escapedPath)
+	before := cloneHostSBOM(sbom)
+
+	filtered, err := filterHostSBOM(sbom, scan)
+	require.NoError(t, err)
+	require.Len(t, filtered.Content.Files, 1)
+	require.Equal(t, escapedPath, filtered.Content.Files[0].Location.RealPath)
+	require.Len(t, filtered.Content.Artifacts, 2)
+	require.Equal(t, "selected", filtered.Content.Artifacts[0].ID)
+	require.Equal(t, "ancestor", filtered.Content.Artifacts[1].ID)
+	require.Equal(t, before, sbom)
+}
+
+func TestFilterHostSBOMUnsafePathsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name, inventoryPath, profilePath string
+	}{
+		{"inventory NUL", "usr/bin/bad\x00name", "/usr/bin/tool"},
+		{"profile root escape", "usr/bin/tool", "/../../tool"},
+		{"profile ambiguous traversal", "usr/bin/tool", "/usr/*/../tool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sbom, scan := hostFixture(t)
+			sbom.Content.Files[0].Location.RealPath = tc.inventoryPath
+			scan.RelevantFiles = mapset.NewSet(tc.profilePath)
+			before := cloneHostSBOM(sbom)
+			filtered, err := filterHostSBOM(sbom, scan)
+			require.Error(t, err)
+			require.Nil(t, filtered.Content)
+			require.Equal(t, before, sbom)
+		})
+	}
+}
+
 func TestNormalizeHostPath(t *testing.T) {
 	for _, p := range []string{"usr/bin/tool", "/usr/bin/tool", "/usr/./bin/x/../tool"} {
 		got, err := normalizeHostPath(p)
 		require.NoError(t, err)
 		require.Equal(t, "/usr/bin/tool", got)
 	}
-	for _, p := range []string{"../tool", "/../../tool", "/a/*/../tool", "/usr/../*/x", "/usr/../⋯/x", "/usr/.././*/x", "/usr/..//⋯/x", "/a/⋯/../tool", "/bad\x00path", "//host/bin/tool", "C:\\bin", ""} {
+	for _, p := range []string{"../tool", "/../../tool", "/a/*/../tool", "/usr/../*/x", "/usr/../⋯/x", "/usr/.././*/x", "/usr/..//⋯/x", "/a/⋯/../tool", "/bad\x00path", "//host/bin/tool", ""} {
 		_, err := normalizeHostPath(p)
 		require.Error(t, err, p)
 	}
@@ -76,6 +124,11 @@ func TestNormalizeHostPath(t *testing.T) {
 		got, err := normalizeHostPath(p)
 		require.NoError(t, err)
 		require.Equal(t, p, got)
+	}
+	for _, p := range []string{`C:\bin`, `usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice`} {
+		got, err := normalizeHostPath(p)
+		require.NoError(t, err)
+		require.Equal(t, "/"+p, got)
 	}
 }
 
@@ -160,6 +213,8 @@ func TestScanHostCPStoredResultsAndRefresh(t *testing.T) {
 				got, err := repo.StorageClient.VulnerabilityManifests("storage").Get(ctx, name, metav1.GetOptions{})
 				require.NoError(t, err)
 				require.Equal(t, helpersv1.HostArtifactType, got.Labels[helpersv1.ArtifactTypeMetadataKey])
+				require.Equal(t, b.Labels["kubescape.io/host"], got.Labels["kubescape.io/host"])
+				require.Equal(t, b.Labels["kubescape.io/node-name"], got.Labels["kubescape.io/node-name"])
 				require.Equal(t, "10", got.Annotations[domain.HostInventoryResourceVersionAnnotationKey])
 				require.Equal(t, b.SBOMCreatorVersion, got.Annotations[helpersv1.ToolVersionMetadataKey])
 				require.Equal(t, b.SBOMCreatorName, got.Annotations[domain.HostInventoryToolNameAnnotationKey])
@@ -177,6 +232,10 @@ func TestScanHostCPStoredResultsAndRefresh(t *testing.T) {
 			require.Equal(t, "storage", summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Namespace)
 			require.Equal(t, relevantName, summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name)
 			require.Equal(t, "storage", summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Namespace)
+			filteredInventory, err := repo.StorageClient.SBOMSyftFiltereds("storage").Get(ctx, relevantName, metav1.GetOptions{})
+			require.NoError(t, err)
+			require.Equal(t, b.Labels["kubescape.io/host"], filteredInventory.Labels["kubescape.io/host"])
+			require.Equal(t, b.Labels["kubescape.io/node-name"], filteredInventory.Labels["kubescape.io/node-name"])
 			stored, err := repo.StorageClient.SBOMSyfts("storage").Get(ctx, b.Name, metav1.GetOptions{})
 			require.NoError(t, err)
 			require.Empty(t, stored.Annotations["scanner-mutation"])
