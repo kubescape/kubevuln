@@ -1054,6 +1054,11 @@ func Test_linkToVuln(t *testing.T) {
 			want: "https://access.redhat.com/errata/RHEA-2024:5678",
 		},
 		{
+			name: "SNYK vulnerability",
+			id:   "SNYK-JS-LODASH-567746",
+			want: "https://security.snyk.io/vuln/SNYK-JS-LODASH-567746",
+		},
+		{
 			name: "CVE defaults to NVD",
 			id:   "CVE-2021-21300",
 			want: "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",

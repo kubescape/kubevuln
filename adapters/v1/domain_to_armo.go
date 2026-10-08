@@ -294,6 +294,9 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"), strings.HasPrefix(id, "MAL-"):
 		return "https://osv.dev/vulnerability/" + id
 
+	case strings.HasPrefix(id, "SNYK-"):
+		return "https://security.snyk.io/vuln/" + id
+
 	default:
 		return "https://nvd.nist.gov/vuln/detail/" + id
 	}
