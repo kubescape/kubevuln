@@ -279,7 +279,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 	// cache key ("<accountID>/////"). Skip caching -- and the deduplication below,
 	// which shares the same key -- entirely for them rather than let unrelated
 	// images share exceptions.
-	cacheable := workload.Wlid != ""
+	// Host selector policies depend on mutable Node labels. Re-evaluate them
+	// on each call rather than reuse a cross-scan merged exception set.
+	cacheable := workload.Wlid != "" && !strings.EqualFold(wlidpkg.GetKindFromWlid(workload.Wlid), "host")
 	cacheKey := strings.Join([]string{
 		a.clusterConfig.AccountID,
 		wlidpkg.GetClusterFromWlid(workload.Wlid),

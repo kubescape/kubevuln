@@ -94,7 +94,7 @@ func TestBackendAdapterHostExceptionsUseProfileNamespace(t *testing.T) {
 		require.ElementsMatch(t, tc.want, ignored, "retrieved policies must suppress actual host findings")
 		require.Len(t, doc.Matches, 4-len(tc.want))
 	}
-	require.Equal(t, 4, cloudCalls, "host policy caches must isolate profile namespaces and retain same-scope caching")
+	require.Equal(t, 5, cloudCalls, "host policies must be re-evaluated even for repeated profile namespaces")
 }
 
 func TestBackendAdapterHostObjectSelectorUsesNodeLabels(t *testing.T) {
@@ -159,6 +159,21 @@ func TestBackendAdapterHostObjectSelectorUsesNodeLabels(t *testing.T) {
 				require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
 				require.Empty(t, policies)
 			}
+
+			if tc.name == "matching Node" {
+				node.SetLabels(map[string]string{"scope": "container"})
+				_, err = store.DynamicClient.Resource(nodeGVR).Update(ctx, node, metav1.UpdateOptions{})
+				require.NoError(t, err)
+				policies, _, err = adapter.GetCVEExceptions(context.WithValue(ctx, domain.WorkloadKey{}, workload))
+				require.NoError(t, err)
+				require.Empty(t, policies, "changed Node labels must invalidate previously matched policies")
+				require.NoError(t, store.DynamicClient.Resource(nodeGVR).Delete(ctx, "node.a", metav1.DeleteOptions{}))
+				policies, _, err = adapter.GetCVEExceptions(context.WithValue(ctx, domain.WorkloadKey{}, workload))
+				require.ErrorIs(t, err, domain.ErrExceptionsDegraded)
+				require.Empty(t, policies, "a deleted Node must not reuse previously matched policies")
+				_, err = store.DynamicClient.Resource(nodeGVR).Create(ctx, node, metav1.CreateOptions{})
+				require.NoError(t, err)
+			}
 			nodeGets := 0
 			for _, action := range store.DynamicClient.(*fakedynamic.FakeDynamicClient).Actions() {
 				if action.GetVerb() == "get" && action.GetResource() == nodeGVR {
@@ -168,6 +183,8 @@ func TestBackendAdapterHostObjectSelectorUsesNodeLabels(t *testing.T) {
 			}
 			if tc.profileNamespace == "" {
 				require.Zero(t, nodeGets)
+			} else if tc.name == "matching Node" {
+				require.Equal(t, 3, nodeGets)
 			} else if tc.forbidden {
 				require.Equal(t, 2, nodeGets, "a denied lookup must not cache the degraded exception result or failed Node lookup")
 			} else {
