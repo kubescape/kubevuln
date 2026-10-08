@@ -19,11 +19,21 @@ package registryauth
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
@@ -52,7 +62,7 @@ type Provider interface {
 
 // Providers is the ordered list of fallbacks consulted on a 401 Unauthorized, before
 // falling back to anonymous access.
-var Providers = []Provider{GCP{}, ECR{}}
+var Providers = []Provider{GCP{}, ECR{}, ACR{}}
 
 // For returns the first provider matching imageID, if any.
 func For(imageID string) (Provider, bool) {
@@ -199,10 +209,233 @@ func credentialsFromAuthorizationToken(out *ecr.GetAuthorizationTokenOutput) (*i
 // live AWS environment.
 var ECRCredsFn = ecrCredentials
 
-// ResetCaches clears both providers' cached credentials. Tests that override
-// GCPCredsFn/ECRCredsFn need this so the next Credentials() call actually reaches the
+// ACR resolves credentials for Azure Container Registry hosts via the ambient Azure
+// credential chain (DefaultAzureCredential: Workload Identity, Managed Identity, Azure CLI, env vars).
+type ACR struct{}
+
+// Matches reports whether this provider handles the given pull reference.
+func (ACR) Matches(imageID string) bool { return IsACRRegistry(imageID) }
+
+// Strategy names this provider in fallback metrics.
+func (ACR) Strategy() string { return metrics.FallbackStrategyACR }
+
+// acrCache is keyed by registry host: Workload Identity federation can map different
+// identities or tenant contexts across separate registries, so keying by host keeps each
+// registry's credentials isolated.
+var acrCache = newCredentialCache(metrics.FallbackStrategyACR)
+
+// Credentials fetches and caches ambient credentials for an ACR image reference.
+func (ACR) Credentials(ctx context.Context, imageID string) (*image.RegistryCredentials, error) {
+	h := host(imageID)
+	return acrCache.get(ctx, h, func(ctx context.Context) (*image.RegistryCredentials, time.Time, error) {
+		return ACRCredsFn(ctx, h)
+	})
+}
+
+// IsACRRegistry reports whether imageID is hosted on Azure Container Registry.
+// Handles standard public cloud (.azurecr.io) as well as sovereign Azure clouds
+// (.azurecr.cn for China, .azurecr.us for US Gov, and .azurecr.de for Germany).
+func IsACRRegistry(imageID string) bool {
+	h := host(imageID)
+	return strings.HasSuffix(h, ".azurecr.io") ||
+		strings.HasSuffix(h, ".azurecr.cn") ||
+		strings.HasSuffix(h, ".azurecr.us") ||
+		strings.HasSuffix(h, ".azurecr.de")
+}
+
+// acrCloudConfig returns the Azure cloud configuration (authority), token scope,
+// and cloud identifier matching the registry's sovereign or public cloud domain.
+func acrCloudConfig(h string) (azcore.ClientOptions, string, string) {
+	lower := strings.ToLower(h)
+	switch {
+	case strings.HasSuffix(lower, ".azurecr.cn"):
+		return azcore.ClientOptions{Cloud: cloud.AzureChina}, "https://containerregistry.azure.cn/.default", "china"
+	case strings.HasSuffix(lower, ".azurecr.us"):
+		return azcore.ClientOptions{Cloud: cloud.AzureGovernment}, "https://containerregistry.azure.us/.default", "usgov"
+	case strings.HasSuffix(lower, ".azurecr.de"):
+		return azcore.ClientOptions{
+			Cloud: cloud.Configuration{
+				ActiveDirectoryAuthorityHost: "https://login.microsoftonline.de/",
+			},
+		}, "https://containerregistry.azure.de/.default", "germany"
+	default:
+		return azcore.ClientOptions{Cloud: cloud.AzurePublic}, "https://containerregistry.azure.net/.default", "public"
+	}
+}
+
+var (
+	azureCredsMu sync.RWMutex
+	azureCreds   = make(map[string]*azidentity.DefaultAzureCredential)
+)
+
+// getOrCreateAzureCredential caches and reuses DefaultAzureCredential instances per cloud.
+func getOrCreateAzureCredential(opts azcore.ClientOptions, cloudKey string) (*azidentity.DefaultAzureCredential, error) {
+	azureCredsMu.RLock()
+	cred, ok := azureCreds[cloudKey]
+	azureCredsMu.RUnlock()
+	if ok {
+		return cred, nil
+	}
+
+	azureCredsMu.Lock()
+	defer azureCredsMu.Unlock()
+	if cred, ok := azureCreds[cloudKey]; ok {
+		return cred, nil
+	}
+
+	cred, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+		ClientOptions: opts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	azureCreds[cloudKey] = cred
+	return cred, nil
+}
+
+// defaultACRTokenFetch retrieves an ambient Entra ID access token configured for the target ACR cloud.
+func defaultACRTokenFetch(ctx context.Context, host string) (string, time.Time, error) {
+	clientOpts, scope, cloudKey := acrCloudConfig(host)
+	cred, err := getOrCreateAzureCredential(clientOpts, cloudKey)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: []string{scope},
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token.Token, token.ExpiresOn, nil
+}
+
+// ACRTokenFn fetches an Entra ID access token for the given ACR host. Overridable in tests.
+var ACRTokenFn = defaultACRTokenFetch
+
+var acrHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// exchangeACRRefreshToken exchanges an Entra ID access token at the ACR registry's
+// /oauth2/exchange endpoint for an ACR refresh token, per Azure's AAD OAuth specification:
+// https://github.com/Azure/acr/blob/main/docs/AAD-OAuth.md#authenticating-docker-with-an-acr-refresh-token
+func exchangeACRRefreshToken(ctx context.Context, registryHost, entraToken string) (string, time.Time, error) {
+	scheme := "https"
+	target := registryHost
+	if strings.HasPrefix(registryHost, "http://") {
+		scheme = "http"
+		target = strings.TrimPrefix(registryHost, "http://")
+	} else if strings.HasPrefix(registryHost, "https://") {
+		target = strings.TrimPrefix(registryHost, "https://")
+	}
+	serviceHost, _, _ := strings.Cut(target, "/")
+	endpoint := fmt.Sprintf("%s://%s/oauth2/exchange", scheme, serviceHost)
+
+	form := url.Values{
+		"grant_type":   {"access_token"},
+		"service":      {serviceHost},
+		"access_token": {entraToken},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := acrHTTPClient.Do(req)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("exchanging AAD token with ACR: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", time.Time{}, fmt.Errorf("ACR exchange returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", time.Time{}, fmt.Errorf("decoding ACR exchange response: %w", err)
+	}
+	if payload.RefreshToken == "" {
+		return "", time.Time{}, errors.New("ACR exchange returned empty refresh_token")
+	}
+
+	exp, _ := parseJWTExpiry(payload.RefreshToken)
+	return payload.RefreshToken, exp, nil
+}
+
+// ACRExchangeFn performs the OAuth exchange against ACR. Overridable in tests.
+var ACRExchangeFn = exchangeACRRefreshToken
+
+// parseJWTExpiry extracts the "exp" unix timestamp from a JWT payload.
+func parseJWTExpiry(tokenStr string) (time.Time, bool) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payload, err = base64.URLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(claims.Exp, 0), true
+}
+
+// acrCredentials acquires an Entra ID token, exchanges it at the registry's /oauth2/exchange
+// endpoint, and returns Docker credentials formatted with the all-zero username and ACR refresh token.
+func acrCredentials(ctx context.Context, host string) (*image.RegistryCredentials, time.Time, error) {
+	entraToken, entraExpiry, err := ACRTokenFn(ctx, host)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+
+	refreshToken, refreshExpiry, err := ACRExchangeFn(ctx, host, entraToken)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+
+	expiry := refreshExpiry
+	if expiry.IsZero() || (!entraExpiry.IsZero() && entraExpiry.Before(expiry)) {
+		expiry = entraExpiry
+	}
+
+	// Authenticating with an ACR refresh token uses the standard all-zero GUID (00000000-0000-0000-0000-000000000000)
+	// as username and the exchanged ACR refresh token as password.
+	return &image.RegistryCredentials{
+		Username: "00000000-0000-0000-0000-000000000000",
+		Password: refreshToken,
+	}, expiry, nil
+}
+
+type acrCredentialFetch func(ctx context.Context, host string) (*image.RegistryCredentials, time.Time, error)
+
+// ACRCredsFn is an indirection over acrCredentials so callers can be unit-tested without a
+// live Azure environment.
+var ACRCredsFn acrCredentialFetch = acrCredentials
+
+// ResetCaches clears all providers' cached credentials. Tests that override
+// GCPCredsFn/ECRCredsFn/ACRCredsFn need this so the next Credentials() call actually reaches the
 // override instead of returning a value an earlier test already cached.
 func ResetCaches() {
 	gcpCache.reset()
 	ecrCache.reset()
+	acrCache.reset()
+	azureCredsMu.Lock()
+	azureCreds = make(map[string]*azidentity.DefaultAzureCredential)
+	azureCredsMu.Unlock()
 }
