@@ -888,7 +888,7 @@ func (a *APIServerStore) fetchClusterSecurityExceptions(ctx context.Context) ([]
 // is never cached, so it self-heals on the next call instead of pinning "unresolved" (and
 // therefore fail-closed/not-applied) for the TTL.
 func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
-	if namespace == "" || kind == "" || name == "" {
+	if (namespace == "" && !strings.EqualFold(kind, "Node")) || kind == "" || name == "" {
 		return nil, nil
 	}
 	cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name

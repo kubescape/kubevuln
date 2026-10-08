@@ -504,7 +504,16 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 	// resolution leaves the corresponding *Resolved flag false so the selector
 	// fails closed in matchExceptionTarget.
 	if UsesObjectSelector(exceptions, clusterExceptions) && namespace != "" && kind != "" && name != "" {
-		if lbls, err := repo.GetWorkloadLabels(ctx, namespace, kind, name); err != nil {
+		labelNamespace, labelKind := namespace, kind
+		profileNamespace, _ := workload.Args[domain.ArgsNamespace].(string)
+		if profileNamespace != "" && strings.EqualFold(kind, "host") &&
+			wlidpkg.IsWlidValid(workload.Wlid) == nil &&
+			workload.Wlid == "wlid://cluster-"+wlidpkg.GetClusterFromWlid(workload.Wlid)+"/namespace-host/host-"+name {
+			// The host identity refers to a real cluster-scoped Node. The
+			// profile's labels are metadata, not the Node's objectSelector labels.
+			labelNamespace, labelKind = "", "Node"
+		}
+		if lbls, err := repo.GetWorkloadLabels(ctx, labelNamespace, labelKind, name); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to resolve workload labels for SecurityException objectSelector; exception will not apply to this workload",
 				helpers.Error(err), helpers.String("namespace", namespace), helpers.String("kind", kind), helpers.String("name", name))
 		} else {
