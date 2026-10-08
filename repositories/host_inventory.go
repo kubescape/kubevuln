@@ -10,6 +10,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -59,7 +60,7 @@ func (a *APIServerStore) GetHostSBOM(ctx context.Context, node string) (domain.S
 		if ctx.Err() != nil {
 			return domain.SBOM{}, ctx.Err()
 		}
-		transportFailure := utilnet.IsTimeout(err) || utilnet.IsConnectionRefused(err) || utilnet.IsConnectionReset(err) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+		transportFailure := errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) || utilnet.IsTimeout(err) || utilnet.IsConnectionRefused(err) || utilnet.IsConnectionReset(err) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 		if transportFailure || errors.Is(err, context.DeadlineExceeded) || apierrors.IsNotFound(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) {
 			return domain.SBOM{}, fmt.Errorf("%w: %s: %w", domain.ErrHostInventoryPending, name, err)
 		}

@@ -195,6 +195,8 @@ func TestGetHostSBOMTransportErrors(t *testing.T) {
 	}{
 		{"connection refused", syscall.ECONNREFUSED, true},
 		{"connection reset", syscall.ECONNRESET, true},
+		{"host unreachable", syscall.EHOSTUNREACH, true},
+		{"network unreachable", syscall.ENETUNREACH, true},
 		{"EOF", io.EOF, true},
 		{"unexpected EOF", io.ErrUnexpectedEOF, true},
 		{"network timeout", syscall.ETIMEDOUT, true},
