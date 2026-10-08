@@ -458,12 +458,24 @@ func rawNameFromWlid(wlid string) string {
 	return ""
 }
 
+func exceptionNamespace(workload domain.ScanCommand) string {
+	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	if namespace == "host" && strings.EqualFold(wlidpkg.GetKindFromWlid(workload.Wlid), "host") && wlidpkg.IsWlidValid(workload.Wlid) == nil {
+		// Host WLIDs have a synthetic namespace; namespaced policies live
+		// alongside the ContainerProfile in its actual namespace.
+		if profileNamespace, ok := workload.Args[domain.ArgsNamespace].(string); ok && profileNamespace != "" {
+			return profileNamespace
+		}
+	}
+	return namespace
+}
+
 // BuildExceptionTarget assembles the ExceptionTarget for the workload in the
 // scan context. Workload and namespace labels are resolved through repo only
 // when at least one exception actually uses objectSelector/namespaceSelector,
 // to avoid extra API calls on the common path.
 func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, repo ports.SecurityExceptionRepository) ExceptionTarget {
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	namespace := exceptionNamespace(workload)
 	kind := wlidpkg.GetKindFromWlid(workload.Wlid)
 	name := rawNameFromWlid(workload.Wlid)
 

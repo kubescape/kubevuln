@@ -272,7 +272,7 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		return nil, domain.ExceptionStats{}, domain.ErrCastingWorkload
 	}
 
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	namespace := exceptionNamespace(workload)
 	// Registry scans carry no Wlid (registryScanCommandToScanCommand never sets
 	// it), which would otherwise collapse every scanned image onto the same
 	// cache key ("<accountID>/////"). Skip caching -- and the deduplication below,
@@ -368,7 +368,7 @@ func (a *BackendAdapter) fetchCVEExceptions(ctx context.Context, workload domain
 		Attributes: map[string]string{
 			"customerGUID":        a.clusterConfig.AccountID,
 			"scope.cluster":       wlidpkg.GetClusterFromWlid(workload.Wlid),
-			"scope.namespace":     namespace,
+			"scope.namespace":     wlidpkg.GetNamespaceFromWlid(workload.Wlid),
 			"scope.kind":          strings.ToLower(wlidpkg.GetKindFromWlid(workload.Wlid)),
 			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
 			"scope.containerName": workload.ContainerName,
