@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/armosec/armoapi-go/scanfailure"
@@ -183,6 +185,9 @@ func filterHostSBOM(sbom domain.SBOM, scan ports.ContainerRelevancyScan) (domain
 		return domain.SBOM{}, err
 	}
 	filtered.Labels[helpersv1.ArtifactTypeMetadataKey] = helpersv1.HostArtifactType
+	profilePaths := paths.ToSlice()
+	slices.Sort(profilePaths)
+	filtered.Annotations[domain.HostProfilePathsHashAnnotationKey] = fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(profilePaths, "\x00"))))
 	for _, key := range []string{domain.HostInventoryUIDAnnotationKey, domain.HostInventoryResourceVersionAnnotationKey, domain.HostInventoryToolNameAnnotationKey} {
 		filtered.Annotations[key] = sbom.Annotations[key]
 	}

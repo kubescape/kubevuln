@@ -25,6 +25,7 @@ import (
 	pkgcautils "github.com/armosec/utils-k8s-go/armometadata"
 	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-multierror"
 	backendClientV1 "github.com/kubescape/backend/pkg/client/v1"
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
@@ -288,6 +289,9 @@ func (a *BackendAdapter) GetCVEExceptions(ctx context.Context) (domain.CVEExcept
 		workload.ContainerName,
 		workload.ImageTagNormalized,
 	}, "/")
+	if _, err := validatedHostReportNode(workload); err == nil {
+		cacheKey += "/" + a.clusterConfig.ClusterName
+	}
 
 	if !cacheable {
 		result, err := a.fetchCVEExceptions(ctx, workload, namespace, cacheKey, cacheable)
@@ -373,6 +377,12 @@ func (a *BackendAdapter) fetchCVEExceptions(ctx context.Context, workload domain
 			"scope.name":          wlidpkg.GetNameFromWlid(workload.Wlid),
 			"scope.containerName": workload.ContainerName,
 		},
+	}
+	if node, err := validatedHostReportNode(workload); err == nil && a.clusterConfig.ClusterName != "" && !strings.EqualFold(a.clusterConfig.ClusterName, "unknown") {
+		designator.Attributes["scope.cluster"] = a.clusterConfig.ClusterName
+		designator.Attributes["scope.namespace"] = ""
+		designator.Attributes["scope.kind"] = "node"
+		designator.Attributes["scope.name"] = node
 	}
 
 	vulnExceptionList, err := a.getBackendClient().GetCVEExceptions(ctx, a.apiServerRestURL, a.clusterConfig.AccountID, &designator, a.getRequestHeaders())
@@ -666,12 +676,19 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 	if !armotypes.ValidateContainerScanID(scanID) {
 		return domain.ErrInvalidScanID
 	}
+	reportWorkload, hostAttributes, reportScanID, err := a.hostReportWorkload(workload, cve, cvep, scanID, uuid.NewString())
+	if err != nil {
+		return err
+	}
 
 	// get exceptions
 	exceptions, _, err := a.GetCVEExceptions(ctx)
 	if err != nil && !errors.Is(err, domain.ErrExceptionsDegraded) {
 		return fmt.Errorf("failed to get exceptions: %w", err)
 	}
+	workload, scanID = reportWorkload, reportScanID
+	ctx = context.WithValue(ctx, domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.ScanIDKey{}, scanID)
 	// convert to vulnerabilities
 	vulnerabilities, err := DomainToArmo(ctx, *cve.Content, exceptions)
 	if err != nil {
@@ -736,6 +753,12 @@ func (a *BackendAdapter) SubmitCVE(ctx context.Context, cve domain.CVEManifest, 
 		if s, err := k8sinterface.GetGroupVersionResource(val); err == nil {
 			finalReport.Designators.Attributes[identifiers.AttributeApiVersion] = k8sinterface.JoinGroupVersion(s.Group, s.Version)
 		}
+	}
+	for key, value := range hostAttributes {
+		finalReport.Designators.Attributes[key] = value
+	}
+	if hostAttributes != nil {
+		finalReport.Designators.Attributes[identifiers.AttributeWorkloadHash] = cs.GenerateWorkloadHash(finalReport.Designators.Attributes)
 	}
 	// fill context and designators into vulnerabilities
 	armoContext := identifiers.DesignatorToArmoContext(&finalReport.Designators, "designators")

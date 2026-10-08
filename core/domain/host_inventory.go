@@ -11,6 +11,7 @@ var (
 )
 
 const (
+	HostProfilePathsHashAnnotationKey         = "kubescape.io/host-profile-paths-hash"
 	HostInventoryToolNameAnnotationKey        = "kubescape.io/host-inventory-tool-name"
 	HostInventoryUIDAnnotationKey             = "kubescape.io/host-inventory-uid"
 	HostInventoryResourceVersionAnnotationKey = "kubescape.io/host-inventory-resource-version"

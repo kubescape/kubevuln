@@ -72,6 +72,23 @@ func TestFilterHostSBOM(t *testing.T) {
 	require.Equal(t, "misleading-profile-host", scan.Labels["kubescape.io/host"])
 	require.Equal(t, "misleading-profile-node", scan.Labels["kubescape.io/node-name"])
 }
+
+func TestFilterHostSBOMProfileIdentity(t *testing.T) {
+	sbom, scan := hostFixture(t)
+	scan.RelevantFiles = mapset.NewSet("usr/bin/tool", "/opt/cache/abc/file")
+	first, err := filterHostSBOM(sbom, scan)
+	require.NoError(t, err)
+	scan.RelevantFiles = mapset.NewSet("/opt/cache/abc/file", "/usr/./bin/tool")
+	reordered, err := filterHostSBOM(sbom, scan)
+	require.NoError(t, err)
+	require.NotEmpty(t, first.Annotations[domain.HostProfilePathsHashAnnotationKey])
+	require.Equal(t, first.Annotations[domain.HostProfilePathsHashAnnotationKey], reordered.Annotations[domain.HostProfilePathsHashAnnotationKey])
+	scan.RelevantFiles.Add("/usr/bin/unused")
+	changed, err := filterHostSBOM(sbom, scan)
+	require.NoError(t, err)
+	require.NotEqual(t, first.Annotations[domain.HostProfilePathsHashAnnotationKey], changed.Annotations[domain.HostProfilePathsHashAnnotationKey])
+	require.NotContains(t, sbom.Annotations, domain.HostProfilePathsHashAnnotationKey)
+}
 func TestFilterHostSBOMPOSIXBackslashes(t *testing.T) {
 	sbom, scan := hostFixture(t)
 	const escapedPath = `usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice`
