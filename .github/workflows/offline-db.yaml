@@ -4,11 +4,7 @@ on:
     schedule:
         - cron: "1 1 * * *"
 
-# Default for every job here. workflow-keepalive overrides it below with the actions:write
-# it needs; deploy authenticates to Quay with its own secrets rather than GITHUB_TOKEN, so
-# read access for the checkout is all it wants.
-permissions:
-    contents: read
+permissions: read-all
 
 jobs:
     workflow-keepalive:
@@ -22,6 +18,9 @@ jobs:
             - uses: liskin/gh-workflow-keepalive@f72ff1a1336129f29bf0166c0fd0ca6cf1bcb38c # v1
     deploy:
         runs-on: ubuntu-latest
+        # Quay publishing uses registry secrets; the token only needs checkout access.
+        permissions:
+            contents: read
         steps:
             - name: Checkout code
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

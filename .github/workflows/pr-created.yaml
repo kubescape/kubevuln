@@ -1,8 +1,5 @@
 name: pull_request_created
-permissions:
-  pull-requests: write
-  security-events: write
-  contents: read
+permissions: read-all
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -18,6 +15,7 @@ concurrency:
 jobs:
   pr-created:
     permissions:
+      contents: read
       pull-requests: write
       security-events: write
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-created.yaml@547a98f361e0713832308e3f34165bb89fd9b08c # main (2026-09-16)
