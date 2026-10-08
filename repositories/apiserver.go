@@ -891,18 +891,26 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 	if (namespace == "" && !strings.EqualFold(kind, "Node")) || kind == "" || name == "" {
 		return nil, nil
 	}
+	// Node labels have no informer invalidation. Always fetch them afresh so
+	// removed labels cannot keep a selector-based exception applied.
+	cacheable := !strings.EqualFold(kind, "Node")
 	cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
-	if a.labelsCache != nil {
+	if cacheable && a.labelsCache != nil {
 		if cached, ok := a.labelsCache.Get(cacheKey); ok {
 			return cached.(map[string]string), nil
 		}
 	}
 
-	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+	var seenGeneration uint64
+	if cacheable {
+		seenGeneration = a.beginLabelsCacheRefresh(cacheKey)
+	}
 
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -912,11 +920,15 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// Propagate NotFound as an error (rather than nil labels) so the caller
 		// fails closed: a negative objectSelector must not match a workload that
 		// could not be resolved.
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	if cacheable {
+		a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	}
 	return labels, nil
 }
 
