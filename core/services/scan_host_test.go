@@ -221,7 +221,7 @@ func TestScanHostCPStoredResultsAndRefresh(t *testing.T) {
 				require.NotContains(t, matchIDs(got.Spec.Payload.Matches), "CVE-selected")
 				require.Len(t, got.Spec.Payload.IgnoredMatches, 1)
 			}
-			summaries, err := repo.StorageClient.VulnerabilityManifestSummaries("host").List(ctx, metav1.ListOptions{})
+			summaries, err := repo.StorageClient.VulnerabilityManifestSummaries("storage").List(ctx, metav1.ListOptions{})
 			require.NoError(t, err)
 			require.Len(t, summaries.Items, 1)
 			summary := summaries.Items[0]

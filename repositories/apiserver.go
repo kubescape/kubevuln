@@ -1345,7 +1345,13 @@ func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
 		return "", domain.ErrCastingWorkload
 	}
 
-	return wlid.GetNamespaceFromWlid(workload.Wlid), nil
+	namespace := wlid.GetNamespaceFromWlid(workload.Wlid)
+	if namespace == "host" && strings.EqualFold(wlid.GetKindFromWlid(workload.Wlid), "host") && wlid.IsWlidValid(workload.Wlid) == nil {
+		// A host WLID uses a synthetic namespace. Returning no workload
+		// namespace makes summary reads and writes use the storage namespace.
+		return "", nil
+	}
+	return namespace, nil
 }
 
 func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
