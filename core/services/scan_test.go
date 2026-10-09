@@ -3623,7 +3623,7 @@ func registryWorkload() domain.ScanCommand {
 // TestScanService_MissingSBOM_NoFlowScansANilSBOM is the property all three CVE flows have
 // to agree on.
 //
-// With sbomGeneration off, getOrCreateSBOM returns a zero domain.SBOM and a nil error, so
+// Without generation or stored inventory, getOrCreateSBOM returns a zero SBOM and nil error, so
 // sbom.Content is nil and nothing about the error tells a flow that. ScanCVE and ScanCP
 // each check for it and stop with domain.ErrMissingSBOM. ScanRegistry did not, and handed
 // the zero SBOM to the CVE scanner, which dereferences Content.
@@ -3857,4 +3857,54 @@ func TestCredentialsFromAuth_WhitespaceAndNewlines(t *testing.T) {
 			assert.Equal(t, tt.wantPassword, p)
 		})
 	}
+}
+
+func TestScanService_getOrCreateSBOM_GenerationDisabled(t *testing.T) {
+	stored := domain.SBOM{Name: "existing", Status: "ready", Content: &v1beta1.SyftDocument{}}
+	readErr := errors.New("storage unavailable")
+	for _, tt := range []struct {
+		name    string
+		storage bool
+		sbom    domain.SBOM
+		err     error
+		want    domain.SBOM
+		wantErr error
+	}{
+		{name: "reads existing inventory", storage: true, sbom: stored, want: stored},
+		{name: "missing inventory", storage: true},
+		{name: "outdated inventory", storage: true, sbom: stored, err: domain.ErrOutdatedSBOM},
+		{name: "storage failure", storage: true, err: readErr, wantErr: readErr},
+		{name: "storage disabled", sbom: stored},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &ScanService{
+				storage:        tt.storage,
+				sbomRepository: &mockSBOMRepository{getSBOMSBOM: tt.sbom, getSBOMErr: tt.err},
+				// If creation is accidentally attempted, this adapter fails the test expectations.
+				sbomCreator: adapters.NewMockSBOMAdapter(true, false, false),
+			}
+			got, storeErr, err := s.getOrCreateSBOM(context.Background(), domain.ScanCommand{ImageSlug: "existing"})
+			assert.Equal(t, tt.want, got)
+			assert.NoError(t, storeErr)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestScanService_ScanCVE_StoredSBOMWithoutGeneration(t *testing.T) {
+	scanner := &recordingScanner{}
+	s, storage := newScanServiceWithoutSBOMGeneration(scanner)
+	s.storage = true
+	sbom := domain.SBOM{Name: "imageSlug", Status: "ready", SBOMCreatorVersion: s.sbomCreator.Version(), Content: &v1beta1.SyftDocument{}}
+	require.NoError(t, storage.StoreSBOM(context.Background(), sbom, false))
+	workload := registryWorkload()
+	workload.ImageHash = "sha256:test"
+	ctx, err := s.ValidateScanCVE(context.Background(), workload)
+	require.NoError(t, err)
+	require.NoError(t, s.ScanCVE(ctx))
+	assert.Equal(t, []domain.SBOM{sbom}, scanner.got)
 }
