@@ -36,6 +36,11 @@ type HTTPController struct {
 	statuses     *scanStatusStore
 	statusesOnce sync.Once
 
+	hostRetryMu     sync.Mutex
+	hostRetries     map[*hostInventoryJob]struct{}
+	hostRetryClosed bool
+	hostRetryPolicy *hostInventoryRetryPolicy
+
 	// submitGate and shuttingDown guard workerPool.Submit against Shutdown's
 	// workerPool.Stop(), which closes the pool's task channel: submitting to a closed
 	// channel panics, and nothing about admitQueueSlot/tryAdmit above prevents a handler
@@ -364,9 +369,8 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 // way, differing only in the endpoint label, the service call and the fields on the error
 // log line, which is what errMsg and errDetails carry.
 //
-// ScanCP keeps its own copy: ErrPartialContainerProfile is a third outcome there, recorded
-// as "partial" for the metric while still marking the job succeeded, and it has no
-// equivalent in the other three.
+// ScanCP uses runCPScan to retain admission across inventory retries and to record
+// ErrPartialContainerProfile as a successful partial outcome.
 //
 // Called only once the caller has already reserved a slot via admitQueueSlot, so exactly
 // one of the submitted closure's release() call or the shutdown fallback below owns
@@ -466,41 +470,10 @@ func (h *HTTPController) ScanCP(c *gin.Context) {
 		return
 	}
 
-	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
-		h.ensureStatuses().markPhase(newScan.JobID, phase)
-	}))
-	task := func() {
-		defer h.release()
-		if !h.claimTrackedJob(newScan.JobID) {
-			return
-		}
-		start := time.Now()
-		err = h.scanService.ScanCP(bgCtx)
-		if err != nil {
-			if errors.Is(err, domain.ErrPartialContainerProfile) {
-				h.recordScan(bgCtx, "scanCP", start, "partial", err)
-				h.ensureStatuses().markSucceeded(newScan.JobID)
-				logger.L().Ctx(bgCtx).Warning("service warning - ScanCP", helpers.Error(err),
-					helpers.String("wlid", newScan.Wlid),
-					helpers.String("name", name),
-					helpers.String("namespace", namespace))
-			} else {
-				h.recordScan(bgCtx, "scanCP", start, "error", err)
-				h.ensureStatuses().markFailed(newScan.JobID, scanFailureReason("error", err))
-				logger.L().Ctx(bgCtx).Error("service error - ScanCP", helpers.Error(err),
-					helpers.String("wlid", newScan.Wlid),
-					helpers.String("name", name),
-					helpers.String("namespace", namespace))
-			}
-		} else {
-			h.recordScan(bgCtx, "scanCP", start, "success", nil)
-			h.ensureStatuses().markSucceeded(newScan.JobID)
-		}
-	}
-	if !h.submit(task) {
-		h.release()
-		h.ensureStatuses().markAbandoned(newScan.JobID, domain.ScanReasonShutdownAbandoned)
-	}
+	h.runCPScan(context.WithoutCancel(ctx), newScan.JobID,
+		helpers.String("wlid", newScan.Wlid),
+		helpers.String("name", name),
+		helpers.String("namespace", namespace))
 }
 
 // ScanCVE unmarshalls the payload and calls scanService.ScanCVE
@@ -669,6 +642,7 @@ func (h *HTTPController) Shutdown(timeout time.Duration) {
 	h.shuttingDown = true
 	h.submitGate.Unlock()
 
+	h.stopHostInventoryRetries()
 	h.ensureStatuses().markAbandonedQueued(domain.ScanReasonShutdownAbandoned)
 
 	drained := make(chan struct{})

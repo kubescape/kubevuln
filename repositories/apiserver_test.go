@@ -4025,7 +4025,6 @@ func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing
 	}
 }
 
-
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	wrapped := &ctxCapturingClient{SpdxV1beta1Interface: clientset.SpdxV1beta1()}
@@ -6255,4 +6254,26 @@ func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
 		res2 := sanitizeResourceName("___")
 		assert.Empty(t, res2, "purely invalid label must sanitize to empty")
 	})
+}
+
+func TestAPIServerStore_GetWorkloadLabels_NodeLabelsStayFresh(t *testing.T) {
+	node := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Node",
+		"metadata": map[string]interface{}{"name": "node.a", "labels": map[string]interface{}{"trusted": "true"}},
+	}}
+	client := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), node)
+	store := &APIServerStore{DynamicClient: client, labelsCache: cache.New(time.Minute)}
+	labels, err := store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.NoError(t, err)
+	require.Equal(t, "true", labels["trusted"])
+	node.SetLabels(map[string]string{})
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
+	_, err = client.Resource(gvr).Update(context.Background(), node, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	labels, err = store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.NoError(t, err)
+	require.Empty(t, labels)
+	require.NoError(t, client.Resource(gvr).Delete(context.Background(), "node.a", metav1.DeleteOptions{}))
+	_, err = store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.Error(t, err)
 }

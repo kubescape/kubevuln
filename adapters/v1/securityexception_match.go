@@ -458,12 +458,24 @@ func rawNameFromWlid(wlid string) string {
 	return ""
 }
 
+func exceptionNamespace(workload domain.ScanCommand) string {
+	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	if namespace == "host" && strings.EqualFold(wlidpkg.GetKindFromWlid(workload.Wlid), "host") && wlidpkg.IsWlidValid(workload.Wlid) == nil {
+		// Host WLIDs have a synthetic namespace; namespaced policies live
+		// alongside the ContainerProfile in its actual namespace.
+		if profileNamespace, ok := workload.Args[domain.ArgsNamespace].(string); ok && profileNamespace != "" {
+			return profileNamespace
+		}
+	}
+	return namespace
+}
+
 // BuildExceptionTarget assembles the ExceptionTarget for the workload in the
 // scan context. Workload and namespace labels are resolved through repo only
 // when at least one exception actually uses objectSelector/namespaceSelector,
 // to avoid extra API calls on the common path.
 func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exceptions []sev1beta1.SecurityException, clusterExceptions []sev1beta1.ClusterSecurityException, repo ports.SecurityExceptionRepository) ExceptionTarget {
-	namespace := wlidpkg.GetNamespaceFromWlid(workload.Wlid)
+	namespace := exceptionNamespace(workload)
 	kind := wlidpkg.GetKindFromWlid(workload.Wlid)
 	name := rawNameFromWlid(workload.Wlid)
 
@@ -492,7 +504,16 @@ func BuildExceptionTarget(ctx context.Context, workload domain.ScanCommand, exce
 	// resolution leaves the corresponding *Resolved flag false so the selector
 	// fails closed in matchExceptionTarget.
 	if UsesObjectSelector(exceptions, clusterExceptions) && namespace != "" && kind != "" && name != "" {
-		if lbls, err := repo.GetWorkloadLabels(ctx, namespace, kind, name); err != nil {
+		labelNamespace, labelKind := namespace, kind
+		profileNamespace, _ := workload.Args[domain.ArgsNamespace].(string)
+		if profileNamespace != "" && strings.EqualFold(kind, "host") &&
+			wlidpkg.IsWlidValid(workload.Wlid) == nil &&
+			workload.Wlid == "wlid://cluster-"+wlidpkg.GetClusterFromWlid(workload.Wlid)+"/namespace-host/host-"+name {
+			// The host identity refers to a real cluster-scoped Node. The
+			// profile's labels are metadata, not the Node's objectSelector labels.
+			labelNamespace, labelKind = "", "Node"
+		}
+		if lbls, err := repo.GetWorkloadLabels(ctx, labelNamespace, labelKind, name); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to resolve workload labels for SecurityException objectSelector; exception will not apply to this workload",
 				helpers.Error(err), helpers.String("namespace", namespace), helpers.String("kind", kind), helpers.String("name", name))
 		} else {

@@ -888,21 +888,29 @@ func (a *APIServerStore) fetchClusterSecurityExceptions(ctx context.Context) ([]
 // is never cached, so it self-heals on the next call instead of pinning "unresolved" (and
 // therefore fail-closed/not-applied) for the TTL.
 func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
-	if namespace == "" || kind == "" || name == "" {
+	if (namespace == "" && !strings.EqualFold(kind, "Node")) || kind == "" || name == "" {
 		return nil, nil
 	}
+	// Node labels have no informer invalidation. Always fetch them afresh so
+	// removed labels cannot keep a selector-based exception applied.
+	cacheable := !strings.EqualFold(kind, "Node")
 	cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
-	if a.labelsCache != nil {
+	if cacheable && a.labelsCache != nil {
 		if cached, ok := a.labelsCache.Get(cacheKey); ok {
 			return cached.(map[string]string), nil
 		}
 	}
 
-	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+	var seenGeneration uint64
+	if cacheable {
+		seenGeneration = a.beginLabelsCacheRefresh(cacheKey)
+	}
 
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -912,11 +920,15 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// Propagate NotFound as an error (rather than nil labels) so the caller
 		// fails closed: a negative objectSelector must not match a workload that
 		// could not be resolved.
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	if cacheable {
+		a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	}
 	return labels, nil
 }
 
@@ -1345,7 +1357,13 @@ func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
 		return "", domain.ErrCastingWorkload
 	}
 
-	return wlid.GetNamespaceFromWlid(workload.Wlid), nil
+	namespace := wlid.GetNamespaceFromWlid(workload.Wlid)
+	if namespace == "host" && strings.EqualFold(wlid.GetKindFromWlid(workload.Wlid), "host") && wlid.IsWlidValid(workload.Wlid) == nil {
+		// A host WLID uses a synthetic namespace. Returning no workload
+		// namespace makes summary reads and writes use the storage namespace.
+		return "", nil
+	}
+	return namespace, nil
 }
 
 func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
