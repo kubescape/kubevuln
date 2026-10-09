@@ -597,7 +597,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return &domain.ScanError{Reason: reason, Err: sbomErr}
 		}
 
-		// With sbomGeneration off, getOrCreateSBOM returns a zero SBOM and a nil error, so
+		// Without generation or stored inventory, getOrCreateSBOM returns a zero SBOM and nil error, so
 		// nothing about err says the SBOM is missing and only Content does. ScanCVE and
 		// ScanCP each stop here for the same reason: the CVE scanner dereferences
 		// sbom.Content, so handing it a zero SBOM is a nil dereference, on a worker-pool
@@ -1396,6 +1396,11 @@ type sbomCreation struct {
 // usable, and only GenerateSBOM, which exists to store it, treats it as a failure.
 func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, error, error) {
 	if !s.sbomGeneration {
+		// Node-agent owns generation in this mode; existing inventory is still usable.
+		if s.storage {
+			sbom, err := s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			return sbom, nil, err
+		}
 		return domain.SBOM{}, nil, nil
 	}
 
