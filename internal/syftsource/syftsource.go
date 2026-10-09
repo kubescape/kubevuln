@@ -22,6 +22,9 @@ import (
 // is inspectable after the fact (#512). Returns "" unless both os and architecture are
 // known, since a half-known platform is not a platform.
 func FormatResolvedPlatform(os, arch, variant string) string {
+	os = strings.TrimSpace(os)
+	arch = strings.TrimSpace(arch)
+	variant = strings.TrimSpace(variant)
 	if os == "" || arch == "" {
 		return ""
 	}
