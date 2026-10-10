@@ -1059,6 +1059,11 @@ func Test_linkToVuln(t *testing.T) {
 			want: "https://security.snyk.io/vuln/SNYK-JS-LODASH-567746",
 		},
 		{
+			name: "GLSA advisory",
+			id:   "GLSA-202412-17",
+			want: "https://security.gentoo.org/glsa/202412-17",
+		},
+		{
 			name: "CVE defaults to NVD",
 			id:   "CVE-2021-21300",
 			want: "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
