@@ -92,10 +92,13 @@ func classifySBOMError(err error) string {
 	case strings.Contains(errStr, "404 Not Found") ||
 		strings.Contains(errStr, "MANIFEST_UNKNOWN") ||
 		strings.Contains(errStr, "NAME_UNKNOWN") ||
-		strings.Contains(errStr, "BLOB_UNKNOWN"):
+		strings.Contains(errStr, "BLOB_UNKNOWN") ||
+		strings.Contains(errStr, "TAG_UNKNOWN") ||
+		strings.Contains(errStr, "TAG_INVALID"):
 		// NAME_UNKNOWN: repository does not exist (distinct from MANIFEST_UNKNOWN: unknown
-		// tag/digest on an existing repo). Same "not found" bucket since armoapi-go has no
-		// dedicated reason.
+		// tag/digest on an existing repo). TAG_UNKNOWN and TAG_INVALID are the OCI
+		// Distribution Spec codes for a missing or malformed tag reference. All land in the
+		// same "not found" bucket since armoapi-go has no dedicated reason for each.
 		return scanfailure.ReasonImageNotFound
 	case strings.Contains(errStr, "429 Too Many Requests") ||
 		strings.Contains(errStr, "TOOMANYREQUESTS") ||
