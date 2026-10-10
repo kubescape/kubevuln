@@ -69,6 +69,14 @@ func TestUpdateScanPhase_RefusesWhatItShould(t *testing.T) {
 		}, "a scan running without status tracking still calls this")
 	})
 
+	t.Run("a nil context is a no-op", func(t *testing.T) {
+		// A background task, an uninitialized worker, or a test can call this with no
+		// context at all; ctx.Value would panic before the type assertion gets a say.
+		assert.NotPanics(t, func() {
+			UpdateScanPhase(nil, "cve_matching")
+		})
+	})
+
 	t.Run("a nil updater stored in context is a no-op", func(t *testing.T) {
 		// WithScanPhaseUpdater will store a nil func, and the type assertion succeeds on it,
 		// so the nil check in UpdateScanPhase is the only thing between this and a panic.

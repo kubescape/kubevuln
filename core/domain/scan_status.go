@@ -36,7 +36,7 @@ func WithScanPhaseUpdater(ctx context.Context, update func(string)) context.Cont
 }
 
 func UpdateScanPhase(ctx context.Context, phase string) {
-	if phase == "" {
+	if ctx == nil || phase == "" {
 		return
 	}
 	if update, ok := ctx.Value(scanPhaseUpdaterKey{}).(func(string)); ok && update != nil {
