@@ -86,6 +86,13 @@ func TestUpdateScanPhase_RefusesWhatItShould(t *testing.T) {
 			UpdateScanPhase(ctx, "cve_matching")
 		})
 	})
+
+	t.Run("a nil context is a safe no-op", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			var nilCtx context.Context
+			UpdateScanPhase(nilCtx, "cve_matching")
+		})
+	})
 }
 
 // The key is an unexported struct type, so nothing outside this package can collide with it
