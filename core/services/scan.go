@@ -983,11 +983,20 @@ func credentialsLog(credentials []domain.RegistryCredentials) string {
 
 // registryCredentialsFromCredentialsList converts auth configurations into domain registry credentials.
 func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) []domain.RegistryCredentials {
-	registryCredentials := make([]domain.RegistryCredentials, len(credentials))
+	registryCredentials := make([]domain.RegistryCredentials, 0, len(credentials))
 	for i, cred := range credentials {
 		rc := domain.RegistryCredentials{}
 		if cred.ServerAddress != "" {
 			rc.Authority = parseAuthorityFromServerAddress(cred.ServerAddress)
+			// An empty Authority means "use for every registry". That is intended for an
+			// entry with no server address, but an address that was supplied and yields no
+			// host (whitespace-only, or a bare path) must not widen into wildcard
+			// credentials sent to unrelated registries, so the entry is dropped instead.
+			if rc.Authority == "" {
+				logger.L().Warning("dropping registry credentials whose server address has no host",
+					helpers.Int("index", i))
+				continue
+			}
 		}
 		if cred.RegistryToken != "" {
 			rc.Token = cred.RegistryToken
@@ -1009,7 +1018,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 			rc.Password = password
 		}
 
-		registryCredentials[i] = rc
+		registryCredentials = append(registryCredentials, rc)
 	}
 	return registryCredentials
 }
@@ -1034,6 +1043,7 @@ func credentialsFromAuth(auth string) (username, password string) {
 
 // parseAuthorityFromServerAddress extracts the authority host:port from a server address.
 func parseAuthorityFromServerAddress(serverAddress string) string {
+	serverAddress = strings.TrimSpace(serverAddress)
 	if serverAddress == "" {
 		return ""
 	}

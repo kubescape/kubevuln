@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	stereoimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -1609,6 +1610,15 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("HTTPS://index.docker.io/v1/"))
 	assert.Equal(t, "registry.example.com", parseAuthorityFromServerAddress("HTTP://registry.example.com/v2/"))
 	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("HttPs://quay.io:5000/v2/"))
+
+	// Leading and trailing whitespace must be stripped before scheme detection and URL
+	// parsing. A server address copied from a config file or credential helper may carry
+	// surrounding spaces; without trimming, " https://..." fails the HasPrefix check and
+	// is cut at the first slash, returning " https:" instead of the host.
+	assert.Equal(t, "", parseAuthorityFromServerAddress("   "))
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("  https://index.docker.io/v1/  "))
+	assert.Equal(t, "ghcr.io", parseAuthorityFromServerAddress("ghcr.io "))
+	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress(" quay.io"))
 }
 
 // The auth field is the canonical one; username and password are supplementary and an entry
@@ -1703,6 +1713,105 @@ func Test_registryCredentialsFromCredentialsList_identityToken(t *testing.T) {
 			require.Len(t, got, 1)
 			assert.Equal(t, tt.wantToken, got[0].Token)
 			assert.Equal(t, tt.wantIdentityToken, got[0].IdentityToken)
+		})
+	}
+}
+
+// An entry's Authority decides which registries stereoscope sends it to, and an empty one
+// matches every registry. These cases run the converted credentials through the same
+// selection the scanners use, so a supplied address that yields no host is caught by what
+// would actually be sent, not just by what the parser returns.
+func Test_registryCredentialsFromCredentialsList_selection(t *testing.T) {
+	tests := []struct {
+		name     string
+		creds    []registry.AuthConfig
+		registry string
+		wantLen  int
+		wantUser string
+		wantPass string
+		wantTok  string
+	}{
+		{
+			name:     "whitespace-only address with basic credentials is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "   ", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "whitespace-only address with a token is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "\t", RegistryToken: "tok"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "address with no host is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "/v2/", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "padded host is used for that host",
+			creds:    []registry.AuthConfig{{ServerAddress: " ghcr.io ", Username: "u", Password: "p"}},
+			registry: "ghcr.io",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+		{
+			name:     "padded host is not used for another host",
+			creds:    []registry.AuthConfig{{ServerAddress: " ghcr.io ", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+			wantLen:  1,
+		},
+		{
+			name:     "padded URL with a token is used for its host",
+			creds:    []registry.AuthConfig{{ServerAddress: "  https://quay.io/v2/  ", RegistryToken: "tok"}},
+			registry: "quay.io",
+			wantLen:  1,
+			wantTok:  "tok",
+		},
+		{
+			name:     "omitted address still applies to every registry",
+			creds:    []registry.AuthConfig{{Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+		{
+			name: "blank entry is dropped without affecting a valid one",
+			creds: []registry.AuthConfig{
+				{ServerAddress: " ", Username: "blank", Password: "blank"},
+				{ServerAddress: "ghcr.io", Username: "u", Password: "p"},
+			},
+			registry: "ghcr.io",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList(tt.creds)
+			require.Len(t, got, tt.wantLen)
+
+			opts := stereoimage.RegistryOptions{}
+			for _, c := range got {
+				opts.Credentials = append(opts.Credentials, stereoimage.RegistryCredentials{
+					Authority: c.Authority,
+					Username:  c.Username,
+					Password:  c.Password,
+					Token:     c.Token,
+				})
+			}
+			authenticator := opts.Authenticator(tt.registry)
+			if tt.wantUser == "" && tt.wantTok == "" {
+				assert.Nil(t, authenticator)
+				return
+			}
+			require.NotNil(t, authenticator)
+			cfg, err := authenticator.Authorization()
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantUser, cfg.Username)
+			assert.Equal(t, tt.wantPass, cfg.Password)
+			assert.Equal(t, tt.wantTok, cfg.RegistryToken)
 		})
 	}
 }
