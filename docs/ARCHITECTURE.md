@@ -357,8 +357,9 @@ has); it then counts the crash per image and, after `maxCrashRetries` of them, m
 `TooLarge` with reason `scanner-oom`. A lost scan without that evidence, such as a restart or a
 graceful stop of the sidecar, or a death after the call had already failed, is reported as
 `ErrScannerUnavailable` and is not counted. Reading the statuses needs `get` on pods in
-kubevuln's namespace, which the Helm chart grants when the sidecar is enabled; without it the
-adapter logs a warning at startup and every lost scan is reported as unavailable. The pod is
+kubevuln's namespace, which the Helm chart grants when the sidecar is enabled; the read is probed
+once at startup under a short deadline, and a failure only logs a warning, after which every lost
+scan is reported as unavailable until the read works. The pod is
 `POD_NAME` or the hostname, the container `SBOM_SCANNER_CONTAINER` (default `sbom-scanner`).
 
 ```

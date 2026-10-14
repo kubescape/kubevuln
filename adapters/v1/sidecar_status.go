@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 const (
@@ -20,21 +19,30 @@ const (
 	// already observed as a lost transport.
 	statusWait = 15 * time.Second
 	statusPoll = 500 * time.Millisecond
+	// probeTimeout bounds the startup read: the probe is a diagnostic and must not hold
+	// the HTTP listener back when the API server accepts the request but does not answer.
+	probeTimeout = 10 * time.Second
 )
+
+// PodGetter is the one read PodScannerStatus needs; a typed core/v1 PodInterface fits.
+type PodGetter interface {
+	Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1.Pod, error)
+}
 
 // PodScannerStatus answers from the container statuses of the pod the adapter runs in.
 type PodScannerStatus struct {
-	pods      corev1client.PodInterface
+	pods      PodGetter
 	pod       string
 	container string
 	wait      time.Duration
 	poll      time.Duration
+	probe     time.Duration
 }
 
 var _ ScannerStatus = (*PodScannerStatus)(nil)
 
-func NewPodScannerStatus(pods corev1client.PodInterface, pod, container string) *PodScannerStatus {
-	return &PodScannerStatus{pods: pods, pod: pod, container: container, wait: statusWait, poll: statusPoll}
+func NewPodScannerStatus(pods PodGetter, pod, container string) *PodScannerStatus {
+	return &PodScannerStatus{pods: pods, pod: pod, container: container, wait: statusWait, poll: statusPoll, probe: probeTimeout}
 }
 
 // OOMKilledBetween reports whether the scanner container died of an OOM kill while the
@@ -67,9 +75,11 @@ func (p *PodScannerStatus) OOMKilledBetween(ctx context.Context, start, end time
 	}
 }
 
-// Probe reads the pod once, so a missing permission shows at startup instead of at the
-// first lost scan.
+// Probe reads the pod once, within its own deadline, so a missing permission shows at
+// startup instead of at the first lost scan and a silent API server cannot stall startup.
 func (p *PodScannerStatus) Probe(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, p.probe)
+	defer cancel()
 	_, err := p.latestTermination(ctx)
 	return err
 }

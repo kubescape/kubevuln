@@ -117,6 +117,23 @@ func TestPodScannerStatus_ProbeReadsThePod(t *testing.T) {
 	require.Error(t, status.Probe(context.Background()))
 }
 
+// silentPodGetter accepts the read and never answers until the caller gives up.
+type silentPodGetter struct{}
+
+func (silentPodGetter) Get(ctx context.Context, _ string, _ metav1.GetOptions) (*corev1.Pod, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestPodScannerStatus_ProbeGivesUpOnASilentAPIServer(t *testing.T) {
+	status := NewPodScannerStatus(silentPodGetter{}, "kubevuln-0", DefaultScannerContainerName)
+	status.probe = 50 * time.Millisecond
+	started := time.Now()
+	err := status.Probe(context.Background())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(started), 2*time.Second, "the probe must not hold startup back")
+}
+
 func TestPodScannerStatus_IgnoresTheCallersCancellation(t *testing.T) {
 	start := time.Now()
 	status, _ := newTestPodScannerStatus(t, scannerPod(oomKilledAt(start.Add(time.Second)), true))
