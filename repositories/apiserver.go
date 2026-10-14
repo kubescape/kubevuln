@@ -1122,10 +1122,11 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifests(a.Namespace),
 		"CVE manifest", cve.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
-		func(existing *v1beta1.VulnerabilityManifest) {
+		func(existing *v1beta1.VulnerabilityManifest) bool {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
+			return true
 		},
 		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
@@ -1410,10 +1411,20 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),
 		"CVE summary manifest", manifest.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
-		func(existing *v1beta1.VulnerabilityManifestSummary) {
+		func(existing *v1beta1.VulnerabilityManifestSummary) bool {
+			storedTimestamp, storedOK := existing.Annotations[timestampMetadataKey]
+			incomingTimestamp, incomingOK := manifest.Annotations[timestampMetadataKey]
+			if storedOK && incomingOK {
+				storedTS, storedErr := strconv.ParseInt(storedTimestamp, 10, 64)
+				incomingTS, incomingErr := strconv.ParseInt(incomingTimestamp, 10, 64)
+				if storedErr == nil && incomingErr == nil && incomingTS < storedTS {
+					return false
+				}
+			}
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
+			return true
 		},
 		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
@@ -2553,7 +2564,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	if isFiltered {
 		filtered := convertToFilteredSBOM(&manifest)
 		return createOrUpdate(ctx, a.StorageClient.SBOMSyftFiltereds(a.Namespace), "filtered SBOM", sbom.Name, filtered, getOpts,
-			func(existing *v1beta1.SBOMSyftFiltered) {
+			func(existing *v1beta1.SBOMSyftFiltered) bool {
 				existing.Annotations = mergeMaps(existing.Annotations, filtered.Annotations)
 				existing.Labels = mergeMaps(existing.Labels, filtered.Labels)
 				// A nil sbom.Content has nothing to replace whatever Spec is already
@@ -2562,16 +2573,18 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				if sbom.Content != nil {
 					existing.Spec = filtered.Spec
 				}
+				return true
 			})
 	}
 	return createOrUpdate(ctx, a.StorageClient.SBOMSyfts(a.Namespace), "SBOM", sbom.Name, &manifest, getOpts,
-		func(existing *v1beta1.SBOMSyft) {
+		func(existing *v1beta1.SBOMSyft) bool {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			// Same reasoning as the filtered path above.
 			if sbom.Content != nil {
 				existing.Spec = manifest.Spec
 			}
+			return true
 		})
 }
 
@@ -2626,7 +2639,7 @@ type objectStore[T any] interface {
 // extra are appended to every log line this emits, for callers that carry an additional
 // field on them. name is the object's own name and is what the Get inside the retry uses,
 // so it is the one thing every line here reports about which object is meant.
-func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T), extra ...helpers.IDetails) error {
+func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T) bool, extra ...helpers.IDetails) error {
 	_, err := store.Create(ctx, obj, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -2640,7 +2653,9 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			if getErr != nil {
 				return getErr
 			}
-			merge(existing)
+			if !merge(existing) {
+				return nil
+			}
 			_, updateErr := store.Update(ctx, existing, metav1.UpdateOptions{})
 			return updateErr
 		})

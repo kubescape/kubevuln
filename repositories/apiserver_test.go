@@ -6277,3 +6277,57 @@ func TestAPIServerStore_GetWorkloadLabels_NodeLabelsStayFresh(t *testing.T) {
 	_, err = store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
 	require.Error(t, err)
 }
+
+func TestAPIServerStore_StoreCVESummary_skipsStaleScan(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(100))
+
+	cve := domain.CVEManifest{
+		Name:    "image",
+		Content: &v1beta1.GrypeDocument{},
+	}
+	cvep := domain.CVEManifest{
+		Name:    "runtime",
+		Content: &v1beta1.GrypeDocument{},
+	}
+
+	resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, cve.Name)
+	require.NoError(t, err)
+	namespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	stored := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      resourceName,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				timestampMetadataKey: "200",
+			},
+		},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: v1beta1.SeveritySummary{
+				Critical: v1beta1.VulnerabilityCounters{All: 987654},
+			},
+		},
+	}
+
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(namespace).Create(
+		context.Background(), stored, metav1.CreateOptions{},
+	)
+	require.NoError(t, err)
+
+	// This scan is older than the summary already stored.
+	require.NoError(t, a.StoreCVESummary(ctx, cve, cvep, false))
+
+	got, err := a.StorageClient.VulnerabilityManifestSummaries(namespace).Get(
+		context.Background(), resourceName, metav1.GetOptions{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "200", got.Annotations[timestampMetadataKey])
+	require.Equal(t, int64(987654), got.Spec.Severities.Critical.All)
+}
