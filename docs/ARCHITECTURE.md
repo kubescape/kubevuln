@@ -348,7 +348,10 @@ over a Unix domain socket, and `SidecarSBOMAdapter` calls it in place of running
 The reason for the split is memory. Syft's peak usage scales with image size and is hard to bound
 in advance, so a large image can exhaust the container's memory limit. In the sidecar, the kernel
 kills that container instead of kubevuln, and the HTTP server, the scan queue and the Grype
-database stay up.
+database stay up. The client reports a transport lost under a running scan as `ErrScannerCrashed`,
+which `SidecarSBOMAdapter` retries up to `maxCrashRetries` times before marking the SBOM
+`TooLarge` with reason `scanner-oom`; a sidecar that is not reachable when the call starts is
+`ErrScannerUnavailable` and does not count as a crash.
 
 ```
 ┌──────────────────────────┐        ┌────────────────────────────┐

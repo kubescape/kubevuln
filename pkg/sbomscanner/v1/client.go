@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
@@ -30,8 +31,9 @@ const (
 )
 
 type sbomScannerClient struct {
-	conn   *grpc.ClientConn
-	client pb.SBOMScannerClient
+	conn      *grpc.ClientConn
+	client    pb.SBOMScannerClient
+	connState func() connectivity.State
 }
 
 // NewSBOMScannerClient creates a gRPC client connected to the scanner sidecar via Unix socket.
@@ -56,8 +58,9 @@ func NewSBOMScannerClient(ctx context.Context, socketPath string, readinessTimeo
 	}
 
 	c := &sbomScannerClient{
-		conn:   conn,
-		client: pb.NewSBOMScannerClient(conn),
+		conn:      conn,
+		client:    pb.NewSBOMScannerClient(conn),
+		connState: conn.GetState,
 	}
 
 	// Wait for the sidecar to become ready, bounded by readinessTimeout and
@@ -139,10 +142,14 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		TimeoutSeconds:        timeoutSecondsForWire(req.Timeout),
 	}
 
+	connected := c.connected()
 	resp, err := c.client.CreateSBOM(ctx, pbReq)
 	if err != nil {
 		st, ok := status.FromError(err)
 		if ok && st.Code() == codes.Unavailable {
+			if connected {
+				return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
+			}
 			return nil, fmt.Errorf("%w: %v", ErrScannerUnavailable, err)
 		}
 		if ok && st.Code() == codes.DeadlineExceeded {
@@ -169,6 +176,13 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	}
 
 	return result, nil
+}
+
+// connected reports whether the transport was established when the call started. gRPC
+// reports a call that could not be sent and a transport lost under a running call both as
+// Unavailable; only the second means the sidecar went away mid-scan, which is a crash.
+func (c *sbomScannerClient) connected() bool {
+	return c.connState != nil && c.connState() == connectivity.Ready
 }
 
 func (c *sbomScannerClient) Health(ctx context.Context) (string, bool, error) {

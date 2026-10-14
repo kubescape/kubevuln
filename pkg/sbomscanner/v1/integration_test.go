@@ -13,10 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func startIntegrationServer(t *testing.T, opts ...ServerOption) (SBOMScannerClient, *grpc.Server, string) {
+func startIntegrationServer(t *testing.T, opts ...ServerOption) (*sbomScannerClient, *grpc.Server, string) {
+	t.Helper()
+	return startIntegrationServerWith(t, NewScannerServer(opts...))
+}
+
+func startIntegrationServerWith(t *testing.T, impl pb.SBOMScannerServer) (*sbomScannerClient, *grpc.Server, string) {
 	t.Helper()
 	sock := newTestSocketPath(t)
 
@@ -27,7 +33,7 @@ func startIntegrationServer(t *testing.T, opts ...ServerOption) (SBOMScannerClie
 		grpc.MaxRecvMsgSize(MaxgRPCMessageSize),
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
-	pb.RegisterSBOMScannerServer(srv, NewScannerServer(opts...))
+	pb.RegisterSBOMScannerServer(srv, impl)
 	go func() {
 		// Serve returns ErrServerStopped on the graceful Stop below; nothing else to do
 		// with it here, but ignoring it silently is what errcheck flags.
@@ -44,11 +50,29 @@ func startIntegrationServer(t *testing.T, opts ...ServerOption) (SBOMScannerClie
 	require.NoError(t, err)
 
 	client := &sbomScannerClient{
-		conn:   conn,
-		client: pb.NewSBOMScannerClient(conn),
+		conn:      conn,
+		client:    pb.NewSBOMScannerClient(conn),
+		connState: conn.GetState,
 	}
 
 	return client, srv, sock
+}
+
+// blockingScannerServer holds every scan until the server is stopped, so a test can take
+// the transport away from under a running call.
+type blockingScannerServer struct {
+	pb.UnimplementedSBOMScannerServer
+	started chan struct{}
+}
+
+func (s *blockingScannerServer) Health(context.Context, *pb.HealthRequest) (*pb.HealthResponse, error) {
+	return &pb.HealthResponse{Version: "test", Ready: true}, nil
+}
+
+func (s *blockingScannerServer) CreateSBOM(ctx context.Context, _ *pb.CreateSBOMRequest) (*pb.CreateSBOMResponse, error) {
+	close(s.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func TestIntegration_HealthCheck(t *testing.T) {
@@ -72,8 +96,14 @@ func TestIntegration_SimulatedTransportLoss(t *testing.T) {
 
 	assert.True(t, client.Ready())
 
-	// Stop the server to simulate a transient sidecar restart / socket disconnect.
+	// Stop the server to simulate a transient sidecar restart / socket disconnect, and wait
+	// until the client has seen the transport go so the call below starts unconnected.
 	srv.Stop()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for client.conn.GetState() == connectivity.Ready {
+		require.True(t, client.conn.WaitForStateChange(waitCtx, connectivity.Ready), "connection never left Ready after the server stopped")
+	}
 
 	_, err := client.CreateSBOM(context.Background(), ScanRequest{
 		ImageID:      "sha256:abc",
@@ -84,6 +114,41 @@ func TestIntegration_SimulatedTransportLoss(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrScannerUnavailable)
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
+}
+
+func TestIntegration_ServerLostDuringScanIsACrash(t *testing.T) {
+	impl := &blockingScannerServer{started: make(chan struct{})}
+	client, srv, sock := startIntegrationServerWith(t, impl)
+	defer os.Remove(sock)
+	defer client.Close()
+
+	require.True(t, client.Ready())
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := client.CreateSBOM(context.Background(), ScanRequest{
+			ImageID:      "sha256:abc",
+			ImageTag:     "test:latest",
+			MaxImageSize: 1024 * 1024 * 1024,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-impl.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the scan never reached the server")
+	}
+	srv.Stop()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrScannerCrashed)
+		assert.NotErrorIs(t, err, ErrScannerUnavailable)
+	case <-time.After(5 * time.Second):
+		t.Fatal("CreateSBOM did not return after the server stopped")
+	}
 }
 
 func TestIntegration_ReadyCheck(t *testing.T) {
