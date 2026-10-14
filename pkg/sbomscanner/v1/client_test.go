@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -10,15 +11,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
 type mockPBScannerClient struct {
 	createSBOMErr error
+	// peerAddr, when set, is reported through the grpc.Peer call option the way a
+	// transport that accepted the call would.
+	peerAddr net.Addr
 }
 
-func (m *mockPBScannerClient) CreateSBOM(_ context.Context, _ *pb.CreateSBOMRequest, _ ...grpc.CallOption) (*pb.CreateSBOMResponse, error) {
+func (m *mockPBScannerClient) CreateSBOM(_ context.Context, _ *pb.CreateSBOMRequest, opts ...grpc.CallOption) (*pb.CreateSBOMResponse, error) {
+	if m.peerAddr != nil {
+		for _, opt := range opts {
+			if po, ok := opt.(grpc.PeerCallOption); ok {
+				*po.PeerAddr = peer.Peer{Addr: m.peerAddr}
+			}
+		}
+	}
 	return nil, m.createSBOMErr
 }
 
@@ -58,30 +69,29 @@ func TestCreateSBOM_WrapsGRPCTransportCodes(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
 }
 
-func TestCreateSBOM_UnavailableOnEstablishedConnectionIsACrash(t *testing.T) {
-	c := &sbomScannerClient{
-		client:    &mockPBScannerClient{createSBOMErr: status.Error(codes.Unavailable, "error reading from server: EOF")},
-		connState: func() connectivity.State { return connectivity.Ready },
-	}
+func TestCreateSBOM_UnavailableAfterTheCallReachedATransportIsLost(t *testing.T) {
+	c := &sbomScannerClient{client: &mockPBScannerClient{
+		createSBOMErr: status.Error(codes.Unavailable, "error reading from server: EOF"),
+		peerAddr:      &net.UnixAddr{Name: "/sbom-comm/scanner.sock", Net: "unix"},
+	}}
 
 	_, err := c.CreateSBOM(context.Background(), ScanRequest{})
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrScannerCrashed)
+	assert.ErrorIs(t, err, ErrScannerLost)
 	assert.NotErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, ErrScannerCrashed)
 	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestCreateSBOM_UnavailableWithoutConnectionStaysUnavailable(t *testing.T) {
-	for _, state := range []connectivity.State{connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown} {
-		c := &sbomScannerClient{
-			client:    &mockPBScannerClient{createSBOMErr: status.Error(codes.Unavailable, "connection refused")},
-			connState: func() connectivity.State { return state },
-		}
+func TestCreateSBOM_UnavailableWithoutATransportStaysUnavailable(t *testing.T) {
+	c := &sbomScannerClient{client: &mockPBScannerClient{
+		createSBOMErr: status.Error(codes.Unavailable, "connection refused"),
+	}}
 
-		_, err := c.CreateSBOM(context.Background(), ScanRequest{})
-		assert.ErrorIs(t, err, ErrScannerUnavailable, state.String())
-		assert.NotErrorIs(t, err, ErrScannerCrashed, state.String())
-	}
+	_, err := c.CreateSBOM(context.Background(), ScanRequest{})
+	assert.ErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, ErrScannerLost)
+	assert.NotErrorIs(t, err, ErrScannerCrashed)
 }
 
 func TestCreateSBOM_DoesNotWrapGRPCAbortedAsUnavailable(t *testing.T) {

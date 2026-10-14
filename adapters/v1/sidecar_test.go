@@ -393,3 +393,85 @@ func TestSBOMSizeLimitForWire(t *testing.T) {
 		})
 	}
 }
+
+type fakeScannerStatus struct {
+	killed bool
+	err    error
+	calls  int
+}
+
+func (f *fakeScannerStatus) OOMKilledSince(context.Context, time.Time) (bool, error) {
+	f.calls++
+	return f.killed, f.err
+}
+
+func lostScannerAdapter(t *testing.T, status ScannerStatus) (*SidecarSBOMAdapter, *int) {
+	t.Helper()
+	callCount := 0
+	mock := &mockScannerClient{
+		healthVersion: "v0.100.0",
+		healthReady:   true,
+		createSBOMFunc: func(ctx context.Context, req sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+			callCount++
+			return nil, sbomscanner.ErrScannerLost
+		},
+	}
+	adapter := NewSidecarSBOMAdapter(mock, 5*time.Minute, 512*1024*1024, 20*1024*1024, false, "5Gi", nil)
+	if status != nil {
+		adapter.SetScannerStatus(status)
+	}
+	return adapter, &callCount
+}
+
+func TestSidecarSBOMAdapter_CreateSBOM_LostScanWithOOMEvidenceIsACrash(t *testing.T) {
+	status := &fakeScannerStatus{killed: true}
+	adapter, callCount := lostScannerAdapter(t, status)
+
+	for i := 0; i < maxCrashRetries-1; i++ {
+		_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "oom-image:latest", domain.RegistryOptions{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sbomscanner.ErrScannerCrashed)
+		assert.NotErrorIs(t, err, sbomscanner.ErrScannerUnavailable)
+	}
+
+	sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "oom-image:latest", domain.RegistryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, helpersv1.TooLarge, sbom.Status)
+	assert.Equal(t, domain.ReasonScannerOOM, sbom.Annotations[domain.StatusReasonAnnotationKey])
+	assert.Equal(t, maxCrashRetries, *callCount)
+	assert.Equal(t, maxCrashRetries, status.calls, "the kubelet is asked once per lost scan")
+}
+
+func TestSidecarSBOMAdapter_CreateSBOM_LostScanWithoutOOMEvidenceStaysUnavailable(t *testing.T) {
+	// A sidecar restart or graceful stop drops the transport exactly like an OOM kill; without
+	// the kubelet saying OOMKilled, repeated losses must never turn into a cached TooLarge.
+	status := &fakeScannerStatus{killed: false}
+	adapter, callCount := lostScannerAdapter(t, status)
+
+	for i := 0; i < maxCrashRetries+1; i++ {
+		sbom, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "restarted-image:latest", domain.RegistryOptions{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sbomscanner.ErrScannerUnavailable)
+		assert.NotErrorIs(t, err, sbomscanner.ErrScannerCrashed)
+		assert.Empty(t, sbom.Status)
+		assert.NotContains(t, sbom.Annotations, domain.StatusReasonAnnotationKey)
+	}
+	assert.Equal(t, maxCrashRetries+1, *callCount)
+	assert.Empty(t, adapter.retryCount, "lost scans without OOM evidence are not crash retries")
+}
+
+func TestSidecarSBOMAdapter_CreateSBOM_LostScanWithoutStatusStaysUnavailable(t *testing.T) {
+	adapter, _ := lostScannerAdapter(t, nil)
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "lost-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sbomscanner.ErrScannerUnavailable)
+	assert.Empty(t, adapter.retryCount)
+}
+
+func TestSidecarSBOMAdapter_CreateSBOM_LostScanWhenStatusFailsStaysUnavailable(t *testing.T) {
+	adapter, _ := lostScannerAdapter(t, &fakeScannerStatus{err: assert.AnError})
+	_, err := adapter.CreateSBOM(context.Background(), "test-sbom", "", "lost-image:latest", domain.RegistryOptions{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sbomscanner.ErrScannerUnavailable)
+	assert.Empty(t, adapter.retryCount)
+}

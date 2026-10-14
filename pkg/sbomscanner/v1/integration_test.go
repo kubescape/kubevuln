@@ -50,9 +50,8 @@ func startIntegrationServerWith(t *testing.T, impl pb.SBOMScannerServer) (*sbomS
 	require.NoError(t, err)
 
 	client := &sbomScannerClient{
-		conn:      conn,
-		client:    pb.NewSBOMScannerClient(conn),
-		connState: conn.GetState,
+		conn:   conn,
+		client: pb.NewSBOMScannerClient(conn),
 	}
 
 	return client, srv, sock
@@ -96,8 +95,8 @@ func TestIntegration_SimulatedTransportLoss(t *testing.T) {
 
 	assert.True(t, client.Ready())
 
-	// Stop the server to simulate a transient sidecar restart / socket disconnect, and wait
-	// until the client has seen the transport go so the call below starts unconnected.
+	// Stop the server to simulate a sidecar that is down before the scan starts, and wait
+	// until the client has seen the transport go so the call below cannot ride on it.
 	srv.Stop()
 	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -113,17 +112,28 @@ func TestIntegration_SimulatedTransportLoss(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrScannerUnavailable)
+	assert.NotErrorIs(t, err, ErrScannerLost)
 	assert.NotErrorIs(t, err, ErrScannerCrashed)
 }
 
-func TestIntegration_ServerLostDuringScanIsACrash(t *testing.T) {
-	impl := &blockingScannerServer{started: make(chan struct{})}
-	client, srv, sock := startIntegrationServerWith(t, impl)
-	defer os.Remove(sock)
-	defer client.Close()
+func TestIntegration_ServerLostDuringScanIsLost(t *testing.T) {
+	for _, warm := range []bool{true, false} {
+		t.Run(map[bool]string{true: "connection ready before the call", false: "connection idle before the call"}[warm], func(t *testing.T) {
+			impl := &blockingScannerServer{started: make(chan struct{})}
+			client, srv, sock := startIntegrationServerWith(t, impl)
+			defer os.Remove(sock)
+			defer client.Close()
 
-	require.True(t, client.Ready())
+			if warm {
+				require.True(t, client.Ready())
+			}
+			assertServerLostDuringScanIsLost(t, client, srv, impl)
+		})
+	}
+}
 
+func assertServerLostDuringScanIsLost(t *testing.T, client *sbomScannerClient, srv *grpc.Server, impl *blockingScannerServer) {
+	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := client.CreateSBOM(context.Background(), ScanRequest{
@@ -144,8 +154,9 @@ func TestIntegration_ServerLostDuringScanIsACrash(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrScannerCrashed)
+		assert.ErrorIs(t, err, ErrScannerLost)
 		assert.NotErrorIs(t, err, ErrScannerUnavailable)
+		assert.NotErrorIs(t, err, ErrScannerCrashed)
 	case <-time.After(5 * time.Second):
 		t.Fatal("CreateSBOM did not return after the server stopped")
 	}

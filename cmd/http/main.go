@@ -97,7 +97,11 @@ func main() {
 			sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 		} else {
 			memoryLimit := os.Getenv("SCANNER_MEMORY_LIMIT")
-			sbomAdapter = v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit, c.ProxyRegistryMap)
+			sidecarAdapter := v1.NewSidecarSBOMAdapter(scannerClient, c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, memoryLimit, c.ProxyRegistryMap)
+			if status := scannerStatus(ctx, c.Namespace); status != nil {
+				sidecarAdapter.SetScannerStatus(status)
+			}
+			sbomAdapter = sidecarAdapter
 			scanMode = domain.ScanModeSidecar
 		}
 	} else {
@@ -312,4 +316,32 @@ func resolveAccountID(credentialsAccount, configAccountID string, keepLocal bool
 		return "", fmt.Errorf("no account identifier configured: set /etc/credentials/account (normally mounted from a Secret), accountID in clusterData.json, or the ACCOUNTID environment variable -- or set keepLocal to run without reporting to the backend")
 	}
 	return accountID, nil
+}
+
+// scannerStatus gives the sidecar adapter the kubelet's view of the scanner container, so a
+// scan lost mid-flight is reported as an OOM kill only when the kubelet recorded one. The
+// pod is the one kubevuln runs in: POD_NAME when set, the hostname otherwise.
+func scannerStatus(ctx context.Context, namespace string) v1.ScannerStatus {
+	k8sConfig := k8sinterface.GetK8sConfig()
+	if k8sConfig == nil {
+		logger.L().Ctx(ctx).Warning("no k8s config, a lost SBOM scanner sidecar will be reported as unavailable rather than OOM-killed")
+		return nil
+	}
+	clientset, err := kubernetes.NewForConfig(k8sConfig)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to build k8s clientset for the SBOM scanner sidecar status", helpers.Error(err))
+		return nil
+	}
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		if podName, err = os.Hostname(); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to resolve the pod name for the SBOM scanner sidecar status", helpers.Error(err))
+			return nil
+		}
+	}
+	container := os.Getenv("SBOM_SCANNER_CONTAINER")
+	if container == "" {
+		container = v1.DefaultScannerContainerName
+	}
+	return v1.NewPodScannerStatus(clientset.CoreV1().Pods(namespace), podName, container)
 }
