@@ -395,13 +395,15 @@ func TestSBOMSizeLimitForWire(t *testing.T) {
 }
 
 type fakeScannerStatus struct {
-	killed bool
-	err    error
-	calls  int
+	killed     bool
+	err        error
+	calls      int
+	start, end time.Time
 }
 
-func (f *fakeScannerStatus) OOMKilledSince(context.Context, time.Time) (bool, error) {
+func (f *fakeScannerStatus) OOMKilledBetween(_ context.Context, start, end time.Time) (bool, error) {
 	f.calls++
+	f.start, f.end = start, end
 	return f.killed, f.err
 }
 
@@ -440,6 +442,8 @@ func TestSidecarSBOMAdapter_CreateSBOM_LostScanWithOOMEvidenceIsACrash(t *testin
 	assert.Equal(t, domain.ReasonScannerOOM, sbom.Annotations[domain.StatusReasonAnnotationKey])
 	assert.Equal(t, maxCrashRetries, *callCount)
 	assert.Equal(t, maxCrashRetries, status.calls, "the kubelet is asked once per lost scan")
+	assert.False(t, status.end.Before(status.start), "the interval the kubelet is asked about is the call's own")
+	assert.WithinDuration(t, time.Now(), status.end, time.Minute)
 }
 
 func TestSidecarSBOMAdapter_CreateSBOM_LostScanWithoutOOMEvidenceStaysUnavailable(t *testing.T) {

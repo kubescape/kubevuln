@@ -343,5 +343,10 @@ func scannerStatus(ctx context.Context, namespace string) v1.ScannerStatus {
 	if container == "" {
 		container = v1.DefaultScannerContainerName
 	}
-	return v1.NewPodScannerStatus(clientset.CoreV1().Pods(namespace), podName, container)
+	status := v1.NewPodScannerStatus(clientset.CoreV1().Pods(namespace), podName, container)
+	if err := status.Probe(ctx); err != nil {
+		logger.L().Ctx(ctx).Warning("cannot read the pod's container statuses, a lost SBOM scanner sidecar will be reported as unavailable rather than OOM-killed; kubevuln needs get on pods in its namespace",
+			helpers.String("pod", podName), helpers.String("container", container), helpers.Error(err))
+	}
+	return status
 }

@@ -37,21 +37,26 @@ func NewPodScannerStatus(pods corev1client.PodInterface, pod, container string) 
 	return &PodScannerStatus{pods: pods, pod: pod, container: container, wait: statusWait, poll: statusPoll}
 }
 
-// OOMKilledSince reports whether the scanner container's latest termination ended at or
-// after since and was an OOM kill. The kubelet reports terminations with a delay, so the
-// pod is re-read for a bounded time until a termination from that period shows up; if none
-// does, the answer is no.
-func (p *PodScannerStatus) OOMKilledSince(ctx context.Context, since time.Time) (bool, error) {
+// OOMKilledBetween reports whether the scanner container died of an OOM kill while the
+// call ran, that is with a termination that finished between start and end. The bounds are
+// compared in whole seconds, the precision FinishedAt has on the wire. The kubelet reports
+// terminations with a delay, so the pod is re-read for a bounded time until a termination
+// from the interval or later shows up; a death after the interval cannot explain the lost
+// call and answers no, as does no termination at all.
+func (p *PodScannerStatus) OOMKilledBetween(ctx context.Context, start, end time.Time) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.wait)
 	defer cancel()
-	// FinishedAt carries whole seconds.
-	since = since.Truncate(time.Second)
+	since := start.Truncate(time.Second)
+	until := end.Truncate(time.Second)
 	for {
 		terminated, err := p.latestTermination(ctx)
 		if err != nil {
 			return false, err
 		}
 		if terminated != nil && !terminated.FinishedAt.Time.Before(since) {
+			if terminated.FinishedAt.Time.After(until) {
+				return false, nil
+			}
 			return terminated.Reason == oomKilledReason, nil
 		}
 		select {
@@ -60,6 +65,13 @@ func (p *PodScannerStatus) OOMKilledSince(ctx context.Context, since time.Time) 
 		case <-time.After(p.poll):
 		}
 	}
+}
+
+// Probe reads the pod once, so a missing permission shows at startup instead of at the
+// first lost scan.
+func (p *PodScannerStatus) Probe(ctx context.Context) error {
+	_, err := p.latestTermination(ctx)
+	return err
 }
 
 func (p *PodScannerStatus) latestTermination(ctx context.Context) (*corev1.ContainerStateTerminated, error) {
