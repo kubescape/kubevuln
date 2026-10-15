@@ -30,7 +30,7 @@ func scannerPod(terminated *corev1.ContainerStateTerminated, restarted bool) *co
 
 func newTestPodScannerStatus(t *testing.T, pod *corev1.Pod) (*PodScannerStatus, *fake.Clientset) {
 	t.Helper()
-	clientset := fake.NewSimpleClientset(pod)
+	clientset := fake.NewClientset(pod)
 	status := NewPodScannerStatus(clientset.CoreV1().Pods("kubescape"), "kubevuln-0", DefaultScannerContainerName)
 	status.wait = 300 * time.Millisecond
 	status.poll = 20 * time.Millisecond
