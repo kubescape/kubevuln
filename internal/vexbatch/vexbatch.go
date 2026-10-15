@@ -35,7 +35,6 @@ func normalizeDocuments(documents []Document) (map[Format][]Document, []Format, 
 	seen := make(map[documentKey]struct{}, len(documents))
 
 	for i, document := range documents {
-	for _, document := range documents {
 		format := Format(strings.ToLower(strings.TrimSpace(string(document.Format))))
 		switch format {
 		case FormatOpenVEX, FormatCSAF:
