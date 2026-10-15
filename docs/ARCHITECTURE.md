@@ -348,7 +348,19 @@ over a Unix domain socket, and `SidecarSBOMAdapter` calls it in place of running
 The reason for the split is memory. Syft's peak usage scales with image size and is hard to bound
 in advance, so a large image can exhaust the container's memory limit. In the sidecar, the kernel
 kills that container instead of kubevuln, and the HTTP server, the scan queue and the Grype
-database stay up.
+database stay up. The client reports a transport lost under a running scan as `ErrScannerLost`
+and a sidecar that could not be reached at all as `ErrScannerUnavailable`. `SidecarSBOMAdapter`
+turns a lost scan into `ErrScannerCrashed` only when the kubelet recorded an `OOMKilled`
+termination of the scanner container that finished while the call ran (`ScannerStatus`, read
+from the pod's container statuses and compared in whole seconds, the precision `finishedAt`
+has); it then counts the crash per image and, after `maxCrashRetries` of them, marks the SBOM
+`TooLarge` with reason `scanner-oom`. A lost scan without that evidence, such as a restart or a
+graceful stop of the sidecar, or a death after the call had already failed, is reported as
+`ErrScannerUnavailable` and is not counted. Reading the statuses needs `get` on pods in
+kubevuln's namespace, which the Helm chart grants when the sidecar is enabled; the read is probed
+once at startup under a short deadline, and a failure only logs a warning, after which every lost
+scan is reported as unavailable until the read works. The pod is
+`POD_NAME` or the hostname, the container `SBOM_SCANNER_CONTAINER` (default `sbom-scanner`).
 
 ```
 ┌──────────────────────────┐        ┌────────────────────────────┐

@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrScannerCrashed     = errors.New("SBOM scanner sidecar crashed during scan")
+	ErrScannerLost        = errors.New("SBOM scanner sidecar connection lost during scan")
 	ErrScannerUnavailable = errors.New("SBOM scanner sidecar unavailable during scan")
 	ErrScannerNotReady    = errors.New("SBOM scanner sidecar not ready")
 )

@@ -59,10 +59,18 @@ type crashRetry struct {
 	lastSeen time.Time
 }
 
+// ScannerStatus tells what the kubelet recorded about the sidecar container. A scan whose
+// transport was lost only counts as a crash when the container was OOM-killed while the
+// call ran; a restart or a graceful stop drops the transport the same way and is not one.
+type ScannerStatus interface {
+	OOMKilledBetween(ctx context.Context, start, end time.Time) (bool, error)
+}
+
 // SidecarSBOMAdapter implements ports.SBOMCreator by delegating SBOM generation
 // to the sbom-scanner sidecar container via gRPC over a Unix domain socket.
 type SidecarSBOMAdapter struct {
 	client            sbomscanner.SBOMScannerClient
+	status            ScannerStatus
 	maxImageSize      int64
 	maxSBOMSize       int
 	proxyRegistryMap  map[string]string
@@ -138,8 +146,16 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 		Timeout:             s.scanTimeout,
 	}
 
+	started := time.Now()
 	result, err := s.client.CreateSBOM(ctx, req)
+	ended := time.Now()
 	if err != nil {
+		if errors.Is(err, sbomscanner.ErrScannerLost) {
+			if !s.oomKilledBetween(ctx, started, ended, imageID) {
+				return domainSBOM, fmt.Errorf("%w: %v", sbomscanner.ErrScannerUnavailable, err)
+			}
+			err = fmt.Errorf("%w: %v", sbomscanner.ErrScannerCrashed, err)
+		}
 		if errors.Is(err, sbomscanner.ErrScannerCrashed) {
 			return s.handleCrash(ctx, name, imageID, imageTag, options, domainSBOM, err)
 		}
@@ -184,6 +200,25 @@ func (s *SidecarSBOMAdapter) CreateSBOM(ctx context.Context, name, imageID, imag
 	s.mu.Unlock()
 
 	return domainSBOM, nil
+}
+
+// SetScannerStatus gives the adapter the kubelet's view of the sidecar container. Without
+// it, a scan whose transport was lost is reported as the sidecar being unavailable.
+func (s *SidecarSBOMAdapter) SetScannerStatus(status ScannerStatus) {
+	s.status = status
+}
+
+func (s *SidecarSBOMAdapter) oomKilledBetween(ctx context.Context, start, end time.Time, imageID string) bool {
+	if s.status == nil {
+		return false
+	}
+	killed, err := s.status.OOMKilledBetween(ctx, start, end)
+	if err != nil {
+		logger.L().Warning("could not check whether the SBOM scanner sidecar was OOM-killed",
+			helpers.String("imageID", imageID), helpers.Error(err))
+		return false
+	}
+	return killed
 }
 
 func (s *SidecarSBOMAdapter) handleCrash(ctx context.Context, name, imageID, imageTag string, options domain.RegistryOptions, domainSBOM domain.SBOM, crashErr error) (domain.SBOM, error) {
