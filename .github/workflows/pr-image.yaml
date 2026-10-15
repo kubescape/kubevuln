@@ -11,10 +11,7 @@ on:
       - 'build/**'
       - '.github/workflows/pr-image.yaml'
 
-# The image is pushed to Quay with its own registry secrets, not GITHUB_TOKEN, so read
-# access for the checkout is all this needs.
-permissions:
-  contents: read
+permissions: read-all
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,6 +20,9 @@ concurrency:
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    # Quay publishing uses registry secrets; the token only needs checkout access.
+    permissions:
+      contents: read
     env:
       QUAY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
       QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}

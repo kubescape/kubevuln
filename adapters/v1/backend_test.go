@@ -31,6 +31,7 @@ import (
 	sysreport "github.com/kubescape/backend/pkg/server/v1/systemreports"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -519,19 +520,6 @@ func TestBackendAdapter_GetCVEExceptions_DoesNotCacheUnresolvedSelectorLabels(t 
 	assert.Equal(t, 2, calls, "selector-based degradations should not be cached")
 }
 
-func fileToType[T any](path string) *T {
-	var t *T
-	b, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	err = json.Unmarshal(b, &t)
-	if err != nil {
-		panic(err)
-	}
-	return t
-}
-
 func TestBackendAdapter_SubmitCVE(t *testing.T) {
 	ja := jsonassert.New(t)
 	tests := []struct {
@@ -545,21 +533,21 @@ func TestBackendAdapter_SubmitCVE(t *testing.T) {
 	}{
 		{
 			name:          "submit small cve",
-			cve:           *fileToType[domain.CVEManifest]("testdata/nginx-cve-small.json"),
+			cve:           *testfixture.Load[domain.CVEManifest]("testdata/nginx-cve-small.json"),
 			checkFullBody: true,
 		},
 		{
 			name: "submit big cve",
-			cve:  *fileToType[domain.CVEManifest]("testdata/nginx-cve.json"),
+			cve:  *testfixture.Load[domain.CVEManifest]("testdata/nginx-cve.json"),
 		},
 		{
 			name: "submit big cve with relevancy",
-			cve:  *fileToType[domain.CVEManifest]("testdata/nginx-cve.json"),
-			cvep: *fileToType[domain.CVEManifest]("testdata/nginx-filtered-cve.json"),
+			cve:  *testfixture.Load[domain.CVEManifest]("testdata/nginx-cve.json"),
+			cvep: *testfixture.Load[domain.CVEManifest]("testdata/nginx-filtered-cve.json"),
 		},
 		{
 			name:                       "submit small cve with exceptions",
-			cve:                        *fileToType[domain.CVEManifest]("testdata/nginx-cve-small.json"),
+			cve:                        *testfixture.Load[domain.CVEManifest]("testdata/nginx-cve-small.json"),
 			checkFullBodyWithException: true,
 			exceptions: []armotypes.VulnerabilityExceptionPolicy{{
 				PolicyType:            "vulnerabilityExceptionPolicy",
@@ -881,7 +869,7 @@ func TestParseImageManifest(t *testing.T) {
 					Target: nginxSBOMMetadata,
 				},
 			},
-			expected: fileToType[containerscan.ImageManifest]("testdata/nginx-image-manifest.json"),
+			expected: testfixture.Load[containerscan.ImageManifest]("testdata/nginx-image-manifest.json"),
 		},
 	}
 	for _, tt := range tests {
@@ -1615,7 +1603,7 @@ func TestBackendAdapter_SubmitCVE_SkipsChunksWhenSummaryFails(t *testing.T) {
 	ctx = context.WithValue(ctx, domain.ScanIDKey{}, uuid.New().String())
 	ctx = context.WithValue(ctx, domain.WorkloadKey{}, domain.ScanCommand{})
 
-	cve := *fileToType[domain.CVEManifest]("testdata/nginx-cve.json")
+	cve := *testfixture.Load[domain.CVEManifest]("testdata/nginx-cve.json")
 	err := a.SubmitCVE(ctx, cve, domain.CVEManifest{})
 
 	require.Error(t, err, "SubmitCVE should surface the summary post failure")

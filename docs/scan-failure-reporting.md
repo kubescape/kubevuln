@@ -43,6 +43,11 @@ backend debugging; the reason code drives the user-facing text (mapped downstrea
 
 Failure cases: CVE scan failure, SBOM generation failure, OOM kill, backend post failure.
 
+The OOM kill case is only reported with evidence: in sidecar mode the adapter asks the kubelet
+whether the scanner container was `OOMKilled` since the scan started (see
+[ARCHITECTURE.md](ARCHITECTURE.md#sbom-generation-modes)); a scan whose gRPC transport was
+lost without that evidence is reported as SBOM generation failure.
+
 The same reason code also lands on the HTTP controller's Prometheus metrics: the scan services
 create the `*domain.ScanError` at the point of failure — the same call site that already
 computes the reason for `ReportScanFailure` above — and `recordScan` (`controllers/http.go`)

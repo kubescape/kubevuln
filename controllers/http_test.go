@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +22,7 @@ import (
 	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/names"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -1677,4 +1680,61 @@ func TestHTTPController_ScanCP_InvalidRequest(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "{\"status\":400,\"title\":\"Bad Request\"}", w.Body.String())
+}
+
+// TestHTTPController_ScanCVE_ValidationErrorLogsWlid pins the workload id into the log line
+// that records why a ScanCVE request was refused.
+//
+// ScanCVE already carries the wlid in its problem detail and in its scan-failure log, but the
+// validation-error block was copied from GenerateSBOM and ScanRegistry, neither of which has a
+// wlid to log. Without it a rejected request cannot be traced back to the workload it named,
+// while a failed scan of the same workload can.
+func TestHTTPController_ScanCVE_ValidationErrorLogsWlid(t *testing.T) {
+	const wlid = "wlid://cluster-test/namespace-default/deployment-nginx"
+
+	oldLoggerName := logger.L().LoggerName()
+	oldLoggerLevel := logger.L().GetLevel()
+	oldLoggerWriter := logger.L().GetWriter()
+	oldStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = writer
+	t.Setenv(logger.EnvLoggerLevel, "debug")
+	logger.InitLogger("pretty")
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = reader.Close()
+		logger.InitLogger(oldLoggerName)
+		_ = logger.L().SetLevel(oldLoggerLevel)
+		if oldLoggerWriter != nil {
+			logger.L().SetWriter(oldLoggerWriter)
+		}
+	})
+
+	c := HTTPController{
+		scanService: validateErrScanService{
+			MockScanService: services.NewMockScanService(true),
+			err:             domain.ErrCastingWorkload,
+		},
+		workerPool: workerpool.New(1),
+	}
+	router := gin.Default()
+	router.POST("/v1/scanImage", c.ScanCVE)
+
+	body, err := json.Marshal(wssc.WebsocketScanCommand{Wlid: wlid, ImageHash: "sha256:abc"})
+	require.NoError(t, err)
+	req, _ := http.NewRequest(http.MethodPost, "/v1/scanImage", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	_ = writer.Close()
+	var output bytes.Buffer
+	_, err = io.Copy(&output, reader)
+	require.NoError(t, err)
+
+	require.Contains(t, output.String(), "validation error",
+		"the request should have been rejected at validation")
+	assert.Contains(t, output.String(), wlid,
+		"a rejected ScanCVE must name the workload it was given")
 }

@@ -2239,6 +2239,26 @@ func TestAPIServerStore_StoreSBOMFiltered_transientError(t *testing.T) {
 	require.ErrorIs(t, err, injectedErr)
 }
 
+// TestAPIServerStore_DeleteSBOM_joinsErrors verifies that DeleteSBOM returns both the
+// unfiltered and filtered deletion errors when both operations fail. Previously the
+// filtered error was silently dropped if the unfiltered deletion had already failed.
+func TestAPIServerStore_DeleteSBOM_joinsErrors(t *testing.T) {
+	clientset := newFakeStorageClientset()
+	syftErr := apierrors.NewInternalError(fmt.Errorf("sbomsyfts delete failed"))
+	filteredErr := apierrors.NewInternalError(fmt.Errorf("sbomsyftfiltereds delete failed"))
+	clientset.PrependReactor("delete", "sbomsyfts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, syftErr
+	})
+	clientset.PrependReactor("delete", "sbomsyftfiltereds", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, filteredErr
+	})
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+	err := a.DeleteSBOM(context.TODO(), name)
+	require.Error(t, err)
+	require.ErrorIs(t, err, syftErr, "unfiltered SBOM deletion error must be included")
+	require.ErrorIs(t, err, filteredErr, "filtered SBOM deletion error must not be dropped")
+}
+
 func TestAPIServerStore_StoreCVESummary_transientError(t *testing.T) {
 	clientset := newFakeStorageClientset()
 	injectedErr := apierrors.NewInternalError(fmt.Errorf("etcd timeout"))
@@ -4004,7 +4024,6 @@ func TestAPIServerStore_LabelsCache_InvalidationAtomicWithPublication(t *testing
 		assert.False(t, exists, "labelsEntries must remain empty when invalidating with no in-flight refreshes")
 	}
 }
-
 
 func TestAPIServerStore_GetContainerProfile_ctxPropagated(t *testing.T) {
 	clientset := newFakeStorageClientset()
@@ -6235,4 +6254,80 @@ func TestSanitizeResourceName_PreservesIdentityAndFormat(t *testing.T) {
 		res2 := sanitizeResourceName("___")
 		assert.Empty(t, res2, "purely invalid label must sanitize to empty")
 	})
+}
+
+func TestAPIServerStore_GetWorkloadLabels_NodeLabelsStayFresh(t *testing.T) {
+	node := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Node",
+		"metadata": map[string]interface{}{"name": "node.a", "labels": map[string]interface{}{"trusted": "true"}},
+	}}
+	client := fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), node)
+	store := &APIServerStore{DynamicClient: client, labelsCache: cache.New(time.Minute)}
+	labels, err := store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.NoError(t, err)
+	require.Equal(t, "true", labels["trusted"])
+	node.SetLabels(map[string]string{})
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
+	_, err = client.Resource(gvr).Update(context.Background(), node, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	labels, err = store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.NoError(t, err)
+	require.Empty(t, labels)
+	require.NoError(t, client.Resource(gvr).Delete(context.Background(), "node.a", metav1.DeleteOptions{}))
+	_, err = store.GetWorkloadLabels(context.Background(), "", "Node", "node.a")
+	require.Error(t, err)
+}
+
+func TestAPIServerStore_StoreCVESummary_skipsStaleScan(t *testing.T) {
+	workload := domain.ScanCommand{
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ContainerName: "anyJobContName",
+	}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(100))
+
+	cve := domain.CVEManifest{
+		Name:    "image",
+		Content: &v1beta1.GrypeDocument{},
+	}
+	cvep := domain.CVEManifest{
+		Name:    "runtime",
+		Content: &v1beta1.GrypeDocument{},
+	}
+
+	resourceName, err := GetCVESummaryK8sResourceNameWithCVEName(ctx, cve.Name)
+	require.NoError(t, err)
+	namespace, err := GetCVESummaryK8sResourceNamespace(ctx)
+	require.NoError(t, err)
+
+	a := NewFakeAPIServerStorage("kubescape")
+	stored := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      resourceName,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				timestampMetadataKey: "200",
+			},
+		},
+		Spec: v1beta1.VulnerabilityManifestSummarySpec{
+			Severities: v1beta1.SeveritySummary{
+				Critical: v1beta1.VulnerabilityCounters{All: 987654},
+			},
+		},
+	}
+
+	_, err = a.StorageClient.VulnerabilityManifestSummaries(namespace).Create(
+		context.Background(), stored, metav1.CreateOptions{},
+	)
+	require.NoError(t, err)
+
+	// This scan is older than the summary already stored.
+	require.NoError(t, a.StoreCVESummary(ctx, cve, cvep, false))
+
+	got, err := a.StorageClient.VulnerabilityManifestSummaries(namespace).Get(
+		context.Background(), resourceName, metav1.GetOptions{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "200", got.Annotations[timestampMetadataKey])
+	require.Equal(t, int64(987654), got.Spec.Severities.Critical.All)
 }

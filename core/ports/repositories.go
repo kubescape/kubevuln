@@ -8,6 +8,11 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+// HostSBOMRepository reads existing producer-owned host inventory.
+type HostSBOMRepository interface {
+	GetHostSBOM(ctx context.Context, rawNodeName string) (domain.SBOM, error)
+}
+
 type ContainerProfileRepository interface {
 	GetContainerProfile(ctx context.Context, namespace string, name string) (v1beta1.ContainerProfile, error)
 }

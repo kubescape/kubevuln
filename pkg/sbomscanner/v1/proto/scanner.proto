@@ -13,6 +13,7 @@ message RegistryCredentials {
   string username = 2;
   string password = 3;
   string token = 4;
+  string identity_token = 5;
 }
 
 message CreateSBOMRequest {

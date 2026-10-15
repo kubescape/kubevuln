@@ -24,17 +24,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  # Needed by the tracking-issue step below. Scheduled-run failure notifications
-  # go only to whoever last committed to this file, who may not be a maintainer,
-  # so a red run alone would leave the manifest rotting exactly as before.
-  issues: write
+permissions: read-all
 
 jobs:
   validate:
     name: validate manifest
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed to open or refresh the expiry tracking issue on scheduled runs.
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

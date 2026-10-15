@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +21,7 @@ import (
 	"github.com/armosec/utils-go/httputils"
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -755,22 +755,9 @@ func Test_summarize(t *testing.T) {
 	}
 }
 
-func fileToReport(path string) *v1.ScanResultReport {
-	var report *v1.ScanResultReport
-	b, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	err = json.Unmarshal(b, &report)
-	if err != nil {
-		panic(err)
-	}
-	return report
-}
-
 func Test_sendSummaryAndVulnerabilities(t *testing.T) {
 	ctx := context.Background()
-	report := fileToReport("testdata/report.json")
+	report := testfixture.Load[v1.ScanResultReport]("testdata/report.json")
 	errChan := make(chan error)
 	testCases := []struct {
 		name                      string
@@ -1145,4 +1132,3 @@ func (r *trackCloseReader) Close() error {
 	}
 	return nil
 }
-

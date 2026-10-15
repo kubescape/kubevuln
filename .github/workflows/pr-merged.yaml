@@ -1,11 +1,5 @@
 name: pr-merged
-permissions:
-  actions: write
-  id-token: write
-  packages: write
-  contents: write
-  pull-requests: read
-  attestations: write
+permissions: read-all
 
 on:
   pull_request_target:
@@ -26,9 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     name: reset github.run_number
     # This job adds github.run_number to a fixed offset and returns the result. It reads
-    # nothing and writes nothing, so it does not want the workflow-level token at all, and
-    # without this it inherits every scope declared above: contents, packages, id-token and
-    # attestations, all write.
+    # nothing and writes nothing, so it needs no token permissions.
     permissions: {}
     outputs:
       run-number: ${{ steps.get-build.outputs.build-number }}
@@ -47,13 +39,13 @@ jobs:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
     needs: reset-run-number
     permissions:
-      actions: write
+      actions: read
       id-token: write
       packages: write
       contents: write
       pull-requests: read
-      attestations: write  # required by actions/attest-build-provenance in the shared workflow
-    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@547a98f361e0713832308e3f34165bb89fd9b08c
+      attestations: write  # required by actions/attest in the shared workflow
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@0e3b67166e00ca8e33324c0ac7ff8720d8539f35 # main (2026-10-07)
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubevuln
       IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}

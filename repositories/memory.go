@@ -289,6 +289,9 @@ func (m *MemoryStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, _ bool) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sbomStores++
+	if m.sboms == nil {
+		m.sboms = make(map[sbomID]domain.SBOM)
+	}
 	m.sboms[id] = sbom
 	return nil
 }

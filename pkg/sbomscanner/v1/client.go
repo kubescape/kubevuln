@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -118,10 +119,11 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	creds := make([]*pb.RegistryCredentials, len(req.Options.Credentials))
 	for i, v := range req.Options.Credentials {
 		creds[i] = &pb.RegistryCredentials{
-			Authority: v.Authority,
-			Username:  v.Username,
-			Password:  v.Password,
-			Token:     v.Token,
+			Authority:     v.Authority,
+			Username:      v.Username,
+			Password:      v.Password,
+			Token:         v.Token,
+			IdentityToken: v.IdentityToken,
 		}
 	}
 
@@ -138,10 +140,17 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		TimeoutSeconds:        timeoutSecondsForWire(req.Timeout),
 	}
 
-	resp, err := c.client.CreateSBOM(ctx, pbReq)
+	// gRPC fills the peer only once the call was placed on a transport, so an Unavailable
+	// with a peer means the transport went away under the running call, and one without
+	// it means the call could never be sent.
+	var remote peer.Peer
+	resp, err := c.client.CreateSBOM(ctx, pbReq, grpc.Peer(&remote))
 	if err != nil {
 		st, ok := status.FromError(err)
 		if ok && st.Code() == codes.Unavailable {
+			if remote.Addr != nil {
+				return nil, fmt.Errorf("%w: %v", ErrScannerLost, err)
+			}
 			return nil, fmt.Errorf("%w: %v", ErrScannerUnavailable, err)
 		}
 		if ok && st.Code() == codes.DeadlineExceeded {

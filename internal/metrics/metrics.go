@@ -36,6 +36,7 @@ const (
 	// cataloging themselves are merely slow (#941).
 	FallbackCategoryPullSemaphore = "pull_semaphore"
 
+	FallbackStrategyACR              = "acr"
 	FallbackStrategyAnonymous        = "anonymous"
 	FallbackStrategyECR              = "ecr"
 	FallbackStrategyGCPADC           = "gcp_adc"

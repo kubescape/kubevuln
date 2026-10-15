@@ -259,13 +259,13 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "GHSA-"):
 		return "https://github.com/advisories/" + id
 
-	case strings.HasPrefix(id, "RHSA-"):
+	case strings.HasPrefix(id, "RHSA-"), strings.HasPrefix(id, "RHBA-"), strings.HasPrefix(id, "RHEA-"):
 		return "https://access.redhat.com/errata/" + id
 
 	case strings.HasPrefix(id, "USN-"):
 		return "https://ubuntu.com/security/notices/" + id + "/"
 
-	case strings.HasPrefix(id, "DSA-"):
+	case strings.HasPrefix(id, "DSA-"), strings.HasPrefix(id, "DLA-"):
 		return "https://security-tracker.debian.org/tracker/" + id
 
 	case strings.HasPrefix(id, "ELSA-"):
@@ -291,8 +291,14 @@ func linkToVuln(id string) string {
 	case strings.HasPrefix(id, "RUSTSEC-"):
 		return "https://rustsec.org/advisories/" + id + ".html"
 
-	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"):
+	case strings.HasPrefix(id, "PYSEC-"), strings.HasPrefix(id, "BIT-"), strings.HasPrefix(id, "CGA-"), strings.HasPrefix(id, "OSV-"), strings.HasPrefix(id, "MAL-"):
 		return "https://osv.dev/vulnerability/" + id
+
+	case strings.HasPrefix(id, "SNYK-"):
+		return "https://security.snyk.io/vuln/" + id
+
+	case strings.HasPrefix(id, "GLSA-"):
+		return "https://security.gentoo.org/glsa/" + strings.TrimPrefix(id, "GLSA-")
 
 	default:
 		return "https://nvd.nist.gov/vuln/detail/" + id

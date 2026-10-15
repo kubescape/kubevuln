@@ -198,5 +198,60 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
+
+	t.Run("formats with surrounding whitespace", func(t *testing.T) {
+		matches := newMatches()
+
+		remaining, ignored, err := Apply(
+			[]Document{
+				{
+					Format: "  openvex  ",
+					Path:   openvexPath,
+				},
+				{
+					Format: "\tcsaf \n",
+					Path:   csafPath,
+				},
+			},
+			pkgContext,
+			&matches,
+			nil,
+			ignoreRules,
+		)
+		require.NoError(t, err)
+
+		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, ignored, 2)
+	})
+}
+
+func TestNormalizeDocuments_DeduplicatesAndNormalizesFormats(t *testing.T) {
+	groups, order, err := normalizeDocuments([]Document{
+		{Format: " OpenVEX ", Path: "openvex.json"},
+		{Format: FormatOpenVEX, Path: "openvex.json"},
+		{Format: "\tCSAF\n", Path: "advisory.json"},
+		{Format: FormatCSAF, Path: "openvex.json"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []Format{FormatOpenVEX, FormatCSAF}, order)
+	require.Len(t, groups[FormatOpenVEX], 1)
+	require.Equal(t, "openvex.json", groups[FormatOpenVEX][0].Path)
+	require.Len(t, groups[FormatCSAF], 2)
+	require.Equal(t, "advisory.json", groups[FormatCSAF][0].Path)
+	require.Equal(t, "openvex.json", groups[FormatCSAF][1].Path)
+}
+
+func TestNormalizeDocuments_EmptyPath(t *testing.T) {
+	_, _, err := normalizeDocuments([]Document{
+		{Format: FormatOpenVEX, Path: " \t "},
+	})
+	require.EqualError(t, err, "VEX document 0 has an empty path")
+}
+
+func TestNormalizeDocuments_UnsupportedFormat(t *testing.T) {
+	_, _, err := normalizeDocuments([]Document{
+		{Format: "cyclonedx", Path: "vex.json"},
+	})
+	require.EqualError(t, err, "unsupported VEX format \"cyclonedx\"")
 }
 

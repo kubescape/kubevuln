@@ -888,21 +888,29 @@ func (a *APIServerStore) fetchClusterSecurityExceptions(ctx context.Context) ([]
 // is never cached, so it self-heals on the next call instead of pinning "unresolved" (and
 // therefore fail-closed/not-applied) for the TTL.
 func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind, name string) (map[string]string, error) {
-	if namespace == "" || kind == "" || name == "" {
+	if (namespace == "" && !strings.EqualFold(kind, "Node")) || kind == "" || name == "" {
 		return nil, nil
 	}
+	// Node labels have no informer invalidation. Always fetch them afresh so
+	// removed labels cannot keep a selector-based exception applied.
+	cacheable := !strings.EqualFold(kind, "Node")
 	cacheKey := workloadLabelsCacheKeyPrefix + namespace + "/" + kind + "/" + name
-	if a.labelsCache != nil {
+	if cacheable && a.labelsCache != nil {
 		if cached, ok := a.labelsCache.Get(cacheKey); ok {
 			return cached.(map[string]string), nil
 		}
 	}
 
-	seenGeneration := a.beginLabelsCacheRefresh(cacheKey)
+	var seenGeneration uint64
+	if cacheable {
+		seenGeneration = a.beginLabelsCacheRefresh(cacheKey)
+	}
 
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
 	if err != nil {
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, fmt.Errorf("failed to resolve GroupVersionResource for kind %q: %w", kind, err)
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -912,11 +920,15 @@ func (a *APIServerStore) GetWorkloadLabels(ctx context.Context, namespace, kind,
 		// Propagate NotFound as an error (rather than nil labels) so the caller
 		// fails closed: a negative objectSelector must not match a workload that
 		// could not be resolved.
-		a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		if cacheable {
+			a.trySetLabelsCache(cacheKey, seenGeneration, nil)
+		}
 		return nil, err
 	}
 	labels := obj.GetLabels()
-	a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	if cacheable {
+		a.trySetLabelsCache(cacheKey, seenGeneration, labels)
+	}
 	return labels, nil
 }
 
@@ -1110,10 +1122,11 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifests(a.Namespace),
 		"CVE manifest", cve.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
-		func(existing *v1beta1.VulnerabilityManifest) {
+		func(existing *v1beta1.VulnerabilityManifest) bool {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
+			return true
 		},
 		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
@@ -1345,7 +1358,13 @@ func GetCVESummaryK8sResourceNamespace(ctx context.Context) (string, error) {
 		return "", domain.ErrCastingWorkload
 	}
 
-	return wlid.GetNamespaceFromWlid(workload.Wlid), nil
+	namespace := wlid.GetNamespaceFromWlid(workload.Wlid)
+	if namespace == "host" && strings.EqualFold(wlid.GetKindFromWlid(workload.Wlid), "host") && wlid.IsWlidValid(workload.Wlid) == nil {
+		// A host WLID uses a synthetic namespace. Returning no workload
+		// namespace makes summary reads and writes use the storage namespace.
+		return "", nil
+	}
+	return namespace, nil
 }
 
 func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEManifest, cvep domain.CVEManifest, withRelevancy bool) error {
@@ -1392,10 +1411,20 @@ func (a *APIServerStore) StoreCVESummary(ctx context.Context, cve domain.CVEMani
 	}
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifestSummaries(workloadNamespace),
 		"CVE summary manifest", manifest.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
-		func(existing *v1beta1.VulnerabilityManifestSummary) {
+		func(existing *v1beta1.VulnerabilityManifestSummary) bool {
+			storedTimestamp, storedOK := existing.Annotations[timestampMetadataKey]
+			incomingTimestamp, incomingOK := manifest.Annotations[timestampMetadataKey]
+			if storedOK && incomingOK {
+				storedTS, storedErr := strconv.ParseInt(storedTimestamp, 10, 64)
+				incomingTS, incomingErr := strconv.ParseInt(incomingTimestamp, 10, 64)
+				if storedErr == nil && incomingErr == nil && incomingTS < storedTS {
+					return false
+				}
+			}
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
+			return true
 		},
 		helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 }
@@ -1715,14 +1744,19 @@ func ignoredMatchAssessment(m v1beta1.IgnoredMatch) ignoredVEXAssessment {
 // matches the SourceKind rather than inferring provenance from rule shape, ensuring
 // that only explicit CRD-driven rules receive the SecurityException impact statement.
 // isOwnIgnoreRule reports whether an ignored match was suppressed by our own exception
-// machinery. buildIgnoreRule writes exactly one rule per suppression and never sets Package,
-// while Grype expresses its own ignore rules in terms of a package, so one carrying a package
-// did not come from us.
+// machinery. buildIgnoreRules never sets Package on the rules it writes, while Grype
+// expresses its own ignore rules in terms of a package, so a match where any rule
+// carries a package did not come from us.
 func isOwnIgnoreRule(m v1beta1.IgnoredMatch) bool {
-	if len(m.AppliedIgnoreRules) != 1 {
+	if len(m.AppliedIgnoreRules) == 0 {
 		return false
 	}
-	return m.AppliedIgnoreRules[0].Package == nil
+	for _, rule := range m.AppliedIgnoreRules {
+		if rule.Package != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // securityExceptionIgnoreRule can face more than one candidate: buildIgnoreRule
@@ -2530,7 +2564,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	if isFiltered {
 		filtered := convertToFilteredSBOM(&manifest)
 		return createOrUpdate(ctx, a.StorageClient.SBOMSyftFiltereds(a.Namespace), "filtered SBOM", sbom.Name, filtered, getOpts,
-			func(existing *v1beta1.SBOMSyftFiltered) {
+			func(existing *v1beta1.SBOMSyftFiltered) bool {
 				existing.Annotations = mergeMaps(existing.Annotations, filtered.Annotations)
 				existing.Labels = mergeMaps(existing.Labels, filtered.Labels)
 				// A nil sbom.Content has nothing to replace whatever Spec is already
@@ -2539,16 +2573,18 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 				if sbom.Content != nil {
 					existing.Spec = filtered.Spec
 				}
+				return true
 			})
 	}
 	return createOrUpdate(ctx, a.StorageClient.SBOMSyfts(a.Namespace), "SBOM", sbom.Name, &manifest, getOpts,
-		func(existing *v1beta1.SBOMSyft) {
+		func(existing *v1beta1.SBOMSyft) bool {
 			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			// Same reasoning as the filtered path above.
 			if sbom.Content != nil {
 				existing.Spec = manifest.Spec
 			}
+			return true
 		})
 }
 
@@ -2569,9 +2605,9 @@ func (a *APIServerStore) DeleteSBOM(ctx context.Context, name string) error {
 	err = a.StorageClient.SBOMSyftFiltereds(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		logger.L().Ctx(ctx).Warning("failed to delete filtered SBOM", helpers.Error(err), helpers.String("name", name))
-		if deleteErr == nil {
-			deleteErr = err
-		}
+		// Join both errors so neither is silently dropped: when both deletions fail the
+		// caller sees the combined message and can inspect each failure individually.
+		deleteErr = stderrors.Join(deleteErr, err)
 	}
 
 	return deleteErr
@@ -2603,7 +2639,7 @@ type objectStore[T any] interface {
 // extra are appended to every log line this emits, for callers that carry an additional
 // field on them. name is the object's own name and is what the Get inside the retry uses,
 // so it is the one thing every line here reports about which object is meant.
-func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T), extra ...helpers.IDetails) error {
+func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T) bool, extra ...helpers.IDetails) error {
 	_, err := store.Create(ctx, obj, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -2617,7 +2653,9 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			if getErr != nil {
 				return getErr
 			}
-			merge(existing)
+			if !merge(existing) {
+				return nil
+			}
 			_, updateErr := store.Update(ctx, existing, metav1.UpdateOptions{})
 			return updateErr
 		})

@@ -14,10 +14,13 @@
 package vexvalidate
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/gocsaf/csaf/v3/csaf"
+	"github.com/kubescape/kubevuln/internal/vexdoc"
 	"github.com/openvex/go-vex/pkg/vex"
 )
 
@@ -28,11 +31,6 @@ var (
 	// ErrInvalidContext is returned when the document's @context is empty or
 	// does not identify it as an OpenVEX document.
 	ErrInvalidContext = errors.New("vexvalidate: document has no valid @context")
-
-	// ErrNoStatements is returned when the document has zero statements. A
-	// VEX document that asserts nothing is not useful to anything that
-	// would consume it.
-	ErrNoStatements = errors.New("vexvalidate: document has no statements")
 
 	// ErrInvalidStatement is returned when a statement fails go-vex's own,
 	// stricter Statement.Validate() - an invalid status, or a status paired
@@ -126,9 +124,16 @@ func vulnerabilityIsAnonymous(v vex.Vulnerability) bool {
 }
 
 // Validate parses data as an OpenVEX document and checks it is genuinely
-// real: a valid @context, at least one statement, and every statement
-// passing go-vex's own, stricter Statement.Validate() with at least one
-// product that actually identifies something.
+// real: a valid @context, and every statement passing go-vex's own, stricter
+// Statement.Validate() with at least one product that actually identifies
+// something.
+//
+// A document carrying no statements is valid. kubevuln publishes one for every
+// image that scans clean, and "we scanned this and found nothing" is a real
+// assertion rather than an empty one. Rejecting it here would mean rejecting
+// documents kubescape itself produces, which is exactly what #387 goes on to
+// fetch. A zero-statement document also suppresses nothing, so accepting one
+// costs a consumer nothing.
 //
 // Validate deliberately reuses go-vex's own Statement.Validate() rather than
 // re-implementing a subset of its rules, so this package cannot drift out of
@@ -141,10 +146,6 @@ func Validate(data []byte) error {
 
 	if !hasValidContext(doc.Context) {
 		return ErrInvalidContext
-	}
-
-	if len(doc.Statements) == 0 {
-		return ErrNoStatements
 	}
 
 	for i := range doc.Statements {
@@ -172,6 +173,63 @@ func Validate(data []byte) error {
 						ErrEmptySubcomponent, i, j, k)
 				}
 			}
+		}
+	}
+
+	return nil
+}
+
+
+// ValidateCSAF parses a CSAF 2.0 advisory using the same upstream validator
+// used by kubevuln's CSAF matching support. The input is written to a
+// short-lived, owner-readable file because gocsaf/csaf exposes its validating
+// loader as a file-based API.
+func ValidateCSAF(data []byte) (err error) {
+	if err := rejectMalformedCSAFArrays(data); err != nil {
+		return err
+	}
+
+	path, cleanup, err := vexdoc.WriteToTempFile(data)
+	if err != nil {
+		return fmt.Errorf("vexvalidate: staging CSAF document: %w", err)
+	}
+	defer cleanup()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("vexvalidate: invalid CSAF document: upstream validator panicked: %v", recovered)
+		}
+	}()
+
+	if _, loadErr := csaf.LoadAdvisory(path); loadErr != nil {
+		return fmt.Errorf("vexvalidate: invalid CSAF document: %w", loadErr)
+	}
+	return nil
+}
+
+func rejectMalformedCSAFArrays(data []byte) error {
+	var envelope struct {
+		Document struct {
+			Tracking struct {
+				RevisionHistory []json.RawMessage `json:"revision_history"`
+			} `json:"tracking"`
+		} `json:"document"`
+		Vulnerabilities []json.RawMessage `json:"vulnerabilities"`
+	}
+
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return fmt.Errorf("vexvalidate: invalid CSAF document: parsing JSON: %w", err)
+	}
+
+	for _, entry := range envelope.Document.Tracking.RevisionHistory {
+		if string(entry) == "null" {
+			return errors.New("vexvalidate: invalid CSAF document: tracking.revision_history contains null entry")
+		}
+	}
+
+	for _, entry := range envelope.Vulnerabilities {
+		if string(entry) == "null" {
+			return errors.New("vexvalidate: invalid CSAF document: vulnerabilities contains null entry")
 		}
 	}
 
