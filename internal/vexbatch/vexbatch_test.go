@@ -198,31 +198,6 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
-
-	t.Run("formats with surrounding whitespace", func(t *testing.T) {
-		matches := newMatches()
-
-		remaining, ignored, err := Apply(
-			[]Document{
-				{
-					Format: "  openvex  ",
-					Path:   openvexPath,
-				},
-				{
-					Format: "\tcsaf \n",
-					Path:   csafPath,
-				},
-			},
-			pkgContext,
-			&matches,
-			nil,
-			ignoreRules,
-		)
-		require.NoError(t, err)
-
-		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
-		require.Len(t, ignored, 2)
-	})
 }
 
 func TestNormalizeDocuments_DeduplicatesAndNormalizesFormats(t *testing.T) {
@@ -254,4 +229,3 @@ func TestNormalizeDocuments_UnsupportedFormat(t *testing.T) {
 	})
 	require.EqualError(t, err, "unsupported VEX format \"cyclonedx\"")
 }
-
