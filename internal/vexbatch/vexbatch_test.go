@@ -186,3 +186,34 @@ func TestApply_MixedFormats(t *testing.T) {
 	})
 }
 
+
+
+func TestNormalizeDocuments_DeduplicatesAndNormalizesFormats(t *testing.T) {
+	groups, order, err := normalizeDocuments([]Document{
+		{Format: " OpenVEX ", Path: "openvex.json"},
+		{Format: FormatOpenVEX, Path: "openvex.json"},
+		{Format: "\tCSAF\n", Path: "advisory.json"},
+		{Format: FormatCSAF, Path: "openvex.json"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []Format{FormatOpenVEX, FormatCSAF}, order)
+	require.Len(t, groups[FormatOpenVEX], 1)
+	require.Equal(t, "openvex.json", groups[FormatOpenVEX][0].Path)
+	require.Len(t, groups[FormatCSAF], 2)
+	require.Equal(t, "advisory.json", groups[FormatCSAF][0].Path)
+	require.Equal(t, "openvex.json", groups[FormatCSAF][1].Path)
+}
+
+func TestNormalizeDocuments_EmptyPath(t *testing.T) {
+	_, _, err := normalizeDocuments([]Document{
+		{Format: FormatOpenVEX, Path: " \t "},
+	})
+	require.EqualError(t, err, "VEX document 0 has an empty path")
+}
+
+func TestNormalizeDocuments_UnsupportedFormat(t *testing.T) {
+	_, _, err := normalizeDocuments([]Document{
+		{Format: "cyclonedx", Path: "vex.json"},
+	})
+	require.EqualError(t, err, "unsupported VEX format \"cyclonedx\"")
+}
