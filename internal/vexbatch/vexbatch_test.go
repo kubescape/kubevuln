@@ -135,6 +135,7 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 
 		ignoredIDs := make(map[string]struct{}, len(ignored))
@@ -144,7 +145,6 @@ func TestApply_MixedFormats(t *testing.T) {
 
 		require.Contains(t, ignoredIDs, "CVE-2023-1255")
 		require.Contains(t, ignoredIDs, "CVE-2023-3817")
-		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 	})
 
 	t.Run("uppercase and mixed-case formats", func(t *testing.T) {
@@ -172,4 +172,31 @@ func TestApply_MixedFormats(t *testing.T) {
 		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
+
+	t.Run("formats with surrounding whitespace", func(t *testing.T) {
+		matches := newMatches()
+
+		remaining, ignored, err := Apply(
+			[]Document{
+				{
+					Format: "  openvex  ",
+					Path:   openvexPath,
+				},
+				{
+					Format: "\tcsaf \n",
+					Path:   csafPath,
+				},
+			},
+			pkgContext,
+			&matches,
+			nil,
+			ignoreRules,
+		)
+		require.NoError(t, err)
+
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
+		require.Len(t, ignored, 2)
+	})
 }
+
