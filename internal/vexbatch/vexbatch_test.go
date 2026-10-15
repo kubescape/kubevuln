@@ -61,6 +61,17 @@ func TestApply_MixedFormats(t *testing.T) {
 				},
 				Package: libCryptoPackage,
 			},
+			// This finding has no corresponding statement in either VEX
+			// document and must remain in the scan results.
+			match.Match{
+				Vulnerability: vulnerability.Vulnerability{
+					Reference: vulnerability.Reference{
+						ID:        "CVE-2099-9999",
+						Namespace: "alpine:distro:alpine:3.17",
+					},
+				},
+				Package: libCryptoPackage,
+			},
 		)
 	}
 
@@ -93,7 +104,7 @@ func TestApply_MixedFormats(t *testing.T) {
 		// A single Grype processor selects its parser from the first
 		// document, so the CSAF document is not applied when OpenVEX
 		// is first in the mixed batch.
-		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 2)
 		require.Len(t, ignored, 1)
 		require.Equal(
 			t,
@@ -123,7 +134,8 @@ func TestApply_MixedFormats(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 
 		ignoredIDs := make(map[string]struct{}, len(ignored))
@@ -156,7 +168,8 @@ func TestApply_MixedFormats(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
 
@@ -181,7 +194,8 @@ func TestApply_MixedFormats(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
 }
@@ -215,4 +229,3 @@ func TestNormalizeDocuments_UnsupportedFormat(t *testing.T) {
 	})
 	require.EqualError(t, err, "unsupported VEX format \"cyclonedx\"")
 }
-
