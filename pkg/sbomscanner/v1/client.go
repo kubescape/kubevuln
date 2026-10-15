@@ -118,10 +118,11 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	creds := make([]*pb.RegistryCredentials, len(req.Options.Credentials))
 	for i, v := range req.Options.Credentials {
 		creds[i] = &pb.RegistryCredentials{
-			Authority: v.Authority,
-			Username:  v.Username,
-			Password:  v.Password,
-			Token:     v.Token,
+			Authority:     v.Authority,
+			Username:      v.Username,
+			Password:      v.Password,
+			Token:         v.Token,
+			IdentityToken: v.IdentityToken,
 		}
 	}
 

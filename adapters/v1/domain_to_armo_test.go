@@ -1034,6 +1034,36 @@ func Test_linkToVuln(t *testing.T) {
 			want: "https://osv.dev/vulnerability/OSV-2020-1",
 		},
 		{
+			name: "MAL vulnerability",
+			id:   "MAL-2024-1234",
+			want: "https://osv.dev/vulnerability/MAL-2024-1234",
+		},
+		{
+			name: "DLA advisory",
+			id:   "DLA-3788-1",
+			want: "https://security-tracker.debian.org/tracker/DLA-3788-1",
+		},
+		{
+			name: "RHBA advisory",
+			id:   "RHBA-2024:1234",
+			want: "https://access.redhat.com/errata/RHBA-2024:1234",
+		},
+		{
+			name: "RHEA advisory",
+			id:   "RHEA-2024:5678",
+			want: "https://access.redhat.com/errata/RHEA-2024:5678",
+		},
+		{
+			name: "SNYK vulnerability",
+			id:   "SNYK-JS-LODASH-567746",
+			want: "https://security.snyk.io/vuln/SNYK-JS-LODASH-567746",
+		},
+		{
+			name: "GLSA advisory",
+			id:   "GLSA-202412-17",
+			want: "https://security.gentoo.org/glsa/202412-17",
+		},
+		{
 			name: "CVE defaults to NVD",
 			id:   "CVE-2021-21300",
 			want: "https://nvd.nist.gov/vuln/detail/CVE-2021-21300",
@@ -1358,5 +1388,3 @@ func TestDomainToArmo_RelatedVulnerabilities_FirstNonEmptyDescription(t *testing
 	require.Len(t, results, 1)
 	assert.Equal(t, "valid fallback description from second related vulnerability", results[0].Vulnerability.Description)
 }
-
-

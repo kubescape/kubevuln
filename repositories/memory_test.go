@@ -43,6 +43,19 @@ func TestMemoryStore_GetSBOM(t *testing.T) {
 	assert.NotNil(t, got.Content)
 }
 
+func TestMemoryStore_StoreSBOM_UninitializedMap(t *testing.T) {
+	m := &MemoryStore{}
+	sbom := domain.SBOM{Name: "uninitialized-test"}
+	assert.NotPanics(t, func() {
+		err := m.StoreSBOM(context.TODO(), sbom, false)
+		assert.NoError(t, err)
+	})
+	got, err := m.GetSBOM(context.TODO(), "uninitialized-test", "")
+	assert.NoError(t, err)
+	assert.Equal(t, "uninitialized-test", got.Name)
+}
+
+
 // TestMemoryStore_SummaryWriteDoesNotSatisfyManifestRead is the property that went wrong
 // while summaries shared the manifest map.
 //

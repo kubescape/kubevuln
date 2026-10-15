@@ -41,6 +41,7 @@ type Platform interface {
 }
 
 type ContainerRelevancyScan struct {
+	HostNodeName     string
 	Completion       string
 	ContainerName    string
 	ImageID          string

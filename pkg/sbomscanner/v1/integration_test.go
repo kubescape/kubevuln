@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func startIntegrationServer(t *testing.T) (SBOMScannerClient, *grpc.Server, string) {
+func startIntegrationServer(t *testing.T, opts ...ServerOption) (SBOMScannerClient, *grpc.Server, string) {
 	t.Helper()
 	sock := newTestSocketPath(t)
 
@@ -27,7 +27,7 @@ func startIntegrationServer(t *testing.T) (SBOMScannerClient, *grpc.Server, stri
 		grpc.MaxRecvMsgSize(MaxgRPCMessageSize),
 		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
 	)
-	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
+	pb.RegisterSBOMScannerServer(srv, NewScannerServer(opts...))
 	go func() {
 		// Serve returns ErrServerStopped on the graceful Stop below; nothing else to do
 		// with it here, but ignoring it silently is what errcheck flags.

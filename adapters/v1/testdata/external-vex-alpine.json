@@ -1,0 +1,26 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/alpine-cve-2023-1255",
+  "author": "Kubescape",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2023-1255"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/alpine@sha256%3Ae2e16842c9b54d985bf1ef9242a313f36b856181f188de21313820e177002501",
+          "subcomponents": [
+            {
+              "@id": "pkg:apk/alpine/libcrypto3@3.0.8-r0"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present"
+    }
+  ]
+}

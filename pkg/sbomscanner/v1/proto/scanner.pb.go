@@ -27,6 +27,7 @@ type RegistryCredentials struct {
 	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	Password      string                 `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
 	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`
+	IdentityToken string                 `protobuf:"bytes,5,opt,name=identity_token,json=identityToken,proto3" json:"identity_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,6 +86,13 @@ func (x *RegistryCredentials) GetPassword() string {
 func (x *RegistryCredentials) GetToken() string {
 	if x != nil {
 		return x.Token
+	}
+	return ""
+}
+
+func (x *RegistryCredentials) GetIdentityToken() string {
+	if x != nil {
+		return x.IdentityToken
 	}
 	return ""
 }
@@ -389,12 +397,13 @@ var File_scanner_proto protoreflect.FileDescriptor
 
 const file_scanner_proto_rawDesc = "" +
 	"\n" +
-	"\rscanner.proto\x12\x0esbomscanner.v1\"\x81\x01\n" +
+	"\rscanner.proto\x12\x0esbomscanner.v1\"\xa8\x01\n" +
 	"\x13RegistryCredentials\x12\x1c\n" +
 	"\tauthority\x18\x01 \x01(\tR\tauthority\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x03 \x01(\tR\bpassword\x12\x14\n" +
-	"\x05token\x18\x04 \x01(\tR\x05token\"\xba\x03\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\x12%\n" +
+	"\x0eidentity_token\x18\x05 \x01(\tR\ridentityToken\"\xba\x03\n" +
 	"\x11CreateSBOMRequest\x12\x19\n" +
 	"\bimage_id\x18\x01 \x01(\tR\aimageId\x12\x1b\n" +
 	"\timage_tag\x18\x02 \x01(\tR\bimageTag\x12\x1a\n" +

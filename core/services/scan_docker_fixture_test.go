@@ -11,7 +11,9 @@ import (
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/kubevuln/repositories"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,12 +57,12 @@ func TestScanService_NginxTest(t *testing.T) {
 			helpersv1.ImageNameMetadataKey: "docker-io-library-nginx",
 		},
 		Name:               imageSlug,
-		Content:            fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+		Content:            testfixture.Load[v1beta1.SyftDocument]("../../adapters/v1/testdata/nginx-sbom.json"),
 		SBOMCreatorVersion: sbomAdapter.Version(),
 	}
 	err = storageSBOM.StoreSBOM(ctx, sbom, false)
 	require.NoError(t, err)
-	ap := fileToContainerProfile("../../adapters/v1/testdata/nginx-ap.json")
+	ap := *testfixture.Load[v1beta1.ContainerProfile]("../../adapters/v1/testdata/nginx-ap.json")
 	err = storageCP.StoreContainerProfile(ctx, ap)
 	require.NoError(t, err)
 	err = s.ScanCP(ctx)

@@ -183,19 +183,10 @@ func (s *SyftAdapter) CreateSBOM(ctx context.Context, name, imageID, imageTag st
 	domainSBOM.Annotations[helpersv1.ImageTagMetadataKey] = imageTag
 
 	// translate business models into Syft models
-	credentials := make([]image.RegistryCredentials, len(options.Credentials))
-	for i, v := range options.Credentials {
-		credentials[i] = image.RegistryCredentials{
-			Authority: v.Authority,
-			Username:  v.Username,
-			Password:  v.Password,
-			Token:     v.Token,
-		}
-	}
 	registryOptions := image.RegistryOptions{
 		InsecureSkipTLSVerify: options.InsecureSkipTLSVerify,
 		InsecureUseHTTP:       options.InsecureUseHTTP,
-		Credentials:           credentials,
+		Credentials:           registryauth.Credentials(options.Credentials),
 	}
 
 	imgPlatform, err := syftsource.ParsePlatform(options.Platform)

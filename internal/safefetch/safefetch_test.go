@@ -45,6 +45,15 @@ func TestCheckIPAllowed(t *testing.T) {
 		{"RFC 5737 TEST-NET-1 (192.0.2.0/24)", "192.0.2.1", true},
 		{"RFC 5737 TEST-NET-2 (198.51.100.0/24)", "198.51.100.1", true},
 		{"RFC 5737 TEST-NET-3 (203.0.113.0/24)", "203.0.113.1", true},
+		{"RFC 6890 IETF Protocol Assignments (192.0.0.0/24)", "192.0.0.1", true},
+		{"RFC 7723 PCP Anycast (192.0.0.9/32)", "192.0.0.9", true},
+		{"RFC 8155 TURN Anycast (192.0.0.10/32)", "192.0.0.10", true},
+		{"RFC 7335 DS-Lite / IPv4 Service Continuity (192.0.0.0/29)", "192.0.0.2", true},
+		{"RFC 7050 NAT64 Discovery (192.0.0.170/32)", "192.0.0.170", true},
+		{"RFC 9637 IPv6 documentation (3fff::/20)", "3fff::1", true},
+		{"RFC 9780 IPv6 dummy prefix (100:0:0:1::/64)", "100:0:0:1::1", true},
+		{"RFC 9602 SRv6 SIDs (5f00::/16)", "5f00::1", true},
+		{"RFC 4843 deprecated ORCHID (2001:10::/28)", "2001:10::1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +177,7 @@ func TestCheckIPAllowed_EmbeddedIPv4(t *testing.T) {
 		{"NAT64 well-known to RFC 2544 benchmark testing", "64:ff9b::c612:1", true},
 		{"NAT64 well-known to RFC 7526 deprecated 6to4 relay anycast", "64:ff9b::c058:6301", true},
 		{"NAT64 well-known to RFC 5737 TEST-NET-1", "64:ff9b::c000:201", true},
+		{"NAT64 well-known to RFC 6890 IETF Protocol Assignments", "64:ff9b::c000:1", true},
 
 		// the embedded address is what decides it, so translation to a genuinely
 		// public host stays reachable: on an IPv6-only cluster NAT64 is how it is
@@ -232,6 +242,9 @@ func TestNew_DialBlocksAddress(t *testing.T) {
 		{"RFC 3849 IPv6 documentation address", "[2001:db8::1]:443"},
 		{"RFC 7526 deprecated 6to4 relay anycast address", "192.88.99.1:443"},
 		{"RFC 5737 TEST-NET-1 address", "192.0.2.1:443"},
+		{"RFC 6890 IETF Protocol Assignments address", "192.0.0.1:443"},
+		{"RFC 9637 IPv6 documentation address", "[3fff::1]:443"},
+		{"RFC 9602 SRv6 SIDs address", "[5f00::1]:443"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

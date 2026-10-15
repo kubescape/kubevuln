@@ -235,6 +235,12 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	var lastFailure *domain.ScanError
 
 	for _, scan := range scans {
+		if scan.HostNodeName != "" {
+			if err := s.scanHostCP(mainCtx, workload, scan); err != nil {
+				return err
+			}
+			continue
+		}
 		imageTagNormalized := tools.NormalizeReference(scan.ImageTag)
 		slug, err := names.ImageInfoToSlug(imageTagNormalized, scan.ImageID)
 		if err != nil {
@@ -591,7 +597,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return &domain.ScanError{Reason: reason, Err: sbomErr}
 		}
 
-		// With sbomGeneration off, getOrCreateSBOM returns a zero SBOM and a nil error, so
+		// Without generation or stored inventory, getOrCreateSBOM returns a zero SBOM and nil error, so
 		// nothing about err says the SBOM is missing and only Content does. ScanCVE and
 		// ScanCP each stop here for the same reason: the CVE scanner dereferences
 		// sbom.Content, so handing it a zero SBOM is a nil dereference, on a worker-pool
@@ -969,7 +975,7 @@ func optionsFromWorkload(ctx context.Context, workload domain.ScanCommand) domai
 func credentialsLog(credentials []domain.RegistryCredentials) string {
 	var sb strings.Builder
 	for _, rc := range credentials {
-		sb.WriteString(fmt.Sprintf("[Authority: %s, Username: %s, Password: *** (%d), Token: *** (%d)]", rc.Authority, rc.Username, len(rc.Password), len(rc.Token)))
+		sb.WriteString(fmt.Sprintf("[Authority: %s, Username: %s, Password: *** (%d), Token: *** (%d), IdentityToken: *** (%d)]", rc.Authority, rc.Username, len(rc.Password), len(rc.Token), len(rc.IdentityToken)))
 	}
 
 	return sb.String()
@@ -977,15 +983,25 @@ func credentialsLog(credentials []domain.RegistryCredentials) string {
 
 // registryCredentialsFromCredentialsList converts auth configurations into domain registry credentials.
 func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) []domain.RegistryCredentials {
-	registryCredentials := make([]domain.RegistryCredentials, len(credentials))
+	registryCredentials := make([]domain.RegistryCredentials, 0, len(credentials))
 	for i, cred := range credentials {
 		rc := domain.RegistryCredentials{}
 		if cred.ServerAddress != "" {
 			rc.Authority = parseAuthorityFromServerAddress(cred.ServerAddress)
+			// An empty Authority means "use for every registry". That is intended for an
+			// entry with no server address, but an address that was supplied and yields no
+			// host (whitespace-only, or a bare path) must not widen into wildcard
+			// credentials sent to unrelated registries, so the entry is dropped instead.
+			if rc.Authority == "" {
+				logger.L().Warning("dropping registry credentials whose server address has no host",
+					helpers.Int("index", i))
+				continue
+			}
 		}
 		if cred.RegistryToken != "" {
 			rc.Token = cred.RegistryToken
 		}
+		rc.IdentityToken = cred.IdentityToken
 		username, password := cred.Username, cred.Password
 		// Consulted whenever the pair is incomplete, not only when both halves are
 		// missing: an entry carrying a username but no password is still an entry whose
@@ -1002,7 +1018,7 @@ func registryCredentialsFromCredentialsList(credentials []registry.AuthConfig) [
 			rc.Password = password
 		}
 
-		registryCredentials[i] = rc
+		registryCredentials = append(registryCredentials, rc)
 	}
 	return registryCredentials
 }
@@ -1027,6 +1043,7 @@ func credentialsFromAuth(auth string) (username, password string) {
 
 // parseAuthorityFromServerAddress extracts the authority host:port from a server address.
 func parseAuthorityFromServerAddress(serverAddress string) string {
+	serverAddress = strings.TrimSpace(serverAddress)
 	if serverAddress == "" {
 		return ""
 	}
@@ -1389,6 +1406,11 @@ type sbomCreation struct {
 // usable, and only GenerateSBOM, which exists to store it, treats it as a failure.
 func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanCommand) (domain.SBOM, error, error) {
 	if !s.sbomGeneration {
+		// Node-agent owns generation in this mode; existing inventory is still usable.
+		if s.storage {
+			sbom, err := s.getSBOM(ctx, workload.ImageSlug, s.sbomCreator.Version())
+			return sbom, nil, err
+		}
 		return domain.SBOM{}, nil, nil
 	}
 

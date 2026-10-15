@@ -43,6 +43,9 @@ type RegistryCredentials struct {
 	Username  string
 	Password  string
 	Token     string
+	// IdentityToken is an OAuth2 refresh token. Unlike Token, it is not a bearer
+	// credential: it must be exchanged at the registry's token endpoint first.
+	IdentityToken string
 }
 
 // RegistryOptions contains OCI registry configuration parameters required for connection

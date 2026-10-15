@@ -150,7 +150,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("load services error", helpers.Error(err))
 		}
 		logger.L().Info("loaded backend services", helpers.String("ApiServerUrl", backendServices.GetApiServerUrl()), helpers.String("ReportReceiverHttpUrl", backendServices.GetReportReceiverHttpUrl()))
-		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo)
+		backendAdapter := v1.NewBackendAdapter(credentials.Account, backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), credentials.AccessKey, seRepo).WithClusterName(c.ClusterName)
 		platform = backendAdapter
 	}
 	var relevancyProvider ports.Relevancy

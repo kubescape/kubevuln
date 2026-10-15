@@ -3,18 +3,17 @@ package services
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	stereoimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -29,6 +28,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
@@ -957,23 +957,6 @@ func TestScanService_ScanCVE_SchemaUnsupportedStub(t *testing.T) {
 	})
 }
 
-func fileContent(path string) []byte {
-	b, _ := os.ReadFile(path)
-	return b
-}
-
-func fileToSyftDocument(path string) *v1beta1.SyftDocument {
-	sbom := v1beta1.SyftDocument{}
-	_ = json.Unmarshal(fileContent(path), &sbom)
-	return &sbom
-}
-
-func fileToContainerProfile(path string) v1beta1.ContainerProfile {
-	ap := v1beta1.ContainerProfile{}
-	_ = json.Unmarshal(fileContent(path), &ap)
-	return ap
-}
-
 func TestScanService_ValidateGenerateSBOM(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1627,6 +1610,15 @@ func Test_parseAuthorityFromServerAddress(t *testing.T) {
 	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("HTTPS://index.docker.io/v1/"))
 	assert.Equal(t, "registry.example.com", parseAuthorityFromServerAddress("HTTP://registry.example.com/v2/"))
 	assert.Equal(t, "quay.io:5000", parseAuthorityFromServerAddress("HttPs://quay.io:5000/v2/"))
+
+	// Leading and trailing whitespace must be stripped before scheme detection and URL
+	// parsing. A server address copied from a config file or credential helper may carry
+	// surrounding spaces; without trimming, " https://..." fails the HasPrefix check and
+	// is cut at the first slash, returning " https:" instead of the host.
+	assert.Equal(t, "", parseAuthorityFromServerAddress("   "))
+	assert.Equal(t, "index.docker.io", parseAuthorityFromServerAddress("  https://index.docker.io/v1/  "))
+	assert.Equal(t, "ghcr.io", parseAuthorityFromServerAddress("ghcr.io "))
+	assert.Equal(t, "quay.io", parseAuthorityFromServerAddress(" quay.io"))
 }
 
 // The auth field is the canonical one; username and password are supplementary and an entry
@@ -1677,6 +1669,153 @@ func Test_registryCredentialsFromCredentialsList_incompletePair(t *testing.T) {
 	}
 }
 
+func Test_registryCredentialsFromCredentialsList_identityToken(t *testing.T) {
+	tests := []struct {
+		name              string
+		cred              registry.AuthConfig
+		wantToken         string
+		wantIdentityToken string
+	}{
+		{
+			name: "identityToken is kept separate and not used as a bearer token",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				Username:      "00000000-0000-0000-0000-000000000000",
+				IdentityToken: "refresh-token",
+			},
+			wantToken:         "",
+			wantIdentityToken: "refresh-token",
+		},
+		{
+			name: "registryToken and identityToken are both carried",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				RegistryToken: "access-token",
+				IdentityToken: "refresh-token",
+			},
+			wantToken:         "access-token",
+			wantIdentityToken: "refresh-token",
+		},
+		{
+			name: "no identityToken leaves the field empty",
+			cred: registry.AuthConfig{
+				ServerAddress: "myacr.azurecr.io",
+				Username:      "user",
+				Password:      "pass",
+			},
+			wantToken:         "",
+			wantIdentityToken: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList([]registry.AuthConfig{tt.cred})
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantToken, got[0].Token)
+			assert.Equal(t, tt.wantIdentityToken, got[0].IdentityToken)
+		})
+	}
+}
+
+// An entry's Authority decides which registries stereoscope sends it to, and an empty one
+// matches every registry. These cases run the converted credentials through the same
+// selection the scanners use, so a supplied address that yields no host is caught by what
+// would actually be sent, not just by what the parser returns.
+func Test_registryCredentialsFromCredentialsList_selection(t *testing.T) {
+	tests := []struct {
+		name     string
+		creds    []registry.AuthConfig
+		registry string
+		wantLen  int
+		wantUser string
+		wantPass string
+		wantTok  string
+	}{
+		{
+			name:     "whitespace-only address with basic credentials is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "   ", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "whitespace-only address with a token is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "\t", RegistryToken: "tok"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "address with no host is not sent to other registries",
+			creds:    []registry.AuthConfig{{ServerAddress: "/v2/", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+		},
+		{
+			name:     "padded host is used for that host",
+			creds:    []registry.AuthConfig{{ServerAddress: " ghcr.io ", Username: "u", Password: "p"}},
+			registry: "ghcr.io",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+		{
+			name:     "padded host is not used for another host",
+			creds:    []registry.AuthConfig{{ServerAddress: " ghcr.io ", Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+			wantLen:  1,
+		},
+		{
+			name:     "padded URL with a token is used for its host",
+			creds:    []registry.AuthConfig{{ServerAddress: "  https://quay.io/v2/  ", RegistryToken: "tok"}},
+			registry: "quay.io",
+			wantLen:  1,
+			wantTok:  "tok",
+		},
+		{
+			name:     "omitted address still applies to every registry",
+			creds:    []registry.AuthConfig{{Username: "u", Password: "p"}},
+			registry: "unrelated.example",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+		{
+			name: "blank entry is dropped without affecting a valid one",
+			creds: []registry.AuthConfig{
+				{ServerAddress: " ", Username: "blank", Password: "blank"},
+				{ServerAddress: "ghcr.io", Username: "u", Password: "p"},
+			},
+			registry: "ghcr.io",
+			wantLen:  1,
+			wantUser: "u",
+			wantPass: "p",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryCredentialsFromCredentialsList(tt.creds)
+			require.Len(t, got, tt.wantLen)
+
+			opts := stereoimage.RegistryOptions{}
+			for _, c := range got {
+				opts.Credentials = append(opts.Credentials, stereoimage.RegistryCredentials{
+					Authority: c.Authority,
+					Username:  c.Username,
+					Password:  c.Password,
+					Token:     c.Token,
+				})
+			}
+			authenticator := opts.Authenticator(tt.registry)
+			if tt.wantUser == "" && tt.wantTok == "" {
+				assert.Nil(t, authenticator)
+				return
+			}
+			require.NotNil(t, authenticator)
+			cfg, err := authenticator.Authorization()
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantUser, cfg.Username)
+			assert.Equal(t, tt.wantPass, cfg.Password)
+			assert.Equal(t, tt.wantTok, cfg.RegistryToken)
+		})
+	}
+}
+
 func Test_filterSBOM(t *testing.T) {
 	nginxSBOM := domain.SBOM{
 		Name: "nginx-sbom",
@@ -1685,7 +1824,7 @@ func Test_filterSBOM(t *testing.T) {
 			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
 			helpersv1.StatusMetadataKey:   helpersv1.Learning,
 		},
-		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+		Content: testfixture.Load[v1beta1.SyftDocument]("../../adapters/v1/testdata/nginx-sbom.json"),
 	}
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
@@ -1832,7 +1971,7 @@ func BenchmarkFilterSBOM(b *testing.B) {
 			helpersv1.ImageTagMetadataKey: "nginx:1.14.1",
 			helpersv1.StatusMetadataKey:   helpersv1.Learning,
 		},
-		Content: fileToSyftDocument("../../adapters/v1/testdata/nginx-sbom.json"),
+		Content: testfixture.Load[v1beta1.SyftDocument]("../../adapters/v1/testdata/nginx-sbom.json"),
 	}
 	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
 		"apiVersion-apps/v1/namespace-default/kind-Deployment/name-nginx/containerName-nginx",
@@ -3593,7 +3732,7 @@ func registryWorkload() domain.ScanCommand {
 // TestScanService_MissingSBOM_NoFlowScansANilSBOM is the property all three CVE flows have
 // to agree on.
 //
-// With sbomGeneration off, getOrCreateSBOM returns a zero domain.SBOM and a nil error, so
+// Without generation or stored inventory, getOrCreateSBOM returns a zero SBOM and nil error, so
 // sbom.Content is nil and nothing about the error tells a flow that. ScanCVE and ScanCP
 // each check for it and stop with domain.ErrMissingSBOM. ScanRegistry did not, and handed
 // the zero SBOM to the CVE scanner, which dereferences Content.
@@ -3827,4 +3966,54 @@ func TestCredentialsFromAuth_WhitespaceAndNewlines(t *testing.T) {
 			assert.Equal(t, tt.wantPassword, p)
 		})
 	}
+}
+
+func TestScanService_getOrCreateSBOM_GenerationDisabled(t *testing.T) {
+	stored := domain.SBOM{Name: "existing", Status: "ready", Content: &v1beta1.SyftDocument{}}
+	readErr := errors.New("storage unavailable")
+	for _, tt := range []struct {
+		name    string
+		storage bool
+		sbom    domain.SBOM
+		err     error
+		want    domain.SBOM
+		wantErr error
+	}{
+		{name: "reads existing inventory", storage: true, sbom: stored, want: stored},
+		{name: "missing inventory", storage: true},
+		{name: "outdated inventory", storage: true, sbom: stored, err: domain.ErrOutdatedSBOM},
+		{name: "storage failure", storage: true, err: readErr, wantErr: readErr},
+		{name: "storage disabled", sbom: stored},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &ScanService{
+				storage:        tt.storage,
+				sbomRepository: &mockSBOMRepository{getSBOMSBOM: tt.sbom, getSBOMErr: tt.err},
+				// If creation is accidentally attempted, this adapter fails the test expectations.
+				sbomCreator: adapters.NewMockSBOMAdapter(true, false, false),
+			}
+			got, storeErr, err := s.getOrCreateSBOM(context.Background(), domain.ScanCommand{ImageSlug: "existing"})
+			assert.Equal(t, tt.want, got)
+			assert.NoError(t, storeErr)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestScanService_ScanCVE_StoredSBOMWithoutGeneration(t *testing.T) {
+	scanner := &recordingScanner{}
+	s, storage := newScanServiceWithoutSBOMGeneration(scanner)
+	s.storage = true
+	sbom := domain.SBOM{Name: "imageSlug", Status: "ready", SBOMCreatorVersion: s.sbomCreator.Version(), Content: &v1beta1.SyftDocument{}}
+	require.NoError(t, storage.StoreSBOM(context.Background(), sbom, false))
+	workload := registryWorkload()
+	workload.ImageHash = "sha256:test"
+	ctx, err := s.ValidateScanCVE(context.Background(), workload)
+	require.NoError(t, err)
+	require.NoError(t, s.ScanCVE(ctx))
+	assert.Equal(t, []domain.SBOM{sbom}, scanner.got)
 }
