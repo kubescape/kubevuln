@@ -168,7 +168,8 @@ func TestApply_MixedFormats(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.Empty(t, remaining.GetByPkgID(libCryptoPackage.ID))
+		require.Len(t, remaining.GetByPkgID(libCryptoPackage.ID), 1)
+		require.Equal(t, "CVE-2099-9999", remaining.GetByPkgID(libCryptoPackage.ID)[0].Vulnerability.Reference.ID)
 		require.Len(t, ignored, 2)
 	})
 }
