@@ -21,6 +21,52 @@ type Document struct {
 	Path   string
 }
 
+type documentKey struct {
+	format Format
+	path   string
+}
+
+// normalizeDocuments canonicalizes document formats, rejects unusable paths,
+// and removes repeated references to the same file and format. It preserves
+// first-seen order so applying a batch remains deterministic.
+func normalizeDocuments(documents []Document) (map[Format][]Document, []Format, error) {
+	groups := make(map[Format][]Document)
+	var order []Format
+	seen := make(map[documentKey]struct{}, len(documents))
+
+	for i, document := range documents {
+		format := Format(strings.ToLower(strings.TrimSpace(string(document.Format))))
+		switch format {
+		case FormatOpenVEX, FormatCSAF:
+		default:
+			return nil, nil, fmt.Errorf(
+				"unsupported VEX format %q",
+				document.Format,
+			)
+		}
+
+		if strings.TrimSpace(document.Path) == "" {
+			return nil, nil, fmt.Errorf("VEX document %d has an empty path", i)
+		}
+
+		key := documentKey{format: format, path: document.Path}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		if _, exists := groups[format]; !exists {
+			order = append(order, format)
+		}
+		groups[format] = append(groups[format], Document{
+			Format: format,
+			Path:   document.Path,
+		})
+	}
+
+	return groups, order, nil
+}
+
 func Apply(
 	documents []Document,
 	pkgContext *pkg.Context,
@@ -32,25 +78,9 @@ func Apply(
 		return matches, ignoredMatches, nil
 	}
 
-	groups := make(map[Format][]Document)
-	var order []Format
-
-	for _, document := range documents {
-		format := Format(strings.ToLower(strings.TrimSpace(string(document.Format))))
-		switch format {
-		case FormatOpenVEX, FormatCSAF:
-		default:
-			return matches, ignoredMatches, fmt.Errorf(
-				"unsupported VEX format %q",
-				document.Format,
-			)
-		}
-
-		if _, exists := groups[format]; !exists {
-			order = append(order, format)
-		}
-
-		groups[format] = append(groups[format], document)
+	groups, order, err := normalizeDocuments(documents)
+	if err != nil {
+		return matches, ignoredMatches, err
 	}
 
 	for _, format := range order {
