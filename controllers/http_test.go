@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1737,4 +1738,30 @@ func TestHTTPController_ScanCVE_ValidationErrorLogsWlid(t *testing.T) {
 		"the request should have been rejected at validation")
 	assert.Contains(t, output.String(), wlid,
 		"a rejected ScanCVE must name the workload it was given")
+}
+
+func TestMetricReasonRejectsUnboundedValues(t *testing.T) {
+	require.Equal(t, services.ReasonRateLimitExceeded, scanFailureReason("error", &domain.ScanError{Reason: services.ReasonRateLimitExceeded}))
+	require.Equal(t, scanfailure.ReasonUnexpected, scanFailureReason("error", &domain.ScanError{Reason: "attacker.example/secret?key=private"}))
+}
+
+// Rejections never reach worker execution. They still need a bounded safe
+// diagnostic so upstream invalid-command storms can be correlated without payloads.
+func TestRejectionDiagnosticsUseProcessGate(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, m.Shutdown(context.Background())) }()
+	h := NewHTTPController(nil, 1)
+	defer h.Shutdown(time.Second)
+	_, err = h.WithMetrics(m)
+	require.NoError(t, err)
+	before := telemetry.Suppressed()
+	for range 1000 {
+		h.recordRejection(context.Background(), "generateSBOM", domain.ErrMissingImageInfo)
+	}
+	require.InDelta(t, 1000, telemetry.Suppressed()-before, 1)
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	require.Contains(t, w.Body.String(), `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1000`)
+	require.NotContains(t, w.Body.String(), `kubevuln_scans_completed_total{`)
 }

@@ -212,3 +212,24 @@ func TestApplyExceptionsToManifest_ActiveGaugeResetsToZero(t *testing.T) {
 	assert.True(t, strings.Contains(body, "kubevuln_exceptions_active 0"), body)
 	assert.False(t, strings.Contains(body, "kubevuln_exceptions_active 1"), body)
 }
+
+func TestExceptionMetricSourceKindsBounded(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, m.Shutdown(context.Background())) }()
+	s := &ScanService{metrics: m}
+	sources := map[string]int{"SecurityException": 2, "ClusterSecurityException": 3, "https://attacker.example/?secret=private": 5, "arbitrary-workload-id": 7}
+	s.recordExceptionsMatched(context.Background(), sources)
+	s.recordExceptionsExpired(context.Background(), domain.ExceptionStats{ExpiredBySource: sources})
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	body := w.Body.String()
+	for _, name := range []string{"matched", "expired"} {
+		require.Contains(t, body, `kubevuln_exceptions_`+name+`_total{sourceKind="unknown"} 12`)
+		require.Contains(t, body, `kubevuln_exceptions_`+name+`_total{sourceKind="SecurityException"} 2`)
+		require.Contains(t, body, `kubevuln_exceptions_`+name+`_total{sourceKind="ClusterSecurityException"} 3`)
+	}
+	require.NotContains(t, body, "attacker.example")
+	require.NotContains(t, body, "private")
+	require.NotContains(t, body, "arbitrary-workload-id")
+}

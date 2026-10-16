@@ -34,6 +34,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/singleflight"
 )
@@ -163,6 +164,7 @@ func httpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, 
 			req.Header.Set(k, v)
 		}
 
+		telemetry.InjectHTTP(req)
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err

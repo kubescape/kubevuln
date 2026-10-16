@@ -107,7 +107,7 @@ volumeMounts:
 | Variable | Description | Default | Example |
 |----------|-------------|---------|---------|
 | `CONFIG_DIR` | Directory containing configuration files | `/etc/config` | `/app/config` |
-| `OTEL_COLLECTOR_SVC` | OpenTelemetry collector endpoint | _(disabled)_ | `otel-collector:4317` |
+| `OTEL_COLLECTOR_SVC` | Legacy operational OTLP endpoint alias; see [operational telemetry](OPERATIONAL_TELEMETRY.md) for discovery and precedence | _(unset)_ | `otel-collector:4317` |
 | `RELEASE` | Version string for telemetry | _(empty)_ | `v1.0.0` |
 
 ### CONFIG_DIR
@@ -126,18 +126,13 @@ Expected files in this directory:
 
 ### OTEL_COLLECTOR_SVC
 
-Enables OpenTelemetry tracing. Set to your collector's address.
-
-```bash
-export OTEL_COLLECTOR_SVC=otel-collector:4317
-./kubevuln
-```
-
-When enabled, Kubevuln will send traces for:
-- HTTP request handling
-- SBOM generation
-- CVE scanning
-- Database updates
+Legacy alias for the operational OTLP/gRPC base endpoint. Prefer
+`OTEL_EXPORTER_OTLP_ENDPOINT`. When the base variable is unset, kubevuln can
+instead discover the backend's `metrics` endpoint using `API_URL`. An explicitly
+empty base skips discovery; base `disable` opts out of all operational signals.
+Per-signal overrides, sampling, exported-log filtering, buffer bounds, credentials,
+and deployment gaps are documented in [Operational telemetry](OPERATIONAL_TELEMETRY.md).
+The sandbox `OTEL_EVENTS_EXPORTER_ENDPOINT` is separate.
 
 ### RELEASE
 

@@ -74,3 +74,6 @@ We configure the Kubevuln to listen to port 8080, and define the configuration i
 ## Changelog
 
 Kubevuln changes are tracked on the [release](https://github.com/kubescape/kubevuln/releases) page
+
+Operational metrics, traces, export controls, and deployment requirements are documented in
+[Operational telemetry](docs/OPERATIONAL_TELEMETRY.md).

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +14,7 @@ import (
 	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/otelsetup"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubevuln/adapters"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
@@ -24,10 +24,12 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -50,26 +52,47 @@ func main() {
 
 	var credentials *utils.Credentials
 	if credentials, err = utils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
-		logger.L().Ctx(ctx).Error("failed to load credentials", helpers.Error(err))
 		credentials = &utils.Credentials{}
-	} else {
-		logger.L().Info("credentials loaded",
-			helpers.Int("accessKeyLength", len(credentials.AccessKey)),
-			helpers.Int("accountLength", len(credentials.Account)))
 	}
+
 	if credentials.Account, err = resolveAccountID(credentials.Account, c.AccountID, c.KeepLocal); err != nil {
 		logger.L().Ctx(ctx).Fatal("account identifier error", helpers.Error(err))
 	}
 
-	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
-	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("kubevuln",
-			os.Getenv("RELEASE"),
-			credentials.Account,
-			c.ClusterName,
-			url.URL{Host: otelHost})
-		defer logger.ShutdownOtel(ctx)
+	// Telemetry discovery is optional and bounded; core backend discovery remains separate.
+	discoveryErr := telemetry.ConfigureEndpoint(ctx, func(discoveryCtx context.Context) (string, error) {
+		if c.KeepLocal {
+			return "", nil
+		}
+		return config.DiscoverTelemetry(discoveryCtx, os.Getenv("API_URL"))
+	})
+	providerConfig := otelsetup.ProviderConfig{ServiceName: "kubevuln", ServiceVersion: os.Getenv("RELEASE"), AccountID: credentials.Account, AccessKey: credentials.AccessKey, ClusterName: c.ClusterName, Namespace: c.Namespace, PodName: os.Getenv("POD_NAME"), NodeName: os.Getenv("NODE_NAME")}
+	shutdownTelemetry, telemetryErr := telemetry.Init(ctx, providerConfig)
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(flushCtx)
+	}()
+	metricOptions := []sdkmetric.Option{sdkmetric.WithResource(resource.NewSchemaless(metrics.ResourceAttributes(providerConfig)...))}
+	if reader, exportErr := metrics.OTLPReader(ctx, providerConfig); exportErr != nil {
+		logger.L().Warning("operational metric exporter unavailable")
+	} else if reader != nil {
+		metricOptions = append(metricOptions, sdkmetric.WithReader(reader))
 	}
+	m, err := metrics.New(metricOptions...)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("metrics initialization error", helpers.Error(err))
+	}
+	// Reconstruct the configured local logger after providers exist. Its OTLP branch
+	// is denied export by the operational scope allowlist; stdout behavior is retained.
+	logger.InitDefaultLogger()
+	if discoveryErr != nil {
+		logger.L().Warning("operational telemetry discovery unavailable")
+	}
+	if telemetryErr != nil {
+		logger.L().Warning("operational telemetry initialization unavailable")
+	}
+	telemetry.Lifecycle(ctx, "kubevuln.startup")
 
 	// modify context to listen to interrupt signals from the OS.
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
@@ -182,10 +205,6 @@ func main() {
 		}
 	})
 
-	m, err := metrics.New()
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("metrics initialization error", helpers.Error(err))
-	}
 	service.SetMetrics(m)
 	controller, err = controller.WithMetrics(m)
 	if err != nil {
@@ -228,7 +247,7 @@ func main() {
 
 	group := router.Group(apis.VulnerabilityScanCommandVersion)
 	{
-		group.Use(otelgin.Middleware("kubevuln-svc"))
+		// W3C context is extracted by the server wrapper; no per-request spans.
 		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
 		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
 		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
@@ -238,7 +257,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":8080",
-		Handler:           router,
+		Handler:           telemetry.ExtractHTTP(router),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -257,6 +276,7 @@ func main() {
 	// Restore default behavior on the interrupt signal and notify user of shutdown.
 	stop()
 	logger.L().Info("shutting down gracefully")
+	telemetry.Lifecycle(context.Background(), "kubevuln.shutdown")
 
 	// Give the HTTP server up to 5 seconds to finish in-flight requests. This must be
 	// derived from context.Background(), not the signal ctx above: that one is already

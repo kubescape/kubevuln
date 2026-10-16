@@ -276,3 +276,16 @@ func BenchmarkScanStatusStore_Get(b *testing.B) {
 		})
 	}
 }
+
+func TestOldestActiveProgressAge(t *testing.T) {
+	s := newScanStatusStore()
+	now := time.Now()
+	s.items["old"] = domain.ScanStatus{State: domain.ScanStateRunning, UpdatedAt: now.Add(-10 * time.Minute)}
+	s.items["queued"] = domain.ScanStatus{State: domain.ScanStateQueued, UpdatedAt: now.Add(-time.Minute)}
+	s.items["finished"] = domain.ScanStatus{State: domain.ScanStateSucceeded, UpdatedAt: now.Add(-time.Hour)}
+	require.Equal(t, 600.0, s.oldestActiveAge(now))
+	s.markSucceeded("old")
+	require.Equal(t, 60.0, s.oldestActiveAge(now))
+	s.markSucceeded("queued")
+	require.Zero(t, s.oldestActiveAge(now))
+}

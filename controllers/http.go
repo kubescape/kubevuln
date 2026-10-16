@@ -19,7 +19,9 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -93,6 +95,19 @@ func (h *HTTPController) WithMetrics(m *metrics.Metrics) (*HTTPController, error
 			return nil
 		}),
 	)
+	if err != nil {
+		return h, err
+	}
+	_, err = m.Meter().Float64ObservableGauge("kubevuln_work_oldest_progress_age_seconds",
+		metric.WithDescription("Seconds since the oldest last progress update of tracked queued/running work; excludes requests without job IDs"), metric.WithUnit("s"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			o.Observe(h.ensureStatuses().oldestActiveAge(time.Now()))
+			return nil
+		}))
+	if err != nil {
+		return h, err
+	}
+	_, err = m.Meter().Int64ObservableCounter("kubevuln_telemetry_diagnostics_suppressed_total", metric.WithDescription("Slow/failure diagnostic pairs omitted by the process-wide one-minute gate"), metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error { o.Observe(telemetry.Suppressed()); return nil }))
 	if err != nil {
 		return h, err
 	}
@@ -259,6 +274,7 @@ func (h *HTTPController) claimTrackedJob(jobID string) bool {
 // err is the error returned by the scan (nil for success/partial) and is only consulted to
 // resolve the bounded reason label on a failed outcome; see scanFailureReason.
 func (h *HTTPController) recordScan(ctx context.Context, endpoint string, start time.Time, outcome string, err error) {
+	telemetry.ScanDiagnostic(ctx, start, outcome == "error")
 	if h.metrics == nil {
 		return
 	}
@@ -282,8 +298,11 @@ func scanFailureReason(outcome string, err error) string {
 		return "none"
 	}
 	var scanErr *domain.ScanError
-	if errors.As(err, &scanErr) && scanErr.Reason != "" {
-		return scanErr.Reason
+	if errors.As(err, &scanErr) {
+		switch scanErr.Reason {
+		case services.ReasonRateLimitExceeded, scanfailure.ReasonSBOMGenerationFailed, scanfailure.ReasonImageTooLarge, scanfailure.ReasonSBOMTooLarge, scanfailure.ReasonSBOMIncomplete, scanfailure.ReasonImageAuthFailed, scanfailure.ReasonImageNotFound, scanfailure.ReasonImageSchemaUnsupported, scanfailure.ReasonCVEMatchingFailed, scanfailure.ReasonResultUploadFailed, scanfailure.ReasonSBOMStorageFailed, scanfailure.ReasonScannerOOMKilled, scanfailure.ReasonScanTimeout, scanfailure.ReasonUnexpected:
+			return scanErr.Reason
+		}
 	}
 	return scanfailure.ReasonUnexpected
 }
@@ -295,6 +314,7 @@ func scanFailureReason(outcome string, err error) string {
 // "invalid_request" for every other validation error, keeping the rejection-rate signal
 // distinct from malformed-payload noise while staying low cardinality.
 func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
+	telemetry.ScanDiagnostic(ctx, time.Now(), true)
 	if h.metrics == nil {
 		return
 	}

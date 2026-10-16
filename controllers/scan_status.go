@@ -307,3 +307,21 @@ func (s *scanStatusStore) markInventoryWaiting(jobID string) {
 	status.UpdatedAt = time.Now().UTC()
 	s.items[jobID] = status
 }
+
+// oldestActiveAge reports work that has stopped making progress without exporting
+// job identities or phases supplied by callers. Terminal records are excluded.
+func (s *scanStatusStore) oldestActiveAge(now time.Time) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var oldest float64
+	for _, status := range s.items {
+		if isTerminal(status.State) {
+			continue
+		}
+		age := now.Sub(status.UpdatedAt).Seconds()
+		if age > oldest {
+			oldest = age
+		}
+	}
+	return oldest
+}
