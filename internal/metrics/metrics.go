@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"net/http"
+	runtimemetrics "runtime/metrics"
 	"sync"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
@@ -98,7 +99,7 @@ type Metrics struct {
 
 // New builds a Metrics instance backed by a Prometheus exporter registered
 // with a fresh OTel MeterProvider.
-func New() (*Metrics, error) {
+func New(options ...sdkmetric.Option) (*Metrics, error) {
 	registry := promclient.NewRegistry()
 	exporter, err := prometheus.New(
 		prometheus.WithRegisterer(registry),
@@ -110,7 +111,8 @@ func New() (*Metrics, error) {
 
 	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName("kubevuln"))
 
-	provider := sdkmetric.NewMeterProvider(
+	providerOptions := []sdkmetric.Option{
+		sdkmetric.WithCardinalityLimit(256),
 		sdkmetric.WithReader(exporter),
 		sdkmetric.WithResource(res),
 		sdkmetric.WithView(sdkmetric.NewView(
@@ -119,7 +121,8 @@ func New() (*Metrics, error) {
 				Boundaries: scanDurationBuckets,
 			}},
 		)),
-	)
+	}
+	provider := sdkmetric.NewMeterProvider(append(providerOptions, options...)...)
 	meter := provider.Meter("kubevuln")
 
 	scanDuration, err := meter.Float64Histogram(
@@ -225,6 +228,23 @@ func New() (*Metrics, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, spec := range []struct{ name, source, unit string }{
+		{"kubevuln_runtime_heap_bytes", "/memory/classes/heap/objects:bytes", "By"},
+		{"kubevuln_runtime_goroutines", "/sched/goroutines:goroutines", "{goroutine}"},
+	} {
+		_, err := meter.Int64ObservableGauge(spec.name, metric.WithUnit(spec.unit), metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			samples := []runtimemetrics.Sample{{Name: spec.source}}
+			runtimemetrics.Read(samples)
+			if samples[0].Value.Kind() == runtimemetrics.KindUint64 {
+				o.Observe(int64(samples[0].Value.Uint64()))
+			}
+			return nil
+		}))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	recorderMu.Lock()

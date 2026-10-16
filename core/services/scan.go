@@ -873,7 +873,7 @@ func (s *ScanService) recordExceptionsExpired(ctx context.Context, stats domain.
 			continue
 		}
 		s.metrics.ExceptionsExpiredCounter.Add(ctx, int64(count),
-			metric.WithAttributes(attribute.String("sourceKind", source)))
+			metric.WithAttributes(attribute.String("sourceKind", metricSourceKind(source))))
 	}
 }
 
@@ -889,7 +889,19 @@ func (s *ScanService) recordExceptionsMatched(ctx context.Context, matchedBySour
 			continue
 		}
 		s.metrics.ExceptionsMatchedCounter.Add(ctx, int64(count),
-			metric.WithAttributes(attribute.String("sourceKind", source)))
+			metric.WithAttributes(attribute.String("sourceKind", metricSourceKind(source))))
+	}
+}
+
+// metricSourceKind bounds externally supplied policy metadata at the metric boundary.
+// Source attributes remain available to the local audit path but cannot become
+// unrestricted OTLP/Prometheus label values.
+func metricSourceKind(source string) string {
+	switch source {
+	case "SecurityException", "ClusterSecurityException":
+		return source
+	default:
+		return "unknown"
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"google.golang.org/grpc"
@@ -47,6 +48,7 @@ func NewSBOMScannerClient(ctx context.Context, socketPath string, readinessTimeo
 	target := fmt.Sprintf("unix://%s", socketPath)
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(telemetry.UnaryClientContext),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(MaxgRPCMessageSize),
 			grpc.MaxCallSendMsgSize(MaxgRPCMessageSize),

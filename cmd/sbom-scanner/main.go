@@ -10,12 +10,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/otelsetup"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/kubevuln/pkg/sbomscanner/v1/proto"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc"
 
 	// Register a pure-Go sqlite driver under the name "sqlite". Syft's RPM
@@ -78,6 +84,27 @@ func gracefulStopWithTimeout(srv *grpc.Server, timeout time.Duration) {
 }
 
 func main() {
+	credentials, err := utils.LoadCredentialsFromFile("/etc/credentials")
+	if err != nil {
+		credentials = &utils.Credentials{}
+	}
+	ctx := context.Background()
+	discoveryErr := telemetry.ConfigureEndpoint(ctx, func(c context.Context) (string, error) { return config.DiscoverTelemetry(c, os.Getenv("API_URL")) })
+	cfg := otelsetup.ProviderConfig{ServiceName: "kubevuln-sbom-scanner", ServiceVersion: os.Getenv("RELEASE"), AccountID: credentials.Account, AccessKey: credentials.AccessKey, ClusterName: os.Getenv("CLUSTER_NAME"), Namespace: os.Getenv("NAMESPACE"), PodName: os.Getenv("POD_NAME"), NodeName: os.Getenv("NODE_NAME")}
+	shutdown, initErr := telemetry.Init(ctx, cfg)
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(flushCtx)
+	}()
+	logger.InitDefaultLogger()
+	if discoveryErr != nil || initErr != nil {
+		logger.L().Warning("scanner operational telemetry unavailable")
+	}
+	defer telemetry.Lifecycle(context.Background(), "kubevuln.scanner.shutdown")
+	scannerProviderConfig = cfg
+	telemetry.Lifecycle(ctx, "kubevuln.scanner.startup")
+
 	socketPath := os.Getenv("SOCKET_PATH")
 	if socketPath == "" {
 		socketPath = "/sbom-comm/scanner.sock"
@@ -98,6 +125,7 @@ func main() {
 }
 
 var (
+	scannerProviderConfig  otelsetup.ProviderConfig
 	metricsHandlerWrapper  func(http.Handler) http.Handler
 	onMetricsShutdownStart func()
 )
@@ -119,11 +147,26 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 	// Without this, RecordTempDirSweep below (and any other metrics.Record* called from the
 	// sidecar's own code paths, e.g. adapters that run in-process here) reads a nil counter and
 	// is a no-op: the component="sidecar" series would never be emitted, silently.
-	m, err := metrics.New()
+	options := []sdkmetric.Option{sdkmetric.WithResource(resource.NewSchemaless(metrics.ResourceAttributes(scannerProviderConfig)...))}
+	if reader, exportErr := metrics.OTLPReader(context.Background(), scannerProviderConfig); exportErr != nil {
+		logger.L().Warning("scanner metric exporter unavailable")
+	} else if reader != nil {
+		options = append(options, sdkmetric.WithReader(reader))
+	}
+	m, err := metrics.New(options...)
 	if err != nil {
 		_ = lis.Close()
 		return err
 	}
+	// Run after RPC/HTTP draining on every exit path; shared shutdown owns only
+	// trace/log providers, so this provider must flush its final metric interval.
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.Shutdown(flushCtx); err != nil {
+			logger.L().Warning("scanner metric flush incomplete")
+		}
+	}()
 	var handler http.Handler = m.Handler()
 	if metricsHandlerWrapper != nil {
 		handler = metricsHandlerWrapper(handler)
@@ -143,6 +186,7 @@ func runServer(socketPath, metricsAddr, tempDir string, sigCh <-chan os.Signal) 
 	}()
 
 	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(telemetry.UnaryServerContext),
 		grpc.MaxRecvMsgSize(sbomscanner.MaxgRPCMessageSize),
 		grpc.MaxSendMsgSize(sbomscanner.MaxgRPCMessageSize),
 	)

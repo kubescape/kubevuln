@@ -1738,3 +1738,7 @@ func TestHTTPController_ScanCVE_ValidationErrorLogsWlid(t *testing.T) {
 	assert.Contains(t, output.String(), wlid,
 		"a rejected ScanCVE must name the workload it was given")
 }
+
+func TestMetricReasonRejectsUnboundedValues(t *testing.T) {
+	require.Equal(t, scanfailure.ReasonUnexpected, scanFailureReason("error", &domain.ScanError{Reason: "attacker.example/secret?key=private"}))
+}
