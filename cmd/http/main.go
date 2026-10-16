@@ -52,7 +52,6 @@ func main() {
 
 	var credentials *utils.Credentials
 	if credentials, err = utils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
-		fmt.Fprintln(os.Stderr, "credentials unavailable; starting without access key")
 		credentials = &utils.Credentials{}
 	}
 

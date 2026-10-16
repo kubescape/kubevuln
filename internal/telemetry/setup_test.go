@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/otelsetup"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -207,8 +209,22 @@ func TestDisabledLogsFreshProcess(t *testing.T) {
 		case "metrics-only":
 			t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://127.0.0.1:1")
 		}
-		stop, err := Init(context.Background(), otelsetup.ProviderConfig{ServiceName: "kubevuln"})
+		t.Setenv("KS_LOGGER_NAME", "slog")
+		t.Setenv("KS_LOGGER_LEVEL", "info")
+		cfg := otelsetup.ProviderConfig{ServiceName: "kubevuln"}
+		stop, err := Init(context.Background(), cfg)
 		require.NoError(t, err)
+		logger.InitDefaultLogger()
+		logger.L().Info("OSS console logging remains enabled")
+		require.False(t, otel.GetLoggerProvider().Logger(Scope).Enabled(context.Background(), log.EnabledParameters{Severity: log.SeverityWarn}))
+		_, span := otel.Tracer(Scope).Start(context.Background(), "unconfigured")
+		require.False(t, span.IsRecording())
+		span.End()
+		if mode != "metrics-only" {
+			reader, err := metrics.OTLPReader(context.Background(), cfg)
+			require.NoError(t, err)
+			require.Nil(t, reader)
+		}
 		ScanDiagnostic(context.Background(), time.Now(), true)
 		require.NoError(t, stop(context.Background()))
 		return
@@ -221,6 +237,20 @@ func TestDisabledLogsFreshProcess(t *testing.T) {
 			cmd.Env = append(os.Environ(), "KUBEVULN_TEST_DISABLED_LOGS="+mode)
 			output, err := cmd.CombinedOutput()
 			require.NoError(t, err, "diagnostic must not block: %s", output)
+			require.Contains(t, string(output), "OSS console logging remains enabled")
+			require.NotContains(t, string(output), "credentials")
 		})
 	}
+}
+
+func TestExplicitEmptyLegacySkipsDiscovery(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("OTEL_COLLECTOR_SVC", "")
+	require.NoError(t, ConfigureEndpoint(context.Background(), func(context.Context) (string, error) {
+		t.Fatal("explicit empty legacy endpoint must suppress discovery")
+		return "", nil
+	}))
+	endpoint, present := os.LookupEnv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	require.True(t, present)
+	require.Empty(t, endpoint)
 }

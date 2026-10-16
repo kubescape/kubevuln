@@ -4,11 +4,13 @@ import (
 	"context"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kubescape/go-logger/otelsetup"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -30,6 +32,7 @@ type received struct {
 	mu                                                                sync.Mutex
 	metricBytes, traceBytes, logBytes, points, spans, logs, wireBytes int
 	authorized                                                        bool
+	credentialHeaders                                                 bool
 	violations                                                        []string
 }
 type mockMetrics struct {
@@ -40,6 +43,7 @@ type mockMetrics struct {
 func (s *mockMetrics) Export(ctx context.Context, r *metricpb.ExportMetricsServiceRequest) (*metricpb.ExportMetricsServiceResponse, error) {
 	s.r.mu.Lock()
 	defer s.r.mu.Unlock()
+	s.r.credentialHeaders = s.r.credentialHeaders || hasCredentialHeaders(ctx)
 	s.r.metricBytes += proto.Size(r)
 	md, _ := metadata.FromIncomingContext(ctx)
 	s.r.authorized = len(md.Get("x-api-key")) == 1 && md.Get("x-api-key")[0] == "test-key" && md.Get("x-api-account")[0] == "test-account"
@@ -71,9 +75,10 @@ type mockTraces struct {
 	r *received
 }
 
-func (s *mockTraces) Export(_ context.Context, r *tracepb.ExportTraceServiceRequest) (*tracepb.ExportTraceServiceResponse, error) {
+func (s *mockTraces) Export(ctx context.Context, r *tracepb.ExportTraceServiceRequest) (*tracepb.ExportTraceServiceResponse, error) {
 	s.r.mu.Lock()
 	defer s.r.mu.Unlock()
+	s.r.credentialHeaders = s.r.credentialHeaders || hasCredentialHeaders(ctx)
 	s.r.traceBytes += proto.Size(r)
 	for _, rs := range r.ResourceSpans {
 		for _, ss := range rs.ScopeSpans {
@@ -88,9 +93,10 @@ type mockLogs struct {
 	r *received
 }
 
-func (s *mockLogs) Export(_ context.Context, r *logpb.ExportLogsServiceRequest) (*logpb.ExportLogsServiceResponse, error) {
+func (s *mockLogs) Export(ctx context.Context, r *logpb.ExportLogsServiceRequest) (*logpb.ExportLogsServiceResponse, error) {
 	s.r.mu.Lock()
 	defer s.r.mu.Unlock()
+	s.r.credentialHeaders = s.r.credentialHeaders || hasCredentialHeaders(ctx)
 	s.r.logBytes += proto.Size(r)
 	for _, rl := range r.ResourceLogs {
 		for _, sl := range rl.ScopeLogs {
@@ -257,4 +263,81 @@ func TestPerSignalEndpointOverride(t *testing.T) {
 	require.Equal(t, 1, baseReceived.spans)
 	require.Equal(t, 3, metricReceived.points)
 	require.Equal(t, 0, metricReceived.spans)
+}
+
+func hasCredentialHeaders(ctx context.Context) bool {
+	md, _ := metadata.FromIncomingContext(ctx)
+	return len(md.Get("x-api-key")) != 0 || len(md.Get("x-api-account")) != 0
+}
+
+// Exercise the complete configuration/provider/reader path against local collectors.
+// No account/access key is supplied, including for single-signal OSS deployments.
+func TestOSSCollectorActivation(t *testing.T) {
+	for _, mode := range []string{"unconfigured", "explicit-empty", "opt-out", "legacy", "base", "metrics", "traces", "logs"} {
+		t.Run(mode, func(t *testing.T) {
+			cleanEnv(t)
+			t.Setenv("API_URL", "")
+			t.Setenv("OTEL_TRACES_SAMPLER", "always_on")
+			t.Setenv("OTEL_METRIC_EXPORT_INTERVAL", "3600000")
+			endpoint, received := newMockCollector(t)
+			switch mode {
+			case "explicit-empty":
+				t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+				t.Setenv("OTEL_COLLECTOR_SVC", endpoint)
+			case "opt-out":
+				t.Setenv("OTEL_SDK_DISABLED", "true")
+				t.Setenv("OTEL_COLLECTOR_SVC", endpoint)
+				for _, signal := range []string{"METRICS", "TRACES", "LOGS"} {
+					t.Setenv("OTEL_EXPORTER_OTLP_"+signal+"_ENDPOINT", endpoint)
+				}
+			case "legacy":
+				t.Setenv("OTEL_COLLECTOR_SVC", endpoint)
+			case "base":
+				t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+			case "metrics", "traces", "logs":
+				t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+				t.Setenv("OTEL_EXPORTER_OTLP_"+strings.ToUpper(mode)+"_ENDPOINT", endpoint)
+			}
+			require.NoError(t, ConfigureEndpoint(context.Background(), func(ctx context.Context) (string, error) {
+				require.Equal(t, "unconfigured", mode, "explicit configuration must skip discovery")
+				return config.DiscoverTelemetry(ctx, os.Getenv("API_URL"))
+			}))
+			cfg := otelsetup.ProviderConfig{ServiceName: "kubevuln"}
+			stop, err := Init(context.Background(), cfg)
+			require.NoError(t, err)
+			reader, err := metrics.OTLPReader(context.Background(), cfg)
+			require.NoError(t, err)
+			wantMetrics := mode == "base" || mode == "legacy" || mode == "metrics"
+			wantTraces := mode == "base" || mode == "legacy" || mode == "traces"
+			wantLogs := mode == "base" || mode == "legacy" || mode == "logs"
+			var m *metrics.Metrics
+			if wantMetrics {
+				require.NotNil(t, reader)
+				m, err = metrics.New(sdkmetric.WithReader(reader))
+				require.NoError(t, err)
+				m.ScanCounter.Add(context.Background(), 1)
+			} else {
+				require.Nil(t, reader)
+			}
+			_, span := otel.Tracer(Scope).Start(context.Background(), "oss.activation")
+			require.Equal(t, wantTraces, span.IsRecording())
+			var record log.Record
+			record.SetSeverity(log.SeverityWarn)
+			record.SetBody(attribute.StringValue("scan requires investigation"))
+			otel.GetLoggerProvider().Logger(Scope).Emit(context.Background(), record)
+			span.End()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if m != nil {
+				require.NoError(t, m.Shutdown(ctx))
+			}
+			require.NoError(t, stop(ctx))
+			received.mu.Lock()
+			defer received.mu.Unlock()
+			require.Equal(t, wantMetrics, received.points > 0)
+			require.Equal(t, wantTraces, received.spans > 0)
+			require.Equal(t, wantLogs, received.logs > 0)
+			require.False(t, received.credentialHeaders, "unauthenticated collectors must not require or receive empty credential headers")
+		})
+	}
 }

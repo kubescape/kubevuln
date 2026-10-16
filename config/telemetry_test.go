@@ -47,7 +47,18 @@ func TestDiscoverTelemetryCancellation(t *testing.T) {
 	require.Error(t, err)
 	require.Less(t, time.Since(start), time.Second)
 }
+
+type telemetryTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f telemetryTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestDiscoverTelemetryNoAPIURL(t *testing.T) {
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	http.DefaultTransport = telemetryTransportFunc(func(*http.Request) (*http.Response, error) {
+		t.Error("unconfigured discovery must not make HTTP requests or use a cloud fallback")
+		return nil, context.Canceled
+	})
 	got, err := DiscoverTelemetry(context.Background(), "")
 	require.NoError(t, err)
 	require.Empty(t, got)

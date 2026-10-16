@@ -37,6 +37,21 @@ Both pass credentials through `otelsetup.ProviderConfig`; shared setup authentic
 trace/log RPCs, and the component's metric reader applies the same header policy.
 Credentials never become telemetry attributes or diagnostic messages.
 
+Operational export is opt-in through an explicit endpoint or the `metrics` field
+of discovery using an explicitly configured `API_URL`. With neither, discovery
+makes no HTTP request and all OTLP signals stay disabled; there is no hardcoded
+cloud discovery fallback. Local Prometheus and normal console logging remain
+available. Missing telemetry credentials are quiet and never block initialization
+or processing. An explicit collector (base, legacy, or per-signal endpoint) works
+without credentials; authentication headers are added only when an access key is
+present. This does not change the existing account requirement for HTTP backend
+reporting: OSS operation without that backend uses `keepLocal`.
+
+Unconfigured trace/log providers are concrete no-ops, and unconfigured metrics
+have no OTLP reader. Explicitly empty base configuration suppresses discovery and
+the legacy endpoint while still allowing nonempty per-signal overrides. The
+precedence and opt-out rules in the table below apply equally to OSS collectors.
+
 `go-logger v0.0.35` is required: v0.0.33's unused-before-this-change OTEL ring-buffer
 package does not compile against the repository's existing OTel log API v1.47.0.
 The gRPC exporters are aligned with the existing OTel SDK v1.47.0 (logs v0.23.0).
@@ -164,8 +179,8 @@ configuration was changed in this implementation.
 
 | Mode | Checked-in availability / required external configuration |
 | --- | --- |
-| HTTP in-process | Image sets `RELEASE` and entrypoint. `/etc/config/clusterData.json` supplies cluster/namespace/account fallback; `/etc/credentials/{account,accessKey}` must be mounted externally. `API_URL` is optional and not set in the image |
-| HTTP + scanner sidecar | Same image, `sbom-scanner` command. Existing documented socket/shared `/tmp`/distinct metrics ports still apply. Both containers need their own environment and credential mount; inheritance from the main container is not automatic. Scanner reads no HTTP cluster config, so resource values require `CLUSTER_NAME`/`NAMESPACE` |
+| HTTP in-process | Image sets `RELEASE` and entrypoint. `/etc/config/clusterData.json` supplies cluster/namespace/account fallback; For authenticated backend export, mount `/etc/credentials/{account,accessKey}` externally. `API_URL` is optional and not set in the image |
+| HTTP + scanner sidecar | Same image, `sbom-scanner` command. Existing documented socket/shared `/tmp`/distinct metrics ports still apply. For authenticated backend telemetry, both containers need their own environment and credential mount; inheritance from the main container is not automatic. Scanner reads no HTTP cluster config, so resource values require `CLUSTER_NAME`/`NAMESPACE` |
 | Static `services.json` / `clusterData.json` backend URLs | Functional backend startup can work without `API_URL`. Those static URLs do not imply a discovery API URL; telemetry discovery skips when absent. Supply an explicit OTLP endpoint or `API_URL` externally |
 | Local `keepLocal` HTTP | No backend discovery; explicit OTLP endpoint can target a local collector without credentials. Without endpoint there is only Prometheus. Scanner has no `keepLocal` configuration; unset `API_URL` or explicit opt-out prevents discovery there |
 | Offline DB image | Separate DB-serving image; does not run these binaries or initialize their providers |
@@ -256,3 +271,14 @@ its first periodic interval.
   were subsequently [verified live](TELEMETRY_STAGE_VALIDATION.md). Production
   rollout, collector quotas and representative fleet bytes remain unverified.
   Code tests, synthetic sizes and this one stage run do not establish those claims.
+
+### OSS activation regression coverage
+
+Local mock-collector tests cover unauthenticated base, legacy, and each individual
+signal endpoint, and confirm absent credential headers. Unconfigured, explicit
+empty, and SDK-opt-out cases export no signals. Fresh-process tests exercise
+no-op trace/log providers and missing metric readers, preserve structured console
+output, and cover absent endpoints, failed discovery, opt-out, and metrics-only
+configuration. An intercepted HTTP transport verifies absent `API_URL` does not
+make a discovery request or use a fallback. These are local code tests, not new
+live deployment observations.
