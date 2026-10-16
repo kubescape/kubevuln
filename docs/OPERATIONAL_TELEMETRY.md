@@ -7,6 +7,9 @@ See the shared [current implementation snapshot](https://github.com/armosec/shar
 for system context. Its **5–15 KB/agent/hour is an unvalidated planning target**,
 not an enforced upload quota or a measured kubevuln budget.
 
+For bounded live evidence from armo-dev-stage, see
+[Stage validation](TELEMETRY_STAGE_VALIDATION.md).
+
 ## Support questions
 
 - Are scans finishing, failing to pull/authenticate, timing out, or failing to upload?
@@ -169,8 +172,9 @@ configuration was changed in this implementation.
 | CLI | Placeholder command exits; no telemetry integration |
 
 Production chart owners must verify mounts, account/access-key availability,
-`API_URL`, and resource environment for **both** containers before rollout. This
-session inspected source and examples, not external charts or running deployments.
+`API_URL`, and resource environment for **both** containers before rollout. The initial implementation audit inspected source and examples; the subsequent
+[stage validation](TELEMETRY_STAGE_VALIDATION.md) inspected a running deployment
+without changing chart source.
 
 ## Validation and measurements
 
@@ -248,6 +252,7 @@ its first periodic interval.
   metrics + 5 s trace/log (50 s). The Kubernetes 30-second default cannot
   guarantee all final flushes in the worst case. Assess externally; no manifest
   was changed here.
-- Live authentication, collector routing/quotas, chart rollout, and production
-  endpoint discovery were **not verified**. Code-tested behavior, checked-in image
-  settings, and the synthetic measurements above do not prove live behavior.
+- Bounded stage authentication/routing, cadence, burst gates and final metric flush
+  were subsequently [verified live](TELEMETRY_STAGE_VALIDATION.md). Production
+  rollout, collector quotas and representative fleet bytes remain unverified.
+  Code tests, synthetic sizes and this one stage run do not establish those claims.
