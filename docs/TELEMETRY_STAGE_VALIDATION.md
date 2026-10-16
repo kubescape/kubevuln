@@ -93,7 +93,9 @@ normal observation started at **10:59:39 UTC**.
 
 ## Normal and burst measurements
 
-All metric rows below are actual ingested cumulative values for the retry version.
+The table reports actual ingested values for the retry version. Completion,
+rejection and suppression counters are cumulative; queue depth and oldest-progress
+age are point-in-time gauges. Stored-series counts are backend observations.
 The two healthy default collections were **11:00:06.002** and **11:01:06.003 UTC**:
 **60.001 seconds** apart. Scanner collections were offset by approximately 0.67 s
 at 11:00:06.674 and 11:01:06.674 UTC, exactly 60.000 seconds apart. Startup collections are not presented as
@@ -233,8 +235,9 @@ Unverified: live backend outage recovery and exporter queue drops, a representat
 hourly/fleet byte budget, statistical sampler frequency, all scan modes and failure
 classes, live full downstream HTTP/gRPC trace trees, and worst-case shutdown under
 a saturated queue/backend outage. HTTP parent-to-diagnostic linkage was verified;
-backend/scanner propagation retains code-test evidence. No collector or shared
-library changes were made. Permanent scanner credentials/discovery/resource
+backend/scanner propagation retains code-test evidence. No collector or shared-library
+source changes were made. This PR upgraded `github.com/kubescape/go-logger` from
+v0.0.33 to v0.0.35. Permanent scanner credentials/discovery/resource
 configuration and grace-period assessment remain deployment follow-ups.
 
 ## Final restoration
