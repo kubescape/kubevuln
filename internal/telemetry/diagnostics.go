@@ -35,7 +35,7 @@ func (g *gate) allow(now time.Time) bool {
 	return true
 }
 
-// ScanDiagnostic emits at most one slow/failure diagnostic per process/minute.
+// ScanDiagnostic emits at most one slow/failure/rejection diagnostic per process/minute.
 // Metrics are recorded by the caller regardless of this gate or trace sampling.
 func ScanDiagnostic(ctx context.Context, start time.Time, failed bool) {
 	elapsed := time.Since(start)

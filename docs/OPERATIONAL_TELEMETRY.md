@@ -55,8 +55,8 @@ No shared-library source is changed.
 | Compression | Default `OTEL_EXPORTER_OTLP_COMPRESSION=gzip`; SDK per-signal compression overrides remain effective |
 | Trace/log buffers | Default BSP/BLRP queue 256 records, export batch 64, export timeout 3000 ms; nonblocking recording with drops when full; standard environment overrides remain effective |
 | Trace/log retry | Shared exporters' SDK retry loop is bounded by the default 3-second overall RPC timeout and processor timeout; standard explicit timeout overrides can change this |
-| Deduplication / rate limit | One **process-wide** slow/failure diagnostic pair per 60 seconds, measured from previous admission; a constant key, one timestamp, no workload cache; rest counted as suppressed |
-| Slow path | Completed scan taking at least 30 seconds, or failed completion; all ordinary completions use aggregate metrics only |
+| Deduplication / rate limit | One **process-wide** slow/failure/rejection diagnostic pair per 60 seconds, measured from previous admission; a constant key, one timestamp, no workload cache; rest counted as suppressed |
+| Slow path | Completed scan taking at least 30 seconds, failed completion, or validation/admission rejection; all ordinary completions use aggregate metrics only |
 | Shutdown | Fresh background context, bounded 5-second flush for shared trace/log providers; metric provider has a separate bounded shutdown after worker draining |
 
 Standard environment overrides are operator controls, **not enforced ingest quotas**.
@@ -118,7 +118,7 @@ spans: `kubevuln.scanner.startup`, `kubevuln.scanner.shutdown`. These mark start
 and shutdown entry, not readiness or complete drain duration.
 `kubevuln.scan.diagnostic` uses the completion's start/end timestamps and a single
 `outcome=slow|failed` attribute. It is created retrospectively only after the gate
-admits a completion; it does not generate child spans for every internal operation.
+admits a completion or rejection; it does not generate child spans for every internal operation.
 
 The corresponding structured log body is always `scan requires investigation`;
 only `outcome` and numeric `duration_seconds` attributes can export. The SDK
@@ -223,7 +223,7 @@ its first periodic interval.
 - Diagnostic allowance is process-local and resets on restart. Replicas and repeated
   restarts increase fleet volume; SDK sampler/environment overrides also change it.
   A single gate can suppress a different failure class during a storm; use metrics
-  for unbiased counts. Diagnostics do not cover rejected/abandoned jobs individually.
+  for unbiased counts. Rejections use the same gate; abandoned jobs have no individual diagnostic.
 - Oldest-progress metrics exclude requests without job IDs. It measures time since
   a phase update, not proof of deadlock; a legitimate long phase can trigger it.
 - Existing scan admission defaults to an unbounded application queue unless

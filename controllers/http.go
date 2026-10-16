@@ -313,6 +313,7 @@ func scanFailureReason(outcome string, err error) string {
 // "invalid_request" for every other validation error, keeping the rejection-rate signal
 // distinct from malformed-payload noise while staying low cardinality.
 func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, err error) {
+	telemetry.ScanDiagnostic(ctx, time.Now(), true)
 	if h.metrics == nil {
 		return
 	}
