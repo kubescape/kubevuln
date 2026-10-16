@@ -1741,6 +1741,7 @@ func TestHTTPController_ScanCVE_ValidationErrorLogsWlid(t *testing.T) {
 }
 
 func TestMetricReasonRejectsUnboundedValues(t *testing.T) {
+	require.Equal(t, services.ReasonRateLimitExceeded, scanFailureReason("error", &domain.ScanError{Reason: services.ReasonRateLimitExceeded}))
 	require.Equal(t, scanfailure.ReasonUnexpected, scanFailureReason("error", &domain.ScanError{Reason: "attacker.example/secret?key=private"}))
 }
 

@@ -19,6 +19,7 @@ import (
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
@@ -299,7 +300,7 @@ func scanFailureReason(outcome string, err error) string {
 	var scanErr *domain.ScanError
 	if errors.As(err, &scanErr) {
 		switch scanErr.Reason {
-		case scanfailure.ReasonSBOMGenerationFailed, scanfailure.ReasonImageTooLarge, scanfailure.ReasonSBOMTooLarge, scanfailure.ReasonSBOMIncomplete, scanfailure.ReasonImageAuthFailed, scanfailure.ReasonImageNotFound, scanfailure.ReasonImageSchemaUnsupported, scanfailure.ReasonCVEMatchingFailed, scanfailure.ReasonResultUploadFailed, scanfailure.ReasonSBOMStorageFailed, scanfailure.ReasonScannerOOMKilled, scanfailure.ReasonScanTimeout, scanfailure.ReasonUnexpected:
+		case services.ReasonRateLimitExceeded, scanfailure.ReasonSBOMGenerationFailed, scanfailure.ReasonImageTooLarge, scanfailure.ReasonSBOMTooLarge, scanfailure.ReasonSBOMIncomplete, scanfailure.ReasonImageAuthFailed, scanfailure.ReasonImageNotFound, scanfailure.ReasonImageSchemaUnsupported, scanfailure.ReasonCVEMatchingFailed, scanfailure.ReasonResultUploadFailed, scanfailure.ReasonSBOMStorageFailed, scanfailure.ReasonScannerOOMKilled, scanfailure.ReasonScanTimeout, scanfailure.ReasonUnexpected:
 			return scanErr.Reason
 		}
 	}

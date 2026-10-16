@@ -116,7 +116,13 @@ func Init(ctx context.Context, cfg otelsetup.ProviderConfig) (func(context.Conte
 	}
 	// Only the reviewed operational scope may export. Existing application records
 	// retain their local logger behavior but cannot export arbitrary payloads/errors.
-	otel.SetLoggerProvider(&safeLogs{LoggerProvider: otel.GetLoggerProvider()})
+	if os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") == "" {
+		// The shared setup leaves the initial delegating provider in place when
+		// logs are disabled. Wrapping it would make it delegate back to itself.
+		otel.SetLoggerProvider(noop.NewLoggerProvider())
+	} else {
+		otel.SetLoggerProvider(&safeLogs{LoggerProvider: otel.GetLoggerProvider()})
+	}
 	otel.SetTracerProvider(&safeTraces{TracerProvider: otel.GetTracerProvider()})
 	return shutdown, nil
 }

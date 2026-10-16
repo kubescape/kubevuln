@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -188,4 +189,38 @@ func TestGRPCContextPropagation(t *testing.T) {
 		return err
 	})
 	require.NoError(t, err)
+}
+
+// A subprocess is essential: earlier tests can replace the initial delegating
+// provider and conceal the disabled-export provider cycle.
+func TestDisabledLogsFreshProcess(t *testing.T) {
+	if mode := os.Getenv("KUBEVULN_TEST_DISABLED_LOGS"); mode != "" {
+		cleanEnv(t)
+		switch mode {
+		case "empty":
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		case "opt-out":
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "disable")
+			require.NoError(t, ConfigureEndpoint(context.Background(), nil))
+		case "discovery-failure":
+			require.Error(t, ConfigureEndpoint(context.Background(), func(context.Context) (string, error) { return "", errors.New("unavailable") }))
+		case "metrics-only":
+			t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://127.0.0.1:1")
+		}
+		stop, err := Init(context.Background(), otelsetup.ProviderConfig{ServiceName: "kubevuln"})
+		require.NoError(t, err)
+		ScanDiagnostic(context.Background(), time.Now(), true)
+		require.NoError(t, stop(context.Background()))
+		return
+	}
+	for _, mode := range []string{"empty", "opt-out", "discovery-failure", "metrics-only"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDisabledLogsFreshProcess$")
+			cmd.Env = append(os.Environ(), "KUBEVULN_TEST_DISABLED_LOGS="+mode)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "diagnostic must not block: %s", output)
+		})
+	}
 }
