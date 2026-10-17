@@ -1035,6 +1035,7 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 		helpers.String("name", name))
 	return domain.CVEManifest{
 		Name:               name,
+		ReportCreatedAt:    manifest.Spec.Metadata.Report.CreatedAt.Time,
 		Annotations:        manifest.Annotations,
 		Labels:             manifest.Labels,
 		SBOMCreatorVersion: SBOMCreatorVersion,
@@ -1109,6 +1110,10 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 		Spec: v1beta1.VulnerabilityManifestSpec{
 			Metadata: v1beta1.VulnerabilityManifestMeta{
 				WithRelevancy: withRelevancy,
+				// Preserve report provenance, including unknown times on legacy records.
+				Report: v1beta1.VulnerabilityManifestReportMeta{
+					CreatedAt: metav1.NewTime(cve.ReportCreatedAt.UTC()),
+				},
 				Tool: v1beta1.VulnerabilityManifestToolMeta{
 					Name:            cve.CVEScannerName,
 					Version:         cve.CVEScannerVersion,

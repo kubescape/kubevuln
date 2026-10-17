@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"time"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -30,6 +32,9 @@ type ExceptionStats struct {
 
 // CVEManifest contains a JSON CVE report manifest with some metadata
 type CVEManifest struct {
+	// ReportCreatedAt is the successful vulnerability evaluation time. Zero means
+	// unknown; cache hits and SecurityException-only rewrites preserve this value.
+	ReportCreatedAt    time.Time
 	Content            *v1beta1.GrypeDocument
 	Annotations        map[string]string
 	Labels             map[string]string

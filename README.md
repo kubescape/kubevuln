@@ -5,6 +5,25 @@
 The Kubevuln component is an in-cluster component of the Kubescape security platform.
 It [scans container images for vulnerabilities](https://www.armosec.io/blog/code-repository-container-image-registry-scanning/?utm_source=github&utm_medium=repository), using Grype as its engine.
 
+## Vulnerability report time
+
+`VulnerabilityManifest.spec.metadata.report.createdAt` records when vulnerability
+evaluation successfully generated the report, in UTC. Image and relevancy reports
+have their own evaluation times, including successful reports with no findings.
+Cache hits and SecurityException-only changes preserve the original report time;
+it is not the time the latest scan request completed. Legacy reports without a
+timestamp remain unknown until a fresh vulnerability evaluation replaces them.
+
+Consumers should label this field "Last vulnerability evaluation" or "Report
+generated" and display `Unknown` when it is absent or null. Kubernetes
+`metadata.creationTimestamp` and the summary's scan-start `kubescape.io/timestamp`
+annotation describe different events. Summaries reference the full and relevant
+manifests; they do not carry this report field themselves.
+
+Report time does not change existing concurrent-write ordering or make manifest,
+summary, and VEX writes atomic. A later upload failure does not invalidate a
+successfully generated report's timestamp.
+
 ## Build Kubevuln
 To build kubevuln with its dependencies run: `make`
 

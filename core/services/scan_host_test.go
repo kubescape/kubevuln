@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
@@ -166,7 +167,7 @@ func (s *hostTestScanner) ScanSBOM(ctx context.Context, b domain.SBOM) (domain.C
 		matches = append(matches, m)
 	}
 	b.Annotations["scanner-mutation"] = "yes"
-	return domain.CVEManifest{Name: b.Name, Labels: b.Labels, Annotations: b.Annotations, CVEScannerVersion: "test", CVEDBVersion: "db", Content: &v1beta1.GrypeDocument{Matches: matches, Source: &v1beta1.Source{Type: "directory", Target: b.Content.SyftSource.Metadata}}}, nil
+	return domain.CVEManifest{ReportCreatedAt: reportTimeForTest().Add(time.Duration(len(s.calls)-1) * time.Hour), Name: b.Name, Labels: b.Labels, Annotations: b.Annotations, CVEScannerVersion: "test", CVEDBVersion: "db", Content: &v1beta1.GrypeDocument{Matches: matches, Source: &v1beta1.Source{Type: "directory", Target: b.Content.SyftSource.Metadata}}}, nil
 }
 
 type hostTestPlatform struct {
@@ -224,11 +225,14 @@ func TestScanHostCPStoredResultsAndRefresh(t *testing.T) {
 			require.Len(t, scanner.calls, 2)
 			require.Contains(t, matchIDs(platform.submitted[0].Content.Matches), "CVE-selected")
 			require.Contains(t, matchIDs(platform.relevant[0].Content.Matches), "CVE-selected")
+			require.Equal(t, reportTimeForTest(), platform.submitted[0].ReportCreatedAt)
+			require.Equal(t, reportTimeForTest().Add(time.Hour), platform.relevant[0].ReportCreatedAt)
 			relevantName, err := scan.InstanceID.GetSlug(false)
 			require.NoError(t, err)
-			for _, name := range []string{b.Name, relevantName} {
+			for i, name := range []string{b.Name, relevantName} {
 				got, err := repo.StorageClient.VulnerabilityManifests("storage").Get(ctx, name, metav1.GetOptions{})
 				require.NoError(t, err)
+				require.Equal(t, reportTimeForTest().Add(time.Duration(i)*time.Hour), got.Spec.Metadata.Report.CreatedAt.Time)
 				require.Equal(t, helpersv1.HostArtifactType, got.Labels[helpersv1.ArtifactTypeMetadataKey])
 				require.Equal(t, b.Labels["kubescape.io/host"], got.Labels["kubescape.io/host"])
 				require.Equal(t, b.Labels["kubescape.io/node-name"], got.Labels["kubescape.io/node-name"])
@@ -265,6 +269,11 @@ func TestScanHostCPStoredResultsAndRefresh(t *testing.T) {
 			require.Len(t, scanner.calls, 4)
 			require.Equal(t, "1.1", scanner.calls[2].Content.Artifacts[0].Version)
 			require.Equal(t, "11", platform.submitted[1].Annotations[domain.HostInventoryResourceVersionAnnotationKey])
+			for i, name := range []string{b.Name, relevantName} {
+				got, err := repo.StorageClient.VulnerabilityManifests("storage").Get(ctx, name, metav1.GetOptions{})
+				require.NoError(t, err)
+				require.Equal(t, reportTimeForTest().Add(time.Duration(i+2)*time.Hour), got.Spec.Metadata.Report.CreatedAt.Time)
+			}
 		})
 	}
 }
