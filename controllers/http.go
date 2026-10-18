@@ -624,7 +624,7 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 	imageTagNormalized := tools.NormalizeReference(c.ImageTag)
 	command := domain.ScanCommand{
 		CredentialsList:    c.Credentialslist,
-		ImageHash:          v1.NormalizeImageID("", c.ImageTag),
+		ImageHash:          v1.NormalizeImageID("", imageTagNormalized), // must match ImageTagNormalized, CreateSBOM normalizes it again
 		ImageTag:           c.ImageTag,
 		ImageTagNormalized: imageTagNormalized,
 		JobID:              c.JobID,
