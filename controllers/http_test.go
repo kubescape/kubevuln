@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/go-containerregistry/pkg/name"
 	"io"
 	"math"
 	"net/http"
@@ -523,6 +524,9 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		assert.Equal(t, tests[i].ImageTag, scanComm.ImageTag)
 		assert.Equal(t, tools.NormalizeReference(tests[i].ImageTag), scanComm.ImageTagNormalized)
 		assert.Equal(t, v1.NormalizeImageID("", tests[i].ImageTag), scanComm.ImageHash)
+		// CreateSBOM normalizes ImageHash again; the result must still be a pullable reference
+		_, err := name.ParseReference(v1.NormalizeImageID(scanComm.ImageHash, scanComm.ImageTag))
+		assert.NoError(t, err)
 		expectedSlug, err := names.ImageInfoToSlug(tools.NormalizeReference(tests[i].ImageTag), "nohash")
 		require.NoError(t, err)
 		assert.Equal(t, expectedSlug, scanComm.ImageSlug)

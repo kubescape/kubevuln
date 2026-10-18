@@ -110,6 +110,19 @@ func TestNormalizeImageID(t *testing.T) {
 			imageTag: "registry.k8s.io/kube-scheduler:v1.28.4",
 			want:     "registry.k8s.io/kube-scheduler@sha256:05c284c929889d88306fdb3dd14ee2d0132543740f9e247685243214fc3d2c54",
 		},
+		{
+			// registry scans normalize twice: once when building the command, once in CreateSBOM
+			name:     "already normalized registry tag",
+			imageID:  "registry.example.com/team/app:PR-1-abc",
+			imageTag: "registry.example.com/team/app:PR-1-abc",
+			want:     "registry.example.com/team/app:PR-1-abc",
+		},
+		{
+			name:     "already normalized registry tag with digest",
+			imageID:  "docker.io/library/nginx:latest@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
+			imageTag: "docker.io/library/nginx:latest@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
+			want:     "docker.io/library/nginx:latest@sha256:73e957703f1266530db0aeac1fd6a3f87c1e59943f4c13eb340bb8521c6041d7",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
