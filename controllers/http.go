@@ -348,6 +348,72 @@ func bindScanCommand[T any](c *gin.Context, ctx context.Context, convert func(T)
 	return convert(cmd), true
 }
 
+// scanEndpoint describes one of the scan handlers that share the same sequence once
+// the request is bound: build the problem detail, validate, log and reject on
+// failure, admit the job, then run it tracked.
+//
+// ScanCP is deliberately not one of these. It loops over a workload's containers and
+// aggregates per-container failures into a single error, so it logs inside the loop
+// and cannot use runTrackedScan.
+type scanEndpoint struct {
+	// name is the endpoint label used for metrics, rejection records and the
+	// tracked scan, e.g. "generateSBOM".
+	name string
+	// errMsg is logged when the scan itself fails, e.g. "service error - GenerateSBOM".
+	errMsg string
+	// details builds the problem detail returned to the caller.
+	details func(domain.ScanCommand) problem.Option
+	// fields are the log fields identifying the scan. The same set is used for a
+	// validation rejection and for a scan failure: when they diverged, ScanCVE
+	// lost the wlid from its rejection log and a refused request could not be
+	// traced to its workload (#1161).
+	fields func(domain.ScanCommand) []helpers.IDetails
+	// validate is the service's per-flow validation.
+	validate func(context.Context, domain.ScanCommand) (context.Context, error)
+	// run is the service call executed on the worker pool.
+	run func(context.Context) error
+}
+
+// runScanEndpoint carries out the sequence described by ep for an already-bound
+// command. Three handlers shared these steps verbatim, differing only in the fields
+// of scanEndpoint.
+func (h *HTTPController) runScanEndpoint(c *gin.Context, ctx context.Context, newScan domain.ScanCommand, ep scanEndpoint) {
+	details := ep.details(newScan)
+
+	ctx, err := ep.validate(ctx, newScan)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("validation error",
+			append([]helpers.IDetails{helpers.Error(err)}, ep.fields(newScan)...)...)
+		h.recordRejection(ctx, ep.name, err)
+		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
+		return
+	}
+
+	if !h.admitJob(c, ctx, ep.name, newScan.JobID, details) {
+		return
+	}
+
+	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
+		h.ensureStatuses().markPhase(newScan.JobID, phase)
+	}))
+	h.runTrackedScan(bgCtx, newScan.JobID, ep.name, ep.run, ep.errMsg, ep.fields(newScan)...)
+}
+
+// imageFields identifies a scan by its image, for the flows that carry no workload id.
+func imageFields(s domain.ScanCommand) []helpers.IDetails {
+	return []helpers.IDetails{
+		helpers.String("imageSlug", s.ImageSlug),
+		helpers.String("imageTagNormalized", s.ImageTagNormalized),
+		helpers.String("imageHash", s.ImageHash),
+	}
+}
+
+// workloadImageFields is imageFields with the workload id, for ScanCVE, which is
+// invoked against a workload rather than a bare image.
+func workloadImageFields(s domain.ScanCommand) []helpers.IDetails {
+	return append([]helpers.IDetails{helpers.String("wlid", s.Wlid)}, imageFields(s)...)
+}
+
 // GenerateSBOM unmarshalls the payload and calls scanService.GenerateSBOM
 func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -357,31 +423,16 @@ func (h *HTTPController) GenerateSBOM(c *gin.Context) {
 		return
 	}
 
-	details := problem.Detailf("ImageHash=%s", newScan.ImageHash)
-
-	ctx, err := h.scanService.ValidateGenerateSBOM(ctx, newScan)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection(ctx, "generateSBOM", err)
-		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
-		return
-	}
-
-	if !h.admitJob(c, ctx, "generateSBOM", newScan.JobID, details) {
-		return
-	}
-
-	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
-		h.ensureStatuses().markPhase(newScan.JobID, phase)
-	}))
-	h.runTrackedScan(bgCtx, newScan.JobID, "generateSBOM", h.scanService.GenerateSBOM,
-		"service error - GenerateSBOM",
-		helpers.String("imageSlug", newScan.ImageSlug),
-		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-		helpers.String("imageHash", newScan.ImageHash))
+	h.runScanEndpoint(c, ctx, newScan, scanEndpoint{
+		name:   "generateSBOM",
+		errMsg: "service error - GenerateSBOM",
+		details: func(s domain.ScanCommand) problem.Option {
+			return problem.Detailf("ImageHash=%s", s.ImageHash)
+		},
+		fields:   imageFields,
+		validate: h.scanService.ValidateGenerateSBOM,
+		run:      h.scanService.GenerateSBOM,
+	})
 }
 
 // runTrackedScan submits scan to the worker pool and reports its result to both the scan
@@ -505,33 +556,16 @@ func (h *HTTPController) ScanCVE(c *gin.Context) {
 		return
 	}
 
-	details := problem.Detailf("Wlid=%s, ImageHash=%s", newScan.Wlid, newScan.ImageHash)
-
-	ctx, err := h.scanService.ValidateScanCVE(ctx, newScan)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("wlid", newScan.Wlid),
-			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection(ctx, "scanCVE", err)
-		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
-		return
-	}
-
-	if !h.admitJob(c, ctx, "scanCVE", newScan.JobID, details) {
-		return
-	}
-
-	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
-		h.ensureStatuses().markPhase(newScan.JobID, phase)
-	}))
-	h.runTrackedScan(bgCtx, newScan.JobID, "scanCVE", h.scanService.ScanCVE,
-		"service error - ScanCVE",
-		helpers.String("wlid", newScan.Wlid),
-		helpers.String("imageSlug", newScan.ImageSlug),
-		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-		helpers.String("imageHash", newScan.ImageHash))
+	h.runScanEndpoint(c, ctx, newScan, scanEndpoint{
+		name:   "scanCVE",
+		errMsg: "service error - ScanCVE",
+		details: func(s domain.ScanCommand) problem.Option {
+			return problem.Detailf("Wlid=%s, ImageHash=%s", s.Wlid, s.ImageHash)
+		},
+		fields:   workloadImageFields,
+		validate: h.scanService.ValidateScanCVE,
+		run:      h.scanService.ScanCVE,
+	})
 }
 
 // validationStatusCode maps a validation/admission error to the HTTP status code that best
@@ -592,31 +626,16 @@ func (h *HTTPController) ScanRegistry(c *gin.Context) {
 		return
 	}
 
-	details := problem.Detailf("ImageTag=%s", newScan.ImageTag)
-
-	ctx, err := h.scanService.ValidateScanRegistry(ctx, newScan)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("validation error", helpers.Error(err),
-			helpers.String("imageSlug", newScan.ImageSlug),
-			helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-			helpers.String("imageHash", newScan.ImageHash))
-		h.recordRejection(ctx, "scanRegistry", err)
-		_, _ = problem.Of(validationStatusCode(err)).Append(details).WriteTo(c.Writer)
-		return
-	}
-
-	if !h.admitJob(c, ctx, "scanRegistry", newScan.JobID, details) {
-		return
-	}
-
-	bgCtx := context.WithoutCancel(domain.WithScanPhaseUpdater(ctx, func(phase string) {
-		h.ensureStatuses().markPhase(newScan.JobID, phase)
-	}))
-	h.runTrackedScan(bgCtx, newScan.JobID, "scanRegistry", h.scanService.ScanRegistry,
-		"service error - ScanRegistry",
-		helpers.String("imageSlug", newScan.ImageSlug),
-		helpers.String("imageTagNormalized", newScan.ImageTagNormalized),
-		helpers.String("imageHash", newScan.ImageHash))
+	h.runScanEndpoint(c, ctx, newScan, scanEndpoint{
+		name:   "scanRegistry",
+		errMsg: "service error - ScanRegistry",
+		details: func(s domain.ScanCommand) problem.Option {
+			return problem.Detailf("ImageTag=%s", s.ImageTag)
+		},
+		fields:   imageFields,
+		validate: h.scanService.ValidateScanRegistry,
+		run:      h.scanService.ScanRegistry,
+	})
 }
 
 // registryScanCommandToScanCommand converts a RegistryScanCommand into a domain.ScanCommand, populating normalized image reference, image hash, and image slug.
