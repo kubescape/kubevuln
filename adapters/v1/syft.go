@@ -114,7 +114,8 @@ func hasUsableProxy(proxyMap map[string]string, key string) bool {
 
 func NormalizeImageID(imageID, imageTag string) string {
 	// registry scanning doesn't provide imageID, so we use imageTag as a reference
-	if imageID == "" {
+	// registry scan commands already carry the tag as imageID; normalizing again would build repo@sha256:<tag>
+	if imageID == "" || imageID == imageTag {
 		return imageTag
 	}
 

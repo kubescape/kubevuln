@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/names"
 	v1 "github.com/kubescape/kubevuln/adapters/v1"
@@ -522,7 +523,11 @@ func Test_registryScanCommandToScanCommand(t *testing.T) {
 		assert.Equal(t, tests[i].Credentialslist, scanComm.CredentialsList)
 		assert.Equal(t, tests[i].ImageTag, scanComm.ImageTag)
 		assert.Equal(t, tools.NormalizeReference(tests[i].ImageTag), scanComm.ImageTagNormalized)
-		assert.Equal(t, v1.NormalizeImageID("", tests[i].ImageTag), scanComm.ImageHash)
+		assert.Equal(t, v1.NormalizeImageID("", tools.NormalizeReference(tests[i].ImageTag)), scanComm.ImageHash)
+		// getOrCreateSBOM passes ImageHash and ImageTagNormalized to CreateSBOM, which normalizes again;
+		// the result must still be a pullable reference
+		_, err := name.ParseReference(v1.NormalizeImageID(scanComm.ImageHash, scanComm.ImageTagNormalized))
+		assert.NoError(t, err)
 		expectedSlug, err := names.ImageInfoToSlug(tools.NormalizeReference(tests[i].ImageTag), "nohash")
 		require.NoError(t, err)
 		assert.Equal(t, expectedSlug, scanComm.ImageSlug)
