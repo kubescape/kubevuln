@@ -160,6 +160,109 @@ func TestAPIServerStore_UpdateCVE(t *testing.T) {
 	assert.Equal(t, got.Content.Descriptor_.Version, "v1.1.0")
 }
 
+func TestAPIServerStore_CVEReportTimestampRoundTrip(t *testing.T) {
+	t1 := time.Date(2026, time.October, 15, 10, 11, 12, 0, time.UTC)
+	t2 := t1.Add(24 * time.Hour)
+	createdAt := metav1.NewTime(t1.Add(-30 * 24 * time.Hour))
+	for _, withRelevancy := range []bool{false, true} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("relevant=%t/legacy=%t", withRelevancy, legacy), func(t *testing.T) {
+				ctx := context.Background()
+				clientset := newFakeStorageClientset()
+				a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+				manifests := a.StorageClient.VulnerabilityManifests(a.Namespace)
+				cve := domain.CVEManifest{
+					Name:               name,
+					SBOMCreatorVersion: "syft-1",
+					CVEScannerName:     "grype",
+					CVEScannerVersion:  "grype-1",
+					CVEDBVersion:       "db-1",
+					Annotations: map[string]string{
+						helpersv1.ToolVersionMetadataKey: "syft-1",
+						"retained-annotation":            "original",
+					},
+					Labels: map[string]string{"retained-label": "original"},
+					Content: &v1beta1.GrypeDocument{
+						Descriptor_: v1beta1.Descriptor{Version: "first-report"},
+					},
+				}
+				if !legacy {
+					// Storage normalizes the same instant to UTC on the wire.
+					cve.ReportCreatedAt = t1.In(time.FixedZone("scan-worker", 5*60*60+30*60))
+				}
+				require.NoError(t, a.StoreCVE(ctx, cve, withRelevancy))
+				stored, err := manifests.Get(ctx, name, metav1.GetOptions{})
+				require.NoError(t, err)
+				wire, err := json.Marshal(stored)
+				require.NoError(t, err)
+				if legacy {
+					assert.Contains(t, string(wire), `"createdAt":null`)
+				} else {
+					assert.Contains(t, string(wire), `"createdAt":"2026-10-15T10:11:12Z"`)
+				}
+				var roundTripped v1beta1.VulnerabilityManifest
+				require.NoError(t, json.Unmarshal(wire, &roundTripped))
+				// The fake apiserver does not assign Kubernetes identity fields. Seed
+				// them explicitly to verify that later report writes retain them.
+				roundTripped.UID = "existing-manifest-uid"
+				roundTripped.CreationTimestamp = createdAt
+				_, err = manifests.Update(ctx, &roundTripped, metav1.UpdateOptions{})
+				require.NoError(t, err)
+
+				cached, err := a.GetCVE(ctx, name, "syft-1", "grype-1", "db-1")
+				require.NoError(t, err)
+				require.NotNil(t, cached.Content)
+				assert.True(t, cve.ReportCreatedAt.Equal(cached.ReportCreatedAt))
+				assert.Equal(t, *cve.Content, *cached.Content)
+				// A cache-only rewrite must not manufacture an evaluation time,
+				// including when the stored report predates this field.
+				require.NoError(t, a.StoreCVE(ctx, cached, withRelevancy))
+				stored, err = manifests.Get(ctx, name, metav1.GetOptions{})
+				require.NoError(t, err)
+				assert.True(t, cve.ReportCreatedAt.Equal(stored.Spec.Metadata.Report.CreatedAt.Time))
+
+				cve.ReportCreatedAt = t2
+				cve.CVEDBVersion = "db-2"
+				cve.Content = &v1beta1.GrypeDocument{
+					Descriptor_: v1beta1.Descriptor{Version: "second-report"},
+					Matches: []v1beta1.Match{{
+						Vulnerability: v1beta1.Vulnerability{
+							VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: "CVE-new-evaluation"},
+						},
+					}},
+				}
+				cve.Annotations = map[string]string{"new-annotation": "updated"}
+				cve.Labels = map[string]string{"new-label": "updated"}
+				require.NoError(t, a.StoreCVE(ctx, cve, withRelevancy))
+				stored, err = manifests.Get(ctx, name, metav1.GetOptions{})
+				require.NoError(t, err)
+				assert.Equal(t, roundTripped.UID, stored.UID)
+				assert.Equal(t, createdAt, stored.CreationTimestamp)
+				assert.True(t, t2.Equal(stored.Spec.Metadata.Report.CreatedAt.Time))
+				assert.Equal(t, *cve.Content, stored.Spec.Payload)
+				assert.Equal(t, withRelevancy, stored.Spec.Metadata.WithRelevancy)
+				assert.Equal(t, v1beta1.VulnerabilityManifestToolMeta{
+					Name: "grype", Version: "grype-1", DatabaseVersion: "db-2",
+				}, stored.Spec.Metadata.Tool)
+				assert.Equal(t, "original", stored.Annotations["retained-annotation"])
+				assert.Equal(t, "updated", stored.Annotations["new-annotation"])
+				assert.Equal(t, "original", stored.Labels["retained-label"])
+				assert.Equal(t, "updated", stored.Labels["new-label"])
+				contextLabel := helpersv1.ContextMetadataKeyNonFiltered
+				if withRelevancy {
+					contextLabel = helpersv1.ContextMetadataKeyFiltered
+				}
+				assert.Equal(t, contextLabel, stored.Labels[helpersv1.ContextMetadataKey])
+				rescanned, err := a.GetCVE(ctx, name, "syft-1", "grype-1", "db-2")
+				require.NoError(t, err)
+				assert.True(t, t2.Equal(rescanned.ReportCreatedAt))
+				require.NotNil(t, rescanned.Content)
+				assert.Equal(t, *cve.Content, *rescanned.Content)
+			})
+		}
+	}
+}
+
 func TestAPIServerStore_GetSBOM(t *testing.T) {
 	type args struct {
 		ctx                context.Context
@@ -2044,24 +2147,55 @@ func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T)
 	newCVE := tools.FileToCVEManifest("testdata/nginx-cve.json")
 	newCVE.Name = name
 	newCVE.CVEDBVersion = "new-db"
+	newCVE.ReportCreatedAt = time.Date(2026, time.October, 16, 12, 0, 0, 0, time.UTC)
 	require.Positive(t, len(newCVE.Content.Matches))
 
 	t.Run("StoreCVE", func(t *testing.T) {
 		seeded := &v1beta1.VulnerabilityManifest{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape"},
 			Spec: v1beta1.VulnerabilityManifestSpec{
-				Metadata: v1beta1.VulnerabilityManifestMeta{Tool: v1beta1.VulnerabilityManifestToolMeta{DatabaseVersion: "old-db"}},
-				Payload:  v1beta1.GrypeDocument{Matches: make([]v1beta1.Match, 999)},
+				Metadata: v1beta1.VulnerabilityManifestMeta{
+					Tool: v1beta1.VulnerabilityManifestToolMeta{DatabaseVersion: "old-db"},
+					Report: v1beta1.VulnerabilityManifestReportMeta{
+						CreatedAt: metav1.NewTime(newCVE.ReportCreatedAt.Add(-time.Hour)),
+					},
+				},
+				Payload: v1beta1.GrypeDocument{Matches: make([]v1beta1.Match, 999)},
 			},
 		}
-		a := newFakeAPIServerStore("kubescape", newFakeStorageClientset(seeded).SpdxV1beta1())
+		clientset := newFakeStorageClientset(seeded)
+		a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+		metadataReads := 0
+		clientset.PrependReactor("get", "vulnerabilitymanifests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			getAction, ok := action.(k8stesting.GetActionImpl)
+			require.True(t, ok)
+			assert.Equal(t, resourceVersionMetadata, getAction.GetOptions.ResourceVersion,
+				"each update retry must retain metadata-only reads")
+			metadataReads++
+			return false, nil, nil
+		})
+		updateAttempts := 0
+		clientset.PrependReactor("update", "vulnerabilitymanifests", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			updateAttempts++
+			if updateAttempts == 1 {
+				return true, nil, apierrors.NewConflict(action.GetResource().GroupResource(), name, nil)
+			}
+			return false, nil, nil
+		})
 
 		require.NoError(t, a.StoreCVE(context.Background(), newCVE, false))
+		assert.Equal(t, 2, updateAttempts)
+		assert.Equal(t, 2, metadataReads)
 
-		got, err := a.StorageClient.VulnerabilityManifests("kubescape").Get(context.Background(), name, metav1.GetOptions{})
+		// Inspect the tracker directly so verification does not add an ordinary
+		// full read to the update-read assertions above.
+		obj, err := clientset.Tracker().Get(v1beta1.SchemeGroupVersion.WithResource("vulnerabilitymanifests"), "kubescape", name)
 		require.NoError(t, err)
+		got := obj.(*v1beta1.VulnerabilityManifest)
 		assert.Len(t, got.Spec.Payload.Matches, len(newCVE.Content.Matches), "the conflict write must store the full new payload, not the stale seed")
+		assert.Equal(t, *newCVE.Content, got.Spec.Payload)
 		assert.Equal(t, "new-db", got.Spec.Metadata.Tool.DatabaseVersion, "and the full new metadata")
+		assert.True(t, newCVE.ReportCreatedAt.Equal(got.Spec.Metadata.Report.CreatedAt.Time), "retry must retain the report generation time with its payload")
 	})
 
 	t.Run("StoreSBOM", func(t *testing.T) {

@@ -90,6 +90,8 @@ type GrypeAdapter struct {
 	// cannot wait out the 15-minute production value; zero means use the default.
 	stuckUpdateTimeout time.Duration
 	dbLoader           VulnerabilityDBLoader
+	// now is set before scanning; nil uses time.Now. It lets tests control report time.
+	now func() time.Time
 }
 
 var _ ports.CVEScanner = (*GrypeAdapter)(nil)
@@ -560,6 +562,13 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
+	// Stamp only a successfully generated report, independently of storage or upload.
+	// Cached reports retain their evaluation time instead of the latest request time.
+	now := g.now
+	if now == nil {
+		now = time.Now
+	}
+	reportCreatedAt := now().UTC().Truncate(time.Second)
 
 	// retrieve scanID from context and add it to the annotations
 	scanID, _ := ctx.Value(domain.ScanIDKey{}).(string)
@@ -580,6 +589,7 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 		helpers.String("name", sbom.Name),
 		helpers.Int("vulnerabilities", len(vulnerabilityResults.Matches)))
 	return domain.CVEManifest{
+		ReportCreatedAt:    reportCreatedAt,
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),

@@ -2204,6 +2204,7 @@ func TestScanService_getSBOM_Outdated(t *testing.T) {
 type recordingPlatform struct {
 	exceptions       domain.CVEExceptions
 	getExceptionsErr error
+	submitErr        error
 	submitted        []domain.CVEManifest
 }
 
@@ -2215,7 +2216,7 @@ func (p *recordingPlatform) GetCVEExceptions(context.Context) (domain.CVEExcepti
 
 func (p *recordingPlatform) SubmitCVE(_ context.Context, cve domain.CVEManifest, _ domain.CVEManifest) error {
 	p.submitted = append(p.submitted, cve)
-	return nil
+	return p.submitErr
 }
 
 func (p *recordingPlatform) ReportError(context.Context, error) error { return nil }
@@ -2236,6 +2237,11 @@ func (c *countingCVERepository) StoreCVE(ctx context.Context, cve domain.CVEMani
 	return c.CVERepository.StoreCVE(ctx, cve, withRelevancy)
 }
 
+// reportTimeForTest is a fixed evaluation time, deliberately unrelated to scan requests.
+func reportTimeForTest() time.Time {
+	return time.Date(2026, time.October, 15, 10, 0, 0, 0, time.UTC)
+}
+
 // fakeCVEScanner is a CVEScanner whose ScanSBOM output is fully controlled, used to exercise the
 // cache-miss path with a real vulnerability ID (the shared MockCVEAdapter emits an empty-ID match
 // that no SecurityException can target).
@@ -2244,6 +2250,7 @@ type fakeCVEScanner struct{}
 func (fakeCVEScanner) ScanSBOM(_ context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
 	return domain.CVEManifest{
 		Name:               sbom.Name,
+		ReportCreatedAt:    reportTimeForTest(),
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  "fake-cve",
 		CVEDBVersion:       "fake-db",
@@ -2256,6 +2263,115 @@ func (fakeCVEScanner) ScanSBOM(_ context.Context, sbom domain.SBOM) (domain.CVEM
 func (fakeCVEScanner) Version() string                  { return "fake-cve" }
 func (fakeCVEScanner) DBVersion(context.Context) string { return "fake-db" }
 func (fakeCVEScanner) Ready(context.Context) bool       { return true }
+
+// timestampTestScanner models a new evaluation when the vulnerability DB changes.
+type timestampTestScanner struct {
+	fakeCVEScanner
+	dbVersion  string
+	reportTime time.Time
+	calls      int
+}
+
+func (s *timestampTestScanner) DBVersion(context.Context) string { return s.dbVersion }
+
+func (s *timestampTestScanner) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	s.calls++
+	cve, err := s.fakeCVEScanner.ScanSBOM(ctx, sbom)
+	cve.ReportCreatedAt = s.reportTime
+	cve.CVEDBVersion = s.dbVersion
+	cve.Annotations = map[string]string{helpersv1.ToolVersionMetadataKey: sbom.SBOMCreatorVersion}
+	for key, value := range sbom.Annotations {
+		cve.Annotations[key] = value
+	}
+	cve.Labels = sbom.Labels
+	match := matchForTest("CVE-" + s.dbVersion)
+	match.Vulnerability.Severity = domain.HighSeverity
+	cve.Content.Matches = []v1beta1.Match{match}
+	return cve, err
+}
+
+func TestScanService_ScanCVE_ReportTimestampReevaluation(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			repo := repositories.NewFakeAPIServerStorage("storage")
+			platform := &recordingPlatform{exceptions: exceptionPolicyForTest("CVE-db-1")}
+			scanner := &timestampTestScanner{dbVersion: "db-1", reportTime: reportTimeForTest()}
+			s, sbomVer, cveVer, dbVer, ctx := newScanCVETestService(t, platform, repo, scanner)
+			wantFirstTime := reportTimeForTest()
+			if legacy {
+				wantFirstTime = time.Time{}
+				require.NoError(t, repo.StoreCVE(ctx, domain.CVEManifest{
+					Name: "imageSlug", SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+					Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
+					Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{matchForTest("CVE-db-1")}},
+				}, false))
+			}
+			require.NoError(t, s.ScanCVE(ctx))
+			first, err := repo.GetCVE(ctx, "imageSlug", sbomVer, cveVer, dbVer)
+			require.NoError(t, err)
+			assert.Equal(t, wantFirstTime, first.ReportCreatedAt)
+			require.NotNil(t, first.Content)
+			require.Len(t, first.Content.IgnoredMatches, 1, "exception-only legacy rewrite must retain an unknown time")
+			wantCalls := 1
+			if legacy {
+				wantCalls = 0
+			}
+			assert.Equal(t, wantCalls, scanner.calls)
+			// The fake API server does not assign identity metadata automatically.
+			raw, err := repo.StorageClient.VulnerabilityManifests("storage").Get(ctx, "imageSlug", metav1.GetOptions{})
+			require.NoError(t, err)
+			raw.UID = "persistent-report"
+			raw.CreationTimestamp = metav1.NewTime(reportTimeForTest().Add(-24 * time.Hour))
+			_, err = repo.StorageClient.VulnerabilityManifests("storage").Update(ctx, raw, metav1.UpdateOptions{})
+			require.NoError(t, err)
+
+			// A DB version miss must evaluate again, rather than retimestamp a cache hit.
+			scanner.dbVersion = "db-2"
+			scanner.reportTime = reportTimeForTest().Add(24 * time.Hour)
+			require.NoError(t, s.ScanCVE(ctx))
+			assert.Equal(t, wantCalls+1, scanner.calls)
+			after, err := repo.StorageClient.VulnerabilityManifests("storage").Get(ctx, "imageSlug", metav1.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, raw.UID, after.UID)
+			assert.Equal(t, raw.CreationTimestamp, after.CreationTimestamp)
+			assert.Equal(t, scanner.reportTime, after.Spec.Metadata.Report.CreatedAt.Time)
+			assert.Equal(t, "db-2", after.Spec.Metadata.Tool.DatabaseVersion)
+			assert.Equal(t, []string{"CVE-db-2"}, matchIDs(after.Spec.Payload.Matches))
+			summary, err := repo.GetCVESummary(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, summary)
+			assert.Equal(t, after.Name, summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name)
+			assert.Equal(t, int64(len(after.Spec.Payload.Matches)), summary.Spec.Severities.High.All)
+			require.Len(t, platform.submitted, 2)
+			assert.Equal(t, wantFirstTime, platform.submitted[0].ReportCreatedAt)
+			assert.Equal(t, scanner.reportTime, platform.submitted[1].ReportCreatedAt)
+		})
+	}
+}
+
+func TestScanService_ScanCVE_ReportTimestampSurvivesUploadFailure(t *testing.T) {
+	repo := repositories.NewFakeAPIServerStorage("storage")
+	platform := &recordingPlatform{submitErr: errors.New("upload unavailable")}
+	scanner := &timestampTestScanner{dbVersion: "db-1", reportTime: reportTimeForTest()}
+	s, sbomVer, cveVer, dbVer, ctx := newScanCVETestService(t, platform, repo, scanner)
+	err := s.ScanCVE(ctx)
+	require.ErrorContains(t, err, "upload unavailable")
+	var scanErr *domain.ScanError
+	require.ErrorAs(t, err, &scanErr)
+	assert.Equal(t, scanfailure.ReasonResultUploadFailed, scanErr.Reason)
+	stored, err := repo.GetCVE(ctx, "imageSlug", sbomVer, cveVer, dbVer)
+	require.NoError(t, err)
+	require.NotNil(t, stored.Content)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt)
+	assert.Equal(t, []string{"CVE-db-1"}, matchIDs(stored.Content.Matches))
+	require.Len(t, platform.submitted, 1)
+	assert.Equal(t, stored.ReportCreatedAt, platform.submitted[0].ReportCreatedAt)
+	summary, err := repo.GetCVESummary(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, stored.Name, summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name)
+	assert.Equal(t, int64(1), summary.Spec.Severities.High.All)
+}
 
 func matchForTest(id string) v1beta1.Match {
 	return v1beta1.Match{Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: id}}}
@@ -2306,6 +2422,7 @@ func newScanCVETestServiceVEX(t *testing.T, platform ports.Platform, cveRepo por
 func seedCachedCVEManifest(t *testing.T, repo ports.CVERepository, name, sbomCreatorVersion, cveScannerVersion, cveDBVersion string, ctx context.Context, content *v1beta1.GrypeDocument) {
 	require.NoError(t, repo.StoreCVE(ctx, domain.CVEManifest{
 		Name:               name,
+		ReportCreatedAt:    reportTimeForTest(),
 		SBOMCreatorVersion: sbomCreatorVersion,
 		CVEScannerVersion:  cveScannerVersion,
 		CVEDBVersion:       cveDBVersion,
@@ -2337,6 +2454,7 @@ func TestScanService_ScanCVE_CacheHit_DeletedExceptionRestoresSuppressedMatch(t 
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.NotNil(t, stored.Content)
 	assert.Contains(t, matchIDs(stored.Content.Matches), "CVE-A", "deleted exception must restore the suppressed match")
 	assert.Len(t, stored.Content.IgnoredMatches, 0)
@@ -2357,6 +2475,7 @@ func TestScanService_ScanCVE_CacheHit_AddedExceptionSuppresses(t *testing.T) {
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.IgnoredMatches, 1)
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
@@ -2376,6 +2495,7 @@ func TestScanService_ScanCVE_CacheHit_UnchangedExceptionSkipsRewrite(t *testing.
 	assert.Zero(t, counting.storeCVECalls, "an unchanged exception set must not rewrite the cached manifest")
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.IgnoredMatches, 1)
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
@@ -2422,7 +2542,8 @@ func TestScanService_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
 				high := matchForTest("CVE-B")
 				high.Vulnerability.Severity = domain.HighSeverity
 				current := domain.CVEManifest{
-					Name: "imageSlug", SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+					ReportCreatedAt: reportTimeForTest(),
+					Name:            "imageSlug", SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
 					Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
 					Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{high}},
 				}
@@ -2477,8 +2598,9 @@ func TestScanService_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
 				assert.Equal(t, current.Name, ref.Name)
 				assert.Equal(t, "custom-storage", ref.Namespace)
 				assert.Equal(t, "vulnerabilitymanifests", ref.Kind)
-				_, err = repo.StorageClient.VulnerabilityManifests(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+				referenced, err := repo.StorageClient.VulnerabilityManifests(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
 				require.NoError(t, err, "the published reference must resolve")
+				assert.Equal(t, current.ReportCreatedAt, referenced.Spec.Metadata.Report.CreatedAt.Time)
 				wantHigh := int64(1)
 				if tc.zeroFindings {
 					wantHigh = 0
@@ -2520,6 +2642,7 @@ func (s *summaryTestScanner) ScanSBOM(ctx context.Context, sbom domain.SBOM) (do
 	cve, err := s.fakeCVEScanner.ScanSBOM(ctx, sbom)
 	cve.Annotations = sbom.Annotations
 	cve.Labels = sbom.Labels
+	cve.ReportCreatedAt = reportTimeForTest().Add(time.Hour)
 	for i := range cve.Content.Matches {
 		cve.Content.Matches[i].Vulnerability.Severity = domain.HighSeverity
 	}
@@ -2547,7 +2670,8 @@ func TestScanService_ScanCP_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
 	high := matchForTest("CVE-B")
 	high.Vulnerability.Severity = domain.HighSeverity
 	cve := domain.CVEManifest{
-		Name: slug, SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
+		ReportCreatedAt: reportTimeForTest(),
+		Name:            slug, SBOMCreatorVersion: sbomVer, CVEScannerVersion: cveVer, CVEDBVersion: dbVer,
 		Annotations: map[string]string{helpersv1.ToolVersionMetadataKey: sbomVer},
 		Content:     &v1beta1.GrypeDocument{Matches: []v1beta1.Match{high}},
 	}
@@ -2568,8 +2692,12 @@ func TestScanService_ScanCP_CacheHit_RefreshesWorkloadSummary(t *testing.T) {
 	assert.Equal(t, "custom-storage", summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Namespace)
 	assert.Equal(t, int64(1), summary.Spec.Severities.High.All)
 	assert.Equal(t, int64(2), summary.Spec.Severities.High.Relevant)
-	_, err = repo.StorageClient.VulnerabilityManifests("custom-storage").Get(ctx, runtimeName, metav1.GetOptions{})
+	runtimeReport, err := repo.StorageClient.VulnerabilityManifests("custom-storage").Get(ctx, runtimeName, metav1.GetOptions{})
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest().Add(time.Hour), runtimeReport.Spec.Metadata.Report.CreatedAt.Time)
+	imageReport, err := repo.GetCVE(ctx, slug, sbomVer, cveVer, dbVer)
+	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), imageReport.ReportCreatedAt)
 	// A later image-only cache hit must retain the runtime result ScanCP just stored.
 	require.NoError(t, s.ScanCVE(ctx))
 	after, err := repo.GetCVESummary(ctx)
@@ -2653,6 +2781,7 @@ func TestScanService_ScanCVE_CacheHit_ExceptionFetchFailureDoesNotWipe(t *testin
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.IgnoredMatches, 1, "a failed exception fetch must not wipe filtering from the stored manifest")
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
@@ -2693,6 +2822,7 @@ func TestScanService_ScanCVE_CacheHit_ExpiredOnFixRestoresFixedMatch(t *testing.
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.Matches, 1, "pkgA (fixed) must be restored into Matches")
 	assert.Equal(t, "pkgA", stored.Content.Matches[0].Artifact.Name)
 	require.Len(t, stored.Content.IgnoredMatches, 1)
@@ -2727,6 +2857,7 @@ func TestScanService_ScanCVE_CacheHit_ExpiredOnFixWideningPersistsSuppression(t 
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	assert.Empty(t, stored.Content.Matches, "widening the exception must suppress pkgA too")
 	require.Len(t, stored.Content.IgnoredMatches, 2)
 }
@@ -2750,6 +2881,7 @@ func TestScanService_ScanCVE_CacheHit_DegradedFetchDoesNotPersistRemoval(t *test
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.IgnoredMatches, 1, "a degraded fetch must not persist an apparent removal")
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
@@ -2771,6 +2903,7 @@ func TestScanService_ScanCVE_CacheHit_DegradedFetchPersistsAddition(t *testing.T
 
 	stored, err := s.cveRepository.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
 	require.NoError(t, err)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt, "exception reconciliation must preserve the evaluation time")
 	require.Len(t, stored.Content.IgnoredMatches, 1, "a purely additive change must be persisted even when degraded")
 	assert.Equal(t, "CVE-A", stored.Content.IgnoredMatches[0].Match.Vulnerability.ID)
 }
@@ -3201,6 +3334,11 @@ func TestScanService_ScanCVE_CacheMiss_GeneratesVEX(t *testing.T) {
 
 	require.Len(t, repo.vexCalls, 1, "a fresh ScanCVE must generate a VEX document")
 	require.NotNil(t, repo.vexCalls[0].Content)
+	stored, err := repo.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	assert.Equal(t, stored.Content, repo.vexCalls[0].Content)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt)
+	assert.Equal(t, stored.ReportCreatedAt, repo.vexCalls[0].ReportCreatedAt)
 	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1,
 		"the VEX document must be built from the exception-filtered manifest")
 }
@@ -3244,6 +3382,11 @@ func TestScanService_ScanCVE_CacheHit_ExceptionChangeUpdatesVEX(t *testing.T) {
 
 	require.Len(t, repo.vexCalls, 1, "a changed ignored-match set must update the VEX document")
 	require.NotNil(t, repo.vexCalls[0].Content)
+	stored, err := repo.GetCVE(ctx, "imageSlug", s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	require.NoError(t, err)
+	assert.Equal(t, stored.Content, repo.vexCalls[0].Content)
+	assert.Equal(t, reportTimeForTest(), stored.ReportCreatedAt)
+	assert.Equal(t, stored.ReportCreatedAt, repo.vexCalls[0].ReportCreatedAt)
 	assert.Len(t, repo.vexCalls[0].Content.IgnoredMatches, 1)
 }
 
