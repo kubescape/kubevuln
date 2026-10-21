@@ -1519,8 +1519,13 @@ func (s *ScanService) getOrCreateSBOM(ctx context.Context, workload domain.ScanC
 			}
 			return domain.SBOM{}, nil, res.Err
 		}
+		// Every caller sharing the creation gets maps of its own: the document is read
+		// downstream, the metadata is stamped per scan.
 		created := res.Val.(sbomCreation)
-		return created.sbom, created.storeErr, nil
+		sbom := created.sbom
+		sbom.Annotations = maps.Clone(sbom.Annotations)
+		sbom.Labels = maps.Clone(sbom.Labels)
+		return sbom, created.storeErr, nil
 	case <-ctx.Done():
 		return domain.SBOM{}, nil, ctx.Err()
 	}

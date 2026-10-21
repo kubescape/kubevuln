@@ -1091,21 +1091,21 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 			helpers.String("relevant", strconv.FormatBool(withRelevancy)))
 		return nil
 	}
-	if cve.Labels == nil {
-		cve.Labels = make(map[string]string)
-	}
-
+	// The context label belongs to the stored object, not to the caller's manifest,
+	// whose maps may be shared with another scan of the same image.
+	labels := make(map[string]string, len(cve.Labels)+1)
+	maps.Copy(labels, cve.Labels)
 	if withRelevancy {
-		cve.Labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
+		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyFiltered
 	} else {
-		cve.Labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
+		labels[helpersv1.ContextMetadataKey] = helpersv1.ContextMetadataKeyNonFiltered
 	}
 
 	manifest := v1beta1.VulnerabilityManifest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        cve.Name,
 			Annotations: cve.Annotations,
-			Labels:      cve.Labels,
+			Labels:      labels,
 		},
 		Spec: v1beta1.VulnerabilityManifestSpec{
 			Metadata: v1beta1.VulnerabilityManifestMeta{
