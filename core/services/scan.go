@@ -1326,6 +1326,9 @@ func (s *ScanService) Version() string {
 // getSBOM retrieves a stored SBOM, deleting and returning empty if it is outdated or stale due to changed size/memory limits.
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
+	if !s.sbomGeneration {
+		return nodeAgentSBOM(sbom, err)
+	}
 	if err != nil {
 		if errors.Is(err, domain.ErrOutdatedSBOM) {
 			if sbom.Status == helpersv1.TooLarge {
@@ -1401,6 +1404,24 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 	}
 
 	return sbom, nil
+}
+
+// nodeAgentSBOM is getSBOM for the mode where node-agent generates SBOMs. kubevuln cannot
+// regenerate them, so it never deletes one: the stale and outdated checks above delete an
+// SBOM to trigger a fresh scan here, which node-agent's TooLarge SBOMs always fail, since
+// they carry no kubescape.io/status-reason and no spec tool version. Deleting one undoes
+// node-agent's pin and it scans the image again on the next container start.
+//
+// TooLarge and Incomplete SBOMs carry no content for the version check to protect, so they
+// are returned as stored and the caller reports their status instead of a missing SBOM.
+func nodeAgentSBOM(sbom domain.SBOM, err error) (domain.SBOM, error) {
+	if errors.Is(err, domain.ErrOutdatedSBOM) {
+		if sbom.Status == helpersv1.TooLarge || sbom.Status == helpersv1.Incomplete {
+			return sbom, nil
+		}
+		return domain.SBOM{}, nil
+	}
+	return sbom, err
 }
 
 // getOrCreateSBOM retrieves an existing SBOM from storage, or creates and stores one via singleflight
