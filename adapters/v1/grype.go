@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -570,19 +571,20 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 	}
 	reportCreatedAt := now().UTC().Truncate(time.Second)
 
-	// retrieve scanID from context and add it to the annotations
+	// The manifest's metadata is the SBOM's plus what this scan adds, in maps of its
+	// own: the SBOM's maps belong to the caller and, through singleflight, to every
+	// scan of the same image running at the same time.
 	scanID, _ := ctx.Value(domain.ScanIDKey{}).(string)
-	if sbom.Annotations == nil {
-		sbom.Annotations = make(map[string]string)
-	}
-	sbom.Annotations[helpersv1.ScanIdMetadataKey] = scanID
+	annotations := make(map[string]string, len(sbom.Annotations)+3)
+	maps.Copy(annotations, sbom.Annotations)
+	annotations[helpersv1.ScanIdMetadataKey] = scanID
 
 	// record the matching mode so backend/UI can explain count differences;
 	// when adaptive mode actually downgraded this scan to a trusted vendor's
 	// feed, flag the matched vendor distro as well.
-	sbom.Annotations[CVEMatchingModeMetadataKey] = string(g.matchingMode)
+	annotations[CVEMatchingModeMetadataKey] = string(g.matchingMode)
 	if g.matchingMode == config.CVEMatchingAdaptive && useDefaultMatchers && dist != nil {
-		sbom.Annotations[VendorTrustedMatchMetadataKey] = dist.Type.String()
+		annotations[VendorTrustedMatchMetadataKey] = dist.Type.String()
 	}
 
 	logger.L().Debug("returning CVE manifest",
@@ -594,8 +596,8 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
 		CVEDBVersion:       g.dbVersionLocked(),
-		Annotations:        sbom.Annotations,
-		Labels:             sbom.Labels,
+		Annotations:        annotations,
+		Labels:             maps.Clone(sbom.Labels),
 		Content:            vulnerabilityResults,
 	}, nil
 }
