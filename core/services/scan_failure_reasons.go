@@ -157,6 +157,11 @@ func classifySBOMStatusWithAnnotation(status string, annotations map[string]stri
 		if ann, ok := annotations[helpersv1.StatusMetadataKey]; ok && strings.Contains(ann, "scanner OOM") {
 			return scanfailure.ReasonScannerOOMKilled
 		}
+		// node-agent pins a crash-looping scan as TooLarge with only the memory limit it
+		// crashed under, and no status reason; kubevuln sets that limit only for OOM as well.
+		if _, ok := annotations[domain.ScannerMemoryLimitAnnotationKey]; ok {
+			return scanfailure.ReasonScannerOOMKilled
+		}
 	}
 	return classifySBOMStatus(status)
 }

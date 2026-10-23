@@ -2185,6 +2185,7 @@ func TestScanService_getSBOM_Outdated(t *testing.T) {
 			}
 			s := &ScanService{
 				sbomRepository: repo,
+				sbomGeneration: true, // kubevuln owns these SBOMs, so stale ones are deleted
 			}
 			gotSBOM, err := s.getSBOM(context.Background(), "test-sbom", "v1.0.0")
 			if tt.wantErr != nil {

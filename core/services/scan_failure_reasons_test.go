@@ -285,6 +285,14 @@ func TestClassifySBOMStatusWithAnnotation(t *testing.T) {
 			expected: scanfailure.ReasonScannerOOMKilled,
 		},
 		{
+			name:   "TooLarge with only node-agent's scanner memory limit",
+			status: helpersv1.TooLarge,
+			annotations: map[string]string{
+				"kubescape.io/scanner-memory-limit": "2147483648",
+			},
+			expected: scanfailure.ReasonScannerOOMKilled,
+		},
+		{
 			name:   "TooLarge with status-reason image-too-large",
 			status: helpersv1.TooLarge,
 			annotations: map[string]string{
