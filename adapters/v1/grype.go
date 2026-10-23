@@ -79,6 +79,12 @@ type GrypeAdapter struct {
 	trustedVendors    map[distro.Type]bool
 	updating          bool
 	updateChan        chan struct{}
+	// scans counts the scans running against the current store. A scan holds the lock
+	// only to take the store and join this group, so a store swap never waits on a scan,
+	// and neither does anything else that takes the lock, such as Ready; the swap
+	// replaces the group with a fresh one and closes the old store once the old group
+	// drained.
+	scans *sync.WaitGroup
 	// loadMu is held for the entire duration of a loadFn call, so at most one load ever
 	// runs against installCfg.DBRootDir at a time. grype's v6 curator deletes the active
 	// DB directory and renames a freshly downloaded one into its place with no
@@ -110,6 +116,7 @@ func NewGrypeAdapter(listingURL string, matchingMode config.CVEMatchingMode, tru
 		matchingMode:   matchingMode,
 		trustedVendors: buildTrustedVendorSet(trustedVendors),
 		dbLoader:       DefaultVulnerabilityDBLoader{},
+		scans:          &sync.WaitGroup{},
 	}
 	return g
 }
@@ -176,10 +183,15 @@ func buildTrustedVendorSet(vendors []string) map[distro.Type]bool {
 var ErrDockerUnavailable = errors.New("container runtime unavailable")
 
 func (g *GrypeAdapter) dbVersionLocked() string {
-	if g.dbStatus == nil {
+	return dbVersionOf(g.dbStatus)
+}
+
+// dbVersionOf is the checksum part of a provider status, the version CVE manifests carry.
+func dbVersionOf(status *vulnerability.ProviderStatus) string {
+	if status == nil {
 		return ""
 	}
-	parts := strings.Split(g.dbStatus.From, "%3A")
+	parts := strings.Split(status.From, "%3A")
 	return parts[len(parts)-1]
 }
 
@@ -416,10 +428,17 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, ch chan struct{}, hasEx
 	g.mu.Lock()
 	owner := g.updateChan == ch
 	var oldStore vulnerability.Provider
+	var oldScans *sync.WaitGroup
 	if owner {
 		oldStore = g.store
 		g.store = store
 		g.dbStatus = dbStatus
+		// A loader may hand the same provider back; its scans keep their group, so a
+		// later swap to another provider still waits for every scan on this one.
+		if store != oldStore || g.scans == nil {
+			oldScans = g.scans
+			g.scans = &sync.WaitGroup{}
+		}
 		// Schedule the next routine refresh in 24 hours
 		g.nextUpdateAttempt = now.Add(24 * time.Hour)
 		g.updating = false
@@ -433,6 +452,10 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, ch chan struct{}, hasEx
 		return
 	}
 	if oldStore != nil && oldStore != store {
+		// The scans that took the old store finish on it; it closes behind the last one.
+		if oldScans != nil {
+			oldScans.Wait()
+		}
 		if closeErr := oldStore.Close(); closeErr != nil {
 			logger.L().Ctx(ctx).Warning("failed to close previous grype DB", helpers.Error(closeErr))
 		}
@@ -490,11 +513,16 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 	defer span.End()
 
 	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	if g.store == nil || g.dbStatus == nil || g.dbStatus.Error != nil {
+	store, status, scans := g.store, g.dbStatus, g.scans
+	if store == nil || status == nil || status.Error != nil {
+		g.mu.RUnlock()
 		return domain.CVEManifest{}, domain.ErrInitVulnDB
 	}
+	if scans != nil { // nil only for an adapter built as a literal, which tests do
+		scans.Add(1)
+		defer scans.Done()
+	}
+	g.mu.RUnlock()
 
 	logger.L().Debug("decoding SBOM",
 		helpers.String("name", sbom.Name))
@@ -519,7 +547,7 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 	}
 	useDefaultMatchers := g.resolveUseDefaultMatchers(dist)
 	vulnMatcher := grype.VulnerabilityMatcher{
-		VulnerabilityProvider: g.store,
+		VulnerabilityProvider: store,
 		Matchers:              getMatchers(useDefaultMatchers),
 		NormalizeByCVE:        true,
 	}
@@ -552,7 +580,7 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 
 	logger.L().Debug("compiling results",
 		helpers.String("name", sbom.Name))
-	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, g.store, nil, g.dbStatus, models.DefaultSortStrategy, false)
+	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, store, nil, status, models.DefaultSortStrategy, false)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
@@ -595,7 +623,7 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 		Name:               sbom.Name,
 		SBOMCreatorVersion: sbom.SBOMCreatorVersion,
 		CVEScannerVersion:  g.Version(),
-		CVEDBVersion:       g.dbVersionLocked(),
+		CVEDBVersion:       dbVersionOf(status),
 		Annotations:        annotations,
 		Labels:             maps.Clone(sbom.Labels),
 		Content:            vulnerabilityResults,
