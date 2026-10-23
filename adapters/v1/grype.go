@@ -431,10 +431,14 @@ func (g *GrypeAdapter) finishUpdate(ctx context.Context, ch chan struct{}, hasEx
 	var oldScans *sync.WaitGroup
 	if owner {
 		oldStore = g.store
-		oldScans = g.scans
 		g.store = store
 		g.dbStatus = dbStatus
-		g.scans = &sync.WaitGroup{}
+		// A loader may hand the same provider back; its scans keep their group, so a
+		// later swap to another provider still waits for every scan on this one.
+		if store != oldStore || g.scans == nil {
+			oldScans = g.scans
+			g.scans = &sync.WaitGroup{}
+		}
 		// Schedule the next routine refresh in 24 hours
 		g.nextUpdateAttempt = now.Add(24 * time.Hour)
 		g.updating = false

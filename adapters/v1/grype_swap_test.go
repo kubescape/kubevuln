@@ -104,6 +104,9 @@ func TestGrypeAdapter_SwapDoesNotWaitForARunningScan(t *testing.T) {
 		close(swapped)
 	}()
 
+	// The swap is published when the update's channel closes; on the old code that
+	// waits for the parked scan.
+	within(t, time.Second, "the swap", func() { <-ch })
 	within(t, time.Second, "Ready", func() { assert.True(t, g.Ready(context.Background())) })
 	within(t, time.Second, "DBVersion", func() { assert.Equal(t, "new", g.DBVersion(context.Background())) })
 	assert.False(t, old.closed.Load(), "the old store stays open while its scan runs")
@@ -116,9 +119,52 @@ func TestGrypeAdapter_SwapDoesNotWaitForARunningScan(t *testing.T) {
 	first := <-scanned
 	require.NoError(t, first.err)
 	assert.Equal(t, "old", first.report.CVEDBVersion, "the scan in flight finishes on the store it started with")
-	within(t, time.Second, "the swap", func() { <-swapped })
+	within(t, time.Second, "the swap's goroutine", func() { <-swapped })
 	assert.True(t, old.closed.Load(), "the old store closes behind its last scan")
 	assert.False(t, replacement.closed.Load())
+}
+
+// A loader may hand the same provider back. A scan running on it then keeps its group,
+// so a later swap to another provider still waits for that scan before closing the one
+// it runs on, instead of only for the scans that started after the same-provider refresh.
+func TestGrypeAdapter_SwapToTheSameProviderKeepsTrackingItsScans(t *testing.T) {
+	a := newParkingProvider()
+	releaseA := sync.OnceFunc(func() { close(a.release) })
+	t.Cleanup(releaseA)
+	g := NewGrypeAdapter("", config.CVEMatchingOn, nil)
+	g.store, g.dbStatus = a, &vulnerability.ProviderStatus{From: "db%3Aa1"}
+
+	refresh := func(store vulnerability.Provider, from string) {
+		t.Helper()
+		ch := make(chan struct{})
+		g.mu.Lock()
+		g.updating, g.updateChan = true, ch
+		g.mu.Unlock()
+		go g.finishUpdate(context.Background(), ch, true, store, &vulnerability.ProviderStatus{From: from}, nil)
+		within(t, time.Second, "the swap to "+from, func() { <-ch })
+	}
+
+	scanned := make(chan error, 1)
+	go func() {
+		_, err := g.ScanSBOM(context.Background(), scannableSBOM())
+		scanned <- err
+	}()
+	<-a.parked
+
+	refresh(a, "db%3Aa2")
+	assert.False(t, a.closed.Load(), "a refresh to the same provider closes nothing")
+
+	b := &parkingProvider{Provider: mock.VulnerabilityProvider(), parked: make(chan struct{}), release: make(chan struct{})}
+	close(b.release)
+	refresh(b, "db%3Ab")
+	assert.Equal(t, "b", g.DBVersion(context.Background()))
+	time.Sleep(100 * time.Millisecond)
+	assert.False(t, a.closed.Load(), "the scan parked since before the same-provider refresh still holds the provider open")
+
+	releaseA()
+	require.NoError(t, <-scanned)
+	require.Eventually(t, a.closed.Load, 2*time.Second, 10*time.Millisecond, "the provider closes once its last scan returned")
+	assert.False(t, b.closed.Load())
 }
 
 // The scan still reports the database it matched against when none is loaded.
