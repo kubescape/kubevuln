@@ -19,7 +19,7 @@ import (
 
 func testRegistry(t *testing.T) (name.Repository, *registryClient) {
 	t.Helper()
-	s := httptest.NewServer(registry.New())
+	s := httptest.NewServer(registry.New(registry.WithReferrersSupport(true)))
 	t.Cleanup(s.Close)
 	repo, err := name.NewRepository(strings.TrimPrefix(s.URL, "http://")+"/image", name.Insecure)
 	require.NoError(t, err)
