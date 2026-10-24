@@ -130,6 +130,10 @@ func main() {
 	} else {
 		sbomAdapter = v1.NewSyftAdapter(c.ScanTimeout, c.MaxImageSize, c.MaxSBOMSize, c.ScanEmbeddedSboms, c.ProxyRegistryMap)
 	}
+	sbomAdapter, err = configureSBOMReuse(c, sbomAdapter)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("SBOM reuse configuration error", helpers.Error(err))
+	}
 	cveAdapter := v1.NewGrypeAdapter(c.ListingURL, c.CVEMatchingMode, c.TrustedVendors)
 
 	// SecurityException CRD integration requires storage and riskAcceptance RBAC

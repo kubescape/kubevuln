@@ -61,6 +61,7 @@ const (
 var defaultTrustedVendors = []string{"echo", "chainguard", "wolfi", "minimos"}
 
 type Config struct {
+	SBOMReusePolicyFile     string            `mapstructure:"sbomReusePolicyFile"`
 	AccountID               string            `mapstructure:"accountID"`
 	ClusterName             string            `mapstructure:"clusterName"`
 	KeepLocal               bool              `mapstructure:"keepLocal"`
@@ -143,6 +144,7 @@ func LoadConfig(path string) (Config, error) {
 		"riskAcceptance",
 		"storage",
 		"storeFilteredSbom",
+		"sbomReusePolicyFile",
 	} {
 		if err := v.BindEnv(key); err != nil {
 			return Config{}, fmt.Errorf("binding %s to the environment: %w", key, err)
@@ -182,7 +184,6 @@ func LoadConfig(path string) (Config, error) {
 	if config.ScanConcurrency <= 0 {
 		return Config{}, fmt.Errorf("scanConcurrency must be positive, got %d", config.ScanConcurrency)
 	}
-
 
 	// Resolve the effective CVE matching mode. An explicit cveMatchingMode
 	// always wins. Backward compatibility: when cveMatchingMode is absent but
