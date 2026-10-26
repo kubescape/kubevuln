@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -2627,6 +2628,8 @@ type objectStore[T any] interface {
 	Update(ctx context.Context, obj T, opts metav1.UpdateOptions) (T, error)
 }
 
+const storageWriteAttempts = 8
+
 // createOrUpdate stores obj, falling back to a read-modify-write when the object is already
 // there. merge carries whatever the caller wants kept onto the stored object; it runs inside
 // the retry, against a freshly read object each time, since a conflict means someone else
@@ -2645,37 +2648,59 @@ type objectStore[T any] interface {
 // field on them. name is the object's own name and is what the Get inside the retry uses,
 // so it is the one thing every line here reports about which object is meant.
 func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name string, obj T, getOpts metav1.GetOptions, merge func(existing T) bool, extra ...helpers.IDetails) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := store.Create(ctx, obj, metav1.CreateOptions{})
-	switch {
-	case errors.IsAlreadyExists(err):
-		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := ctx.Err(); err != nil {
-				return err
+	if err == nil {
+		logger.L().Debug("stored "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
+		return nil
+	}
+	if !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to store %s in storage: %w", kind, err)
+	}
+
+	// Each attempt reads the latest resourceVersion and reapplies the intended
+	// result. Deletion races return to Create; a competing creator returns us to Get.
+	delay := wait.Backoff{Steps: storageWriteAttempts, Duration: 25 * time.Millisecond, Factor: 2, Jitter: 0.2, Cap: time.Second}.DelayFunc()
+	for attempt := 0; attempt < storageWriteAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		existing, getErr := store.Get(ctx, name, getOpts)
+		switch {
+		case errors.IsNotFound(getErr):
+			_, err = store.Create(ctx, obj, metav1.CreateOptions{})
+			if err != nil && !errors.IsAlreadyExists(err) && !errors.IsConflict(err) {
+				return fmt.Errorf("failed to recreate %s in storage: %w", kind, err)
 			}
-			// retrieve the latest version before attempting update
-			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			existing, getErr := store.Get(ctx, name, getOpts)
-			if getErr != nil {
-				return getErr
-			}
+		case getErr != nil:
+			return fmt.Errorf("failed to get %s from storage: %w", kind, getErr)
+		default:
 			if !merge(existing) {
 				return nil
 			}
-			_, updateErr := store.Update(ctx, existing, metav1.UpdateOptions{})
-			return updateErr
-		})
-		if retryErr != nil {
-			logger.L().Debug("failed to update "+kind+" in storage", append([]helpers.IDetails{helpers.Error(retryErr), helpers.String("name", name)}, extra...)...)
-			return fmt.Errorf("failed to update %s in storage: %w", kind, retryErr)
+			_, err = store.Update(ctx, existing, metav1.UpdateOptions{})
+			if err != nil && !errors.IsConflict(err) && !errors.IsNotFound(err) {
+				return fmt.Errorf("failed to update %s in storage: %w", kind, err)
+			}
 		}
-		logger.L().Debug("updated "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
-	case err != nil:
-		logger.L().Debug("failed to store "+kind+" in storage", append([]helpers.IDetails{helpers.Error(err), helpers.String("name", name)}, extra...)...)
-		return fmt.Errorf("failed to store %s in storage: %w", kind, err)
-	default:
-		logger.L().Debug("stored "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
+		if err == nil {
+			logger.L().Debug("updated "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
+			return nil
+		}
+		if attempt+1 == storageWriteAttempts {
+			break
+		}
+		timer := time.NewTimer(min(delay(), time.Second))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return nil
+	return fmt.Errorf("failed to update %s in storage after %d attempts: %w", kind, storageWriteAttempts, err)
 }
 
 func convertToFilteredSBOM(sbom *v1beta1.SBOMSyft) *v1beta1.SBOMSyftFiltered {

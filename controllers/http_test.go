@@ -953,6 +953,13 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
+			name:       "scanCVE, result storage failure",
+			path:       "/v1/scanImage",
+			endpoint:   "scanCVE",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/scanImage", c.ScanCVE) },
+			wantReason: services.ReasonResultStorageFailed,
+		},
+		{
 			name:       "scanCVE, classified reason",
 			path:       "/v1/scanImage",
 			endpoint:   "scanCVE",
@@ -1007,6 +1014,7 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			router := gin.Default()
 			tt.register(router, c)
 			router.GET("/metrics", gin.WrapH(m.Handler()))
+			router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
 
 			file, err := os.Open("../api/v1/testdata/scan.yaml")
 			require.NoError(t, err)
@@ -1032,6 +1040,16 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			assert.True(t, strings.Contains(body, wantSeries), body)
 			wantDurationSeries := `kubevuln_scan_duration_seconds_count{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
 			assert.True(t, strings.Contains(body, wantDurationSeries), body)
+
+			req, _ = http.NewRequest("GET", "/v1/scanStatus/b56211c7-716a-4f9f-b27f-b4942195fa5e", nil)
+			w = httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var status domain.ScanStatus
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
+			assert.Equal(t, domain.ScanStateFailed, status.State)
+			assert.Equal(t, tt.wantReason, status.Reason)
+
 		})
 	}
 }

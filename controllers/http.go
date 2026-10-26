@@ -300,7 +300,7 @@ func scanFailureReason(outcome string, err error) string {
 	var scanErr *domain.ScanError
 	if errors.As(err, &scanErr) {
 		switch scanErr.Reason {
-		case services.ReasonRateLimitExceeded, scanfailure.ReasonSBOMGenerationFailed, scanfailure.ReasonImageTooLarge, scanfailure.ReasonSBOMTooLarge, scanfailure.ReasonSBOMIncomplete, scanfailure.ReasonImageAuthFailed, scanfailure.ReasonImageNotFound, scanfailure.ReasonImageSchemaUnsupported, scanfailure.ReasonCVEMatchingFailed, scanfailure.ReasonResultUploadFailed, scanfailure.ReasonSBOMStorageFailed, scanfailure.ReasonScannerOOMKilled, scanfailure.ReasonScanTimeout, scanfailure.ReasonUnexpected:
+		case services.ReasonResultStorageFailed, services.ReasonRateLimitExceeded, scanfailure.ReasonSBOMGenerationFailed, scanfailure.ReasonImageTooLarge, scanfailure.ReasonSBOMTooLarge, scanfailure.ReasonSBOMIncomplete, scanfailure.ReasonImageAuthFailed, scanfailure.ReasonImageNotFound, scanfailure.ReasonImageSchemaUnsupported, scanfailure.ReasonCVEMatchingFailed, scanfailure.ReasonResultUploadFailed, scanfailure.ReasonSBOMStorageFailed, scanfailure.ReasonScannerOOMKilled, scanfailure.ReasonScanTimeout, scanfailure.ReasonUnexpected:
 			return scanErr.Reason
 		}
 	}

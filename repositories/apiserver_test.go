@@ -2501,7 +2501,7 @@ func TestAPIServerStore_StoreCVE_retryExhausted_transientError(t *testing.T) {
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 	err := a.StoreCVE(context.TODO(), domain.CVEManifest{Name: name}, false)
 	require.True(t, apierrors.IsConflict(err))
-	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+	require.Equal(t, storageWriteAttempts, updateCalls)
 }
 
 func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
@@ -2520,7 +2520,7 @@ func TestAPIServerStore_StoreSBOM_retryExhausted_transientError(t *testing.T) {
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, false)
 	require.True(t, apierrors.IsConflict(err))
-	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+	require.Equal(t, storageWriteAttempts, updateCalls)
 }
 
 func TestAPIServerStore_StoreSBOMFiltered_retryExhausted_transientError(t *testing.T) {
@@ -2539,7 +2539,7 @@ func TestAPIServerStore_StoreSBOMFiltered_retryExhausted_transientError(t *testi
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 	err := a.StoreSBOM(context.TODO(), domain.SBOM{Name: name}, true)
 	require.True(t, apierrors.IsConflict(err))
-	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+	require.Equal(t, storageWriteAttempts, updateCalls)
 }
 
 func TestAPIServerStore_StoreCVESummary_retryExhausted_transientError(t *testing.T) {
@@ -2574,7 +2574,7 @@ func TestAPIServerStore_StoreCVESummary_retryExhausted_transientError(t *testing
 	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
 	err = a.StoreCVESummary(ctx, cveManifest, domain.CVEManifest{}, false)
 	require.True(t, apierrors.IsConflict(err))
-	require.Equal(t, retry.DefaultRetry.Steps, updateCalls)
+	require.Equal(t, storageWriteAttempts, updateCalls)
 }
 
 func TestAPIServerStore_StoreCVESummaryStub_transientError(t *testing.T) {
