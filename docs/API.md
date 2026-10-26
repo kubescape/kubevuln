@@ -154,7 +154,9 @@ GET /metrics
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
 -- the same classification already sent to the backend via `ReportScanFailure` (see
 [scan-failure-reporting.md](scan-failure-reporting.md)) -- falling back to `"unexpected_error"`
-for an `error` outcome that carries no specific classification. This lets an operator watching
+for an `error` outcome that carries no specific classification. Required local vulnerability
+manifest or summary persistence failures use the local reason `result_storage_failed`,
+including when cloud upload succeeds. This lets an operator watching
 only `/metrics` distinguish, for example, a registry auth failure from an oversized image
 without needing access to the backend's failure-report stream or pod logs.
 

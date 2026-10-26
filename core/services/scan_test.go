@@ -404,6 +404,8 @@ func TestScanService_ScanCP(t *testing.T) {
 			storeErrorCVE: true,
 			storage:       true,
 			workload:      true,
+			wantErr:       true,
+			wantReason:    "result_storage_failed",
 		},
 		{
 			// regression test for #816: ScanCP used to swallow this failure and return nil
@@ -826,7 +828,8 @@ func TestScanService_ScanCVE(t *testing.T) {
 			storeErrorCVE: true,
 			storage:       true,
 			workload:      true,
-			wantErr:       false,
+			wantErr:       true,
+			wantReason:    "result_storage_failed",
 		},
 		{
 			name:       "timeout SBOM",
@@ -2735,7 +2738,7 @@ func (r *cachedSummaryFailureRepository) StoreCVESummary(ctx context.Context, cv
 	return r.CVERepository.StoreCVESummary(ctx, cve, cvep, withRelevancy)
 }
 
-func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
+func TestScanService_CacheHit_SummaryRefreshFailureIsReported(t *testing.T) {
 	for _, failure := range []string{"summary lookup", "relevancy lookup", "summary write"} {
 		t.Run(failure, func(t *testing.T) {
 			inner := repositories.NewFakeAPIServerStorage("kubescape")
@@ -2755,7 +2758,11 @@ func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
 			require.NoError(t, inner.StoreCVESummary(ctx, cve, cvep, true))
 			before, err := inner.GetCVESummary(ctx)
 			require.NoError(t, err)
-			require.NoError(t, s.ScanCVE(ctx))
+			err = s.ScanCVE(ctx)
+			require.ErrorIs(t, err, domain.ErrMockError)
+			var scanErr *domain.ScanError
+			require.ErrorAs(t, err, &scanErr)
+			assert.Equal(t, ReasonResultStorageFailed, scanErr.Reason)
 			after, err := inner.GetCVESummary(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, before, after, "a transient failure must not discard existing relevancy")
@@ -2764,7 +2771,7 @@ func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
 			} else {
 				assert.Zero(t, repo.writes)
 			}
-			assert.Len(t, platform.submitted, 1, "summary storage is best effort")
+			assert.Len(t, platform.submitted, 1, "cloud upload remains independent of local storage")
 		})
 	}
 }

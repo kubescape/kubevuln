@@ -58,6 +58,20 @@ only `/metrics` access (no backend `ReportScanFailure` stream, no pod logs) the 
 distinction between failure causes that this document describes, instead of a single opaque
 `outcome="error"` bucket.
 
+## Local result persistence
+
+When Storage is enabled, a vulnerability scan succeeds only after its manifest and
+workload summary have been saved. Conflict retries fetch the latest resource version
+and reapply the intended result; concurrent deletion and recreation are retried within
+the same bounded operation. Exhausted writes fail the local job with
+`result_storage_failed` on the scan-status endpoint and outcome metrics. This local
+reason is separate from cloud upload failure reporting.
+
+Cloud upload is still attempted after a local write failure. Summaries are not
+published after a referenced manifest fails to save. A later scan can repair a failed
+summary using the cached manifest; clearing manifests is unnecessary. Storage-disabled
+scans and best-effort VEX publication retain their existing behavior.
+
 ## Report shape
 
 `ScanFailureReport` (from `armoapi-go/scanfailure`) carries the customer GUID, image tag/hash,

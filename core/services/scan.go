@@ -232,7 +232,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 	// carries from the relevancy lookup above, so it is surfaced the same way GenerateSBOM,
 	// ScanCVE and ScanRegistry surface theirs — as a returned *domain.ScanError.
 	var failed int
-	var lastFailure *domain.ScanError
+	var lastFailure error
+	var persistenceErr error
 
 	for _, scan := range scans {
 		if scan.HostNodeName != "" {
@@ -320,6 +321,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 		}
 
+		var resultErr error
 		var filteredCve domain.CVEManifest
 		var cveExceptionsComplete bool
 		// if CVE manifest is not available, create it
@@ -340,27 +342,14 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
 			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
 
-			// store filtered CVE
 			if s.storage {
-				domain.UpdateScanPhase(mainCtx, "result_storage")
-				err = s.cveRepository.StoreCVE(ctx, filteredCve, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-					// no continue, storing the CVE is not critical
-				}
-				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-					// no continue, storing the CVE summary is not critical
-				}
+				resultErr = s.storeCVEAndSummary(ctx, filteredCve, domain.CVEManifest{}, false)
 			}
 		} else {
-			// VEX is not published here: ScanCP republishes it later, once
-			// filteredCvep is also available, gated on both exceptionsComplete flags.
-			cve, filteredCve, cveExceptionsComplete = s.reconcileCachedCVE(ctx, cve, slug, false)
+			// Publish VEX after computing the relevancy result below.
+			cve, filteredCve, cveExceptionsComplete, resultErr = s.reconcileCachedCVE(ctx, cve, slug, false)
 		}
+		persistenceErr = errors.Join(persistenceErr, resultErr)
 
 		// generate SBOM' from SBOM and relevant files
 		sbomp := domain.SBOM{}
@@ -399,32 +388,11 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
 			filteredCvep, cvepExceptionsComplete := s.applyExceptionsToManifest(ctx, cvep)
 
-			// store filtered CVE'
-			if s.storage {
+			if s.storage && resultErr == nil {
 				filteredCvep.Wlid = scan.Wlid
-				err = s.cveRepository.StoreCVE(ctx, filteredCvep, true)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVEp", helpers.Error(err),
-						helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
-					// no continue, storing the CVE' is not critical
-				}
-				// Summary uses filteredCve (all matches, exceptions applied) and
-				// filteredCvep (exceptions applied to relevant matches only), matching
-				// every other StoreCVESummary call site (storeFilteredCVE,
-				// reconcileCachedCVE, and ScanCP's own non-relevancy branch above) so
-				// severities.*.all means the same thing regardless of which scan flow
-				// last wrote this workload/container's VulnerabilityManifestSummary.
-				// See #819: this used to pass the unfiltered cve, so a
-				// SecurityException-suppressed CVE's presence in severities.*.all
-				// flipped depending on whether ScanCVE/ScanRegistry or ScanCP scanned
-				// last.
-				err = s.cveRepository.StoreCVESummary(ctx, filteredCve, filteredCvep, true)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-						helpers.String("imageSlug", slug))
-					// no continue, storing the CVE summary is not critical
-				}
-				if cveExceptionsComplete && cvepExceptionsComplete {
+				resultErr = s.storeCVEAndSummary(ctx, filteredCve, filteredCvep, true)
+				persistenceErr = errors.Join(persistenceErr, resultErr)
+				if resultErr == nil && cveExceptionsComplete && cvepExceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
 				}
 			}
@@ -443,13 +411,13 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		}
 	}
 
+	if failed > 0 || persistenceErr != nil {
+		return errors.Join(resultStorageError(persistenceErr), lastFailure)
+	}
 	logger.L().Info("scan complete",
 		helpers.String("name", name),
 		helpers.String("namespace", namespace),
 		helpers.String("jobID", workload.JobID))
-	if failed > 0 {
-		return lastFailure
-	}
 	return nil
 }
 
@@ -509,6 +477,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		}
 	}
 
+	var persistenceErr error
 	// if CVE manifest is not available, create it
 	if cve.Content == nil {
 		domain.UpdateScanPhase(ctx, "cve_matching")
@@ -520,9 +489,9 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning SBOM: %w", err)}
 		}
 
-		s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
+		persistenceErr = s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
 	} else {
-		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
+		cve, _, _, persistenceErr = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// submit CVE manifest to platform, only if we have a wlid
@@ -532,10 +501,13 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 				scanfailure.ReasonResultUploadFailed, err)
-			return &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: fmt.Errorf("submitting CVEs: %w", err)}
+			return errors.Join(resultStorageError(persistenceErr), &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: fmt.Errorf("submitting CVEs: %w", err)})
 		}
 	}
 
+	if persistenceErr != nil {
+		return resultStorageError(persistenceErr)
+	}
 	logger.L().Info("scan complete",
 		helpers.String("imageSlug", workload.ImageSlug),
 		helpers.String("instanceID", workload.InstanceID),
@@ -578,6 +550,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 		}
 	}
 
+	var persistenceErr error
 	sbom := domain.SBOM{}
 	if cve.Content == nil {
 		domain.UpdateScanPhase(ctx, "sbom_generation")
@@ -629,24 +602,28 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 			return &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: err}
 		}
 
-		s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
+		persistenceErr = s.storeFilteredCVE(ctx, cve, workload.ImageSlug)
 	} else {
-		cve, _, _ = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
+		cve, _, _, persistenceErr = s.reconcileCachedCVE(ctx, cve, workload.ImageSlug, true)
 	}
 
 	// report scan success to platform
 	domain.UpdateScanPhase(ctx, "result_upload")
-	err = s.platform.SendStatus(ctx, domain.Success)
-	if err != nil {
-		logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
-			helpers.String("imageSlug", workload.ImageSlug))
+	if persistenceErr == nil {
+		if err = s.platform.SendStatus(ctx, domain.Success); err != nil {
+			logger.L().Ctx(ctx).Warning("telemetry error", helpers.Error(err),
+				helpers.String("imageSlug", workload.ImageSlug))
+		}
 	}
 	// submit CVE manifest to platform
 	err = s.platform.SubmitCVE(ctx, cve, domain.CVEManifest{})
 	if err != nil {
 		_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
 			scanfailure.ReasonResultUploadFailed, err)
-		return &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: err}
+		return errors.Join(resultStorageError(persistenceErr), &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: err})
+	}
+	if persistenceErr != nil {
+		return resultStorageError(persistenceErr)
 	}
 	// report submit success to platform
 	err = s.platform.SendStatus(ctx, domain.Done)
@@ -669,30 +646,43 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 // The exceptions are applied whether or not storage is on, since that call is also what
 // reports the degraded, expired and active exception counts for the scan.
 //
-// Storing is best effort: a failure is logged and the scan carries on, the report sent to the
-// backend not depending on any of it.
-func (s *ScanService) storeFilteredCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string) {
-	// copy — original stays intact for SubmitCVE
+// Required writes return errors to the scan; cloud upload is attempted independently.
+func (s *ScanService) storeFilteredCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string) error {
 	filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
 	if !s.storage {
-		return
+		return nil
 	}
-
-	domain.UpdateScanPhase(ctx, "result_storage")
-	if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
-		logger.L().Ctx(ctx).Warning("storing CVE", helpers.Error(err),
-			helpers.String("imageSlug", imageSlug))
+	if err := s.storeCVEAndSummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+		return err
 	}
-	if err := s.cveRepository.StoreCVESummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
-		logger.L().Ctx(ctx).Warning("storing CVE summary", helpers.Error(err),
-			helpers.String("imageSlug", imageSlug))
-	}
-	// Only publish VEX built from a known-complete exception set, matching how ScanCP gates
-	// its own call: a degraded fetch would otherwise emit a document asserting fewer
-	// suppressions than the user actually configured.
 	if exceptionsComplete {
 		s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
 	}
+	return nil
+}
+
+// storeCVEAndSummary publishes a summary only after its referenced manifest is saved.
+// With relevancy, the full image manifest has already been saved by the caller.
+func (s *ScanService) storeCVEAndSummary(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool) error {
+	domain.UpdateScanPhase(ctx, "result_storage")
+	manifest := cve
+	if withRelevancy {
+		manifest = cvep
+	}
+	if err := s.cveRepository.StoreCVE(ctx, manifest, withRelevancy); err != nil {
+		return fmt.Errorf("storing CVE %q: %w", manifest.Name, err)
+	}
+	if err := s.cveRepository.StoreCVESummary(ctx, cve, cvep, withRelevancy); err != nil {
+		return fmt.Errorf("storing CVE summary for %q: %w", cve.Name, err)
+	}
+	return nil
+}
+
+func resultStorageError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &domain.ScanError{Reason: ReasonResultStorageFailed, Err: err}
 }
 
 // storeVEX writes the VEX document for a scanned image when VEX generation is enabled,
@@ -735,7 +725,7 @@ func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest
 // available, using the exceptionsComplete this call returns.
 // The workload summary is refreshed even when the image manifest is unchanged:
 // another workload may have populated the image cache before this workload upgraded.
-func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool) {
+func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string, publishVEX bool) (restoredCve, filteredCve domain.CVEManifest, exceptionsComplete bool, err error) {
 	cachedCve := cve
 	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
@@ -758,8 +748,7 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 			}
 			if exceptionsComplete || !hasRemovals {
 				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
-					logger.L().Ctx(ctx).Warning("storing CVE with exceptions", helpers.Error(err),
-						helpers.String("imageSlug", imageSlug))
+					return cve, filteredCve, exceptionsComplete, fmt.Errorf("storing cached CVE %q: %w", cve.Name, err)
 				}
 				// The stored manifest just changed, so the VEX document describing it is
 				// now stale. Republish it, but only from a known-complete exception set,
@@ -782,22 +771,20 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 				preserveRelevancy = true
 			}
 		}
-		s.refreshCachedCVESummary(ctx, filteredCve, imageSlug, preserveRelevancy)
+		err = s.refreshCachedCVESummary(ctx, filteredCve, preserveRelevancy)
 	}
 
-	return cve, filteredCve, exceptionsComplete
+	return cve, filteredCve, exceptionsComplete, err
 }
 
 // refreshCachedCVESummary updates the workload's reference and counts without
 // discarding valid runtime findings from an earlier scan of the same image.
-func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CVEManifest, imageSlug string, preserveRelevancy bool) {
+func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CVEManifest, preserveRelevancy bool) error {
 	var cvep domain.CVEManifest
 	if preserveRelevancy {
 		summary, err := s.cveRepository.GetCVESummary(ctx)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("getting cached CVE summary", helpers.Error(err),
-				helpers.String("imageSlug", imageSlug))
-			return // A failed read must not be treated as absent relevancy.
+			return fmt.Errorf("getting cached CVE summary: %w", err)
 		}
 		if summary != nil && summary.Spec.Vulnerabilities.ImageVulnerabilitiesObj.Name == cve.Name {
 			if name := summary.Spec.Vulnerabilities.WorkloadVulnerabilitiesObj.Name; name != "" {
@@ -805,17 +792,15 @@ func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CV
 				// storage namespace, repairing legacy workload-namespace references.
 				cvep, err = s.cveRepository.GetCVE(ctx, name, cve.SBOMCreatorVersion, cve.CVEScannerVersion, cve.CVEDBVersion)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("getting cached relevancy CVE", helpers.Error(err),
-						helpers.String("imageSlug", imageSlug))
-					return
+					return fmt.Errorf("getting cached relevancy CVE %q: %w", name, err)
 				}
 			}
 		}
 	}
 	if err := s.cveRepository.StoreCVESummary(ctx, cve, cvep, cvep.Content != nil); err != nil {
-		logger.L().Ctx(ctx).Warning("storing cached CVE summary", helpers.Error(err),
-			helpers.String("imageSlug", imageSlug))
+		return fmt.Errorf("storing cached CVE summary for %q: %w", cve.Name, err)
 	}
+	return nil
 }
 
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
