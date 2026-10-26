@@ -37,6 +37,20 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
+// scanServer serves the scan API. The handlers answer as soon as a scan is admitted, so a
+// request that takes longer than this to arrive or to be answered is a stalled client
+// holding a connection, not a scan in progress; a scan command is a few kilobytes.
+func scanServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":8080",
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -255,11 +269,7 @@ func main() {
 		group.GET("/scanStatus/:jobID", controller.ScanStatus)
 	}
 
-	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           telemetry.ExtractHTTP(router),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := scanServer(telemetry.ExtractHTTP(router))
 
 	// Initializing the server in a goroutine so that
 	// it won't block the graceful shutdown handling below
