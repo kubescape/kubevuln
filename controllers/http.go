@@ -333,6 +333,9 @@ func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, e
 	))
 }
 
+// maxScanCommandBytes bounds a scan request's body.
+const maxScanCommandBytes = 1 << 20
+
 // bindScanCommand decodes the request body into T and converts it to a domain.ScanCommand.
 // A body that will not bind is answered here with the same 400 each handler used to write
 // for itself, and reported as ok=false so the caller returns without scanning. T is the
@@ -340,9 +343,18 @@ func (h *HTTPController) recordRejection(ctx context.Context, endpoint string, e
 // and RegistryScanCommand for ScanRegistry.
 func bindScanCommand[T any](c *gin.Context, ctx context.Context, convert func(T) domain.ScanCommand) (domain.ScanCommand, bool) {
 	var cmd T
+	// The body is read in full before anything admits or bounds the request, so it
+	// gets its own bound here: a scan command is a few kilobytes, and the body of a
+	// scheduled scan already lives in a ConfigMap, which Kubernetes caps at 1 MiB.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxScanCommandBytes)
 	if err := c.ShouldBindJSON(&cmd); err != nil {
+		status := http.StatusBadRequest
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
 		logger.L().Ctx(ctx).Error("handler error", helpers.Error(err))
-		_, _ = problem.Of(http.StatusBadRequest).WriteTo(c.Writer)
+		_, _ = problem.Of(status).WriteTo(c.Writer)
 		return domain.ScanCommand{}, false
 	}
 	return convert(cmd), true
