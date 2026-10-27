@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/distribution/reference"
 )
 
 // Policy is a startup snapshot. Changing a mounted file requires restarting kubevuln.
@@ -90,8 +90,8 @@ func CompilePolicy(p Policy) (*CompiledPolicy, error) {
 	}
 	c := &CompiledPolicy{repositories: map[string]trust{}, maxBytes: p.MaxBytes, maxCandidates: p.MaxCandidates, timeout: time.Duration(p.TimeoutSeconds) * time.Second}
 	for repo, producer := range p.Repositories {
-		r, err := name.NewRepository(repo, name.StrictValidation)
-		if err != nil || r.Name() != repo {
+		r, err := reference.ParseNamed(repo)
+		if err != nil || !reference.IsNameOnly(r) {
 			return nil, fmt.Errorf("SBOM policy repository must be canonical: %q", repo)
 		}
 		if producer.SyftVersion == "" || producer.SchemaVersion == "" || len(producer.PublicKeys) == 0 {
