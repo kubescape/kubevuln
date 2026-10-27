@@ -46,14 +46,14 @@ func (t *boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, fmt.Errorf("SBOM registry response exceeds size limit")
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, t.maxBody+1))
-	if err != nil {
-		return nil, err
-	}
 	t.mu.Lock()
 	t.bytes += int64(len(b))
 	t.remaining -= int64(len(b))
 	exhausted = t.remaining < 0
 	t.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	if int64(len(b)) > t.maxBody || exhausted {
 		return nil, fmt.Errorf("SBOM registry response exceeds size budget")
 	}

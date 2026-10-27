@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,6 +69,9 @@ func publishInventory(t *testing.T, ref name.Digest, raw []byte, key ed25519.Pri
 // Alpine/Nginx tarballs exercise the identical path with real package inventories.
 func TestRegistrySBOMRealParity(t *testing.T) {
 	g, stop, err := NewGrypeAdapterFixedDB()
+	if errors.Is(err, ErrDockerUnavailable) {
+		t.Skipf("skipping: grype offline db container unavailable (container runtime not usable): %v", err)
+	}
 	require.NoError(t, err)
 	defer stop()
 	ctx := context.WithValue(context.Background(), domain.TimestampKey{}, time.Now().Unix())
