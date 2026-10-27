@@ -23,7 +23,8 @@ func compatible(raw []byte, s subject, producer trust) (*v1beta1.SyftDocument, e
 		} `json:"descriptor"`
 		Artifacts json.RawMessage `json:"artifacts"`
 		Source    struct {
-			Type     string `json:"type"`
+			Target   json.RawMessage `json:"target"`
+			Type     string          `json:"type"`
 			Metadata struct {
 				ManifestDigest string `json:"manifestDigest"`
 				ImageID        string `json:"imageID"`
@@ -40,6 +41,11 @@ func compatible(raw []byte, s subject, producer trust) (*v1beta1.SyftDocument, e
 	}
 	if len(header.Artifacts) == 0 || string(header.Artifacts) == "null" {
 		return nil, fmt.Errorf("inventory has no artifact array")
+	}
+	// The storage decoder gives pre-v9 target fields precedence over metadata.
+	// This profile only supports modern metadata, which is what we validate below.
+	if len(header.Source.Target) != 0 {
+		return nil, fmt.Errorf("legacy Syft source target is unsupported")
 	}
 	meta := header.Source.Metadata
 	if header.Source.Type != "image" || meta.ManifestDigest != s.ref.DigestStr() || meta.ImageID != s.configDigest {
