@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/distribution/reference"
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 // Policy is a startup snapshot. Changing a mounted file requires restarting kubevuln.
@@ -90,8 +91,14 @@ func CompilePolicy(p Policy) (*CompiledPolicy, error) {
 	}
 	c := &CompiledPolicy{repositories: map[string]trust{}, maxBytes: p.MaxBytes, maxCandidates: p.MaxCandidates, timeout: time.Duration(p.TimeoutSeconds) * time.Second}
 	for repo, producer := range p.Repositories {
-		r, err := reference.ParseNamed(repo)
+		r, err := reference.ParseNormalizedNamed(repo)
 		if err != nil || !reference.IsNameOnly(r) {
+			return nil, fmt.Errorf("SBOM policy repository must be canonical: %q", repo)
+		}
+		// Keep the registry client's canonical spelling (including index.docker.io),
+		// while validating paths with the complete distribution repository grammar.
+		registry, err := name.NewRegistry(reference.Domain(r), name.StrictValidation)
+		if err != nil || registry.Repo(reference.Path(r)).Name() != repo {
 			return nil, fmt.Errorf("SBOM policy repository must be canonical: %q", repo)
 		}
 		if producer.SyftVersion == "" || producer.SchemaVersion == "" || len(producer.PublicKeys) == 0 {
