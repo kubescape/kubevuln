@@ -51,3 +51,35 @@ func TestPolicyRejectsInvalidConfiguration(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestPolicyRepositoryGrammar(t *testing.T) {
+	for _, tc := range []struct {
+		repository string
+		valid      bool
+	}{
+		{"registry.example/a", true},
+		{"registry.example/a/b", true},
+		{"registry.example:5000/team/image", true},
+		{"localhost/image", true},
+		{"docker.io/library/alpine", true},
+		{"registry.example/team//image", false},
+		{"registry.example/team/", false},
+		{"registry.example/Team/image", false},
+		{"registry.example/team/image:latest", false},
+		{"registry.example/team/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false},
+		{"image", false},
+		{"team/image", false},
+		{"docker.io/alpine", false},
+	} {
+		t.Run(tc.repository, func(t *testing.T) {
+			p, _ := testPolicy(t, tc.repository)
+			compiled, err := CompilePolicy(p)
+			if !tc.valid {
+				require.ErrorContains(t, err, "canonical")
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, compiled.repositories, tc.repository)
+		})
+	}
+}
