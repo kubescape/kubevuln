@@ -1788,3 +1788,34 @@ func TestRejectionDiagnosticsUseProcessGate(t *testing.T) {
 	require.Contains(t, w.Body.String(), `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1000`)
 	require.NotContains(t, w.Body.String(), `kubevuln_scans_completed_total{`)
 }
+
+// A registry scan names the platform it wants through args.platform; the slug carries it,
+// so the stores keep one SBOM and CVE manifest per platform, and a request without one
+// keeps the slug and the objects it always had.
+func TestRegistryScanCommandToScanCommandQualifiesTheSlugWithThePlatform(t *testing.T) {
+	base := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{ImageTag: "quay.io/kubescape/kubevuln:v0.3.0"}}).ImageSlug
+	require.NotEmpty(t, base)
+	for platform, want := range map[string]string{
+		"linux/amd64":    base + "-linux-amd64",
+		"linux/arm64":    base + "-linux-arm64",
+		"linux/arm64/v8": base + "-linux-arm64-v8",
+		"Windows/AMD64":  base + "-windows-amd64",
+	} {
+		command := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{
+			ImageTag: "quay.io/kubescape/kubevuln:v0.3.0",
+			Args:     map[string]interface{}{domain.ArgsPlatform: platform},
+		}})
+		assert.Equal(t, want, command.ImageSlug, platform)
+		assert.True(t, names.IsValidSlug(command.ImageSlug), command.ImageSlug)
+	}
+	unqualified := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{
+		ImageTag: "quay.io/kubescape/kubevuln:v0.3.0",
+		Args:     map[string]interface{}{domain.ArgsPlatform: 7},
+	}})
+	assert.Equal(t, base, unqualified.ImageSlug, "a platform that is not a string is ignored")
+	long := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{
+		ImageTag: "quay.io/kubescape/kubevuln:v0.3.0",
+		Args:     map[string]interface{}{domain.ArgsPlatform: strings.Repeat("a", 300)},
+	}})
+	assert.Equal(t, base, long.ImageSlug, "a platform that does not fit a slug leaves it unqualified")
+}

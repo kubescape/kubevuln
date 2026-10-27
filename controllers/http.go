@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -664,9 +665,34 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 		Session:            sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(imageTagNormalized, "nohash"); err == nil {
-		command.ImageSlug = slug
+		command.ImageSlug = registrySlugForPlatform(slug, c.Args)
 	}
 	return command
+}
+
+// registrySlugForPlatform qualifies a registry scan's slug with the platform the request
+// names, so a scan for one architecture is never answered from another's SBOM and CVE
+// manifest: the stores look objects up by slug alone. A request without a platform keeps
+// the slug it always had, so the objects stored so far stay the ones it reads, and a
+// platform gets its own objects the first time it is requested.
+func registrySlugForPlatform(slug string, args map[string]interface{}) string {
+	platform, _ := args[domain.ArgsPlatform].(string)
+	if platform == "" {
+		return slug
+	}
+	suffix := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, strings.ToLower(platform))
+	qualified := slug + "-" + strings.Trim(suffix, "-")
+	if !names.IsValidSlug(qualified) {
+		logger.L().Warning("platform does not fit the image slug, scanning under the unqualified one",
+			helpers.String("imageSlug", slug), helpers.String("platform", platform))
+		return slug
+	}
+	return qualified
 }
 
 // Shutdown abandons queued-but-not-started scans immediately and waits only for
