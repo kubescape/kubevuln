@@ -34,6 +34,26 @@ func TestCompatibilityAcceptsEmptyImageAndRejectsMismatches(t *testing.T) {
 	doc, err := compatible(raw, s, producer)
 	require.NoError(t, err)
 	require.Empty(t, doc.Artifacts)
+	type sourceMetadata struct {
+		ManifestDigest string `json:"manifestDigest"`
+		ImageID        string `json:"imageID"`
+		Manifest       []byte `json:"manifest"`
+		Config         []byte `json:"config"`
+	}
+	var source sourceMetadata
+	require.Equal(t, "image", doc.SyftSource.Type)
+	require.NoError(t, json.Unmarshal(doc.SyftSource.Metadata, &source))
+	require.Equal(t, s.ref.DigestStr(), source.ManifestDigest)
+	require.Equal(t, s.configDigest, source.ImageID)
+	var original struct {
+		Source struct {
+			Metadata json.RawMessage `json:"metadata"`
+		} `json:"source"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &original))
+	var expected sourceMetadata
+	require.NoError(t, json.Unmarshal(original.Source.Metadata, &expected))
+	require.Equal(t, expected, source)
 	for _, mutation := range []func(map[string]any){
 		func(d map[string]any) { delete(d, "artifacts") },
 		func(d map[string]any) { d["artifacts"] = nil },
@@ -42,6 +62,10 @@ func TestCompatibilityAcceptsEmptyImageAndRejectsMismatches(t *testing.T) {
 			d["source"].(map[string]any)["metadata"].(map[string]any)["imageID"] = "sha256:wrong"
 		},
 		func(d map[string]any) { d["source"].(map[string]any)["metadata"].(map[string]any)["config"] = "e30=" },
+		func(d map[string]any) {
+			d["source"].(map[string]any)["target"] = map[string]any{"manifestDigest": "sha256:wrong", "imageID": "sha256:wrong", "architecture": "arm64", "os": "linux"}
+		},
+		func(d map[string]any) { d["source"].(map[string]any)["target"] = nil },
 	} {
 		var d map[string]any
 		require.NoError(t, json.Unmarshal(raw, &d))
