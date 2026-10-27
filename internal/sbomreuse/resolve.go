@@ -33,10 +33,12 @@ func newRegistryClient(ctx context.Context, repository name.Repository, opts ima
 	base.TLSClientConfig = tls
 	budget := &boundedTransport{base: base, maxBody: policy.maxBytes, remaining: 2*policy.maxBytes + 8*1024*1024}
 	options := []remote.Option{remote.WithContext(ctx), remote.WithTransport(budget)}
-	if a := opts.Authenticator(repository.Name()); a != nil {
+	if a := opts.Authenticator(repository.RegistryStr()); a != nil {
 		options = append(options, remote.WithAuth(a))
+	} else if opts.Keychain != nil {
+		options = append(options, remote.WithAuthFromKeychain(opts.Keychain))
 	} else {
-		options = append(options, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		options = append(options, remote.WithAuth(authn.Anonymous))
 	}
 	return &registryClient{opts: options, budget: budget}, nil
 }

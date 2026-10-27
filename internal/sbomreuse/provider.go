@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -42,8 +43,16 @@ func (p *Provider) Acquire(ctx context.Context, slug, imageID string, opts domai
 	ctx, cancel := context.WithTimeout(ctx, p.policy.timeout)
 	defer cancel()
 	registryOpts := image.RegistryOptions{Credentials: registryauth.Credentials(opts.Credentials), InsecureUseHTTP: opts.InsecureUseHTTP, InsecureSkipTLSVerify: opts.InsecureSkipTLSVerify}
+	firstAttempt := true
 	get := func(ctx context.Context, _ string, ro *image.RegistryOptions) (domain.SBOM, error) {
-		c, err := newRegistryClient(ctx, ref.Context(), *ro, p.policy)
+		attempt := *ro
+		// Consult Docker credentials only on the initial attempt. ResolveSource's
+		// final retry clears explicit credentials and must stay truly anonymous.
+		if firstAttempt {
+			attempt.Keychain = authn.DefaultKeychain
+		}
+		firstAttempt = false
+		c, err := newRegistryClient(ctx, ref.Context(), attempt, p.policy)
 		if err != nil {
 			return domain.SBOM{}, err
 		}
