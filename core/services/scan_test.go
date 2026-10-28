@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1463,6 +1464,15 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 				ImageSlug:          "imageSlug",
 				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
 				Args:               map[string]interface{}{domain.ArgsPlatform: "linux:amd64"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a platform that does not fit a slug",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/" + strings.Repeat("v", 300)},
 			},
 			wantErr: true,
 		},

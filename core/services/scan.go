@@ -1298,7 +1298,7 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 		if !isString {
 			return ctx, fmt.Errorf("%w: %T is not a platform", domain.ErrInvalidPlatform, platform)
 		}
-		if _, err := syftsource.ParsePlatform(requested); err != nil {
+		if _, err := syftsource.PlatformSlugSuffix(requested); err != nil {
 			return ctx, fmt.Errorf("%w: %v", domain.ErrInvalidPlatform, err)
 		}
 	}

@@ -10,6 +10,7 @@ package syftsource
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -47,6 +48,36 @@ func FormatResolvedPlatform(os, arch, variant string) string {
 func IsPlatformMismatch(err error) bool {
 	var platformErr *image.ErrPlatformMismatch
 	return errors.As(err, &platformErr)
+}
+
+// MaxPlatformSlugSuffixLength bounds the platform part of an image slug: a canonical
+// os/arch[/variant] is a few characters, and the image part has to keep its room.
+const MaxPlatformSlugSuffixLength = 64
+
+// PlatformSlugSuffix turns the platform a request names into the suffix an image slug
+// carries for it: the canonical os/arch[/variant] ParsePlatform gives, lowercased, with
+// every character a DNS label cannot hold replaced by a dash, so two spellings of one
+// platform share a suffix. An empty specifier gives no suffix; one that does not parse,
+// or whose canonical form does not fit, is an error for validation to refuse.
+func PlatformSlugSuffix(specifier string) (string, error) {
+	platform, err := ParsePlatform(specifier)
+	if err != nil {
+		return "", err
+	}
+	if platform == nil {
+		return "", nil
+	}
+	canonical := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, strings.ToLower(FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant)))
+	suffix := "-" + strings.Trim(canonical, "-")
+	if len(suffix) > MaxPlatformSlugSuffixLength {
+		return "", fmt.Errorf("platform %q does not fit an image slug", specifier)
+	}
+	return suffix, nil
 }
 
 // ParsePlatform normalizes a platform specifier for multi-arch image resolution. The

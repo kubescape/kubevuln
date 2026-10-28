@@ -1830,4 +1830,15 @@ func TestRegistryScanCommandToScanCommandQualifiesTheSlugWithThePlatform(t *test
 	}
 	assert.True(t, strings.HasSuffix(amd64, "-linux-amd64"), amd64)
 	assert.True(t, strings.HasSuffix(arm64, "-linux-arm64"), arm64)
+
+	// Two references that differ only past the point where the slug is cut keep their
+	// own slugs on the same platform: the digest of the full reference tells them apart.
+	twin := "registry.example/" + strings.Repeat("a", 299) + "b:v1"
+	require.Equal(t, longBase, registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{ImageTag: twin}}).ImageSlug, "the unqualified slugs collide, which is what the digest is for")
+	assert.NotEqual(t, amd64, withPlatform(twin, "linux/amd64"))
+
+	// A platform whose canonical form does not fit a slug is refused by validation; here it
+	// must leave the slug unqualified rather than cut past the end of it.
+	assert.Equal(t, base, withPlatform(image, "linux/arm/"+strings.Repeat("v", 300)))
+	assert.Equal(t, longBase, withPlatform(long, "linux/arm/"+strings.Repeat("v", 300)))
 }
