@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -1288,6 +1289,18 @@ func (s *ScanService) ValidateScanRegistry(ctx context.Context, workload domain.
 	// validate inputs
 	if workload.ImageTagNormalized == "" || workload.ImageSlug == "" {
 		return ctx, domain.ErrMissingImageInfo
+	}
+	// The platform decides which SBOM and CVE manifest the slug names, so one that does
+	// not parse is refused here, before any lookup, and never served from a cache entry
+	// it could not have produced.
+	if platform, ok := workload.Args[domain.ArgsPlatform]; ok {
+		requested, isString := platform.(string)
+		if !isString {
+			return ctx, fmt.Errorf("%w: %T is not a platform", domain.ErrInvalidPlatform, platform)
+		}
+		if _, err := syftsource.ParsePlatform(requested); err != nil {
+			return ctx, fmt.Errorf("%w: %v", domain.ErrInvalidPlatform, err)
+		}
 	}
 	// add imageSlug to parent span
 	if parentSpan := trace.SpanFromContext(ctx); parentSpan != nil {

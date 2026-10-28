@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -671,28 +672,28 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 }
 
 // registrySlugForPlatform qualifies a registry scan's slug with the platform the request
-// names, so a scan for one architecture is never answered from another's SBOM and CVE
-// manifest: the stores look objects up by slug alone. A request without a platform keeps
-// the slug it always had, so the objects stored so far stay the ones it reads, and a
-// platform gets its own objects the first time it is requested.
+// names, so the stores, which look objects up by slug alone, keep one SBOM and CVE
+// manifest per platform. The platform is parsed the way SBOM creation parses it and
+// written in its canonical os/arch[/variant] form, so two spellings of one platform share
+// a slug, and a spelling that does not parse leaves the slug unqualified for
+// ValidateScanRegistry to refuse before any lookup. The qualified slug always fits a DNS
+// subdomain: the image part gives way, the platform never does, so a long image reference
+// keeps one slug per platform instead of falling back to a shared one.
 func registrySlugForPlatform(slug string, args map[string]interface{}) string {
-	platform, _ := args[domain.ArgsPlatform].(string)
-	if platform == "" {
+	requested, _ := args[domain.ArgsPlatform].(string)
+	if requested == "" {
 		return slug
 	}
-	suffix := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		return '-'
-	}, strings.ToLower(platform))
-	qualified := slug + "-" + strings.Trim(suffix, "-")
-	if !names.IsValidSlug(qualified) {
-		logger.L().Warning("platform does not fit the image slug, scanning under the unqualified one",
-			helpers.String("imageSlug", slug), helpers.String("platform", platform))
+	platform, err := syftsource.ParsePlatform(requested)
+	if err != nil || platform == nil {
 		return slug
 	}
-	return qualified
+	suffix := "-" + strings.ReplaceAll(syftsource.FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant), "/", "-")
+	base := slug
+	if room := names.MaxDNSSubdomainLength - len(suffix); len(base) > room {
+		base = strings.TrimRight(base[:room], "-.")
+	}
+	return base + suffix
 }
 
 // Shutdown abandons queued-but-not-started scans immediately and waits only for
