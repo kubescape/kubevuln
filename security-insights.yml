@@ -1,0 +1,135 @@
+header:
+  schema-version: 2.2.0
+  last-updated: '2026-10-28'
+  last-reviewed: '2026-10-28'
+  url: https://raw.githubusercontent.com/kubescape/kubevuln/main/security-insights.yml
+
+project:
+  name: Kubescape
+  administrators:
+    - name: Matthias Bertschy
+      social: https://github.com/matthyx
+      primary: true
+    - name: Ben Hirschberg
+      social: https://github.com/slashben
+      primary: false
+    - name: Rotem Refael
+      social: https://github.com/rotemamsa
+      primary: false
+    - name: Amir Malka
+      social: https://github.com/amirmalka
+      primary: false
+    - name: Bezalel Brandwine
+      social: https://github.com/Bezbran
+      primary: false
+  repositories:
+    - name: kubevuln
+      url: https://github.com/kubescape/kubevuln
+      comment: In-cluster image vulnerability scanner, using Grype.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
+    contact:
+      name: Kubescape maintainers
+      email: cncf-kubescape-maintainers@lists.cncf.io
+      primary: true
+  documentation:
+    detailed-guide: https://kubescape.io/docs/
+    code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
+    quickstart-guide: https://kubescape.io/docs/getting-started/
+
+repository:
+  url: https://github.com/kubescape/kubevuln
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  core-team:
+    - name: Matthias Bertschy
+      social: https://github.com/matthyx
+      primary: true
+    - name: Ben Hirschberg
+      social: https://github.com/slashben
+      primary: false
+    - name: Rotem Refael
+      social: https://github.com/rotemamsa
+      primary: false
+    - name: Amir Malka
+      social: https://github.com/amirmalka
+      primary: false
+    - name: Bezalel Brandwine
+      social: https://github.com/Bezbran
+      primary: false
+  license:
+    url: https://github.com/kubescape/kubevuln/blob/main/LICENSE
+    expression: Apache-2.0
+  documentation:
+    contributing-guide: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md
+    governance: https://github.com/kubescape/project-governance/blob/main/GOVERNANCE.md
+    security-policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
+    review-policy: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md#requirements-for-contributions
+  release:
+    automated-pipeline: true
+    distribution-points:
+      - uri: https://quay.io/repository/kubescape/kubevuln
+        comment: Container image.
+  security:
+    assessments:
+      self:
+        evidence: https://github.com/kubescape/kubescape/blob/master/docs/security/self-assessment.md
+        comment: Project-wide Kubescape self-assessment, maintained in kubescape/kubescape.
+    tools:
+      - name: OpenSSF Scorecard
+        type: other
+        rulesets:
+          - default
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: Runs weekly and on every push to main.
+      - name: Dependabot
+        type: SCA
+        rulesets:
+          - default
+        integration:
+          adhoc: true
+          ci: false
+          release: false
+        results: {}
+        comment: Weekly github-actions updates.
+      - name: govulncheck
+        type: SCA
+        rulesets:
+          - default
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: Runs weekly and on every push to main.
+      - name: golangci-lint
+        type: SAST
+        rulesets:
+          - default
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: Runs on pull requests that change Go code.
+      - name: OSPS Baseline Action
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results:
+          ci:
+            name: OSPS Baseline scan
+            predicate-uri: https://github.com/revanite-io/osps-baseline-action
+            location: https://github.com/kubescape/kubevuln/actions/workflows/osps-baseline.yml
+        comment: Runs on every push to the default branch and weekly.
