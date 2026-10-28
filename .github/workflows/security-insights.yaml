@@ -56,17 +56,32 @@ jobs:
           fi
           echo "security-insights.yml is the only Security Insights file"
 
-      # Runs cue vet on security-insights.yml with the schema for its
-      # header.schema-version. Pinned to a commit after v1.0.0 because v1.0.0
-      # calls cue vet without -d '#SecurityInsights', and then every file on
-      # schema 2.1.0 or later passes (revanite-io/security-insights-action#2).
-      # The fix has not been released yet, so do not take a Dependabot update
-      # back to v1.0.0. `file` is set because the action looks in .github/ by
-      # default. Same pin as kubescape/kubescape's repo-hygiene workflow.
-      - name: Validate security-insights.yml against its schema
-        uses: revanite-io/security-insights-action@13244c96662ef295385925489ea9e8e56376ce7d # main, 2026-06-18
+      - name: Install cue
+        uses: cue-lang/setup-cue@a93fa358375740cd8b0078f76355512b9208acb1 # v1.0.1
         with:
-          file: security-insights.yml
+          version: v0.17.1
+
+      # Validated inline rather than with revanite-io/security-insights-action:
+      # that action reads header.schema-version from the manifest and expands it
+      # inside a bash script, so a pull request could run commands on the runner
+      # through it. Here the schema version is fixed by this workflow and the
+      # manifest's value is only compared as data, never expanded or printed.
+      # The schema is fetched by the commit behind the v2.2.0 tag, so it cannot
+      # change underneath us. -d '#SecurityInsights' is required: without it cue
+      # vet accepts any file on schema 2.1.0 or later.
+      - name: Validate security-insights.yml against the v2.2.0 schema
+        env:
+          SCHEMA_VERSION: 2.2.0
+          SCHEMA_URL: https://raw.githubusercontent.com/ossf/security-insights/701ac2a02ef17fc8b316f5df685428773c51372a/spec/schema.cue # v2.2.0
+        run: |
+          declared=$(yq -r '.header.schema-version' security-insights.yml)
+          if [ "${declared}" != "${SCHEMA_VERSION}" ]; then
+            echo "::error file=security-insights.yml::header.schema-version must be ${SCHEMA_VERSION}. To move to a newer schema, update SCHEMA_VERSION and SCHEMA_URL in this workflow in the same pull request."
+            exit 1
+          fi
+          curl -sSfL --connect-timeout 10 --max-time 60 -o "${RUNNER_TEMP}/si-schema.cue" "${SCHEMA_URL}"
+          cue vet -c -d '#SecurityInsights' "${RUNNER_TEMP}/si-schema.cue" security-insights.yml
+          echo "security-insights.yml is valid against Security Insights ${SCHEMA_VERSION}"
 
       - name: Fail if the manifest was last reviewed more than 365 days ago
         id: freshness
@@ -74,9 +89,15 @@ jobs:
         # the only freshness signal, so the review lapses 365 days after it.
         run: |
           reviewed=$(yq -r '.header.last-reviewed' security-insights.yml)
+          now_epoch=$(date -u +%s)
+          # A date in the future would push the due date out with it and keep
+          # this check quiet for years, so reject it outright.
+          if [ "$(date -u -d "${reviewed}" +%s)" -gt "${now_epoch}" ]; then
+            echo "::error file=security-insights.yml::header.last-reviewed (${reviewed}) is in the future; set it to the date the manifest was actually reviewed."
+            exit 1
+          fi
           due=$(date -u -d "${reviewed} + 365 days" +%F)
           due_epoch=$(date -u -d "${due}" +%s)
-          now_epoch=$(date -u +%s)
           days=$(( (due_epoch - now_epoch) / 86400 ))
           echo "last-reviewed: ${reviewed} (review due ${due}, ${days} days remaining)"
           # Classify on epoch seconds, not the truncated day count: a review that
