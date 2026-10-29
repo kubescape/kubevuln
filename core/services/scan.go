@@ -141,8 +141,11 @@ func credentialsFingerprint(workload domain.ScanCommand) string {
 // rateLimitCacheKey leaves the digest out on purpose, because a registry rate limits by
 // repository rather than by digest, which makes it the wrong identity here.
 func sbomSingleflightKey(workload domain.ScanCommand, opts domain.RegistryOptions) string {
-	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t", workload.ImageSlug, credentialsFingerprint(workload),
-		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
+	// Registry scans may import inventory; workload and instance scans require
+	// local generation for runtime file coverage and must not join that flight.
+	registryInventory := workload.Wlid == "" && workload.InstanceID == ""
+	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t|registryinventory:%t", workload.ImageSlug, credentialsFingerprint(workload),
+		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify, registryInventory)
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
@@ -1311,6 +1314,14 @@ func (s *ScanService) Version() string {
 // getSBOM retrieves a stored SBOM, deleting and returning empty if it is outdated or stale due to changed size/memory limits.
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
+	if sbom.Imported() {
+		validator, ok := s.sbomCreator.(ports.SBOMCacheValidator)
+		if s.sbomGeneration && ok && (err == nil || errors.Is(err, domain.ErrOutdatedSBOM)) && validator.ValidateCachedSBOM(ctx, sbom) {
+			return sbom, nil
+		}
+		// Disabled/changed trust must never turn an imported inventory into a local hit.
+		return domain.SBOM{}, nil
+	}
 	if !s.sbomGeneration {
 		return nodeAgentSBOM(sbom, err)
 	}
