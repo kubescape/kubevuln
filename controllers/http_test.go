@@ -1816,6 +1816,7 @@ func TestRegistryScanCommandToScanCommandQualifiesTheSlugWithThePlatform(t *test
 		assert.True(t, names.IsValidSlug(got), got)
 	}
 	assert.Equal(t, base, withPlatform(image, "linux:amd64"), "a platform that does not parse leaves the slug for validation to refuse")
+	assert.Equal(t, base, withPlatform(image, "linux/arm/v7-"), "a variant the parser keeps apart from v7 is never folded onto it")
 	assert.Equal(t, base, withPlatform(image, 7), "a platform that is not a string leaves the slug for validation to refuse")
 
 	long := "registry.example/" + strings.Repeat("a", 300) + ":v1"

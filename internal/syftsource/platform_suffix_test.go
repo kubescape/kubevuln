@@ -22,7 +22,8 @@ func TestPlatformSlugSuffix(t *testing.T) {
 		require.NoError(t, err, specifier)
 		assert.Equal(t, want, got, specifier)
 	}
-	for _, specifier := range []string{"linux:amd64", "linux/arm/" + strings.Repeat("v", 300)} {
+	// The parser keeps these as variants of their own; a suffix must not fold them onto v7.
+	for _, specifier := range []string{"linux:amd64", "linux/arm/" + strings.Repeat("v", 300), "linux/arm/v7-", "linux/arm/v7_", "linux/arm/-v7"} {
 		_, err := PlatformSlugSuffix(specifier)
 		assert.Error(t, err, specifier)
 	}

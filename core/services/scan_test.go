@@ -1468,6 +1468,15 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "with a variant that would fold onto another",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/v7-"},
+			},
+			wantErr: true,
+		},
+		{
 			name: "with a platform that does not fit a slug",
 			workload: domain.ScanCommand{
 				ImageSlug:          "imageSlug",

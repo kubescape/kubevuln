@@ -56,9 +56,11 @@ const MaxPlatformSlugSuffixLength = 64
 
 // PlatformSlugSuffix turns the platform a request names into the suffix an image slug
 // carries for it: the canonical os/arch[/variant] ParsePlatform gives, lowercased, with
-// every character a DNS label cannot hold replaced by a dash, so two spellings of one
-// platform share a suffix. An empty specifier gives no suffix; one that does not parse,
-// or whose canonical form does not fit, is an error for validation to refuse.
+// the slashes turned into dashes. Each part must be letters and digits only: the parser
+// keeps "v7-" and "v7_" as variants of their own, and a suffix that folded them onto
+// "v7" would serve one variant's objects for another, so such a platform is an error
+// for validation to refuse, as is one that does not parse or does not fit. An empty
+// specifier gives no suffix.
 func PlatformSlugSuffix(specifier string) (string, error) {
 	platform, err := ParsePlatform(specifier)
 	if err != nil {
@@ -67,13 +69,15 @@ func PlatformSlugSuffix(specifier string) (string, error) {
 	if platform == nil {
 		return "", nil
 	}
-	canonical := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			return r
+	canonical := strings.ToLower(FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant))
+	for _, part := range strings.Split(canonical, "/") {
+		if part == "" || strings.IndexFunc(part, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) >= 0 {
+			return "", fmt.Errorf("platform %q has a part that cannot be a slug segment: %q", specifier, part)
 		}
-		return '-'
-	}, strings.ToLower(FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant)))
-	suffix := "-" + strings.Trim(canonical, "-")
+	}
+	suffix := "-" + strings.ReplaceAll(canonical, "/", "-")
 	if len(suffix) > MaxPlatformSlugSuffixLength {
 		return "", fmt.Errorf("platform %q does not fit an image slug", specifier)
 	}
