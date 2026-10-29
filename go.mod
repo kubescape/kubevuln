@@ -42,6 +42,7 @@ require (
 	github.com/openvex/go-vex v0.2.7
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/prometheus/client_golang v1.23.2
+	github.com/secure-systems-lab/go-securesystemslib v0.11.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.38.0
