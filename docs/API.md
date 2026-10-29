@@ -182,8 +182,8 @@ Syft adapter. `scanMode` is how you tell which one is running.
 ```json
 {
   "scanMode": "sidecar",
-  "sbomCreatorVersion": "v1.42.3",
-  "cveScannerVersion": "v0.104.1-matching-adaptive",
+  "sbomCreatorVersion": "v1.55.0",
+  "cveScannerVersion": "v0.121.0-matching-adaptive",
   "cveDBVersion": "5e8b0e2c9f",
   "scanTimeout": "5m0s",
   "scannerReadinessTimeout": "1m0s",

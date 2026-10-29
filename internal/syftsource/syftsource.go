@@ -72,14 +72,18 @@ func ParsePlatform(specifier string) (*image.Platform, error) {
 	return image.NewPlatform(specifier)
 }
 
-// GetSourceConfig builds the config both paths hand to syft.GetSource. "registry" is the
-// only source: kubevuln always pulls, and leaving the default set would let Syft fall back
-// to reading a local docker daemon or containerd socket that is not there.
+// GetSourceConfig builds the config both paths hand to syft.GetSource. "oci-registry" is
+// the only source: kubevuln always pulls, and leaving the default set would let Syft fall
+// back to reading a local docker daemon or containerd socket that is not there.
+//
+// The single provider name, not the "registry" tag: syft v1.55 also tags its oci-model
+// provider "registry", and GetSource flattens two provider errors into plain text, which
+// loses the typed *image.ErrPlatformMismatch that IsPlatformMismatch matches on.
 func GetSourceConfig(registryOptions *image.RegistryOptions, platform *image.Platform) *syft.GetSourceConfig {
 	return syft.DefaultGetSourceConfig().
 		WithRegistryOptions(registryOptions).
 		WithPlatform(platform).
-		WithSources("registry")
+		WithSources(string(image.OciRegistrySource))
 }
 
 // NewCreateSBOMConfig builds the syft.CreateSBOMConfig both SBOM paths start from. It removes
