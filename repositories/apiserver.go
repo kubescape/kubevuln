@@ -1018,6 +1018,11 @@ func (a *APIServerStore) GetCVE(ctx context.Context, name, SBOMCreatorVersion, C
 	case err != nil:
 		return domain.CVEManifest{}, fmt.Errorf("failed to get CVE manifest from apiserver: %w", err)
 	}
+	// Imported reports must revisit SBOM policy eligibility before matching. A cached
+	// report alone cannot prove that its producer is still trusted after a restart.
+	if manifest.Annotations[domain.SBOMImportSource] != "" {
+		return domain.CVEManifest{}, nil
+	}
 	// discard the manifest if it was created by an older version of the scanner
 	if manifest.Annotations[helpersv1.ToolVersionMetadataKey] != SBOMCreatorVersion ||
 		manifest.Spec.Metadata.Tool.Version != CVEScannerVersion ||
@@ -1129,7 +1134,7 @@ func (a *APIServerStore) StoreCVE(ctx context.Context, cve domain.CVEManifest, w
 	return createOrUpdate(ctx, a.StorageClient.VulnerabilityManifests(a.Namespace),
 		"CVE manifest", cve.Name, &manifest, metav1.GetOptions{ResourceVersion: resourceVersionMetadata},
 		func(existing *v1beta1.VulnerabilityManifest) bool {
-			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
+			existing.Annotations = mergeInventoryAnnotations(existing.Annotations, manifest.Annotations, true)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			existing.Spec = manifest.Spec
 			return true
@@ -2483,7 +2488,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 	// deployment/rollback writes it, and a different-versioned replica serving the same
 	// image slug reads it back next). Comparing only for "older" let the newer case through
 	// as if it were fresh (see #768).
-	if semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) != 0 {
+	if manifest.Annotations[domain.SBOMImportSource] != "" || semver.Compare(manifest.Spec.Metadata.Tool.Version, SBOMCreatorVersion) != 0 {
 		logger.L().Debug("discarding SBOM with mismatched scanner version",
 			helpers.String("name", name),
 			helpers.String("manifest scanner version", manifest.Spec.Metadata.Tool.Version),
@@ -2493,6 +2498,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 			Annotations:        manifest.Annotations,
 			Labels:             manifest.Labels,
 			SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+			SBOMCreatorName:    manifest.Spec.Metadata.Tool.Name,
 			Content:            &manifest.Spec.Syft,
 		}
 		if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
@@ -2508,6 +2514,7 @@ func (a *APIServerStore) GetSBOM(ctx context.Context, name, SBOMCreatorVersion s
 		// semver.Compare treats build-metadata differences as equal, so the two can still
 		// differ as strings even when the check above passes.
 		SBOMCreatorVersion: manifest.Spec.Metadata.Tool.Version,
+		SBOMCreatorName:    manifest.Spec.Metadata.Tool.Name,
 		Content:            &manifest.Spec.Syft,
 	}
 	if status, ok := manifest.Annotations[helpersv1.StatusMetadataKey]; ok {
@@ -2571,7 +2578,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 		filtered := convertToFilteredSBOM(&manifest)
 		return createOrUpdate(ctx, a.StorageClient.SBOMSyftFiltereds(a.Namespace), "filtered SBOM", sbom.Name, filtered, getOpts,
 			func(existing *v1beta1.SBOMSyftFiltered) bool {
-				existing.Annotations = mergeMaps(existing.Annotations, filtered.Annotations)
+				existing.Annotations = mergeInventoryAnnotations(existing.Annotations, filtered.Annotations, sbom.Content != nil)
 				existing.Labels = mergeMaps(existing.Labels, filtered.Labels)
 				// A nil sbom.Content has nothing to replace whatever Spec is already
 				// stored with - leave it alone rather than zeroing it, regardless of
@@ -2584,7 +2591,7 @@ func (a *APIServerStore) StoreSBOM(ctx context.Context, sbom domain.SBOM, isFilt
 	}
 	return createOrUpdate(ctx, a.StorageClient.SBOMSyfts(a.Namespace), "SBOM", sbom.Name, &manifest, getOpts,
 		func(existing *v1beta1.SBOMSyft) bool {
-			existing.Annotations = mergeMaps(existing.Annotations, manifest.Annotations)
+			existing.Annotations = mergeInventoryAnnotations(existing.Annotations, manifest.Annotations, sbom.Content != nil)
 			existing.Labels = mergeMaps(existing.Labels, manifest.Labels)
 			// Same reasoning as the filtered path above.
 			if sbom.Content != nil {
