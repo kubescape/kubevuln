@@ -2,9 +2,12 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +24,7 @@ import (
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
 	"go.opentelemetry.io/otel/attribute"
@@ -664,9 +668,40 @@ func registryScanCommandToScanCommand(c wssc.RegistryScanCommand) domain.ScanCom
 		Session:            sessionChainToSession(c.Session),
 	}
 	if slug, err := names.ImageInfoToSlug(imageTagNormalized, "nohash"); err == nil {
-		command.ImageSlug = slug
+		command.ImageSlug = registrySlugForPlatform(slug, imageTagNormalized, c.Args)
 	}
 	return command
+}
+
+// imageIdentityLength is how many hex characters of the full reference's digest a
+// shortened slug keeps.
+const imageIdentityLength = 8
+
+// registrySlugForPlatform qualifies a registry scan's slug with the platform the request
+// names, so the stores, which look objects up by slug alone, keep one SBOM and CVE
+// manifest per platform. The suffix is the platform's canonical form, so two spellings
+// of one platform share a slug, and a platform that does not parse or does not fit
+// leaves the slug unqualified for ValidateScanRegistry to refuse before any lookup. The
+// qualified slug always fits a DNS subdomain: when the image part has to give way it
+// ends with a digest of the full reference, so two long references never share a slug,
+// and the platform never gives way.
+func registrySlugForPlatform(slug, imageTagNormalized string, args map[string]interface{}) string {
+	requested, _ := args[domain.ArgsPlatform].(string)
+	if requested == "" {
+		return slug
+	}
+	suffix, err := syftsource.PlatformSlugSuffix(requested)
+	if err != nil || suffix == "" {
+		return slug
+	}
+	room := names.MaxDNSSubdomainLength - len(suffix)
+	if len(slug) <= room {
+		return slug + suffix
+	}
+	digest := sha256.Sum256([]byte(imageTagNormalized))
+	identity := "-" + hex.EncodeToString(digest[:])[:imageIdentityLength]
+	base := strings.TrimRight(slug[:room-len(identity)], "-.")
+	return base + identity + suffix
 }
 
 // Shutdown abandons queued-but-not-started scans immediately and waits only for

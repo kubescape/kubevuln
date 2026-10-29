@@ -10,6 +10,7 @@ package syftsource
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -47,6 +48,40 @@ func FormatResolvedPlatform(os, arch, variant string) string {
 func IsPlatformMismatch(err error) bool {
 	var platformErr *image.ErrPlatformMismatch
 	return errors.As(err, &platformErr)
+}
+
+// MaxPlatformSlugSuffixLength bounds the platform part of an image slug: a canonical
+// os/arch[/variant] is a few characters, and the image part has to keep its room.
+const MaxPlatformSlugSuffixLength = 64
+
+// PlatformSlugSuffix turns the platform a request names into the suffix an image slug
+// carries for it: the canonical os/arch[/variant] ParsePlatform gives, lowercased, with
+// the slashes turned into dashes. Each part must be letters and digits only: the parser
+// keeps "v7-" and "v7_" as variants of their own, and a suffix that folded them onto
+// "v7" would serve one variant's objects for another, so such a platform is an error
+// for validation to refuse, as is one that does not parse or does not fit. An empty
+// specifier gives no suffix.
+func PlatformSlugSuffix(specifier string) (string, error) {
+	platform, err := ParsePlatform(specifier)
+	if err != nil {
+		return "", err
+	}
+	if platform == nil {
+		return "", nil
+	}
+	canonical := strings.ToLower(FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant))
+	for _, part := range strings.Split(canonical, "/") {
+		if part == "" || strings.IndexFunc(part, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) >= 0 {
+			return "", fmt.Errorf("platform %q has a part that cannot be a slug segment: %q", specifier, part)
+		}
+	}
+	suffix := "-" + strings.ReplaceAll(canonical, "/", "-")
+	if len(suffix) > MaxPlatformSlugSuffixLength {
+		return "", fmt.Errorf("platform %q does not fit an image slug", specifier)
+	}
+	return suffix, nil
 }
 
 // ParsePlatform normalizes a platform specifier for multi-arch image resolution. The

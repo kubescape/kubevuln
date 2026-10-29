@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1448,11 +1449,59 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "with a platform that parses",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug-linux-arm64",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm64"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "with a platform that does not parse",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux:amd64"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a variant that would fold onto another",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/v7-"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a platform that does not fit a slug",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/" + strings.Repeat("v", 300)},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a platform that is not a string",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: 7},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
+			if tt.wantErr && tt.workload.Args != nil {
+				assert.ErrorIs(t, err, domain.ErrInvalidPlatform)
+			}
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 				return
