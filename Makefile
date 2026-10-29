@@ -11,7 +11,7 @@ TAG=v0.0.0
 # docker/docker dependencies by default (see #929). Tests requiring the real Docker DB container
 # pass -tags dockerfixture.
 build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) cmd/http/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd/http
 
 test:
 	go test -tags dockerfixture ./...
