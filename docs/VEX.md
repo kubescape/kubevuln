@@ -11,8 +11,10 @@ That distinction is the whole point of the feature here. Relevancy data and
 Grype matched it, and a VEX document is how kubevuln states that in a format other tools
 can consume.
 
-This page covers the document kubevuln **produces**. Consuming VEX documents published by
-someone else is not implemented; see [Ingestion](#ingestion-not-implemented) at the end.
+This page primarily covers the document kubevuln **produces**. External VEX ingestion
+has reusable fetching, validation, staging, and Grype-application primitives, but the normal
+scan service does not yet resolve configured external sources and invoke that path end to end.
+See [External VEX ingestion status](#external-vex-ingestion-status) for the implemented pieces and remaining gap.
 
 - [Enabling it](#enabling-it)
 - [Where the document lives](#where-the-document-lives)
@@ -25,7 +27,7 @@ someone else is not implemented; see [Ingestion](#ingestion-not-implemented) at 
 - [Updating an existing document](#updating-an-existing-document)
 - [The canonical hash](#the-canonical-hash)
 - [Legacy statement repair](#legacy-statement-repair)
-- [Ingestion, not implemented](#ingestion-not-implemented)
+- [Ingestion, not implemented](#external-vex-ingestion-status)
 - [Troubleshooting](#troubleshooting)
 
 ## Enabling it
@@ -320,28 +322,33 @@ impact statement and the action statement are checked, since a statement last wr
 CVE identifier in `@id` and the data source URL in `name`. They are normalised in place so
 the dedup, which keys on `name`, finds them instead of appending a duplicate for each.
 
-## Ingestion, not implemented
+## External VEX ingestion status
 
-Consuming VEX documents published by an image vendor is [#387](https://github.com/kubescape/kubevuln/issues/387)
-and is not implemented. Nothing in this repository calls Grype's VEX matching: a repo-wide
-search for `ApplyVEX`, `vex.NewProcessor` and `vex.Processor` turns up nothing outside
-Grype's own library code.
+The external VEX work tracked in [#387](https://github.com/kubescape/kubevuln/issues/387)
+is implemented in layers, but the normal scan service is not yet wired to discover and fetch
+configured external sources automatically. The current code provides an explicit adapter
+entry point (`GrypeAdapter.ScanSBOMWithVEX`) and the lower-level ingestion/application path;
+callers must supply the already prepared VEX documents.
 
-Several primitives exist for it, each closing one concrete blocker, none of them wired into
-a scan:
-
-| package | what it is for |
+| package / entry point | responsibility |
 | --- | --- |
-| [`internal/safefetch`](../internal/safefetch) | fetching a user-supplied URL without turning it into an SSRF. https only, dial-time IP validation against private, loopback, link-local, carrier-grade NAT and NAT64-embedded addresses, a redirect hop limit with per-hop scheme checking, and a response size bound |
-| [`internal/vexsource`](../internal/vexsource) | fetching and validating external VEX documents. `Source.Fetch` keeps retrieval and validation separate from persistence and temporary-file creation |
-| [`internal/vexdoc`](../internal/vexdoc) | writing a fetched document to a temp file. Grype's `vex.Processor` accepts only real file paths, so anything handing it a fetched document has to write one first. Random filename, `0600`, always inside `os.TempDir()` |
-| [`internal/csafresolve`](../internal/csafresolve) | resolving a CSAF advisory's composite product IDs into real purls. Grype's CSAF matcher compares purls by string equality but only looks for one directly on a relationships entry, which real Red Hat advisories never populate |
+| [`internal/safefetch`](../internal/safefetch) | safely fetch a user-supplied HTTPS URL, validating destination IPs at dial time and on redirects, bounding redirects and response size, and blocking private or otherwise non-routable destinations |
+| [`internal/vexsource`](../internal/vexsource) | fetch and validate OpenVEX or CSAF sources; OpenVEX is the default when no format is selected |
+| [`internal/vexdoc`](../internal/vexdoc) | stage validated document bytes in a temporary file for Grype's file-based processor, with restrictive permissions and cleanup support |
+| [`internal/vexbatch`](../internal/vexbatch) | normalize and deduplicate document references, group documents by format, and apply each group through Grype's VEX processor |
+| [`internal/csafresolve`](../internal/csafresolve) | resolve CSAF composite product identifiers into package URLs compatible with Grype's matching behavior |
+| `GrypeAdapter.ScanSBOMWithVEX` | expose the scan-time application path for callers that already have prepared VEX documents |
+
+The remaining integration gap is source orchestration in the normal scan service: source
+configuration/discovery, fetching and staging at the appropriate call site, and ensuring
+fetch/parse/application failures are reported without silently changing the normal scan
+result. Keep that gap distinct from the lower-level Grype application path, which is already
+implemented and covered by focused tests.
 
 The "ignored by an external VEX document or scanner configuration" impact statement
-described [above](#how-a-status-is-chosen) is the other half of the same preparation: the
-assessment path already distinguishes an ignore that did not come from kubevuln's own
-exception machinery, so an ingested document's suppressions would be labelled correctly
-rather than being reported as a `SecurityException`.
+described [above](#how-a-status-is-chosen) is part of the existing assessment path: it
+allows externally sourced suppressions to be distinguished from kubevuln's own exception
+machinery rather than being reported as a `SecurityException`.
 
 ## Troubleshooting
 
