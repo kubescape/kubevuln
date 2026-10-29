@@ -27,7 +27,7 @@ See [External VEX ingestion status](#external-vex-ingestion-status) for the impl
 - [Updating an existing document](#updating-an-existing-document)
 - [The canonical hash](#the-canonical-hash)
 - [Legacy statement repair](#legacy-statement-repair)
-- [Ingestion, not implemented](#external-vex-ingestion-status)
+- [External VEX ingestion status](#external-vex-ingestion-status)
 - [Troubleshooting](#troubleshooting)
 
 ## Enabling it
