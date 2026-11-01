@@ -535,13 +535,13 @@ replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.3.4-
 // kubevuln must carry it, or schema1.ConfigFile() support is lost.
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20261028145237-d59d58c6328d
 
-replace github.com/anchore/syft => github.com/kubescape/syft v1.55.0-ks.2
+replace github.com/anchore/syft => github.com/kubescape/syft v1.55.0-ks.3
 
 // Held at v3.3.0: grype v0.121.0 wants v3.5.1, which re-added
 // decoder.DisallowUnknownFields() to LoadAdvisory (gocsaf/csaf#681). Its Advisory
 // struct tags the field "acknowledgements", but the CSAF 2.0 schema the library
 // itself bundles spells it "acknowledgments", so strict decoding rejects every
 // conforming advisory carrying that section -- including real Red Hat ones, via
-// internal/vexvalidate.ValidateCSAF. Still broken in v3.7.0; no upstream issue
-// filed for this field yet (gocsaf/csaf#702 is the same class, different field).
+// internal/vexvalidate.ValidateCSAF. Still broken in v3.7.1; tracked upstream in
+// gocsaf/csaf#817 (gocsaf/csaf#702 is the same class, different field).
 replace github.com/gocsaf/csaf/v3 => github.com/gocsaf/csaf/v3 v3.3.0

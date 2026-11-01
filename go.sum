@@ -958,8 +958,8 @@ github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/storage v0.0.305 h1:Ofuoi3V6OW/7CApr7yuzYlcBQP0flBDY2zRzXs3N3Ls=
 github.com/kubescape/storage v0.0.305/go.mod h1:d/1hqWPda2clsjx2wmQgysnB5dThIo3rDKP7RWx+v+M=
-github.com/kubescape/syft v1.55.0-ks.2 h1:9Niwm7F8fKVbZewXF5usif4MpL3GpXV/BasmpssCrSg=
-github.com/kubescape/syft v1.55.0-ks.2/go.mod h1:mBfgoR36a4J2XG7L6EPThwJjUjdQb/fUyxghW3U72Zk=
+github.com/kubescape/syft v1.55.0-ks.3 h1:GL7gfj3zohpTB23YU6idVP+NuKKG5GfV1r2Fu5FhN8Q=
+github.com/kubescape/syft v1.55.0-ks.3/go.mod h1:mBfgoR36a4J2XG7L6EPThwJjUjdQb/fUyxghW3U72Zk=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
