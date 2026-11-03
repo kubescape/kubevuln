@@ -27,6 +27,7 @@ require (
 	github.com/emicklei/go-restful/v3 v3.13.0
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gin-gonic/gin v1.9.1
+	github.com/go-logr/stdr v1.2.2
 	github.com/gocsaf/csaf/v3 v3.5.1
 	github.com/gofrs/flock v0.13.0
 	github.com/google/go-cmp v0.7.0
@@ -233,7 +234,6 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-openapi/analysis v1.0.0 // indirect
 	github.com/go-openapi/errors v0.22.9 // indirect

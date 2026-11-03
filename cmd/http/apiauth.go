@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
+	"github.com/go-logr/stdr"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apiauth"
 	"k8s.io/client-go/kubernetes"
@@ -39,7 +41,7 @@ func apiAuthRoute(r *http.Request) (apiauth.Attributes, bool) {
 
 // newAPIAuth builds the gin auth middleware from the environment.
 func newAPIAuth(ctx context.Context) (gin.HandlerFunc, error) {
-	cfg := apiauth.Config{Route: apiAuthRoute}
+	cfg := apiauth.Config{Route: apiAuthRoute, Logger: stdr.New(log.New(os.Stderr, "apiauth: ", log.LstdFlags))}
 	if os.Getenv(apiauth.DisabledEnv) != "true" {
 		ns := os.Getenv("POD_NAMESPACE")
 		if ns == "" {
