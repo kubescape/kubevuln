@@ -39,6 +39,7 @@ require (
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.214
 	github.com/kubescape/storage v0.0.387
+	github.com/kubescape/storage/pkg/apiauth v0.1.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.9
 	github.com/package-url/packageurl-go v0.1.7

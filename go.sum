@@ -953,6 +953,8 @@ github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/storage v0.0.387 h1:muJibVJsXCNeqBQ0n0YSlWWGJFEktSzU+FVceBhZKmU=
 github.com/kubescape/storage v0.0.387/go.mod h1:QZGrRt5YbZYxQqm9B54TJb0Pf4bt5xz6pCmiqi1T/xk=
+github.com/kubescape/storage/pkg/apiauth v0.1.0 h1:lkmcuT18mb1hi0R0Bz1MwWpJIpyVo1Ppuwo26fVh9WY=
+github.com/kubescape/storage/pkg/apiauth v0.1.0/go.mod h1:WiGMS7DCUl6a3SPwuFjxXHosdkNCw8F+JqRtGhBwQF8=
 github.com/kubescape/syft v1.55.0-ks.3 h1:GL7gfj3zohpTB23YU6idVP+NuKKG5GfV1r2Fu5FhN8Q=
 github.com/kubescape/syft v1.55.0-ks.3/go.mod h1:mBfgoR36a4J2XG7L6EPThwJjUjdQb/fUyxghW3U72Zk=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
