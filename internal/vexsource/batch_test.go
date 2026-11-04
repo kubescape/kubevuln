@@ -36,8 +36,8 @@ func TestIngestorIngestBatchKeepsSuccessfulSources(t *testing.T) {
 	})
 
 	require.Len(t, batch.Documents, 1)
-	require.Equal(t, server.URL+"/valid", batch.Failures[0].URL)
 	require.Len(t, batch.Failures, 1)
+	require.Equal(t, server.URL+"/invalid", batch.Failures[0].URL)
 	require.ErrorContains(t, batch.Err(), server.URL+"/invalid")
 
 	stagedPath := batch.Documents[0].Path
