@@ -115,9 +115,19 @@ also inert for kubevuln, whose images are ELF, and was confirmed by re-measuring
 
 ## Vulnerability surface
 
-`govulncheck -mode=binary` against the shipped `linux/amd64` binary reports two findings, both
-in `github.com/docker/docker` / `docker-credential-helpers` with no fix available. Those
-module versions are unchanged by this upgrade, so they are pre-existing.
+`govulncheck -mode=binary` against the shipped `linux/amd64` binary used to report two
+findings, GO-2026-4887 and GO-2026-4883, against `github.com/docker/docker`. Their OSV entries
+flag the whole module with no fixed version: Moby stopped releasing under that path at v28.5.2,
+and the fix ships only in `github.com/moby/moby/v2`. Any linked `docker/docker` package
+therefore trips the check, even the plain type packages kubevuln actually uses.
+
+After this upgrade Grype and Syft use `github.com/moby/moby/{api,client}` instead, so the only
+remaining importers were kubevuln itself and `armoapi-go/apis`, both for
+`api/types/registry.AuthConfig`. Both now import `github.com/moby/moby/api/types/registry`,
+which is the same struct minus the deprecated `Email` field and has the same JSON tags. With
+that, nothing from `docker/docker` is linked and govulncheck reports no vulnerabilities. The
+module still appears as `// indirect` in `go.mod` through other dependencies; that is harmless,
+because govulncheck in binary mode only looks at linked packages.
 
 The upgrade also **resolves [#854](https://github.com/kubescape/kubevuln/issues/854)**: Syft
 v1.42.3 pulled `github.com/nwaples/rardecode` v1.1.3, whose unfixed RAR-decoder DoS
