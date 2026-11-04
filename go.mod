@@ -14,7 +14,7 @@ require (
 	github.com/anchore/stereoscope v0.3.4
 	github.com/anchore/syft v1.55.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.718
+	github.com/armosec/armoapi-go v0.0.773-0.20261104172637-3722613c1ee7
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
@@ -22,7 +22,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/distribution/reference v0.6.0
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/eapache/go-resiliency v1.3.0
 	github.com/emicklei/go-restful/v3 v3.13.0
 	github.com/gammazero/workerpool v1.1.3
@@ -41,6 +40,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.214
 	github.com/kubescape/storage v0.0.387
 	github.com/kubescape/storage/pkg/apiauth v0.1.0
+	github.com/moby/moby/api v1.56.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/openvex/go-vex v0.2.9
 	github.com/package-url/packageurl-go v0.1.7
@@ -206,6 +206,7 @@ require (
 	github.com/dghubble/trie v0.1.0 // indirect
 	github.com/diskfs/go-diskfs v1.9.4 // indirect
 	github.com/docker/cli v29.8.2+incompatible // indirect
+	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -341,7 +342,6 @@ require (
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.3.0 // indirect
 	github.com/moby/locker v1.0.1 // indirect
-	github.com/moby/moby/api v1.56.0 // indirect
 	github.com/moby/moby/client v0.6.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/sys/capability v0.4.0 // indirect

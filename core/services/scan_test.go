@@ -18,7 +18,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -35,6 +34,7 @@ import (
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1572,7 +1572,6 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 			ServerAddress: "https://index.docker.io/v1/",
 			Username:      "test_user",
 			Password:      "dummyPassword",
-			Email:         "test_user@gmail.com",
 			Auth:          "dGVzdF91c2VyOmR1bW15UGFzc3dvcmQ=",
 		},
 		{
