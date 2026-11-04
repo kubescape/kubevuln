@@ -2684,6 +2684,15 @@ func createOrUpdate[T any](ctx context.Context, store objectStore[T], kind, name
 			if err != nil && !errors.IsConflict(err) && !errors.IsNotFound(err) {
 				return fmt.Errorf("failed to update %s in storage: %w", kind, err)
 			}
+			// A metadata-only read comes from storage's metadata row, but the update is
+			// checked against the payload's resourceVersion. Objects written by storage
+			// before v0.0.306 can have those two out of sync forever, so every retry
+			// with a metadata-only read conflicts again. Read the full object from here
+			// on: its resourceVersion is the one the update is checked against, and the
+			// successful save realigns the metadata row.
+			if errors.IsConflict(err) && getOpts.ResourceVersion == resourceVersionMetadata {
+				getOpts = metav1.GetOptions{}
+			}
 		}
 		if err == nil {
 			logger.L().Debug("updated "+kind+" in storage", append([]helpers.IDetails{helpers.String("name", name)}, extra...)...)
