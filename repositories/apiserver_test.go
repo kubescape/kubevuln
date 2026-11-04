@@ -2165,13 +2165,11 @@ func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T)
 		}
 		clientset := newFakeStorageClientset(seeded)
 		a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
-		metadataReads := 0
+		var readOpts []string
 		clientset.PrependReactor("get", "vulnerabilitymanifests", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			getAction, ok := action.(k8stesting.GetActionImpl)
 			require.True(t, ok)
-			assert.Equal(t, resourceVersionMetadata, getAction.GetOptions.ResourceVersion,
-				"each update retry must retain metadata-only reads")
-			metadataReads++
+			readOpts = append(readOpts, getAction.GetOptions.ResourceVersion)
 			return false, nil, nil
 		})
 		updateAttempts := 0
@@ -2185,7 +2183,8 @@ func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T)
 
 		require.NoError(t, a.StoreCVE(context.Background(), newCVE, false))
 		assert.Equal(t, 2, updateAttempts)
-		assert.Equal(t, 2, metadataReads)
+		assert.Equal(t, []string{resourceVersionMetadata, ""}, readOpts,
+			"the first read is metadata-only; after a conflict the retry reads the full object")
 
 		// Inspect the tracker directly so verification does not add an ordinary
 		// full read to the update-read assertions above.
@@ -2233,6 +2232,55 @@ func TestAPIServerStore_createOrUpdate_conflictRetryStoresFullSpec(t *testing.T)
 		assert.Equal(t, parseSeverities(newCVE, domain.CVEManifest{}, false), got.Spec.Severities,
 			"the conflict write must store the full recomputed summary, not merge onto the zeroed metadata read")
 	})
+}
+
+// Storage before v0.0.306 could leave an object's metadata row at an older resourceVersion
+// than its payload. A metadata-only read then always returns the stale version and every
+// update against it conflicts, so retrying with metadata-only reads can never succeed.
+// createOrUpdate must fall back to a full read after a conflict.
+func TestAPIServerStore_createOrUpdate_recoversFromStaleMetadataResourceVersion(t *testing.T) {
+	newCVE := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	newCVE.Name = name
+	workload := domain.ScanCommand{ImageTag: "nginx:latest", ImageSlug: name, ContainerName: "nginx"}
+	ctx := context.WithValue(context.Background(), domain.WorkloadKey{}, workload)
+	ctx = context.WithValue(ctx, domain.TimestampKey{}, int64(1734957372))
+
+	const payloadRV, staleMetadataRV = "42", "7"
+	seeded := &v1beta1.VulnerabilityManifestSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubescape", ResourceVersion: payloadRV},
+	}
+	clientset := newFakeStorageClientset(seeded)
+	a := newFakeAPIServerStore("kubescape", clientset.SpdxV1beta1())
+
+	var readOpts []string
+	clientset.PrependReactor("get", "vulnerabilitymanifestsummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		opts := action.(k8stesting.GetActionImpl).GetOptions.ResourceVersion
+		readOpts = append(readOpts, opts)
+		if opts != resourceVersionMetadata {
+			return false, nil, nil
+		}
+		// the drifted metadata row: right object, stale resourceVersion
+		stale := seeded.DeepCopy()
+		stale.ResourceVersion = staleMetadataRV
+		return true, stale, nil
+	})
+	updates := 0
+	clientset.PrependReactor("update", "vulnerabilitymanifestsummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		updates++
+		obj := action.(k8stesting.UpdateAction).GetObject().(*v1beta1.VulnerabilityManifestSummary)
+		if obj.ResourceVersion != payloadRV {
+			return true, nil, apierrors.NewConflict(action.GetResource().GroupResource(), name, fmt.Errorf("the object has been modified"))
+		}
+		return false, nil, nil
+	})
+
+	require.NoError(t, a.StoreCVESummary(ctx, newCVE, domain.CVEManifest{}, false))
+	assert.Equal(t, 2, updates, "one conflict on the stale metadata read, then success on the full read")
+	assert.Equal(t, []string{resourceVersionMetadata, ""}, readOpts)
+
+	obj, err := clientset.Tracker().Get(v1beta1.SchemeGroupVersion.WithResource("vulnerabilitymanifestsummaries"), "kubescape", name)
+	require.NoError(t, err)
+	assert.Equal(t, parseSeverities(newCVE, domain.CVEManifest{}, false), obj.(*v1beta1.VulnerabilityManifestSummary).Spec.Severities)
 }
 
 // StoreSBOM's merge closure historically overwrote Spec wholesale on every update,
