@@ -51,6 +51,30 @@ func scanServer(handler http.Handler) *http.Server {
 	}
 }
 
+// newRouter registers the probes and metrics (open) and the scan API (behind auth).
+func newRouter(controller *controllers.HTTPController, metricsHandler http.Handler, auth gin.HandlerFunc) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	router.GET("/v1/liveness", controller.Alive)
+	router.GET("/v1/readiness", controller.Ready)
+	router.GET("/v1/diagnostics", auth, controller.Diagnostics)
+	router.GET("/metrics", gin.WrapH(metricsHandler))
+
+	group := router.Group(apis.VulnerabilityScanCommandVersion)
+	group.Use(auth)
+	{
+		// W3C context is extracted by the server wrapper; no per-request spans.
+		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
+		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
+		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
+		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
+		group.GET("/scanStatus/:jobID", controller.ScanStatus)
+	}
+	return router
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -250,24 +274,11 @@ func main() {
 		metrics.RecordTempDirSweep(ctx, metrics.ComponentInProcess, removed)
 	})
 
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	router.GET("/v1/liveness", controller.Alive)
-	router.GET("/v1/readiness", controller.Ready)
-	router.GET("/v1/diagnostics", controller.Diagnostics)
-	router.GET("/metrics", gin.WrapH(m.Handler()))
-
-	group := router.Group(apis.VulnerabilityScanCommandVersion)
-	{
-		// W3C context is extracted by the server wrapper; no per-request spans.
-		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
-		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
-		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
-		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
-		group.GET("/scanStatus/:jobID", controller.ScanStatus)
+	auth, err := newAPIAuth(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("API auth setup failed", helpers.Error(err))
 	}
+	router := newRouter(controller, m.Handler(), auth)
 
 	srv := scanServer(telemetry.ExtractHTTP(router))
 

@@ -706,6 +706,26 @@ Traces include:
 - CVE scanning time
 - Image download time
 
+## API authentication
+
+Every route except the probes and `/metrics` requires `Authorization: Bearer <Kubernetes service-account token>`
+with audience `kubescape.io`. The token is validated with a TokenReview and the caller is authorized
+by RBAC (SubjectAccessReview) on `kubescape.io` resources: `create` on `vulnerabilityscans` for the scan POSTs, `get` on `vulnerabilityscans` for `/v1/scanStatus/*` and `/v1/diagnostics`.
+
+- The service account running this component needs a `ClusterRoleBinding` to `system:auth-delegator`.
+- `KS_API_AUDIENCE`: expected token audience (default `kubescape.io`).
+- `POD_NAMESPACE`: required; the process exits at startup if it is unset.
+- `KS_API_AUTH_DISABLED=true`: turns the check off.
+
+To call the API by hand, mint a token for a service account that holds the matching Role:
+
+```bash
+TOKEN=$(kubectl create token <sa> -n <ns> --audience kubescape.io)
+curl -H "Authorization: Bearer $TOKEN" ...
+```
+
+Design: [in-cluster API authn/authz](https://github.com/kubescape/designs-and-proposals/blob/main/proposals/in-cluster-api-authn-authz.md).
+
 ---
 
 ## See Also
