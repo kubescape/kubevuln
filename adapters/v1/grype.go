@@ -20,10 +20,12 @@ import (
 	"github.com/anchore/grype/grype/matcher"
 	"github.com/anchore/grype/grype/matcher/dotnet"
 	"github.com/anchore/grype/grype/matcher/golang"
+	"github.com/anchore/grype/grype/matcher/hex"
 	"github.com/anchore/grype/grype/matcher/java"
 	"github.com/anchore/grype/grype/matcher/javascript"
 	"github.com/anchore/grype/grype/matcher/python"
 	"github.com/anchore/grype/grype/matcher/ruby"
+	"github.com/anchore/grype/grype/matcher/rust"
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
@@ -667,6 +669,8 @@ func getMatchers(useDefaultMatchers bool) []match.Matcher {
 			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
 			Javascript: javascript.MatcherConfig{UseCPEs: true},
 			Golang:     golang.MatcherConfig{UseCPEs: true},
+			Rust:       rust.MatcherConfig{UseCPEs: true},
+			Hex:        hex.MatcherConfig{UseCPEs: true},
 			Stock:      stock.MatcherConfig{UseCPEs: true},
 		},
 	)
