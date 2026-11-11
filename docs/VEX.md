@@ -114,7 +114,7 @@ Each statement covers one (vulnerability, package) pair:
     description: <vulnerability description>
     aliases: [<related vulnerability IDs>]
   products:
-    - "@id": pkg:oci/<image>?repository_url=<repo>
+    - "@id": pkg:oci/<name>@<digest>?repository_url=<registry>/<repository>
       subcomponents:
         - "@id": pkg:deb/xz-utils@5.6.0
   status: not_affected
@@ -123,7 +123,12 @@ Each statement covers one (vulnerability, package) pair:
 ```
 
 The product is the image, the subcomponent is the package the finding is in. Both are
-purls. The image purl is built from the `kubescape.io/image-id` annotation on the manifest.
+purls. The image purl is built from the `kubescape.io/image-id` annotation on the manifest,
+following the purl-spec `oci` type, which is also how Grype identifies the image it scanned
+when it applies a VEX document: the name is the last segment of the repository, the version
+is the digest, and `repository_url` is the whole repository, image name included
+(`pkg:oci/nginx@sha256:...?repository_url=docker.io/library/nginx`). A reference with no
+digest, as in a registry scan, carries its tag as a `tag` qualifier instead.
 
 `vulnerability.@id` holds the Grype match's data source URL and `vulnerability.name` holds
 the CVE identifier. Documents written by older versions have these two swapped; see

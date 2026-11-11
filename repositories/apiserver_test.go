@@ -5103,19 +5103,26 @@ func TestCreateProductStructForImageAndPackage(t *testing.T) {
 			name:          "multi-segment image reference with repository",
 			imagePullable: "gcr.io/google-samples/microservices-demo/adservice@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f",
 			packagePURL:   "pkg:golang/github.com/foo/bar@v1.0.0",
-			wantProductID: "pkg:oci/adservice@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io%2Fgoogle-samples%2Fmicroservices-demo",
+			wantProductID: "pkg:oci/adservice@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io%2Fgoogle-samples%2Fmicroservices-demo%2Fadservice",
 		},
 		{
 			name:          "docker:// prefix with repository",
 			imagePullable: "docker://docker.io/library/nginx:latest",
 			packagePURL:   "pkg:deb/debian/nginx@1.18.0",
-			wantProductID: "pkg:oci/nginx:latest?repository_url=docker.io%2Flibrary",
+			wantProductID: "pkg:oci/nginx?repository_url=docker.io%2Flibrary%2Fnginx&tag=latest",
 		},
 		{
 			name:          "single-component image reference without repository",
 			imagePullable: "alpine:latest",
 			packagePURL:   "pkg:apk/alpine/musl@1.2.2",
-			wantProductID: "pkg:oci/alpine:latest",
+			wantProductID: "pkg:oci/alpine?tag=latest",
+		},
+		{
+			// the digest identifies the image; Grype offers no tag next to a digest
+			name:          "tag and digest keep the digest only",
+			imagePullable: "registry.example.com:5000/team/app:1.0@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f",
+			packagePURL:   "pkg:golang/github.com/foo/bar@v1.0.0",
+			wantProductID: "pkg:oci/app@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=registry.example.com:5000%2Fteam%2Fapp",
 		},
 		{
 			name:          "single-component bare name without tag",
