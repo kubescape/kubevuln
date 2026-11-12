@@ -2,8 +2,11 @@ package sbomreuse
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/stretchr/testify/require"
 )
@@ -75,4 +78,32 @@ func TestCompatibilityAcceptsEmptyImageAndRejectsMismatches(t *testing.T) {
 		_, err = compatible(b, s, producer)
 		require.Error(t, err)
 	}
+}
+
+func TestCompatibilityWithBundledSyftInventory(t *testing.T) {
+	raw, err := os.ReadFile("../../adapters/v1/testdata/alpine-sbom.json")
+	require.NoError(t, err)
+	var inventory struct {
+		Source struct {
+			Metadata struct {
+				ManifestDigest string
+				ImageID        string
+				OS             string
+				Architecture   string
+			}
+		}
+		Descriptor struct{ Version string }
+	}
+	require.NoError(t, json.Unmarshal(raw, &inventory))
+	meta := inventory.Source.Metadata
+	ref, err := name.NewDigest("index.docker.io/library/alpine@" + meta.ManifestDigest)
+	require.NoError(t, err)
+	s := subject{ref: ref, configDigest: meta.ImageID, platform: v1.Platform{OS: meta.OS, Architecture: meta.Architecture}}
+	producer := trust{Producer: Producer{SyftVersion: inventory.Descriptor.Version, SchemaVersion: "16.1.11"}}
+	doc, err := compatible(raw, s, producer)
+	require.NoError(t, err)
+	require.NotEmpty(t, doc.Artifacts)
+	producer.SchemaVersion = "16.0.39"
+	_, err = compatible(raw, s, producer)
+	require.Error(t, err)
 }
