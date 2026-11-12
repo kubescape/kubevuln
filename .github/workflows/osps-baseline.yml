@@ -1,0 +1,35 @@
+# Runs the OSPS Baseline scanner against this repository on every push to the
+# default branch and weekly. Results are in the run summary and the
+# osps-baseline-results artifact; nothing is published outside the repository.
+name: OSPS Baseline scan
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  scan:
+    name: OSPS Baseline scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Run the OSPS Baseline scanner
+        uses: revanite-io/osps-baseline-action@8417b9d0c0e789c3fe4e93996e47a3a8aafe6965 # v1.5.4
+        with:
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
+          token: ${{ github.token }}
+          catalog: osps-baseline-2026-08
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: osps-baseline-results
+          path: evaluation_results/
+          retention-days: 30
