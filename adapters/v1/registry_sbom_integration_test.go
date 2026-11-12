@@ -135,7 +135,7 @@ func TestRegistrySBOMRealParity(t *testing.T) {
 			require.NoError(t, err)
 			der, err := x509.MarshalPKIXPublicKey(pub)
 			require.NoError(t, err)
-			policy, err := sbomreuse.CompilePolicy(sbomreuse.Policy{Repositories: map[string]sbomreuse.Producer{repo.Name(): {PublicKeys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}, SyftVersion: header.Descriptor.Version, SchemaVersion: "16.0.39"}}})
+			policy, err := sbomreuse.CompilePolicy(sbomreuse.Policy{Repositories: map[string]sbomreuse.Producer{repo.Name(): {PublicKeys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}, SyftVersion: header.Descriptor.Version, SchemaVersion: "16.1.11"}}})
 			require.NoError(t, err)
 			provider := sbomreuse.NewProvider(policy)
 			// With no attachment yet, the real decorator must invoke Syft normally.
