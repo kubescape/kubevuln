@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/anchore/syft/syft/source/sourceproviders"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,8 +85,26 @@ func TestGetSourceConfig_usesPlatform(t *testing.T) {
 func TestGetSourceConfig_restrictsToRegistry(t *testing.T) {
 	cfg := GetSourceConfig(&image.RegistryOptions{}, nil)
 	require.NotNil(t, cfg)
-	assert.Equal(t, []string{"registry"}, cfg.Sources,
+	assert.Equal(t, []string{"oci-registry"}, cfg.Sources,
 		"kubevuln always pulls; falling back to a local daemon or containerd socket is not wanted")
+}
+
+// Selecting a provider by name is only safe while that name still matches a provider Syft
+// ships: syft.GetSource narrows by name and an unmatched name silently yields an empty
+// provider set, which fails every scan with a generic "no source providers" error far from
+// the cause. Fail here, at upgrade time, instead.
+func TestGetSourceConfig_sourceNameMatchesAShippedProvider(t *testing.T) {
+	cfg := GetSourceConfig(&image.RegistryOptions{}, nil)
+	require.Len(t, cfg.Sources, 1)
+	want := cfg.Sources[0]
+
+	var names []string
+	for _, p := range sourceproviders.All("alpine:latest", sourceproviders.DefaultConfig()) {
+		names = append(names, p.Value.Name())
+	}
+
+	assert.Contains(t, names, want,
+		"configured source %q matches no Syft source provider; it was likely renamed upstream", want)
 }
 
 // TestNewCreateSBOMConfig_RemovesFileCatalogers pins the memory-reduction fix from #355

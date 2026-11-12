@@ -27,6 +27,9 @@ import (
 // shared constant, switch this to consume it directly.
 const ReasonRateLimitExceeded = "rate_limit_exceeded"
 
+// ReasonResultStorageFailed identifies required local result writes, independently of cloud upload.
+const ReasonResultStorageFailed = "result_storage_failed"
+
 // classifySBOMError inspects the error returned by CreateSBOM and returns
 // a reason code constant. Uses errors.Is for sentinel errors (Go 1.13+),
 // errors.As for typed errors, and falls back to string matching.
