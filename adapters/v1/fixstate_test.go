@@ -122,6 +122,17 @@ func TestHasKnownFix(t *testing.T) {
 			wantVersion: "3.4.7-r10",
 		},
 		{
+			// The shape Red Hat, CBL-Mariner and Azure Linux findings arrive in: the feed
+			// writes "0:" on the fix and Syft reports no epoch on the installed package.
+			name: "rpm fix with an explicit zero epoch suggests the fix, not unknown",
+			match: v1beta1.Match{
+				Artifact:      v1beta1.GrypePackage{Version: "2.4.53-7.el9", Type: "rpm"},
+				Vulnerability: v1beta1.Vulnerability{Fix: v1beta1.Fix{State: fixStateFixed, Versions: []string{"0:2.4.53-7.el9_1.1"}}},
+			},
+			wantFixed:   true,
+			wantVersion: "0:2.4.53-7.el9_1.1",
+		},
+		{
 			// The #449 shape: Grype reports no fix, but the CPE range is bounded above.
 			name: "upper-bounded CPE constraint implies a fix",
 			match: v1beta1.Match{

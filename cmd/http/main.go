@@ -37,6 +37,44 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
+// scanServer serves the scan API. The handlers answer as soon as a scan is admitted, so a
+// request that takes longer than this to arrive or to be answered is a stalled client
+// holding a connection, not a scan in progress; a scan command is a few kilobytes.
+func scanServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":8080",
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
+// newRouter registers the probes and metrics (open) and the scan API (behind auth).
+func newRouter(controller *controllers.HTTPController, metricsHandler http.Handler, auth gin.HandlerFunc) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	router.GET("/v1/liveness", controller.Alive)
+	router.GET("/v1/readiness", controller.Ready)
+	router.GET("/v1/diagnostics", auth, controller.Diagnostics)
+	router.GET("/metrics", gin.WrapH(metricsHandler))
+
+	group := router.Group(apis.VulnerabilityScanCommandVersion)
+	group.Use(auth)
+	{
+		// W3C context is extracted by the server wrapper; no per-request spans.
+		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
+		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
+		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
+		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
+		group.GET("/scanStatus/:jobID", controller.ScanStatus)
+	}
+	return router
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -236,30 +274,13 @@ func main() {
 		metrics.RecordTempDirSweep(ctx, metrics.ComponentInProcess, removed)
 	})
 
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	router.GET("/v1/liveness", controller.Alive)
-	router.GET("/v1/readiness", controller.Ready)
-	router.GET("/v1/diagnostics", controller.Diagnostics)
-	router.GET("/metrics", gin.WrapH(m.Handler()))
-
-	group := router.Group(apis.VulnerabilityScanCommandVersion)
-	{
-		// W3C context is extracted by the server wrapper; no per-request spans.
-		group.POST("/"+apis.SBOMCalculationCommandPath, controller.GenerateSBOM)
-		group.POST("/"+apis.ApplicationProfileScanCommandPath, controller.ScanCP)
-		group.POST("/"+apis.ContainerScanCommandPath, controller.ScanCVE)
-		group.POST("/"+apis.RegistryScanCommandPath, controller.ScanRegistry)
-		group.GET("/scanStatus/:jobID", controller.ScanStatus)
+	auth, err := newAPIAuth(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("API auth setup failed", helpers.Error(err))
 	}
+	router := newRouter(controller, m.Handler(), auth)
 
-	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           telemetry.ExtractHTTP(router),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := scanServer(telemetry.ExtractHTTP(router))
 
 	// Initializing the server in a goroutine so that
 	// it won't block the graceful shutdown handling below

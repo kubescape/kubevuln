@@ -20,10 +20,12 @@ import (
 	"github.com/anchore/grype/grype/matcher"
 	"github.com/anchore/grype/grype/matcher/dotnet"
 	"github.com/anchore/grype/grype/matcher/golang"
+	"github.com/anchore/grype/grype/matcher/hex"
 	"github.com/anchore/grype/grype/matcher/java"
 	"github.com/anchore/grype/grype/matcher/javascript"
 	"github.com/anchore/grype/grype/matcher/python"
 	"github.com/anchore/grype/grype/matcher/ruby"
+	"github.com/anchore/grype/grype/matcher/rust"
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
@@ -534,12 +536,15 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 	dist := distro.FromRelease(s.Artifacts.LinuxDistribution, distro.DefaultFixChannels())
 
 	logger.L().Debug("reading packages from SBOM", helpers.String("name", sbom.Name))
-	packages := pkg.FromCollection(s.Artifacts.Packages, pkg.SynthesisConfig{
+	// Relationships are new in grype v0.121: they populate Package.RelatedPackages, which the
+	// apk/rpm/dpkg matchers use to suppress a finding already reported against the OS package
+	// owning the same files. Passing them matches what grype's own providers do.
+	packages := pkg.FromPtrs(pkg.FromCollection(s.Artifacts.Packages, s.Relationships, pkg.SynthesisConfig{
 		GenerateMissingCPEs: false,
 		Distro: pkg.DistroConfig{
 			Override:    dist,
 			FixChannels: distro.DefaultFixChannels(),
-		}})
+		}}))
 
 	pkgContext := pkg.Context{
 		Source: &s.Source,
@@ -580,7 +585,7 @@ func (g *GrypeAdapter) scanSBOM(ctx context.Context, sbom domain.SBOM, documents
 
 	logger.L().Debug("compiling results",
 		helpers.String("name", sbom.Name))
-	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, store, nil, status, models.DefaultSortStrategy, false)
+	doc, err := models.NewDocument(clio.Identification{}, packages, pkgContext, *remainingMatches, ignoredMatches, store, nil, status, models.DefaultSortStrategy, false, nil)
 	if err != nil {
 		return domain.CVEManifest{}, err
 	}
@@ -664,6 +669,8 @@ func getMatchers(useDefaultMatchers bool) []match.Matcher {
 			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
 			Javascript: javascript.MatcherConfig{UseCPEs: true},
 			Golang:     golang.MatcherConfig{UseCPEs: true},
+			Rust:       rust.MatcherConfig{UseCPEs: true},
+			Hex:        hex.MatcherConfig{UseCPEs: true},
 			Stock:      stock.MatcherConfig{UseCPEs: true},
 		},
 	)

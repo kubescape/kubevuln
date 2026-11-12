@@ -19,7 +19,6 @@ import (
 
 	wssc "github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/armoapi-go/scanfailure"
-	"github.com/docker/docker/api/types/registry"
 	"github.com/gammazero/workerpool"
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -32,6 +31,7 @@ import (
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -953,6 +953,13 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			wantReason: scanfailure.ReasonSBOMIncomplete,
 		},
 		{
+			name:       "scanCVE, result storage failure",
+			path:       "/v1/scanImage",
+			endpoint:   "scanCVE",
+			register:   func(router *gin.Engine, c *HTTPController) { router.POST("/v1/scanImage", c.ScanCVE) },
+			wantReason: services.ReasonResultStorageFailed,
+		},
+		{
 			name:       "scanCVE, classified reason",
 			path:       "/v1/scanImage",
 			endpoint:   "scanCVE",
@@ -1007,6 +1014,7 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			router := gin.Default()
 			tt.register(router, c)
 			router.GET("/metrics", gin.WrapH(m.Handler()))
+			router.GET("/v1/scanStatus/:jobID", c.ScanStatus)
 
 			file, err := os.Open("../api/v1/testdata/scan.yaml")
 			require.NoError(t, err)
@@ -1032,6 +1040,16 @@ func TestHTTPController_MetricsEndpoint_RecordsScanFailureReason(t *testing.T) {
 			assert.True(t, strings.Contains(body, wantSeries), body)
 			wantDurationSeries := `kubevuln_scan_duration_seconds_count{endpoint="` + tt.endpoint + `",outcome="error",reason="` + tt.wantReason + `"} 1`
 			assert.True(t, strings.Contains(body, wantDurationSeries), body)
+
+			req, _ = http.NewRequest("GET", "/v1/scanStatus/b56211c7-716a-4f9f-b27f-b4942195fa5e", nil)
+			w = httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var status domain.ScanStatus
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
+			assert.Equal(t, domain.ScanStateFailed, status.State)
+			assert.Equal(t, tt.wantReason, status.Reason)
+
 		})
 	}
 }
@@ -1769,4 +1787,59 @@ func TestRejectionDiagnosticsUseProcessGate(t *testing.T) {
 	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 	require.Contains(t, w.Body.String(), `kubevuln_scan_rejections_total{endpoint="generateSBOM",reason="invalid_request"} 1000`)
 	require.NotContains(t, w.Body.String(), `kubevuln_scans_completed_total{`)
+}
+
+// A registry scan names the platform it wants through args.platform; the slug carries it
+// in its canonical form, so the stores keep one SBOM and CVE manifest per platform, a
+// request without one keeps the slug and the objects it always had, and a long image
+// reference keeps one slug per platform.
+func TestRegistryScanCommandToScanCommandQualifiesTheSlugWithThePlatform(t *testing.T) {
+	const image = "quay.io/kubescape/kubevuln:v0.3.0"
+	withPlatform := func(image string, platform interface{}) string {
+		return registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{
+			ImageTag: image,
+			Args:     map[string]interface{}{domain.ArgsPlatform: platform},
+		}}).ImageSlug
+	}
+	base := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{ImageTag: image}}).ImageSlug
+	require.NotEmpty(t, base)
+	for platform, want := range map[string]string{
+		"linux/amd64":    base + "-linux-amd64",
+		"linux/arm64":    base + "-linux-arm64",
+		"linux/arm64/v8": base + "-linux-arm64",
+		"arm64":          base + "-linux-arm64",
+		"Windows/AMD64":  base + "-windows-amd64",
+		"linux/arm/v7":   base + "-linux-arm-v7",
+	} {
+		got := withPlatform(image, platform)
+		assert.Equal(t, want, got, platform)
+		assert.True(t, names.IsValidSlug(got), got)
+	}
+	assert.Equal(t, base, withPlatform(image, "linux:amd64"), "a platform that does not parse leaves the slug for validation to refuse")
+	assert.Equal(t, base, withPlatform(image, "linux/arm/v7-"), "a variant the parser keeps apart from v7 is never folded onto it")
+	assert.Equal(t, base, withPlatform(image, 7), "a platform that is not a string leaves the slug for validation to refuse")
+
+	long := "registry.example/" + strings.Repeat("a", 300) + ":v1"
+	longBase := registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{ImageTag: long}}).ImageSlug
+	require.Len(t, longBase, names.MaxDNSSubdomainLength)
+	amd64, arm64 := withPlatform(long, "linux/amd64"), withPlatform(long, "linux/arm64")
+	assert.NotEqual(t, amd64, arm64)
+	for _, got := range []string{amd64, arm64} {
+		assert.NotEqual(t, longBase, got)
+		assert.LessOrEqual(t, len(got), names.MaxDNSSubdomainLength)
+		assert.True(t, names.IsValidSlug(got), got)
+	}
+	assert.True(t, strings.HasSuffix(amd64, "-linux-amd64"), amd64)
+	assert.True(t, strings.HasSuffix(arm64, "-linux-arm64"), arm64)
+
+	// Two references that differ only past the point where the slug is cut keep their
+	// own slugs on the same platform: the digest of the full reference tells them apart.
+	twin := "registry.example/" + strings.Repeat("a", 299) + "b:v1"
+	require.Equal(t, longBase, registryScanCommandToScanCommand(wssc.RegistryScanCommand{ImageScanParams: wssc.ImageScanParams{ImageTag: twin}}).ImageSlug, "the unqualified slugs collide, which is what the digest is for")
+	assert.NotEqual(t, amd64, withPlatform(twin, "linux/amd64"))
+
+	// A platform whose canonical form does not fit a slug is refused by validation; here it
+	// must leave the slug unqualified rather than cut past the end of it.
+	assert.Equal(t, base, withPlatform(image, "linux/arm/"+strings.Repeat("v", 300)))
+	assert.Equal(t, longBase, withPlatform(long, "linux/arm/"+strings.Repeat("v", 300)))
 }
