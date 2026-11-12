@@ -454,7 +454,7 @@ make verify
 `make verify` expands to these targets:
 
 ```bash
-make build   # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln cmd/http/main.go
+make build   # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln ./cmd/http
 make test    # go test ./...
 make vet     # go vet ./...
 make lint    # full-tree golangci-lint filtered to findings introduced in this branch

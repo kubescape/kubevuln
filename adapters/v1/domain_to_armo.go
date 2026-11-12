@@ -531,7 +531,11 @@ func nearestDistroFix(current string, versions []string, format grypeversion.For
 //     comparison entirely otherwise -- rather than treating a missing epoch as 0, which is
 //     what RPM itself specifies. A current version with an explicit higher epoch (e.g.
 //     "1:0") can therefore be judged older than a candidate that merely omits its epoch
-//     (e.g. "1"), when the candidate is actually the same release or older.
+//     (e.g. "1"), when the candidate is actually the same release or older. An explicit
+//     zero epoch is the exception: it is the epoch a missing one stands for, so skipping
+//     the comparison gives the right answer. Red Hat, CBL-Mariner and Azure Linux feeds
+//     write every fix for an epoch-less package that way ("0:2.4.53-7.el9_1.1"), against
+//     an installed version Syft reports with no epoch at all.
 //  2. Its tokenizer has no notion of "^" (RPM's post-release/snapshot marker) at all: the
 //     caret is silently dropped and the digits around it are compared as an ordinary
 //     numeric segment, which can rank a caret-tagged snapshot above the release that
@@ -553,10 +557,16 @@ func rpmSafeToCompare(a, b string) bool {
 	if strings.Contains(a, "^") || strings.Contains(b, "^") {
 		return false
 	}
-	if rpmHasExplicitEpoch(a) != rpmHasExplicitEpoch(b) {
+	if rpmHasExplicitEpoch(a) != rpmHasExplicitEpoch(b) && (rpmHasNonZeroEpoch(a) || rpmHasNonZeroEpoch(b)) {
 		return false
 	}
 	return !rpmVersionsDifferOnlyByTrailingZeros(rpmVersionPart(a), rpmVersionPart(b))
+}
+
+// rpmHasNonZeroEpoch reports whether raw carries an "epoch:" prefix other than zero.
+func rpmHasNonZeroEpoch(raw string) bool {
+	epoch, _, found := strings.Cut(raw, ":")
+	return found && strings.Trim(epoch, "0") != ""
 }
 
 // portageVersionRegexp mirrors grype's own Portage version pattern (grype/version,

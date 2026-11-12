@@ -206,7 +206,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -359,7 +360,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -553,7 +555,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -690,7 +693,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -878,7 +882,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1009,7 +1014,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1216,7 +1222,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1366,7 +1373,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1565,7 +1573,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1707,7 +1716,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -1894,7 +1904,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2024,7 +2035,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2218,7 +2230,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2355,7 +2368,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2520,7 +2534,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2615,7 +2630,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2713,7 +2729,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -2917,7 +2934,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3064,7 +3082,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3251,7 +3270,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3381,7 +3401,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3567,7 +3588,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3696,7 +3718,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -3902,7 +3925,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4051,7 +4075,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4251,7 +4276,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4394,7 +4420,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4598,7 +4625,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4745,7 +4773,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -4951,7 +4980,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5100,7 +5130,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5282,7 +5313,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5407,7 +5439,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5603,7 +5636,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5742,7 +5776,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -5930,7 +5965,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6061,7 +6097,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6249,7 +6286,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6380,7 +6418,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6440,7 +6479,7 @@
           },
           "found": {
             "vulnerabilityID": "CVE-2024-13176",
-            "versionConstraint": "\u003e= 1.0.2, \u003c 1.0.2zl,\u003e= 1.1.1, \u003c 1.1.1zb,\u003e= 3.0.0, \u003c 3.0.16,\u003e= 3.1.0, \u003c 3.1.8,\u003e= 3.2.0, \u003c 3.2.4,\u003e= 3.3.0, \u003c 3.3.3,\u003e= 3.4.0, \u003c 3.4.1 (unknown)",
+            "versionConstraint": "\u003e= 1.0.2, \u003c 1.0.2zl||\u003e= 1.1.1, \u003c 1.1.1zb||\u003e= 3.0.0, \u003c 3.0.16||\u003e= 3.1.0, \u003c 3.1.8||\u003e= 3.2.0, \u003c 3.2.4||\u003e= 3.3.0, \u003c 3.3.3||\u003e= 3.4.0, \u003c 3.4.1 (unknown)",
             "cpes": [
               "cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*"
             ]
@@ -6548,7 +6587,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6608,7 +6648,7 @@
           },
           "found": {
             "vulnerabilityID": "CVE-2024-13176",
-            "versionConstraint": "\u003e= 1.0.2, \u003c 1.0.2zl,\u003e= 1.1.1, \u003c 1.1.1zb,\u003e= 3.0.0, \u003c 3.0.16,\u003e= 3.1.0, \u003c 3.1.8,\u003e= 3.2.0, \u003c 3.2.4,\u003e= 3.3.0, \u003c 3.3.3,\u003e= 3.4.0, \u003c 3.4.1 (unknown)",
+            "versionConstraint": "\u003e= 1.0.2, \u003c 1.0.2zl||\u003e= 1.1.1, \u003c 1.1.1zb||\u003e= 3.0.0, \u003c 3.0.16||\u003e= 3.1.0, \u003c 3.1.8||\u003e= 3.2.0, \u003c 3.2.4||\u003e= 3.3.0, \u003c 3.3.3||\u003e= 3.4.0, \u003c 3.4.1 (unknown)",
             "cpes": [
               "cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*"
             ]
@@ -6659,7 +6699,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6853,7 +6894,8 @@
             {
               "path": "/usr/lib/ossl-modules/legacy.so"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -6990,7 +7032,8 @@
             {
               "path": "/usr/lib/libssl.so.3"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7193,7 +7236,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7307,7 +7351,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7424,7 +7469,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7637,7 +7683,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7761,7 +7808,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -7888,7 +7936,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8091,7 +8140,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8205,7 +8255,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8322,7 +8373,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8526,7 +8578,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8641,7 +8694,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8759,7 +8813,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -8899,7 +8954,8 @@
             {
               "path": "/lib/libc.musl-x86_64.so.1"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9040,7 +9096,8 @@
             {
               "path": "/usr/bin/ldd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9206,7 +9263,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9302,7 +9360,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9401,7 +9460,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9568,7 +9628,8 @@
             {
               "path": "/var/lib/udhcpd"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9665,7 +9726,8 @@
             {
               "path": "/bin/sh"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     },
@@ -9765,7 +9827,8 @@
             {
               "path": "/usr/bin/ssl_client"
             }
-          ]
+          ],
+          "Arch": "x86_64"
         }
       }
     }
