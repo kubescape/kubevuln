@@ -574,6 +574,60 @@ func TestDefaultMatchers_CVEMatchingOnProducesCPEMatch(t *testing.T) {
 	assert.True(t, foundCPEMatch, "CVEMatchingOn must produce a CPE match for the expected CVE")
 }
 
+// docs/CONFIGURATION.md promises that the "on" mode enables CPE matching everywhere, and
+// adaptive mode uses the same matchers for every image from an untrusted vendor. Grype gives
+// each language matcher its own UseCPEs switch, so one left out of getMatchers(false) silently
+// keeps the zero value and never searches by CPE.
+func TestCVEMatchingOn_ProducesCPEMatchForEveryLanguageMatcher(t *testing.T) {
+	const widgetCPE = "cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:*"
+
+	tests := []struct {
+		name     string
+		pkgType  syftPkg.Type
+		language syftPkg.Language
+	}{
+		{name: "python", pkgType: syftPkg.PythonPkg, language: syftPkg.Python},
+		{name: "rust", pkgType: syftPkg.RustPkg, language: syftPkg.Rust},
+		{name: "hex", pkgType: syftPkg.HexPkg, language: syftPkg.Elixir},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := mock.VulnerabilityProvider(vulnerability.Vulnerability{
+				PackageName: "widget",
+				Constraint:  version.MustGetConstraint("< 1.2.0", version.SemanticFormat),
+				Reference:   vulnerability.Reference{ID: "CVE-0000-0001", Namespace: "nvd:cpe"},
+				CPEs:        []cpe.CPE{cpe.Must(widgetCPE, "")},
+			})
+			packages := []pkg.Package{{
+				Name:     "widget",
+				Version:  "1.1.0",
+				Type:     tt.pkgType,
+				Language: tt.language,
+				CPEs:     []cpe.CPE{cpe.Must(widgetCPE, "")},
+			}}
+
+			vm := grype.VulnerabilityMatcher{
+				VulnerabilityProvider: provider,
+				Matchers:              getMatchers(false),
+				NormalizeByCVE:        true,
+			}
+			matches, _, err := vm.FindMatches(packages, pkg.Context{})
+			require.NoError(t, err)
+
+			foundCPEMatch := false
+			for m := range matches.Enumerate() {
+				for _, detail := range m.Details {
+					if detail.Type == "cpe-match" {
+						foundCPEMatch = true
+					}
+				}
+			}
+			assert.True(t, foundCPEMatch, "CVEMatchingOn must produce a CPE match for a %s package", tt.pkgType)
+		})
+	}
+}
+
 func Test_GrypeAdapter_WithDBLoader(t *testing.T) {
 	g := NewGrypeAdapter("https://example.com/listing.json", config.CVEMatchingOff, nil)
 	assert.IsType(t, DefaultVulnerabilityDBLoader{}, g.getDBLoader())
