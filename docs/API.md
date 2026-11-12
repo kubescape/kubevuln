@@ -154,7 +154,9 @@ GET /metrics
 `scanfailure.Reason*` constants from [`armoapi-go/scanfailure`](https://github.com/armosec/armoapi-go)
 -- the same classification already sent to the backend via `ReportScanFailure` (see
 [scan-failure-reporting.md](scan-failure-reporting.md)) -- falling back to `"unexpected_error"`
-for an `error` outcome that carries no specific classification. This lets an operator watching
+for an `error` outcome that carries no specific classification. Required local vulnerability
+manifest or summary persistence failures use the local reason `result_storage_failed`,
+including when cloud upload succeeds. This lets an operator watching
 only `/metrics` distinguish, for example, a registry auth failure from an oversized image
 without needing access to the backend's failure-report stream or pod logs.
 
@@ -180,8 +182,8 @@ Syft adapter. `scanMode` is how you tell which one is running.
 ```json
 {
   "scanMode": "sidecar",
-  "sbomCreatorVersion": "v1.42.3",
-  "cveScannerVersion": "v0.104.1-matching-adaptive",
+  "sbomCreatorVersion": "v1.55.0",
+  "cveScannerVersion": "v0.121.0-matching-adaptive",
   "cveDBVersion": "5e8b0e2c9f",
   "scanTimeout": "5m0s",
   "scannerReadinessTimeout": "1m0s",
@@ -703,6 +705,26 @@ Traces include:
 - SBOM generation time
 - CVE scanning time
 - Image download time
+
+## API authentication
+
+Every route except the probes and `/metrics` requires `Authorization: Bearer <Kubernetes service-account token>`
+with audience `kubescape.io`. The token is validated with a TokenReview and the caller is authorized
+by RBAC (SubjectAccessReview) on `kubescape.io` resources: `create` on `vulnerabilityscans` for the scan POSTs, `get` on `vulnerabilityscans` for `/v1/scanStatus/*` and `/v1/diagnostics`.
+
+- The service account running this component needs a `ClusterRoleBinding` to `system:auth-delegator`.
+- `KS_API_AUDIENCE`: expected token audience (default `kubescape.io`).
+- `POD_NAMESPACE`: required; the process exits at startup if it is unset.
+- `KS_API_AUTH_DISABLED=true`: turns the check off.
+
+To call the API by hand, mint a token for a service account that holds the matching Role:
+
+```bash
+TOKEN=$(kubectl create token <sa> -n <ns> --audience kubescape.io)
+curl -H "Authorization: Bearer $TOKEN" ...
+```
+
+Design: [in-cluster API authn/authz](https://github.com/kubescape/designs-and-proposals/blob/main/proposals/in-cluster-api-authn-authz.md).
 
 ---
 
