@@ -10,6 +10,7 @@ package syftsource
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/anchore/stereoscope/pkg/image"
@@ -49,6 +50,40 @@ func IsPlatformMismatch(err error) bool {
 	return errors.As(err, &platformErr)
 }
 
+// MaxPlatformSlugSuffixLength bounds the platform part of an image slug: a canonical
+// os/arch[/variant] is a few characters, and the image part has to keep its room.
+const MaxPlatformSlugSuffixLength = 64
+
+// PlatformSlugSuffix turns the platform a request names into the suffix an image slug
+// carries for it: the canonical os/arch[/variant] ParsePlatform gives, lowercased, with
+// the slashes turned into dashes. Each part must be letters and digits only: the parser
+// keeps "v7-" and "v7_" as variants of their own, and a suffix that folded them onto
+// "v7" would serve one variant's objects for another, so such a platform is an error
+// for validation to refuse, as is one that does not parse or does not fit. An empty
+// specifier gives no suffix.
+func PlatformSlugSuffix(specifier string) (string, error) {
+	platform, err := ParsePlatform(specifier)
+	if err != nil {
+		return "", err
+	}
+	if platform == nil {
+		return "", nil
+	}
+	canonical := strings.ToLower(FormatResolvedPlatform(platform.OS, platform.Architecture, platform.Variant))
+	for _, part := range strings.Split(canonical, "/") {
+		if part == "" || strings.IndexFunc(part, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) >= 0 {
+			return "", fmt.Errorf("platform %q has a part that cannot be a slug segment: %q", specifier, part)
+		}
+	}
+	suffix := "-" + strings.ReplaceAll(canonical, "/", "-")
+	if len(suffix) > MaxPlatformSlugSuffixLength {
+		return "", fmt.Errorf("platform %q does not fit an image slug", specifier)
+	}
+	return suffix, nil
+}
+
 // ParsePlatform normalizes a platform specifier for multi-arch image resolution. The
 // specifier uses OCI format, "os/arch[/variant]" such as "linux/amd64", and an
 // architecture on its own is read as Linux.
@@ -72,14 +107,18 @@ func ParsePlatform(specifier string) (*image.Platform, error) {
 	return image.NewPlatform(specifier)
 }
 
-// GetSourceConfig builds the config both paths hand to syft.GetSource. "registry" is the
-// only source: kubevuln always pulls, and leaving the default set would let Syft fall back
-// to reading a local docker daemon or containerd socket that is not there.
+// GetSourceConfig builds the config both paths hand to syft.GetSource. "oci-registry" is
+// the only source: kubevuln always pulls, and leaving the default set would let Syft fall
+// back to reading a local docker daemon or containerd socket that is not there.
+//
+// The single provider name, not the "registry" tag: syft v1.55 also tags its oci-model
+// provider "registry", and GetSource flattens two provider errors into plain text, which
+// loses the typed *image.ErrPlatformMismatch that IsPlatformMismatch matches on.
 func GetSourceConfig(registryOptions *image.RegistryOptions, platform *image.Platform) *syft.GetSourceConfig {
 	return syft.DefaultGetSourceConfig().
 		WithRegistryOptions(registryOptions).
 		WithPlatform(platform).
-		WithSources("registry")
+		WithSources(string(image.OciRegistrySource))
 }
 
 // NewCreateSBOMConfig builds the syft.CreateSBOMConfig both SBOM paths start from. It removes
