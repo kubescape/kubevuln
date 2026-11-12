@@ -1633,22 +1633,26 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 // repository_url that stops at the parent path ("gcr.io/google-samples/microservices-demo")
 // names no repository, so a statement carrying it applied to no image at all.
 //
+// The reference is normalized first, because a Docker Hub image can be written several ways
+// ("nginx", "library/nginx", "docker.io/nginx", "index.docker.io/library/nginx") and Grype
+// resolves them all to one repository, which it offers as index.docker.io/library/nginx,
+// docker.io/library/nginx and docker.io/nginx (ociRepositoryIdentity). Taken as written,
+// "library/nginx" or "index.docker.io/nginx" is none of those. ParseNormalizedNamed spells
+// every one of them docker.io/library/nginx, which Grype offers in each case and which is
+// also the purl-spec's own example form. A bare name is a Docker Hub name too, so it gets
+// the same repository_url rather than none.
+//
 // A tag only qualifies a reference that has no digest: Grype offers the tag qualifier on the
 // identities it derives from tags, never on the ones it derives from digests, so stating it
 // next to a digest would make the product match neither.
 func imageProductID(image string) string {
-	ref, err := reference.Parse(image)
-	named, ok := ref.(reference.Named)
-	if err != nil || !ok {
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
 		return legacyImageProductID(image)
 	}
 	repository := named.Name()
 
-	qualifiers := map[string]string{}
-	// a bare name ("alpine") says nothing about where the image can be fetched from
-	if strings.Contains(repository, "/") {
-		qualifiers["repository_url"] = repository
-	}
+	qualifiers := map[string]string{"repository_url": repository}
 	var version string
 	if digested, ok := named.(reference.Digested); ok {
 		version = digested.Digest().String()

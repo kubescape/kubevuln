@@ -5115,7 +5115,26 @@ func TestCreateProductStructForImageAndPackage(t *testing.T) {
 			name:          "single-component image reference without repository",
 			imagePullable: "alpine:latest",
 			packagePURL:   "pkg:apk/alpine/musl@1.2.2",
-			wantProductID: "pkg:oci/alpine?tag=latest",
+			wantProductID: "pkg:oci/alpine?repository_url=docker.io%2Flibrary%2Falpine&tag=latest",
+		},
+		{
+			name:          "docker hub short name with the library namespace",
+			imagePullable: "library/nginx:latest",
+			packagePURL:   "pkg:deb/debian/nginx@1.18.0",
+			wantProductID: "pkg:oci/nginx?repository_url=docker.io%2Flibrary%2Fnginx&tag=latest",
+		},
+		{
+			name:          "docker hub legacy index domain is spelled docker.io",
+			imagePullable: "index.docker.io/nginx@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f",
+			packagePURL:   "pkg:deb/debian/nginx@1.18.0",
+			wantProductID: "pkg:oci/nginx@sha256:45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=docker.io%2Flibrary%2Fnginx",
+		},
+		{
+			// a user repository keeps its own namespace, with no library/ inserted
+			name:          "docker hub user repository",
+			imagePullable: "bitnami/redis:7.2",
+			packagePURL:   "pkg:generic/redis@7.2.0",
+			wantProductID: "pkg:oci/redis?repository_url=docker.io%2Fbitnami%2Fredis&tag=7.2",
 		},
 		{
 			// the digest identifies the image; Grype offers no tag next to a digest
@@ -5128,7 +5147,7 @@ func TestCreateProductStructForImageAndPackage(t *testing.T) {
 			name:          "single-component bare name without tag",
 			imagePullable: "redis",
 			packagePURL:   "pkg:generic/redis@7.0.0",
-			wantProductID: "pkg:oci/redis",
+			wantProductID: "pkg:oci/redis?repository_url=docker.io%2Flibrary%2Fredis",
 		},
 	}
 

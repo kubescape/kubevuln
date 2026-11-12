@@ -47,6 +47,25 @@ func TestLocalVEXStatementAppliesToTheScannedImageInGrype(t *testing.T) {
 			imagePullable: "quay.io/prometheus/node-exporter:v1.8.2",
 			metadata:      source.ImageMetadata{Tags: []string{"quay.io/prometheus/node-exporter:v1.8.2"}},
 		},
+		// Docker Hub short names. Grype resolves every spelling of a Docker Hub repository to
+		// the same identity and offers it as index.docker.io/library/nginx,
+		// docker.io/library/nginx and docker.io/nginx, so the product has to name the
+		// repository in one of those spellings whichever one the reference was written in.
+		{
+			name:          "docker hub short name with the library namespace",
+			imagePullable: "library/nginx:latest",
+			metadata:      source.ImageMetadata{Tags: []string{"library/nginx:latest"}},
+		},
+		{
+			name:          "docker hub bare name",
+			imagePullable: "nginx:latest",
+			metadata:      source.ImageMetadata{Tags: []string{"nginx:latest"}},
+		},
+		{
+			name:          "docker hub legacy index domain without the library namespace",
+			imagePullable: "index.docker.io/nginx@" + digest,
+			metadata:      source.ImageMetadata{RepoDigests: []string{"nginx@" + digest}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
