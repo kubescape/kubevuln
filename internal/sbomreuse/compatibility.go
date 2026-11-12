@@ -36,7 +36,12 @@ func compatible(raw []byte, s subject, producer trust) (*v1beta1.SyftDocument, e
 	if err := json.Unmarshal(raw, &header); err != nil {
 		return nil, err
 	}
-	if header.Schema.Version != "16.0.39" || header.Schema.Version != producer.SchemaVersion || header.Descriptor.Name != "syft" || header.Descriptor.Version != producer.SyftVersion {
+	switch header.Schema.Version {
+	case "16.0.39", "16.1.11":
+	default:
+		return nil, fmt.Errorf("unsupported Syft inventory schema %q", header.Schema.Version)
+	}
+	if header.Schema.Version != producer.SchemaVersion || header.Descriptor.Name != "syft" || header.Descriptor.Version != producer.SyftVersion {
 		return nil, fmt.Errorf("unsupported Syft producer or schema")
 	}
 	if len(header.Artifacts) == 0 || string(header.Artifacts) == "null" {
