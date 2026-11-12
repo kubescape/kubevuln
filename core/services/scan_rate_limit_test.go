@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/registry"
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/repositories"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
