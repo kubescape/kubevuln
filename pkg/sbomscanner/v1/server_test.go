@@ -1011,6 +1011,9 @@ func TestCreateSBOM_UsesSharedCatalogerSelection(t *testing.T) {
 	}, gotCfg.CatalogerSelection.RemoveNamesOrTags)
 }
 
+// The 30s budget is not slack: go-containerregistry now retries 429 in its own transport
+// (1s then 3s, three steps) underneath this method's three attempts, so a 429 takes ~14s to
+// surface. A 5s budget expires first and the deadline arm claims the error instead.
 func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1030,7 +1033,7 @@ func TestCreateSBOM_Exhausted429RateLimitFromResolveSource(t *testing.T) {
 		Platform:        "linux/amd64",
 		MaxImageSize:    1 << 30,
 		MaxSbomSize:     1 << 30,
-		TimeoutSeconds:  5,
+		TimeoutSeconds:  30,
 		InsecureUseHttp: true,
 	})
 	require.NoError(t, err)

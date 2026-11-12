@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/scanfailure"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/docker/docker/api/types/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -34,6 +34,7 @@ import (
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -404,6 +405,8 @@ func TestScanService_ScanCP(t *testing.T) {
 			storeErrorCVE: true,
 			storage:       true,
 			workload:      true,
+			wantErr:       true,
+			wantReason:    "result_storage_failed",
 		},
 		{
 			// regression test for #816: ScanCP used to swallow this failure and return nil
@@ -826,7 +829,8 @@ func TestScanService_ScanCVE(t *testing.T) {
 			storeErrorCVE: true,
 			storage:       true,
 			workload:      true,
-			wantErr:       false,
+			wantErr:       true,
+			wantReason:    "result_storage_failed",
 		},
 		{
 			name:       "timeout SBOM",
@@ -1445,11 +1449,59 @@ func TestScanService_ValidateScanRegistry(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "with a platform that parses",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug-linux-arm64",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm64"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "with a platform that does not parse",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux:amd64"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a variant that would fold onto another",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/v7-"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a platform that does not fit a slug",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: "linux/arm/" + strings.Repeat("v", 300)},
+			},
+			wantErr: true,
+		},
+		{
+			name: "with a platform that is not a string",
+			workload: domain.ScanCommand{
+				ImageSlug:          "imageSlug",
+				ImageTagNormalized: "k8s.gcr.io/kube-proxy:v1.24.3",
+				Args:               map[string]interface{}{domain.ArgsPlatform: 7},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewScanService(adapters.NewMockSBOMAdapter(false, false, false), repositories.NewMemoryStorage(false, false), adapters.NewMockCVEAdapter(), repositories.NewMemoryStorage(false, false), adapters.NewMockPlatform(false, nil), adapters.NewMockRelevancyAdapter(), false, false, true, false, false)
 			_, err := s.ValidateScanRegistry(context.TODO(), tt.workload)
+			if tt.wantErr && tt.workload.Args != nil {
+				assert.ErrorIs(t, err, domain.ErrInvalidPlatform)
+			}
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateScanRegistry() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1520,7 +1572,6 @@ func Test_registryCredentialsFromCredentialsList(t *testing.T) {
 			ServerAddress: "https://index.docker.io/v1/",
 			Username:      "test_user",
 			Password:      "dummyPassword",
-			Email:         "test_user@gmail.com",
 			Auth:          "dGVzdF91c2VyOmR1bW15UGFzc3dvcmQ=",
 		},
 		{
@@ -2735,7 +2786,7 @@ func (r *cachedSummaryFailureRepository) StoreCVESummary(ctx context.Context, cv
 	return r.CVERepository.StoreCVESummary(ctx, cve, cvep, withRelevancy)
 }
 
-func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
+func TestScanService_CacheHit_SummaryRefreshFailureIsReported(t *testing.T) {
 	for _, failure := range []string{"summary lookup", "relevancy lookup", "summary write"} {
 		t.Run(failure, func(t *testing.T) {
 			inner := repositories.NewFakeAPIServerStorage("kubescape")
@@ -2755,7 +2806,11 @@ func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
 			require.NoError(t, inner.StoreCVESummary(ctx, cve, cvep, true))
 			before, err := inner.GetCVESummary(ctx)
 			require.NoError(t, err)
-			require.NoError(t, s.ScanCVE(ctx))
+			err = s.ScanCVE(ctx)
+			require.ErrorIs(t, err, domain.ErrMockError)
+			var scanErr *domain.ScanError
+			require.ErrorAs(t, err, &scanErr)
+			assert.Equal(t, ReasonResultStorageFailed, scanErr.Reason)
 			after, err := inner.GetCVESummary(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, before, after, "a transient failure must not discard existing relevancy")
@@ -2764,7 +2819,7 @@ func TestScanService_CacheHit_SummaryRefreshFailureIsNonfatal(t *testing.T) {
 			} else {
 				assert.Zero(t, repo.writes)
 			}
-			assert.Len(t, platform.submitted, 1, "summary storage is best effort")
+			assert.Len(t, platform.submitted, 1, "cloud upload remains independent of local storage")
 		})
 	}
 }
