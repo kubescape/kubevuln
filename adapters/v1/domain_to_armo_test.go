@@ -508,6 +508,40 @@ func Test_suggestedVersion(t *testing.T) {
 			want:         "",
 		},
 		{
+			// Red Hat, CBL-Mariner and Azure Linux feeds write the fix for a package with
+			// no epoch as "0:<version>", and Syft reports the installed package with no
+			// epoch at all. A missing epoch is 0, so these share an epoch and comparing
+			// the versions alone is exactly what RPM specifies.
+			name:         "rpm fix with an explicit zero epoch is an upgrade for an installed version with none",
+			current:      "2.4.53-7.el9",
+			versions:     []string{"0:2.4.53-7.el9_1.1"},
+			artifactType: "rpm",
+			want:         "0:2.4.53-7.el9_1.1",
+		},
+		{
+			name:         "rpm nearest of several explicit zero epoch fixes is picked",
+			current:      "2.4.53-7.el9",
+			versions:     []string{"0:2.4.53-9.el9", "0:2.4.53-8.el9"},
+			artifactType: "rpm",
+			want:         "0:2.4.53-8.el9",
+		},
+		{
+			name:         "rpm explicit zero epoch does not turn a downgrade into an upgrade",
+			current:      "2.4.53-8.el9",
+			versions:     []string{"0:2.4.53-7.el9_1.1"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
+			// Only a zero epoch can be read across: a non-zero one on one side is still a
+			// comparison Grype would get wrong by skipping it.
+			name:         "rpm non-zero epoch against an installed version with none is still not trusted",
+			current:      "2.4.53-7.el9",
+			versions:     []string{"1:2.4.53-8.el9"},
+			artifactType: "rpm",
+			want:         "",
+		},
+		{
 			// Grype's RPM tokenizer has no notion of "^" (RPM's post-release/snapshot
 			// marker): the caret is dropped and the surrounding digits are compared as an
 			// ordinary numeric segment, so "1.0^20250611" ranks above "1.0.1" even though
