@@ -65,7 +65,7 @@ func TestPublishAndImport(t *testing.T) {
 	second, err := publish(context.Background(), ref.Name(), sbomPath, keyPath, true)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
-	p, err := sbomreuse.CompilePolicy(sbomreuse.Policy{Repositories: map[string]sbomreuse.Producer{repo.Name(): {PublicKeys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))}, SyftVersion: header.Descriptor.Version, SchemaVersion: "16.0.39"}}})
+	p, err := sbomreuse.CompilePolicy(sbomreuse.Policy{Repositories: map[string]sbomreuse.Producer{repo.Name(): {PublicKeys: []string{string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))}, SyftVersion: header.Descriptor.Version, SchemaVersion: b.Content.Schema.Version}}})
 	require.NoError(t, err)
 	imported, err := sbomreuse.NewProvider(p).Acquire(context.Background(), "example", ref.Name(), opts)
 	require.NoError(t, err)
