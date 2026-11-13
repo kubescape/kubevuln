@@ -155,7 +155,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ```bash
 # Check the binary runs (it takes no flags, so this starts the server; Ctrl-C to stop)
-./kubevuln
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true ./kubevuln
 
 # Check size
 ls -lh kubevuln

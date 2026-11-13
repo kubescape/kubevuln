@@ -70,7 +70,7 @@ EOF
 CONFIG_DIR=/etc/kubevuln/config ./kubevuln
 ```
 
-Outside a cluster, also set `KS_API_AUTH_DISABLED=true`, or kubevuln exits at startup; see
+Outside a cluster without `POD_NAMESPACE` or a kube config, also set `KS_API_AUTH_DISABLED=true`, or kubevuln exits at startup; see
 [API authentication variables](#api-authentication-variables).
 
 ### Method 2: Kubernetes ConfigMap

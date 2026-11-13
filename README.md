@@ -51,7 +51,7 @@ CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true go run ./cmd/http
 
 `KS_API_AUTH_DISABLED=true` is what lets it start without a cluster. By default every API route
 except the probes and `/metrics` requires a Kubernetes service-account token, and kubevuln exits
-at startup when `POD_NAMESPACE` is not set. Never set it in a cluster. See
+at startup when `POD_NAMESPACE` is not set. Never set `KS_API_AUTH_DISABLED` in a cluster. See
 [API authentication](docs/API.md#api-authentication).
 
 ## Development
