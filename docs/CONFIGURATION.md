@@ -70,6 +70,9 @@ EOF
 CONFIG_DIR=/etc/kubevuln/config ./kubevuln
 ```
 
+Outside a cluster, also set `KS_API_AUTH_DISABLED=true`, or kubevuln exits at startup; see
+[API authentication variables](#api-authentication-variables).
+
 ### Method 2: Kubernetes ConfigMap
 
 ```yaml
@@ -109,6 +112,9 @@ volumeMounts:
 | `CONFIG_DIR` | Directory containing configuration files | `/etc/config` | `/app/config` |
 | `OTEL_COLLECTOR_SVC` | Legacy operational OTLP endpoint alias; see [operational telemetry](OPERATIONAL_TELEMETRY.md) for discovery and precedence | _(unset)_ | `otel-collector:4317` |
 | `RELEASE` | Version string for telemetry | _(empty)_ | `v1.0.0` |
+| `POD_NAMESPACE` | Namespace kubevuln runs in, used for API authentication; required unless `KS_API_AUTH_DISABLED=true` | _(unset)_ | `kubescape` |
+| `KS_API_AUTH_DISABLED` | `true` turns off API authentication | _(unset)_ | `true` |
+| `KS_API_AUDIENCE` | Audience a caller's service-account token must carry | `kubescape.io` | `kubescape.io` |
 
 ### CONFIG_DIR
 
@@ -133,6 +139,30 @@ empty base skips discovery; base `disable` opts out of all operational signals.
 Per-signal overrides, sampling, exported-log filtering, buffer bounds, credentials,
 and deployment gaps are documented in [Operational telemetry](OPERATIONAL_TELEMETRY.md).
 The sandbox `OTEL_EVENTS_EXPORTER_ENDPOINT` is separate.
+
+### API authentication variables
+
+Every API route except `/v1/liveness`, `/v1/readiness` and `/metrics` requires a Kubernetes
+service-account token, checked with a TokenReview and a SubjectAccessReview against the
+API server (see [API authentication](API.md#api-authentication)). To do that kubevuln needs
+`POD_NAMESPACE` and a kube config: the in-cluster one, or `KUBECONFIG`/`~/.kube/config` when
+run elsewhere. At startup it also checks that it may create TokenReviews (its service account
+needs the `system:auth-delegator` ClusterRole). If any of this is missing or the API server
+can't be reached, it exits at startup, for example with:
+
+```
+[fatal] API auth setup failed. error: POD_NAMESPACE must be set for API auth (or set KS_API_AUTH_DISABLED=true)
+```
+
+Only the exact value `true` disables the check. Set it to run kubevuln locally without a
+cluster:
+
+```bash
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true ./kubevuln
+```
+
+With authentication disabled, any client that can reach port 8080 can start scans and read
+their status, so do not set it in a cluster.
 
 ### RELEASE
 

@@ -4,7 +4,7 @@ This document provides detailed documentation for the Kubevuln REST API.
 
 ## Overview
 
-Kubevuln exposes a REST API on port **8080** for vulnerability scanning operations. The API follows REST conventions and returns responses in the [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) format.
+Kubevuln exposes a REST API on port **8080** for vulnerability scanning operations. The API follows REST conventions and returns responses in the [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) format, except for requests rejected by [authentication](#authentication).
 
 ---
 
@@ -43,7 +43,9 @@ http://kubevuln.kubescape.svc.cluster.local:8080
 
 ## Authentication
 
-Kubevuln does not implement authentication directly. Access control should be managed at the network level (e.g., Kubernetes NetworkPolicies, service mesh).
+Every route except `/v1/liveness`, `/v1/readiness` and `/metrics` requires a Kubernetes service-account token in an `Authorization: Bearer` header. Requests without a valid token, or from a caller that RBAC does not allow, are rejected before they reach the handlers below. See [API authentication](#api-authentication) for the token audience, the RBAC it checks, and the environment it needs.
+
+The `curl` examples in this document leave the header out. They work as written against a local instance started with `KS_API_AUTH_DISABLED=true`; against a cluster, add `-H "Authorization: Bearer $TOKEN"`.
 
 For scanning private container registries, credentials are passed in the request payload.
 
@@ -203,7 +205,7 @@ Syft adapter. `scanMode` is how you tell which one is running.
 | `storageEnabled` | bool | Whether SBOMs and CVE manifests are persisted as CRDs |
 | `riskAcceptanceEnabled` | bool | Whether SecurityException / ClusterSecurityException CRDs are applied |
 
-Always returns `200`. When the controller was built without a diagnostics provider the
+Always returns `200` once the request is authorized. When the controller was built without a diagnostics provider the
 struct's zero value is returned, so an all-empty body means "not wired up" rather than
 "nothing configured".
 
@@ -530,7 +532,7 @@ Credentials for accessing private container registries.
 
 ### Problem Details Response
 
-All responses follow RFC 7807.
+All responses follow RFC 7807, except the authentication rejections described under [HTTP Status Codes](#http-status-codes).
 
 ```json
 {
@@ -556,10 +558,14 @@ All responses follow RFC 7807.
 |------|---------|------|
 | `200` | OK | Request accepted |
 | `400` | Bad Request | Invalid JSON, missing required fields, or validation failed |
+| `401` | Unauthorized | Missing, malformed, or rejected bearer token ([API authentication](#api-authentication)) |
+| `403` | Forbidden | The token is valid but RBAC does not allow the request ([API authentication](#api-authentication)) |
 | `409` | Conflict | A scan endpoint's `jobID` already belongs to a scan that is still queued or running |
 | `429` | Too Many Requests | Registry rate limit hit on a previous pull for this image |
 | `500` | Internal Server Error | Internal error |
-| `503` | Service Unavailable | Two distinct causes, unrelated to each other: `/v1/readiness` reports it when the vulnerability DB isn't loaded, and a scan endpoint reports it when scan admission capacity is full (positive `maxQueueDepth` reached) |
+| `503` | Service Unavailable | Three distinct causes, unrelated to each other: `/v1/readiness` reports it when the vulnerability DB isn't loaded, a scan endpoint reports it when scan admission capacity is full (positive `maxQueueDepth` reached), and any authenticated route reports it when the token could not be checked because the Kubernetes API server was unreachable or returned an error |
+
+The `401`, `403`, and authentication `503` responses come from the authentication middleware, so their body is `{"error": "...", "reason": "..."}` rather than the Problem Details format above.
 
 ### Common Errors
 
@@ -714,8 +720,8 @@ by RBAC (SubjectAccessReview) on `kubescape.io` resources: `create` on `vulnerab
 
 - The service account running this component needs a `ClusterRoleBinding` to `system:auth-delegator`.
 - `KS_API_AUDIENCE`: expected token audience (default `kubescape.io`).
-- `POD_NAMESPACE`: required; the process exits at startup if it is unset.
-- `KS_API_AUTH_DISABLED=true`: turns the check off.
+- `POD_NAMESPACE`: required; the process exits at startup if it is unset. It also exits when it has no kube config (the in-cluster one, or `KUBECONFIG`/`~/.kube/config` elsewhere) or when its startup check that it may create TokenReviews fails.
+- `KS_API_AUTH_DISABLED=true`: turns the check off, along with the startup requirements above. Use it only for local development, since every client that can reach the port is then allowed. See [Running locally](DEVELOPMENT.md#4-build-and-run).
 
 To call the API by hand, mint a token for a service account that holds the matching Role:
 
