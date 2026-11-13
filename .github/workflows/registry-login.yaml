@@ -1,0 +1,116 @@
+name: Registry Login Check
+
+# pr-image.yaml skips its Quay login whenever registry secrets are unavailable
+# (Dependabot and fork pull requests), and offline-db.yaml only runs on a
+# schedule or by hand, so a change to the pinned docker/login-action would
+# otherwise reach main without its authentication path ever running.
+#
+# This workflow runs that same pinned action against a throwaway registry on
+# the runner, with a password generated for this run only. It reads no
+# secrets, so it is safe to run on untrusted pull request code.
+
+permissions: read-all
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  registry-login:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Pinned by digest; Dependabot only tracks actions here. Update deliberately.
+      REGISTRY_IMAGE: registry:3.1.2@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c
+      HTPASSWD_IMAGE: httpd:2.4.71-alpine@sha256:0dd40f744444e37271d28c0b63c4e9fe8bcb8dee6fadb1a16a851ca311a39e88
+      REGISTRY: localhost:5000
+      REGISTRY_USERNAME: ci
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The login step below can only pin docker/login-action by a literal
+      # commit, so this check makes sure it is the same commit the publishing
+      # workflows use. Dependabot bumps every occurrence in one pull request.
+      - name: Check that every workflow pins the same docker/login-action
+        run: |
+          pins="$(grep -rhoE 'uses:[[:space:]]*docker/login-action@[^[:space:]]+' .github/workflows \
+            | sed -E 's/^uses:[[:space:]]*//' | sort -u)"
+          echo "${pins}"
+          if [ -z "${pins}" ] || [ "$(printf '%s\n' "${pins}" | wc -l)" -ne 1 ]; then
+            echo "::error::workflows pin different docker/login-action commits; update them together"
+            exit 1
+          fi
+
+      - name: Start a disposable registry that requires authentication
+        run: |
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::${password}"
+          echo "REGISTRY_PASSWORD=${password}" >> "${GITHUB_ENV}"
+
+          auth_dir="${RUNNER_TEMP}/registry-auth"
+          mkdir -p "${auth_dir}"
+          docker run --rm --entrypoint htpasswd "${HTPASSWD_IMAGE}" -Bbn "${REGISTRY_USERNAME}" "${password}" > "${auth_dir}/htpasswd"
+
+          docker run --detach --name registry-login-check \
+            --publish 127.0.0.1:5000:5000 \
+            --volume "${auth_dir}:/auth:ro" \
+            --env REGISTRY_AUTH=htpasswd \
+            --env REGISTRY_AUTH_HTPASSWD_REALM=registry-login-check \
+            --env REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+            "${REGISTRY_IMAGE}"
+
+          # Wait for the registry to answer, and require the 401 that proves
+          # anonymous access is refused before testing any login against it.
+          for _ in $(seq 30); do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://${REGISTRY}/v2/" || true)"
+            if [ "${status}" = "401" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::registry did not start refusing anonymous requests (last status: ${status})"
+          docker logs registry-login-check
+          exit 1
+
+      - name: Log in with a wrong password
+        id: rejected-login
+        continue-on-error: true
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: not-the-password
+
+      - name: Check that the wrong password was rejected
+        if: steps.rejected-login.outcome != 'failure'
+        run: |
+          echo "::error::docker/login-action reported success with a wrong password"
+          exit 1
+
+      - name: Log in with the generated password
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Push an image with the stored credentials
+        run: |
+          image="${REGISTRY}/registry-login-check:${GITHUB_RUN_ID}"
+          docker tag "${REGISTRY_IMAGE}" "${image}"
+          docker push "${image}"
+
+      - name: Stop the registry
+        if: always()
+        run: docker rm --force registry-login-check || true
