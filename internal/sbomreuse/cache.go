@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
 )
 
@@ -15,7 +16,7 @@ import (
 // is trusted cluster state, as with local SBOMs; the digest detects accidental
 // payload/provenance mismatches, not an attacker authorized to rewrite both.
 func (p *Provider) CachedEligible(b domain.SBOM, imageID string, opts domain.RegistryOptions) bool {
-	if p == nil || p.policy == nil || b.Content == nil || b.Annotations[domain.SBOMImportSource] != "oci-attestation-v1" || b.Annotations[domain.SBOMImportPolicy] != p.policy.fingerprint {
+	if p == nil || p.policy == nil || b.Status != helpersv1.Completed || b.Content == nil || b.Annotations[domain.SBOMImportSource] != "oci-attestation-v1" || b.Annotations[domain.SBOMImportPolicy] != p.policy.fingerprint {
 		return false
 	}
 	ref, err := name.NewDigest(imageID, name.StrictValidation)
@@ -47,8 +48,8 @@ func (p *Provider) CachedEligible(b domain.SBOM, imageID string, opts domain.Reg
 		return false
 	}
 	if opts.Platform != "" {
-		want, err := v1.ParsePlatform(opts.Platform)
-		if err != nil || !samePlatform(*platform, *want) {
+		want, err := parseRequestedPlatform(opts.Platform)
+		if err != nil || !matchesPlatform(*platform, *want) {
 			return false
 		}
 	}

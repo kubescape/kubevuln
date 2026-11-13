@@ -33,6 +33,11 @@ func verify(ctx context.Context, envelope []byte, s subject, producer trust) (js
 	if env.PayloadType != ArtifactType || len(env.Signatures) == 0 || len(env.Signatures) > 8 {
 		return nil, "", fmt.Errorf("unsupported DSSE envelope")
 	}
+	// The envelope key ID is an unsigned producer hint. Let DSSE try every
+	// approved public key and report the policy ID of the key that verified.
+	for i := range env.Signatures {
+		env.Signatures[i].KeyID = ""
+	}
 	var verifiers []dsse.Verifier
 	// Deterministic signer provenance when more than one approved key signed the envelope.
 	ids := make([]string, 0, len(producer.keys))
