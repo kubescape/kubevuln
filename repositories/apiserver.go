@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/akyoto/cache"
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/distribution/reference"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -28,6 +30,7 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	fakespdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1/fake"
 	"github.com/openvex/go-vex/pkg/vex"
+	packageurl "github.com/package-url/packageurl-go"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"
@@ -1605,20 +1608,9 @@ func (a *APIServerStore) StoreVEX(ctx context.Context, cve domain.CVEManifest, c
 }
 
 func createProductStructForImageAndPackage(imagePullable string, packagePURL string) (*v1beta1.Product, error) {
-	imagePullable = strings.TrimPrefix(imagePullable, "docker://")
-	imageComponents := strings.Split(imagePullable, "/")
-	imageName := imageComponents[len(imageComponents)-1]
-	imageRepo := strings.Join(imageComponents[:len(imageComponents)-1], "/")
-	// pkg:oci/adservice@sha256%3A45fb8ed886902c0c49e044b1f8870fad61c1022fa23c4943098302a8f1c5b75f?repository_url=gcr.io/google-samples/microservices-demo
-	var imageField string
-	if imageRepo != "" {
-		imageField = fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
-	} else {
-		imageField = fmt.Sprintf("pkg:oci/%s", url.PathEscape(imageName))
-	}
 	product := v1beta1.Product{
 		Component: v1beta1.Component{
-			ID: imageField,
+			ID: imageProductID(strings.TrimPrefix(imagePullable, "docker://")),
 		},
 	}
 	product.Subcomponents = append(product.Subcomponents, v1beta1.Subcomponent{
@@ -1627,6 +1619,60 @@ func createProductStructForImageAndPackage(imagePullable string, packagePURL str
 		},
 	})
 	return &product, nil
+}
+
+// imageProductID identifies an image as the purl-spec oci type does: the name is the last
+// segment of the repository, the version is the digest, and repository_url is the whole
+// repository, image name included, e.g.
+//
+//	pkg:oci/adservice@sha256:45fb...?repository_url=gcr.io%2Fgoogle-samples%2Fmicroservices-demo%2Fadservice
+//
+// That is also how Grype names the image it scanned when it applies a VEX document
+// (grype/vex/openvex, identifiersFromDigests and identifiersFromTags), and go-vex matches a
+// product only when every qualifier it states is present with the same value. A
+// repository_url that stops at the parent path ("gcr.io/google-samples/microservices-demo")
+// names no repository, so a statement carrying it applied to no image at all.
+//
+// The reference is normalized first, because a Docker Hub image can be written several ways
+// ("nginx", "library/nginx", "docker.io/nginx", "index.docker.io/library/nginx") and Grype
+// resolves them all to one repository, which it offers as index.docker.io/library/nginx,
+// docker.io/library/nginx and docker.io/nginx (ociRepositoryIdentity). Taken as written,
+// "library/nginx" or "index.docker.io/nginx" is none of those. ParseNormalizedNamed spells
+// every one of them docker.io/library/nginx, which Grype offers in each case and which is
+// also the purl-spec's own example form. A bare name is a Docker Hub name too, so it gets
+// the same repository_url rather than none.
+//
+// A tag only qualifies a reference that has no digest: Grype offers the tag qualifier on the
+// identities it derives from tags, never on the ones it derives from digests, so stating it
+// next to a digest would make the product match neither.
+func imageProductID(image string) string {
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return legacyImageProductID(image)
+	}
+	repository := named.Name()
+
+	qualifiers := map[string]string{"repository_url": repository}
+	var version string
+	if digested, ok := named.(reference.Digested); ok {
+		version = digested.Digest().String()
+	} else if tagged, ok := named.(reference.Tagged); ok {
+		qualifiers["tag"] = tagged.Tag()
+	}
+	return packageurl.NewPackageURL(packageurl.TypeOCI, "", path.Base(repository), version,
+		packageurl.QualifiersFromMap(qualifiers), "").ToString()
+}
+
+// legacyImageProductID is what every reference used to get. It is kept for one that does not
+// parse as an image reference, which has no repository to name.
+func legacyImageProductID(image string) string {
+	imageComponents := strings.Split(image, "/")
+	imageName := imageComponents[len(imageComponents)-1]
+	imageRepo := strings.Join(imageComponents[:len(imageComponents)-1], "/")
+	if imageRepo != "" {
+		return fmt.Sprintf("pkg:oci/%s?repository_url=%s", url.PathEscape(imageName), url.PathEscape(imageRepo))
+	}
+	return fmt.Sprintf("pkg:oci/%s", url.PathEscape(imageName))
 }
 
 func buildIgnoredVEXAssessmentMap(cve *domain.CVEManifest) map[vexStatementKey]ignoredVEXAssessment {
