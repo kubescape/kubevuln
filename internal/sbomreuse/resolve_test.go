@@ -50,6 +50,8 @@ func TestResolvePlatformWithoutLayers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ref, s.ref)
 	require.Equal(t, "amd64", s.platform.Architecture)
+	_, err = c.resolve(ref, "amd64")
+	require.NoError(t, err)
 	_, err = c.resolve(ref, "linux/arm64")
 	require.ErrorContains(t, err, "platform")
 }
@@ -68,4 +70,26 @@ func TestResolveIndexRequiresUniqueExplicitPlatform(t *testing.T) {
 	s, err := c.resolve(ref, "linux/amd64")
 	require.NoError(t, err)
 	require.NotEqual(t, ref, s.ref)
+}
+
+func TestResolveWindowsVersion(t *testing.T) {
+	repo, c := testRegistry(t)
+	cfg := &v1.ConfigFile{OS: "windows", Architecture: "amd64", OSVersion: "10.0.20348.0"}
+	img, err := mutate.ConfigFile(empty.Image, cfg)
+	require.NoError(t, err)
+	platform := cfg.Platform()
+	idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{Add: img, Descriptor: v1.Descriptor{Platform: platform}})
+	h, err := idx.Digest()
+	require.NoError(t, err)
+	ref := repo.Digest(h.String())
+	require.NoError(t, remote.WriteIndex(ref, idx))
+	resolved, err := c.resolve(ref, platform.String())
+	require.NoError(t, err)
+	require.Equal(t, cfg.OSVersion, resolved.platform.OSVersion)
+	_, err = c.resolve(ref, "windows/amd64")
+	require.NoError(t, err)
+	_, err = c.resolve(ref, "windows/amd64:10.0.17763.0")
+	require.ErrorContains(t, err, "missing or ambiguous")
+	_, err = c.resolve(resolved.ref, "windows/amd64:10.0.17763.0")
+	require.ErrorContains(t, err, "configuration does not match")
 }
