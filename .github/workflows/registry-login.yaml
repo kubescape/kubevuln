@@ -44,13 +44,8 @@ jobs:
       # workflows use. Dependabot bumps every occurrence in one pull request.
       - name: Check that every workflow pins the same docker/login-action
         run: |
-          pins="$(grep -rhoE 'uses:[[:space:]]*docker/login-action@[^[:space:]]+' .github/workflows \
-            | sed -E 's/^uses:[[:space:]]*//' | sort -u)"
-          echo "${pins}"
-          if [ -z "${pins}" ] || [ "$(printf '%s\n' "${pins}" | wc -l)" -ne 1 ]; then
-            echo "::error::workflows pin different docker/login-action commits; update them together"
-            exit 1
-          fi
+          hack/check-login-action-pin_test.sh
+          hack/check-login-action-pin.sh
 
       - name: Start a disposable registry that requires authentication
         run: |
