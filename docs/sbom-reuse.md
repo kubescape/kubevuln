@@ -17,8 +17,9 @@ TLS and registry credentials are reused.
 
 A valid signature proves who signed an inventory, not that its packages are
 complete. Enable this only for approved build producers whose inventories have
-been compared against local generation. The supported document schema is Syft
-JSON 16.0.39, with an exact configured producer version. Other schemas fall back.
+been compared against local generation. Kubevuln supports Syft JSON schemas
+16.0.39 and 16.1.11. Both the schema version and the Syft producer version must
+match the repository policy. Other versions fall back to local generation.
 
 Each policy repository is an exact canonical name, for example
 `registry.example/team/application`. Its producer has `publicKeys` (PKIX PEM

@@ -26,8 +26,10 @@ func testRegistry(t *testing.T) (name.Repository, *registryClient) {
 	p, _ := testPolicy(t, repo.Name())
 	policy, err := CompilePolicy(p)
 	require.NoError(t, err)
-	c, err := newRegistryClient(context.Background(), repo, image.RegistryOptions{InsecureUseHTTP: true}, policy)
+	optsForSetup := image.RegistryOptions{InsecureUseHTTP: true}
+	budget, err := newRegistryTransport(repo, optsForSetup, policy)
 	require.NoError(t, err)
+	c := newRegistryClient(context.Background(), repo, optsForSetup, budget)
 	t.Cleanup(func() { c.budget.base.(*http.Transport).CloseIdleConnections() })
 	return repo, c
 }
@@ -92,4 +94,20 @@ func TestResolveWindowsVersion(t *testing.T) {
 	require.ErrorContains(t, err, "missing or ambiguous")
 	_, err = c.resolve(resolved.ref, "windows/amd64:10.0.17763.0")
 	require.ErrorContains(t, err, "configuration does not match")
+}
+
+func TestRegistryAttemptsShareRequestBudget(t *testing.T) {
+	repo, setup := testRegistry(t)
+	ref := publishImage(t, repo, "amd64")
+	budget := setup.budget
+	first := newRegistryClient(context.Background(), repo, image.RegistryOptions{}, budget)
+	_, err := first.resolve(ref, "")
+	require.NoError(t, err)
+	firstRequests := budget.requests
+	require.Positive(t, firstRequests)
+	// Leave fewer requests than a complete second resolution needs.
+	budget.requests = 65 - firstRequests
+	retry := newRegistryClient(context.Background(), repo, image.RegistryOptions{}, budget)
+	_, err = retry.resolve(ref, "")
+	require.ErrorContains(t, err, "request budget exhausted")
 }
