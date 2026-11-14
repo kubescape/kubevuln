@@ -45,16 +45,21 @@ func (t *boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if resp.ContentLength > t.maxBody {
 		return nil, fmt.Errorf("SBOM registry response exceeds size limit")
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, t.maxBody+1))
+	// Serialize bounded body reads so overlapping requests cannot spend the
+	// same remaining bytes. Allow one extra byte to detect overflow.
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.remaining <= 0 {
+		return nil, fmt.Errorf("SBOM registry request budget exhausted")
+	}
+	limit := min(t.maxBody, t.remaining)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	t.bytes += int64(len(b))
 	t.remaining -= int64(len(b))
-	exhausted = t.remaining < 0
-	t.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(b)) > t.maxBody || exhausted {
+	if int64(len(b)) > limit {
 		return nil, fmt.Errorf("SBOM registry response exceeds size budget")
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(b))

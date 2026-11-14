@@ -17,14 +17,15 @@ TLS and registry credentials are reused.
 
 A valid signature proves who signed an inventory, not that its packages are
 complete. Enable this only for approved build producers whose inventories have
-been compared against local generation. The importer supports Syft JSON schemas 16.0.39 and 16.1.11. Each repository
-policy pins one exact schema and producer version. Other versions fall back.
+been compared against local generation. Kubevuln supports Syft JSON schemas
+16.0.39 and 16.1.11. Both the schema version and the Syft producer version must
+match the repository policy. Other versions fall back to local generation.
 
 Each policy repository is an exact canonical name, for example
 `registry.example/team/application`. Its producer has `publicKeys` (PKIX PEM
 Ed25519 public keys), `syftVersion`, and `schemaVersion` fields. Policy limits are
 `maxBytes` (default 8 MiB, range 1 KiB–64 MiB), `maxCandidates` (default 8, maximum
-32), and `timeoutSeconds` (default 10, maximum 60). Each credential attempt also has a
+32), and `timeoutSeconds` (default 10, maximum 60). Each acquisition also has a
 64-request ceiling and a total body-byte budget of twice `maxBytes` plus 8 MiB.
 
 Imported inventories retain their producer version and record the signer,
@@ -83,9 +84,8 @@ tags and paginated or ambiguous listings cause fallback. This initial profile do
 not implement keyless identity, transparency logs, or general cosign bundles.
 
 Multi-platform image indexes require an explicit exact OS/architecture/variant
-match. For example, `linux/arm64/v8` is distinct from `linux/arm64`. Every lookup
-and credential attempt shares the acquisition timeout; each credential attempt
-has its own bounded transport budget. Cache eligibility trusts cluster storage
+match. For example, `linux/arm64/v8` is distinct from `linux/arm64`. All lookups and credential retries
+share one timeout, request limit, and byte budget for the acquisition. Cache eligibility trusts cluster storage
 and revalidates policy, signer, content digest, source identity and compatibility;
 it does not fetch a new remote signature on every cache hit.
 
