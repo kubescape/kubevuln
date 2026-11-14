@@ -49,6 +49,12 @@ func (p *Provider) Acquire(ctx context.Context, slug, imageID string, opts domai
 	ctx, cancel := context.WithTimeout(ctx, p.policy.timeout)
 	defer cancel()
 	registryOpts := image.RegistryOptions{Credentials: registryauth.Credentials(opts.Credentials), InsecureUseHTTP: opts.InsecureUseHTTP, InsecureSkipTLSVerify: opts.InsecureSkipTLSVerify}
+	budget, err := newRegistryTransport(ref.Context(), registryOpts, p.policy)
+	if err != nil {
+		return domain.SBOM{}, err
+	}
+	defer budget.base.(*http.Transport).CloseIdleConnections()
+	defer func() { fetched = budget.fetchedBytes() }()
 	firstAttempt := true
 	get := func(ctx context.Context, _ string, ro *image.RegistryOptions) (domain.SBOM, error) {
 		result = "resolution"
@@ -59,12 +65,7 @@ func (p *Provider) Acquire(ctx context.Context, slug, imageID string, opts domai
 			attempt.Keychain = authn.DefaultKeychain
 		}
 		firstAttempt = false
-		c, err := newRegistryClient(ctx, ref.Context(), attempt, p.policy)
-		if err != nil {
-			return domain.SBOM{}, err
-		}
-		defer c.budget.base.(*http.Transport).CloseIdleConnections()
-		defer func() { fetched += c.budget.fetchedBytes() }()
+		c := newRegistryClient(ctx, ref.Context(), attempt, budget)
 		s, err := c.resolve(ref, opts.Platform)
 		if err != nil {
 			return domain.SBOM{}, err

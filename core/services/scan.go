@@ -1336,7 +1336,8 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 		// provenance. Workload scans can reuse the size verdict, subject to the
 		// usual limit checks below, but must never receive that document.
 		workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
-		if !s.sbomGeneration || (workload.Wlid == "" && workload.InstanceID == "") || sbom.Status != helpersv1.TooLarge {
+		canTryImport := ok && workload.Wlid == "" && workload.InstanceID == ""
+		if !s.sbomGeneration || canTryImport || sbom.Status != helpersv1.TooLarge {
 			return domain.SBOM{}, nil
 		}
 		sbom.Content = nil
