@@ -75,6 +75,8 @@ var registryAuthCacheCounter metric.Int64Counter
 var singleflightHitsCounter metric.Int64Counter
 var retryAttemptsCounter metric.Int64Counter
 var tempDirSweepCounter metric.Int64Counter
+var sbomImportCounter metric.Int64Counter
+var sbomImportBytes metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -247,7 +249,17 @@ func New(options ...sdkmetric.Option) (*Metrics, error) {
 		}
 	}
 
+	importCounter, err := meter.Int64Counter("kubevuln_sbom_import_attempts", metric.WithDescription("Verified registry inventory acquisition outcomes"))
+	if err != nil {
+		return nil, err
+	}
+	importBytes, err := meter.Int64Counter("kubevuln_sbom_import_bytes", metric.WithDescription("Registry response body bytes read during inventory acquisition"), metric.WithUnit("By"))
+	if err != nil {
+		return nil, err
+	}
 	recorderMu.Lock()
+	sbomImportCounter = importCounter
+	sbomImportBytes = importBytes
 	fallbackCounter = scanFallbackCounter
 	sourceResolutionCounter = sourceResolutionMetric
 	registryAuthCacheCounter = registryAuthCacheMetric
