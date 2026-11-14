@@ -1324,6 +1324,24 @@ func (s *ScanService) Version() string {
 // getSBOM retrieves a stored SBOM, deleting and returning empty if it is outdated or stale due to changed size/memory limits.
 func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion string) (domain.SBOM, error) {
 	sbom, err := s.sbomRepository.GetSBOM(ctx, name, creatorVersion)
+	if sbom.Imported() {
+		validator, ok := s.sbomCreator.(ports.SBOMCacheValidator)
+		if s.sbomGeneration && ok && (err == nil || errors.Is(err, domain.ErrOutdatedSBOM)) && validator.ValidateCachedSBOM(ctx, sbom) {
+			return sbom, nil
+		}
+		// A status-only local write preserves the old imported document and its
+		// provenance. Workload scans can reuse the size verdict, subject to the
+		// usual limit checks below, but must never receive that document.
+		workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+		if !s.sbomGeneration || (workload.Wlid == "" && workload.InstanceID == "") || sbom.Status != helpersv1.TooLarge {
+			return domain.SBOM{}, nil
+		}
+		sbom.Content = nil
+		if errors.Is(err, domain.ErrOutdatedSBOM) {
+			// Storage always reports imported documents as outdated.
+			err = nil
+		}
+	}
 	if !s.sbomGeneration {
 		return nodeAgentSBOM(sbom, err)
 	}

@@ -14,6 +14,26 @@ type InventoryAcquirer interface {
 	Acquire(context.Context, string, string, domain.RegistryOptions) (domain.SBOM, error)
 }
 
+func (a *RegistrySBOMAdapter) ValidateCachedSBOM(ctx context.Context, b domain.SBOM) bool {
+	w, ok := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+	if !ok || w.Wlid != "" || w.InstanceID != "" {
+		return false
+	}
+	validator, ok := a.provider.(interface {
+		CachedEligible(domain.SBOM, string, domain.RegistryOptions) bool
+	})
+	if !ok {
+		return false
+	}
+	ref := w.ImageHash
+	if w.ImageTagNormalized != "" {
+		ref = NormalizeImageID(ref, w.ImageTagNormalized)
+	}
+	platform, _ := w.Args[domain.ArgsPlatform].(string)
+	bts, err := json.Marshal(b.Content)
+	return err == nil && len(bts) <= a.GetMaxSBOMSize() && validator.CachedEligible(b, ref, domain.RegistryOptions{Platform: platform})
+}
+
 // RegistrySBOMAdapter tries a verified inventory before the selected in-process or
 // sidecar creator. Embedding preserves the fallback's version and resource limits.
 type RegistrySBOMAdapter struct {

@@ -26,6 +26,11 @@ type SBOMCreator interface {
 	GetMemoryLimit() string
 }
 
+// SBOMCacheValidator is optional: ordinary creators cannot authorize imported inventories.
+type SBOMCacheValidator interface {
+	ValidateCachedSBOM(context.Context, domain.SBOM) bool
+}
+
 // Platform is the port implemented by adapters to be used in ScanService to report scan results and send telemetry data
 type Platform interface {
 	// GetCVEExceptions returns the merged cloud + CRD-based exception set for the scan in ctx,
