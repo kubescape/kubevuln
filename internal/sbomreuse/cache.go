@@ -47,6 +47,10 @@ func (p *Provider) CachedEligible(b domain.SBOM, imageID string, opts domain.Reg
 	if err != nil {
 		return false
 	}
+	// An index cannot select a child without an explicit platform, even on a cache hit.
+	if opts.Platform == "" && child.Name() != ref.Name() {
+		return false
+	}
 	if opts.Platform != "" {
 		want, err := parseRequestedPlatform(opts.Platform)
 		if err != nil || !matchesPlatform(*platform, *want) {

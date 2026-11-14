@@ -25,14 +25,17 @@ type registryClient struct {
 	budget *boundedTransport
 }
 
-func newRegistryClient(ctx context.Context, repository name.Repository, opts image.RegistryOptions, policy *CompiledPolicy) (*registryClient, error) {
+func newRegistryTransport(repository name.Repository, opts image.RegistryOptions, policy *CompiledPolicy) (*boundedTransport, error) {
 	tls, err := opts.TLSConfig(repository.RegistryStr())
 	if err != nil {
 		return nil, err
 	}
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.TLSClientConfig = tls
-	budget := &boundedTransport{base: base, maxBody: policy.maxBytes, remaining: 2*policy.maxBytes + 8*1024*1024}
+	return &boundedTransport{base: base, maxBody: policy.maxBytes, remaining: 2*policy.maxBytes + 8*1024*1024}, nil
+}
+
+func newRegistryClient(ctx context.Context, repository name.Repository, opts image.RegistryOptions, budget *boundedTransport) *registryClient {
 	options := []remote.Option{remote.WithContext(ctx), remote.WithTransport(budget)}
 	if a := opts.Authenticator(repository.RegistryStr()); a != nil {
 		options = append(options, remote.WithAuth(a))
@@ -41,7 +44,7 @@ func newRegistryClient(ctx context.Context, repository name.Repository, opts ima
 	} else {
 		options = append(options, remote.WithAuth(authn.Anonymous))
 	}
-	return &registryClient{opts: options, budget: budget}, nil
+	return &registryClient{opts: options, budget: budget}
 }
 
 // resolve reads manifests and the image configuration, never image layers. An index

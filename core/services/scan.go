@@ -142,8 +142,11 @@ func credentialsFingerprint(workload domain.ScanCommand) string {
 // rateLimitCacheKey leaves the digest out on purpose, because a registry rate limits by
 // repository rather than by digest, which makes it the wrong identity here.
 func sbomSingleflightKey(workload domain.ScanCommand, opts domain.RegistryOptions) string {
-	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t", workload.ImageSlug, credentialsFingerprint(workload),
-		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify)
+	// Registry scans may import inventory; workload and instance scans require
+	// local generation for runtime file coverage and must not join that flight.
+	registryInventory := workload.Wlid == "" && workload.InstanceID == ""
+	return fmt.Sprintf("%s|%s|%s|http:%t|skiptls:%t|registryinventory:%t", workload.ImageSlug, credentialsFingerprint(workload),
+		opts.Platform, opts.InsecureUseHTTP, opts.InsecureSkipTLSVerify, registryInventory)
 }
 
 // checkCreateSBOM records a rate-limit (429) backoff entry in the tooManyRequests cache if the error indicates a rate-limited registry pull.
@@ -1333,7 +1336,8 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 		// provenance. Workload scans can reuse the size verdict, subject to the
 		// usual limit checks below, but must never receive that document.
 		workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
-		if !s.sbomGeneration || (workload.Wlid == "" && workload.InstanceID == "") || sbom.Status != helpersv1.TooLarge {
+		canTryImport := ok && workload.Wlid == "" && workload.InstanceID == ""
+		if !s.sbomGeneration || canTryImport || sbom.Status != helpersv1.TooLarge {
 			return domain.SBOM{}, nil
 		}
 		sbom.Content = nil
