@@ -55,8 +55,10 @@ func TestAcquireRegistryCredentials(t *testing.T) {
 			p, key := testPolicy(t, repo.Name())
 			policy, err := CompilePolicy(p)
 			require.NoError(t, err)
-			client, err := newRegistryClient(context.Background(), repo, image.RegistryOptions{InsecureUseHTTP: true}, policy)
+			optsForSetup := image.RegistryOptions{InsecureUseHTTP: true}
+			budget, err := newRegistryTransport(repo, optsForSetup, policy)
 			require.NoError(t, err)
+			client := newRegistryClient(context.Background(), repo, optsForSetup, budget)
 			defer client.budget.base.(*http.Transport).CloseIdleConnections()
 			subject, err := client.resolve(ref, "linux/amd64")
 			require.NoError(t, err)

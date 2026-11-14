@@ -74,4 +74,9 @@ func TestWorkloadReusesTooLargeVerdictAfterImport(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.Status)
 	require.Nil(t, got.Content)
+	// With import disabled, registry scans use local generation and its size verdict.
+	s.sbomCreator = fallback
+	require.ErrorIs(t, s.GenerateSBOM(registryCtx), domain.ErrIncompleteSBOM)
+	require.Equal(t, 1, fallback.calls)
+
 }

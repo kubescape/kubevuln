@@ -53,6 +53,7 @@ func TestTransportTotalBudget(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	err = roundTripError(tr, req)
 	require.ErrorContains(t, err, "size budget")
+	require.Equal(t, int64(9), tr.fetchedBytes(), "only one byte beyond the total budget is read")
 }
 
 func TestTransportRejectsLegacyDiscoveryAndRequestLimit(t *testing.T) {
@@ -73,4 +74,34 @@ func roundTripError(tr http.RoundTripper, req *http.Request) error {
 		_ = resp.Body.Close()
 	}
 	return err
+}
+
+type partialErrorBody struct {
+	err    error
+	closed bool
+}
+
+func (b *partialErrorBody) Read(p []byte) (int, error) { return copy(p, "partial"), b.err }
+func (b *partialErrorBody) Close() error               { b.closed = true; return nil }
+
+type responseTransport func(*http.Request) (*http.Response, error)
+
+func (f responseTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTransportCountsPartialReadErrors(t *testing.T) {
+	for _, readErr := range []error{io.ErrUnexpectedEOF, context.DeadlineExceeded} {
+		t.Run(readErr.Error(), func(t *testing.T) {
+			body := &partialErrorBody{err: readErr}
+			tr := &boundedTransport{base: responseTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body, ContentLength: -1}, nil
+			}), maxBody: 100, remaining: 5}
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://registry.example/v2/", nil)
+			require.NoError(t, err)
+			require.ErrorIs(t, roundTripError(tr, req), readErr, "preserve the read error even when it exhausts the budget")
+			require.Equal(t, int64(6), tr.fetchedBytes())
+			require.Equal(t, int64(-1), tr.remaining)
+			require.True(t, body.closed)
+			require.ErrorContains(t, roundTripError(tr, req), "request budget")
+		})
+	}
 }
