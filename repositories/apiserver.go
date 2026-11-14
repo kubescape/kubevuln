@@ -1680,6 +1680,33 @@ func legacyImageProductID(image string) string {
 	return fmt.Sprintf("pkg:oci/%s", url.PathEscape(imageName))
 }
 
+// migrateLegacyImageProducts gives kubevuln's own statements the image product ID that
+// imageProductID gives image today, where they still carry the one every reference used to
+// get (legacyImageProductID). updateVEX keys statements on vulnerability and package purl, so
+// a document stored before the product ID changed kept the old one, which Grype matches to no
+// image, through every later scan.
+//
+// Only a product whose ID is exactly what the old code wrote for this image is rewritten, and
+// only its ID: status, justification, statements and subcomponents stay as they are. A product
+// naming another image, a statement from another author, and a reference that does not parse
+// (whose ID is the legacy one either way) are left alone, and a second run changes nothing.
+func migrateLegacyImageProducts(statements []v1beta1.Statement, image string) {
+	legacy, current := legacyImageProductID(image), imageProductID(image)
+	if legacy == current {
+		return
+	}
+	for i := range statements {
+		if !isLocalStatement(statements[i].ID) {
+			continue
+		}
+		for j := range statements[i].Products {
+			if statements[i].Products[j].ID == legacy {
+				statements[i].Products[j].ID = current
+			}
+		}
+	}
+}
+
 func buildIgnoredVEXAssessmentMap(cve *domain.CVEManifest) map[vexStatementKey]ignoredVEXAssessment {
 	ignoredMap := make(map[vexStatementKey]ignoredVEXAssessment)
 
@@ -2204,6 +2231,11 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
 		}
 	}
+
+	// Statements stored before the image product ID followed the oci purl type still name
+	// the image the old way, which no image matches. New statements get today's ID from
+	// newLocalStatement, the same trimming included.
+	migrateLegacyImageProducts(vexDoc.Statements, strings.TrimPrefix(imagePullable, "docker://"))
 
 	// statementIdx tracks local statements by (vulnerability, package), built once and kept
 	// up to date as statements are appended below. It drives the Matches/IgnoredMatches dedup
