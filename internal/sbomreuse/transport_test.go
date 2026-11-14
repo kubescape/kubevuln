@@ -53,6 +53,7 @@ func TestTransportTotalBudget(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	err = roundTripError(tr, req)
 	require.ErrorContains(t, err, "size budget")
+	require.Equal(t, int64(9), tr.fetchedBytes(), "only one byte beyond the total budget is read")
 }
 
 func TestTransportRejectsLegacyDiscoveryAndRequestLimit(t *testing.T) {
@@ -97,8 +98,8 @@ func TestTransportCountsPartialReadErrors(t *testing.T) {
 			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://registry.example/v2/", nil)
 			require.NoError(t, err)
 			require.ErrorIs(t, roundTripError(tr, req), readErr, "preserve the read error even when it exhausts the budget")
-			require.Equal(t, int64(7), tr.fetchedBytes())
-			require.Equal(t, int64(-2), tr.remaining)
+			require.Equal(t, int64(6), tr.fetchedBytes())
+			require.Equal(t, int64(-1), tr.remaining)
 			require.True(t, body.closed)
 			require.ErrorContains(t, roundTripError(tr, req), "request budget")
 		})

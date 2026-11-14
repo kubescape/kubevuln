@@ -1332,8 +1332,18 @@ func (s *ScanService) getSBOM(ctx context.Context, name string, creatorVersion s
 		if s.sbomGeneration && ok && (err == nil || errors.Is(err, domain.ErrOutdatedSBOM)) && validator.ValidateCachedSBOM(ctx, sbom) {
 			return sbom, nil
 		}
-		// Disabled/changed trust must never turn an imported inventory into a local hit.
-		return domain.SBOM{}, nil
+		// A status-only local write preserves the old imported document and its
+		// provenance. Workload scans can reuse the size verdict, subject to the
+		// usual limit checks below, but must never receive that document.
+		workload, _ := ctx.Value(domain.WorkloadKey{}).(domain.ScanCommand)
+		if !s.sbomGeneration || (workload.Wlid == "" && workload.InstanceID == "") || sbom.Status != helpersv1.TooLarge {
+			return domain.SBOM{}, nil
+		}
+		sbom.Content = nil
+		if errors.Is(err, domain.ErrOutdatedSBOM) {
+			// Storage always reports imported documents as outdated.
+			err = nil
+		}
 	}
 	if !s.sbomGeneration {
 		return nodeAgentSBOM(sbom, err)
