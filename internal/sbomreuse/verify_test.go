@@ -35,6 +35,14 @@ func TestVerifySignedSubject(t *testing.T) {
 	predicate, signer, err := verify(context.Background(), env, s, policy.repositories[repo.Name()])
 	require.NoError(t, err)
 	require.NotEmpty(t, signer)
+	var labeled dsse.Envelope
+	require.NoError(t, json.Unmarshal(env, &labeled))
+	labeled.Signatures[0].KeyID = "producer-key"
+	env, err = json.Marshal(labeled)
+	require.NoError(t, err)
+	_, verifiedID, err := verify(context.Background(), env, s, policy.repositories[repo.Name()])
+	require.NoError(t, err)
+	require.Equal(t, signer, verifiedID)
 	require.JSONEq(t, `{"artifacts":[]}`, string(predicate))
 	other, _ := testPolicy(t, repo.Name())
 	otherPolicy, err := CompilePolicy(other)

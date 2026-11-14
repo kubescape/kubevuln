@@ -71,7 +71,7 @@ func compatible(raw []byte, s subject, producer trust) (*v1beta1.SyftDocument, e
 	if err := json.Unmarshal(meta.Config, &cfg); err != nil {
 		return nil, err
 	}
-	if !samePlatform(v1.Platform{OS: cfg.OS, Architecture: cfg.Architecture, Variant: cfg.Variant}, s.platform) {
+	if !matchesPlatform(v1.Platform{OS: cfg.OS, Architecture: cfg.Architecture, Variant: cfg.Variant, OSVersion: cfg.OSVersion}, s.platform) {
 		return nil, fmt.Errorf("syft source platform mismatch")
 	}
 	var doc v1beta1.SyftDocument
