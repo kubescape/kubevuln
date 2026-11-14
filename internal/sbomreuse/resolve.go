@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -52,8 +53,8 @@ func (c *registryClient) resolve(ref name.Digest, platform string) (subject, err
 	}
 	var requested *v1.Platform
 	if platform != "" {
-		requested, err = v1.ParsePlatform(platform)
-		if err != nil || requested.OS == "" || requested.Architecture == "" {
+		requested, err = parseRequestedPlatform(platform)
+		if err != nil {
 			return subject{}, fmt.Errorf("invalid image platform")
 		}
 	}
@@ -74,7 +75,7 @@ func (c *registryClient) resolve(ref name.Digest, platform string) (subject, err
 		}
 		var candidates []v1.Descriptor
 		for _, child := range manifest.Manifests {
-			if child.Platform != nil && samePlatform(*child.Platform, *requested) {
+			if child.Platform != nil && matchesPlatform(*child.Platform, *requested) {
 				candidates = append(candidates, child)
 			}
 		}
@@ -98,8 +99,8 @@ func (c *registryClient) resolve(ref name.Digest, platform string) (subject, err
 	if err != nil {
 		return subject{}, err
 	}
-	actual := v1.Platform{OS: cfg.OS, Architecture: cfg.Architecture, Variant: cfg.Variant}
-	if actual.OS == "" || actual.Architecture == "" || (requested != nil && !samePlatform(actual, *requested)) {
+	actual := v1.Platform{OS: cfg.OS, Architecture: cfg.Architecture, Variant: cfg.Variant, OSVersion: cfg.OSVersion}
+	if actual.OS == "" || actual.Architecture == "" || (requested != nil && !matchesPlatform(actual, *requested)) {
 		return subject{}, fmt.Errorf("image configuration does not match platform")
 	}
 	manifest, err := img.Manifest()
@@ -112,6 +113,19 @@ func (c *registryClient) resolve(ref name.Digest, platform string) (subject, err
 	return subject{ref: ref, descriptor: d.Descriptor, platform: actual, configDigest: manifest.Config.Digest.String()}, nil
 }
 
-func samePlatform(a, b v1.Platform) bool {
-	return a.OS == b.OS && a.Architecture == b.Architecture && a.Variant == b.Variant
+func parseRequestedPlatform(value string) (*v1.Platform, error) {
+	value = strings.TrimSpace(value)
+	if !strings.Contains(value, "/") {
+		value = "linux/" + value
+	}
+	p, err := v1.ParsePlatform(value)
+	if err != nil || p.OS == "" || p.Architecture == "" || strings.Count(value, ":") > 1 || strings.HasSuffix(value, ":") {
+		return nil, fmt.Errorf("invalid image platform %q", value)
+	}
+	return p, nil
+}
+
+func matchesPlatform(actual, requested v1.Platform) bool {
+	return actual.OS == requested.OS && actual.Architecture == requested.Architecture &&
+		actual.Variant == requested.Variant && (requested.OSVersion == "" || actual.OSVersion == requested.OSVersion)
 }
