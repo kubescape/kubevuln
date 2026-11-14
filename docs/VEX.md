@@ -130,7 +130,8 @@ is the digest, and `repository_url` is the whole repository, image name included
 (`pkg:oci/nginx@sha256:...?repository_url=docker.io/library/nginx`). A Docker Hub
 reference is normalized first, so `nginx`, `library/nginx` and `index.docker.io/nginx` all
 name `docker.io/library/nginx`. A reference with no digest, as in a registry scan, carries
-its tag as a `tag` qualifier instead.
+its tag as a `tag` qualifier instead. Documents stored before this form was used are
+rewritten on the image's next scan; see [Legacy statement repair](#legacy-statement-repair).
 
 `vulnerability.@id` holds the Grype match's data source URL and `vulnerability.name` holds
 the CVE identifier. Documents written by older versions have these two swapped; see
@@ -312,8 +313,8 @@ producing a different hash for identical content on consecutive runs.
 
 ## Legacy statement repair
 
-`updateVEX` opens with two passes that exist purely to reconcile documents written by older
-versions. Both are worth knowing about when reading a document that has been around a while.
+`updateVEX` opens with three passes that exist purely to reconcile documents written by older
+versions. All are worth knowing about when reading a document that has been around a while.
 
 **ID-less statements.** Statements stored before kubevuln started setting an `@id` have
 none, and treating an empty ID as ours was later stopped so that an external feed's ID-less
@@ -328,6 +329,15 @@ impact statement and the action statement are checked, since a statement last wr
 **Swapped fields.** Statements written before the ID/Name mapping was corrected carry the
 CVE identifier in `@id` and the data source URL in `name`. They are normalised in place so
 the dedup, which keys on `name`, finds them instead of appending a duplicate for each.
+
+**Old image products.** Statements written before the image purl followed the `oci` type
+name the image the old way: the last path segment, tag or digest included, as the name, and
+the parent path as `repository_url`. Grype matches no image to that, and since statements
+are keyed on vulnerability and package, a later scan never rewrote it. A kubevuln product
+whose `@id` is exactly what the old code wrote for the manifest's image is given today's
+`@id`. Its statement, status and subcomponents are kept, a product naming another image or
+belonging to another author is left alone, and so is a reference that does not parse, whose
+`@id` never changed.
 
 ## External VEX ingestion status
 
