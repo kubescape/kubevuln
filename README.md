@@ -25,70 +25,39 @@ summary, and VEX writes atomic. A later upload failure does not invalidate a
 successfully generated report's timestamp.
 
 ## Build Kubevuln
-To build kubevuln with its dependencies run: `make`
+`make` builds the Linux/amd64 binary that goes into the container image. To build for your
+own platform instead, run `go build -o kubevuln ./cmd/http`.
 
 ## Configuration
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the current, complete configuration reference (environment variables, `clusterData.json` schema, and validation). The example below predates it and doesn't reflect current field names.
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuration reference
+(environment variables, the `clusterData.json` schema, and validation).
 
-1. Load config file using the `CONFIG` environment variable
+kubevuln reads `clusterData.json` from the directory named by the `CONFIG_DIR` environment
+variable (default `/etc/config`) and always listens on port 8080. To run it locally without a
+backend or a cluster:
 
-   `export CONFIG=path/to/clusterData.json`
-
-   <details><summary>example/clusterData.json</summary>
-
-   ```json5
-   {
-       "gatewayWebsocketURL": "127.0.0.1:8001",
-       "gatewayRestURL": "127.0.0.1:8002",
-       "kubevulnURL": "127.0.0.1:8080",
-       "kubescapeURL": "127.0.0.1:8080",
-       "eventReceiverRestURL": "https://report.armo.cloud",
-       "eventReceiverWebsocketURL": "wss://report.armo.cloud",
-       "rootGatewayURL": "wss://ens.euprod1.cyberarmorsoft.com/v1/waitfornotification",
-       "accountID": "*********************",
-       "clusterName": "******"
-      }
-   ```
-   </details>
-
-2. Set the `PORT` environment variable to 8081
-   `export PORT=8080`
-
-## Environment Variables
-
-Check out `scanner/environmentvariables.go`
-
-## VS code configuration samples
-
-You can use the samples files below to setup your [VS code](https://www.armosec.io/blog/securing-ci-cd-pipelines-security-gates/?utm_source=github&utm_medium=repository) environment for building and debugging purposes.
-
-<details><summary>.vscode/launch.json</summary>
-
-```json5
+```bash
+mkdir -p .dev/config
+cat > .dev/config/clusterData.json << 'EOF'
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Launch Package",
-            "type": "go",
-            "request": "launch",
-            "mode": "auto",
-            "program":  "${workspaceRoot}",
-                 "env": {
-                     "PORT": "8080",
-                     "NAMESPACE": "kubescape",
-                     "CONFIG": "${workspaceRoot}/.vscode/clusterData.json",
-            },
-            "args": [
-                "-alsologtostderr", "-v=4", "2>&1"
-            ]
-        }
-    ]
+  "keepLocal": true,
+  "clusterName": "dev-cluster"
 }
+EOF
+
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true go run ./cmd/http
 ```
-We configure the Kubevuln to listen to port 8080, and define the configuration in the clusterData.json file [as mentioned above](https://github.com/kubescape/kubevuln#configuration).
-</details>
+
+`KS_API_AUTH_DISABLED=true` is what lets it start without a cluster. By default every API route
+except the probes and `/metrics` requires a Kubernetes service-account token, and kubevuln exits
+at startup when `POD_NAMESPACE` is not set. Never set `KS_API_AUTH_DISABLED` in a cluster. See
+[API authentication](docs/API.md#api-authentication).
+
+## Development
+
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) covers building, testing, debugging, and sample
+VS Code and GoLand run configurations.
 
 ## Changelog
 

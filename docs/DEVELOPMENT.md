@@ -98,8 +98,13 @@ EOF
 make
 
 # Run
-CONFIG_DIR=.dev/config go run ./cmd/http
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true go run ./cmd/http
 ```
+
+`KS_API_AUTH_DISABLED=true` turns off [API authentication](API.md#api-authentication), which is
+on by default. With it on, kubevuln needs `POD_NAMESPACE` and a kube config for the API server,
+and without them exits at startup with `POD_NAMESPACE must be set for API auth`. Every local
+run command in this guide sets it. Never set it in a cluster.
 
 ### 5. Verify
 
@@ -120,15 +125,15 @@ curl http://localhost:8080/v1/readiness
 ### Build Commands
 
 ```bash
-# Build binary for current platform
+# Build the Linux/amd64 binary the container image ships
 make
 
-# Build binary manually
-CGO_ENABLED=0 go build -o kubevuln cmd/http/main.go
+# Build binary for current platform
+CGO_ENABLED=0 go build -o kubevuln ./cmd/http
 
 # Build for specific platform
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln cmd/http/main.go
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o kubevuln-arm64 cmd/http/main.go
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln ./cmd/http
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o kubevuln-arm64 ./cmd/http
 ```
 
 ### Docker Build
@@ -150,7 +155,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ```bash
 # Check the binary runs (it takes no flags, so this starts the server; Ctrl-C to stop)
-./kubevuln
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true ./kubevuln
 
 # Check size
 ls -lh kubevuln
@@ -298,7 +303,7 @@ and environment. Log level is one of `debug`, `info`, `warning`, `error` or `fat
 ```bash
 # Run with debug logging
 export KS_LOGGER_LEVEL=debug
-./kubevuln
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true ./kubevuln
 
 # Optionally name the logger in the output
 export KS_LOGGER_NAME=pretty
@@ -311,13 +316,13 @@ export KS_LOGGER_NAME=pretty
 go install github.com/go-delve/delve/cmd/dlv@latest
 
 # Debug build (includes debug symbols)
-go build -gcflags="all=-N -l" -o kubevuln cmd/http/main.go
+go build -gcflags="all=-N -l" -o kubevuln ./cmd/http
 
 # Start debugger
-CONFIG_DIR=.dev/config dlv exec ./kubevuln
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true dlv exec ./kubevuln
 
 # Or debug directly
-CONFIG_DIR=.dev/config dlv debug cmd/http/main.go
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true dlv debug ./cmd/http
 ```
 
 Common Delve commands:
@@ -429,7 +434,8 @@ kubevuln/
 │                                                                  │
 │  4. Run slower checks as needed                                  │
 │     └── make verify-image                                        │
-│     └── CONFIG_DIR=.dev/config ./kubevuln                       │
+│     └── CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true \       │
+│         ./kubevuln                                               │
 │                                                                  │
 │  5. Commit changes                                               │
 │     └── git commit -m "Add feature X"                           │
@@ -468,7 +474,7 @@ Keep slower or network-backed checks separate from the fast path:
 make verify-image
 
 # Optional runtime smoke check; readiness may wait on vulnerability DB download
-CONFIG_DIR=.dev/config go run ./cmd/http
+CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true go run ./cmd/http
 
 # Optional integration suite when external dependencies are available
 go test -tags=integration ./...
@@ -642,6 +648,7 @@ go mod verify
       "program": "${workspaceFolder}/cmd/http",
       "env": {
         "CONFIG_DIR": "${workspaceFolder}/.dev/config",
+        "KS_API_AUTH_DISABLED": "true",
         "KS_LOGGER_LEVEL": "debug"
       }
     },
@@ -684,7 +691,7 @@ go mod verify
    - Type: Go Build
    - Run kind: Directory
    - Directory: `cmd/http`
-   - Environment: `CONFIG_DIR=/path/to/kubevuln/.dev/config`
+   - Environment: `CONFIG_DIR=/path/to/kubevuln/.dev/config;KS_API_AUTH_DISABLED=true`
 
 ### Vim/Neovim
 
