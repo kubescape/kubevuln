@@ -336,12 +336,12 @@ the parent path as `repository_url`. Grype matches no image to that, and since s
 are keyed on vulnerability and package, a later scan never rewrote it. A kubevuln product
 whose `@id` is exactly what an earlier version wrote for the manifest's image is given today's
 `@id`. For a name with no path, that includes the form from before #719, which kept an empty
-`repository_url=`. The old `@id` follows the reference's spelling, so when the container's
-stored `kubescape.io/image-id` is another spelling of the same image (`index.docker.io/library/nginx`
-rescanned as `docker.io/library/nginx`), the `@id`s written for that spelling are rewritten
-too. Its statement, status and subcomponents are kept, a product naming another image or
-belonging to another author is left alone, and a reference that does not parse keeps the
-`@id` it has had since #719.
+`repository_url=`. The old `@id` follows the reference's spelling, so for a Docker Hub image
+the `@id`s of every way to write it are rewritten (`docker.io/`, `index.docker.io/` or no
+registry, with or without `library/`), and so are those of the container's stored
+`kubescape.io/image-id` when it is another spelling of the same image. Its statement, status
+and subcomponents are kept, and a product naming another image or belonging to another
+author is left alone. Nothing is rewritten for a reference that does not parse.
 
 ## External VEX ingestion status
 

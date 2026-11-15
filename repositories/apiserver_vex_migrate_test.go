@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"testing"
 
@@ -108,14 +109,60 @@ func TestMigrateLegacyImageProductsKeepsAnUnparseableReference(t *testing.T) {
 		assert.Equal(t, want, statements, "%q", image)
 	}
 
-	// Before #719 it had an empty repository_url qualifier as well, which #719 dropped.
+	// Before #719 it had an empty repository_url qualifier as well. That stays too.
 	const bare = "App:1.0" // upper case: not a reference
 	statements := []v1beta1.Statement{{
 		ID:       localStatementID("CVE-2023-0001", packagePURL),
 		Products: []v1beta1.Product{imageProduct("pkg:oci/App:1.0?repository_url=", packagePURL)},
 	}}
 	migrateLegacyImageProducts(statements, bare, "")
-	assert.Equal(t, "pkg:oci/App:1.0", statements[0].Products[0].ID, "it gets the ID it has had since #719")
+	assert.Equal(t, "pkg:oci/App:1.0?repository_url=", statements[0].Products[0].ID, "an unparseable reference keeps its ID")
+}
+
+// Every Docker Hub spelling of the image wrote its own old ID, and the document may carry any
+// of them: each is rewritten, whichever spelling is rescanned.
+func TestMigrateLegacyImageProductsCoversEveryDockerHubSpelling(t *testing.T) {
+	const packagePURL = "pkg:deb/debian/openssl@3.0.11-1"
+	const current = "pkg:oci/nginx?repository_url=docker.io%2Flibrary%2Fnginx&tag=1.25"
+	old := []string{
+		"pkg:oci/nginx:1.25",                                    // nginx:1.25
+		"pkg:oci/nginx:1.25?repository_url=",                    // nginx:1.25, before #719
+		"pkg:oci/nginx:1.25?repository_url=library",             // library/nginx:1.25
+		"pkg:oci/nginx:1.25?repository_url=docker.io",           // docker.io/nginx:1.25
+		"pkg:oci/nginx:1.25?repository_url=docker.io%2Flibrary", // docker.io/library/nginx:1.25
+		"pkg:oci/nginx:1.25?repository_url=index.docker.io",
+		"pkg:oci/nginx:1.25?repository_url=index.docker.io%2Flibrary",
+	}
+	for _, image := range []string{"nginx:1.25", "docker.io/library/nginx:1.25", "index.docker.io/nginx:1.25"} {
+		statements := make([]v1beta1.Statement, len(old))
+		for i, id := range old {
+			statements[i] = v1beta1.Statement{
+				ID:       localStatementID(fmt.Sprintf("CVE-2023-%04d", i), packagePURL),
+				Products: []v1beta1.Product{imageProduct(id, packagePURL)},
+			}
+		}
+		require.Equal(t, current, imageProductID(image))
+
+		migrateLegacyImageProducts(statements, image, "")
+		for i, s := range statements {
+			assert.Equal(t, current, s.Products[0].ID, "%s rescanned as %s", old[i], image)
+		}
+	}
+
+	assert.Equal(t, []string{"quay.io/prometheus/node-exporter:v1.8.2"}, imageSpellings("quay.io/prometheus/node-exporter:v1.8.2"),
+		"another registry has one spelling")
+}
+
+// The stored annotation is merged over by every scan, so it may already hold the spelling being
+// rescanned while the products still carry another spelling's old ID.
+func TestAPIServerStore_updateVEX_migratesADockerHubSpellingTheAnnotationLost(t *testing.T) {
+	const image = "docker.io/library/nginx:1.25"
+	a, ctx := storeWithLegacyProducts(t, image, "pkg:oci/nginx:1.25?repository_url=index.docker.io%2Flibrary")
+
+	full, filtered := manifestsForImage(image)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+
+	requireProducts(t, a, ctx, full.Name, "pkg:oci/nginx?repository_url=docker.io%2Flibrary%2Fnginx&tag=1.25")
 }
 
 // storeWithLegacyProducts stores the VEX document for the testdata manifests with the image
