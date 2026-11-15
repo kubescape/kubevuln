@@ -1680,6 +1680,95 @@ func legacyImageProductID(image string) string {
 	return fmt.Sprintf("pkg:oci/%s", url.PathEscape(imageName))
 }
 
+// migrateLegacyImageProducts gives kubevuln's own statements the image product ID that
+// imageProductID gives image today, where they still carry one an earlier version wrote for it
+// (legacyImageProductIDs). updateVEX keys statements on vulnerability and package purl, so a
+// document stored before the product ID changed kept the old one, which Grype matches to no
+// image, through every later scan.
+//
+// The old IDs follow the reference's spelling, and the document may have been written for
+// another spelling of the same image than the one rescanned now (index.docker.io/library/nginx
+// and docker.io/library/nginx). So the IDs of every Docker Hub spelling of the image are
+// migrated (imageSpellings), and those of storedImage, the image the stored document was
+// written for, when it resolves to the same ID today.
+//
+// Only a product whose ID is exactly one of those is rewritten, and only its ID: status,
+// justification, statements and subcomponents stay as they are. A product naming another
+// image, a statement from another author, and every product of a reference that does not
+// parse are left alone, and a second run changes nothing.
+func migrateLegacyImageProducts(statements []v1beta1.Statement, image, storedImage string) {
+	if _, err := reference.ParseNormalizedNamed(image); err != nil {
+		return // no repository to name: whatever ID it has stays
+	}
+	current := imageProductID(image)
+	legacy := map[string]bool{}
+	spellings := imageSpellings(image)
+	if storedImage != "" && storedImage != image && imageProductID(storedImage) == current {
+		spellings = append(spellings, imageSpellings(storedImage)...)
+	}
+	for _, spelling := range spellings {
+		if imageProductID(spelling) == current {
+			maps.Copy(legacy, legacyImageProductIDs(spelling))
+		}
+	}
+	delete(legacy, current)
+	if len(legacy) == 0 {
+		return
+	}
+	for i := range statements {
+		if !isLocalStatement(statements[i].ID) {
+			continue
+		}
+		for j := range statements[i].Products {
+			if legacy[statements[i].Products[j].ID] {
+				statements[i].Products[j].ID = current
+			}
+		}
+	}
+}
+
+// imageSpellings returns image and, for a Docker Hub reference, the other ways it can be
+// written: with docker.io/, index.docker.io/ or no registry, and for an official image with or
+// without library/, each with the same tag and digest. The old product IDs follow the spelling,
+// and a document can hold them for a spelling its annotation no longer records, as a later
+// scan's annotations are merged over it.
+func imageSpellings(image string) []string {
+	spellings := []string{image}
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil || reference.Domain(named) != "docker.io" {
+		return spellings
+	}
+	var suffix string
+	if tagged, ok := named.(reference.Tagged); ok {
+		suffix += ":" + tagged.Tag()
+	}
+	if digested, ok := named.(reference.Digested); ok {
+		suffix += "@" + digested.Digest().String()
+	}
+	paths := []string{reference.Path(named)}
+	if short, ok := strings.CutPrefix(paths[0], "library/"); ok {
+		paths = append(paths, short)
+	}
+	for _, registry := range []string{"", "docker.io/", "index.docker.io/"} {
+		for _, path := range paths {
+			spellings = append(spellings, registry+path+suffix)
+		}
+	}
+	return spellings
+}
+
+// legacyImageProductIDs returns the IDs earlier versions gave image: legacyImageProductID, and
+// for a reference with no path, the form written before #719, which kept an empty
+// repository_url qualifier ("pkg:oci/nginx:1.25?repository_url=").
+func legacyImageProductIDs(image string) map[string]bool {
+	id := legacyImageProductID(image)
+	ids := map[string]bool{id: true}
+	if !strings.Contains(id, "?") {
+		ids[id+"?repository_url="] = true
+	}
+	return ids
+}
+
 func buildIgnoredVEXAssessmentMap(cve *domain.CVEManifest) map[vexStatementKey]ignoredVEXAssessment {
 	ignoredMap := make(map[vexStatementKey]ignoredVEXAssessment)
 
@@ -2204,6 +2293,13 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 			vexDoc.Statements[i].Vulnerability.ID, vexDoc.Statements[i].Vulnerability.Name = s.Vulnerability.Name, s.Vulnerability.ID
 		}
 	}
+
+	// Statements stored before the image product ID followed the oci purl type still name
+	// the image the old way, which no image matches. New statements get today's ID from
+	// newLocalStatement, the same trimming included. The container's annotation is still the
+	// one it was stored with here: the incoming annotations are merged into it further down.
+	migrateLegacyImageProducts(vexDoc.Statements, strings.TrimPrefix(imagePullable, "docker://"),
+		strings.TrimPrefix(vexContainer.Annotations[helpersv1.ImageIDMetadataKey], "docker://"))
 
 	// statementIdx tracks local statements by (vulnerability, package), built once and kept
 	// up to date as statements are appended below. It drives the Matches/IgnoredMatches dedup
