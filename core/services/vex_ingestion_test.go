@@ -69,7 +69,7 @@ type vexRecordingPlatform struct {
 
 func (p *vexRecordingPlatform) ReportError(ctx context.Context, err error) error {
 	p.reported = append(p.reported, err)
-	return p.Platform.ReportError(ctx, err)
+	return nil
 }
 
 func newVEXTestService(scanner ports.CVEScanner, server *httptest.Server, sources []vexsource.Source) *ScanService {
@@ -114,7 +114,7 @@ func TestScanSBOMWithExternalVEXKeepsPartialSuccessAndCleansStagedFiles(t *testi
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	platform := service.platform.(*vexRecordingPlatform)
-	require.Len(t, platform.reported, 1)
+	require.Empty(t, platform.reported, "optional VEX errors must not mark the backend job failed")
 }
 
 func TestScanSBOMFallsBackWhenGrypeCannotApplyExternalVEX(t *testing.T) {
@@ -139,7 +139,7 @@ func TestScanSBOMFallsBackWhenGrypeCannotApplyExternalVEX(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	platform := service.platform.(*vexRecordingPlatform)
-	require.Len(t, platform.reported, 1)
+	require.Empty(t, platform.reported, "optional VEX errors must not mark the backend job failed")
 }
 
 func TestCVECachingVersionIsScopedToExternalVEXSources(t *testing.T) {
@@ -171,5 +171,5 @@ func TestScanSBOMFallsBackWhenAllExternalSourcesFail(t *testing.T) {
 	require.Equal(t, 1, scanner.plainCalls)
 
 	platform := service.platform.(*vexRecordingPlatform)
-	require.Len(t, platform.reported, 1)
+	require.Empty(t, platform.reported, "optional VEX errors must not mark the backend job failed")
 }
