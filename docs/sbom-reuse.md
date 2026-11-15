@@ -87,7 +87,9 @@ Multi-platform image indexes require an explicit exact OS/architecture/variant
 match. For example, `linux/arm64/v8` is distinct from `linux/arm64`. All lookups and credential retries
 share one timeout, request limit, and byte budget for the acquisition. Cache eligibility trusts cluster storage
 and revalidates policy, signer, content digest, source identity and compatibility;
-it does not fetch a new remote signature on every cache hit.
+it does not fetch a new remote signature on every cache hit. The content digest is taken
+over the protobuf encoding that storage keeps, so an inventory read back from storage,
+where an empty list comes back as a missing one, still matches it.
 
 ## Reproducing real inventory parity
 

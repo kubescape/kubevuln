@@ -2,9 +2,6 @@ package sbomreuse
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -85,11 +82,10 @@ func (p *Provider) Acquire(ctx context.Context, slug, imageID string, opts domai
 		if err != nil {
 			return domain.SBOM{}, err
 		}
-		stored, err := json.Marshal(doc)
+		hash, err := contentDigest(doc)
 		if err != nil {
 			return domain.SBOM{}, err
 		}
-		hash := sha256.Sum256(stored)
 		result = "accepted"
 		return domain.SBOM{
 			Name:               slug,
@@ -105,7 +101,7 @@ func (p *Provider) Acquire(ctx context.Context, slug, imageID string, opts domai
 				domain.SBOMImportArtifact:            a.digest,
 				domain.SBOMImportSubject:             s.ref.Name(),
 				domain.SBOMImportRequest:             ref.Name(),
-				domain.SBOMImportContent:             hex.EncodeToString(hash[:]),
+				domain.SBOMImportContent:             hash,
 				domain.SBOMImportSchema:              producer.SchemaVersion,
 				domain.SBOMImportVerifiedAt:          time.Now().UTC().Format(time.RFC3339),
 				domain.ResolvedPlatformAnnotationKey: s.platform.String(),
