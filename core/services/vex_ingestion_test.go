@@ -154,3 +154,22 @@ func TestCVECachingVersionIsScopedToExternalVEXSources(t *testing.T) {
 	service.SetVEXSources([]vexsource.Source{{URL: "https://vex.example.com/other.json"}})
 	require.NotEqual(t, withOpenVEX, service.cveCacheVersion())
 }
+
+func TestScanSBOMFallsBackWhenAllExternalSourcesFail(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	scanner := &vexAwareTestScanner{CVEScanner: adapters.NewMockCVEAdapter()}
+	service := newVEXTestService(scanner, server, []vexsource.Source{{URL: server.URL}})
+
+	manifest, err := service.scanSBOM(context.Background(), domain.SBOM{Name: "image"})
+	require.NoError(t, err)
+	require.NotNil(t, manifest.Content)
+	require.Zero(t, scanner.vexCalls)
+	require.Equal(t, 1, scanner.plainCalls)
+
+	platform := service.platform.(*vexRecordingPlatform)
+	require.Len(t, platform.reported, 1)
+}
