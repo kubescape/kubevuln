@@ -60,6 +60,12 @@ const (
 // adds false positives, so adaptive mode falls back to Grype defaults.
 var defaultTrustedVendors = []string{"echo", "chainguard", "wolfi", "minimos"}
 
+// VEXSourceConfig describes one external VEX feed configured in clusterData.json.
+type VEXSourceConfig struct {
+	URL    string `mapstructure:"url"`
+	Format string `mapstructure:"format"`
+}
+
 type Config struct {
 	SBOMReusePolicyFile     string            `mapstructure:"sbomReusePolicyFile"`
 	AccountID               string            `mapstructure:"accountID"`
@@ -85,6 +91,7 @@ type Config struct {
 	CVEMatchingMode         CVEMatchingMode   `mapstructure:"cveMatchingMode"`
 	TrustedVendors          []string          `mapstructure:"trustedVendors"` // distro slugs trusted in adaptive mode; empty/unset reverts to defaultTrustedVendors
 	VexGeneration           bool              `mapstructure:"vexGeneration"`
+	VEXSources              []VEXSourceConfig `mapstructure:"vexSources"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -159,6 +166,26 @@ func LoadConfig(path string) (Config, error) {
 	var config Config
 	if err = v.Unmarshal(&config); err != nil {
 		return Config{}, err
+	}
+
+	// External VEX feeds are fetched by safefetch, which deliberately accepts only
+	// absolute HTTPS URLs. Normalize formats here so unsupported values fail at startup.
+	for i := range config.VEXSources {
+		source := &config.VEXSources[i]
+		source.URL = strings.TrimSpace(source.URL)
+		parsed, parseErr := url.Parse(source.URL)
+		if parseErr != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("vexSources[%d].url must be an absolute HTTPS URL without embedded credentials", i)
+		}
+		source.Format = strings.ToLower(strings.TrimSpace(source.Format))
+		if source.Format == "" {
+			source.Format = "openvex"
+		}
+		switch source.Format {
+		case "openvex", "csaf":
+		default:
+			return Config{}, fmt.Errorf("vexSources[%d].format %q is unsupported: use openvex or csaf", i, source.Format)
+		}
 	}
 
 	// cmd/http passes ScanTimeout straight through to

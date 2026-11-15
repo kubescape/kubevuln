@@ -202,7 +202,29 @@ credentials file has none. If neither source has one, startup fails.
 | `maxQueueDepth` | int | `0` | Maximum number of scans accepted but not yet finished (queued or running) that the HTTP controller will hold at once. `0` or a negative value means unbounded, matching the pre-existing behavior: `workerpool.Submit` never blocks, so without this a sustained burst of requests past `scanConcurrency` grows the backlog — and the registry credentials each queued job holds onto — without limit. Once set to a positive value and reached, new scan requests are rejected with `503` instead of being queued, so a caller handling that status can retry later rather than assuming the scan is in flight. This counts total pending scans (queued + running), which differs from the `kubevuln_worker_pool_queue_depth` metric (queued only, via the worker pool's own `WaitingQueueSize()`) — a scan can count against this limit while that gauge reads `0`. |
 | `scanTimeout` | duration | `5m` | Timeout for SBOM generation. The scanner protocol carries this as whole seconds, so when the `sbom-scanner` sidecar is in use a sub-second value is rounded up to `1s` and any fractional part is rounded up to the next second. The in-process `SyftAdapter` applies the value exactly. |
 | `scanEmbeddedSBOMs` | bool | `false` | Scan for embedded SBOMs in images |
+| `vexSources` | array of objects | `[]` | External VEX feeds. Each entry requires an absolute HTTPS `url` and accepts `format`: `openvex` (default) or `csaf`. Feed-enabled scans fetch sources for each scan and bypass cached CVE reads so feed updates are picked up. |
 | `scannerReadinessTimeout` | duration | `60s` | Maximum time to wait for the SBOM scanner sidecar to become ready at startup. A value of `0` or less does not mean "wait forever": it makes the readiness deadline expire immediately, causing startup to fall back to the built-in Syft scanner right away. |
+
+Example external feed configuration:
+
+```json
+{
+  "vexSources": [
+    {
+      "url": "https://vex.example.com/openvex.json",
+      "format": "openvex"
+    },
+    {
+      "url": "https://security.example.com/advisories/csaf.json",
+      "format": "csaf"
+    }
+  ]
+}
+```
+
+External feed URLs must use HTTPS. The fetcher blocks private, loopback, link-local, and
+other non-routable destinations, including redirect targets. Source failures are reported
+without failing the normal vulnerability scan.
 
 #### Shutdown Options
 
