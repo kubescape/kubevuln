@@ -79,10 +79,10 @@ func TestMigrateLegacyImageProducts(t *testing.T) {
 			want := cloneStatements(statements)
 			want[0].Products[0].ID = current
 
-			migrateLegacyImageProducts(statements, tc.image)
+			migrateLegacyImageProducts(statements, tc.image, "")
 			assert.Equal(t, want, statements, "only our product for this image is renamed")
 
-			migrateLegacyImageProducts(statements, tc.image)
+			migrateLegacyImageProducts(statements, tc.image, "")
 			assert.Equal(t, want, statements, "a second run changes nothing")
 		})
 	}
@@ -104,9 +104,117 @@ func TestMigrateLegacyImageProductsKeepsAnUnparseableReference(t *testing.T) {
 		}}
 		want := cloneStatements(statements)
 
-		migrateLegacyImageProducts(statements, image)
+		migrateLegacyImageProducts(statements, image, "")
 		assert.Equal(t, want, statements, "%q", image)
 	}
+
+	// Before #719 it had an empty repository_url qualifier as well, which #719 dropped.
+	const bare = "App:1.0" // upper case: not a reference
+	statements := []v1beta1.Statement{{
+		ID:       localStatementID("CVE-2023-0001", packagePURL),
+		Products: []v1beta1.Product{imageProduct("pkg:oci/App:1.0?repository_url=", packagePURL)},
+	}}
+	migrateLegacyImageProducts(statements, bare, "")
+	assert.Equal(t, "pkg:oci/App:1.0", statements[0].Products[0].ID, "it gets the ID it has had since #719")
+}
+
+// storeWithLegacyProducts stores the VEX document for the testdata manifests with the image
+// annotation set to storedImage, then rewrites each of kubevuln's products to the literal
+// legacyID, as an older kubevuln left it. It returns the store and the context to rescan with.
+func storeWithLegacyProducts(t *testing.T, storedImage, legacyID string) (*APIServerStore, context.Context) {
+	t.Helper()
+	full, filtered := manifestsForImage(storedImage)
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.WithValue(context.TODO(), domain.WorkloadKey{}, domain.ScanCommand{
+		ImageHash:     "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228",
+		InstanceID:    "apiVersion-apps/v1/namespace-kubescape/kind-ReplicaSet/name-kubevuln-65bfbfdcdd/containerName-kubevuln",
+		Wlid:          "wlid://cluster-aaa/namespace-anyNamespaceJob/job-anyJob",
+		ImageTag:      "nginx:latest",
+		ContainerName: "anyJobContName",
+	})
+	vexClient := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace)
+
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+	stored, err := vexClient.Get(ctx, full.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, storedImage, stored.Annotations[helpersv1.ImageIDMetadataKey])
+	ours := 0
+	for i := range stored.Spec.Statements {
+		if !isLocalStatement(stored.Spec.Statements[i].ID) {
+			continue
+		}
+		for j := range stored.Spec.Statements[i].Products {
+			stored.Spec.Statements[i].Products[j].ID = legacyID
+			ours++
+		}
+	}
+	require.NotZero(t, ours)
+	_, err = vexClient.Update(ctx, stored, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	return a, ctx
+}
+
+func manifestsForImage(image string) (domain.CVEManifest, domain.CVEManifest) {
+	full := tools.FileToCVEManifest("testdata/nginx-cve.json")
+	filtered := tools.FileToCVEManifest("testdata/nginx-cve-filtered.json")
+	for _, m := range []*domain.CVEManifest{&full, &filtered} {
+		m.Annotations = maps.Clone(m.Annotations)
+		m.Annotations[helpersv1.ImageIDMetadataKey] = image
+	}
+	return full, filtered
+}
+
+// requireProducts checks that every one of kubevuln's products in the stored document is want.
+func requireProducts(t *testing.T, a *APIServerStore, ctx context.Context, name, want string) {
+	t.Helper()
+	got, err := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace).Get(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	for _, s := range got.Spec.Statements {
+		if !isLocalStatement(s.ID) {
+			continue
+		}
+		for _, p := range s.Products {
+			require.Equal(t, want, p.ID, "statement %s", s.ID)
+		}
+	}
+}
+
+// Before #719 the repository_url qualifier was written even when it was empty, so a bare
+// image name got "pkg:oci/nginx:1.25?repository_url=". That form is migrated as well.
+func TestAPIServerStore_updateVEX_migratesThePre719BareImageForm(t *testing.T) {
+	const image = "nginx:1.25"
+	a, ctx := storeWithLegacyProducts(t, image, "pkg:oci/nginx:1.25?repository_url=")
+
+	full, filtered := manifestsForImage(image)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+
+	requireProducts(t, a, ctx, full.Name, "pkg:oci/nginx?repository_url=docker.io%2Flibrary%2Fnginx&tag=1.25")
+}
+
+// The document was stored for one spelling of the image and is rescanned under another that
+// names the same image. The legacy IDs differ with the spelling, so the stored image annotation
+// is what tells the migration which one the document was written for.
+func TestAPIServerStore_updateVEX_migratesAProductStoredUnderAnotherSpelling(t *testing.T) {
+	const digest = "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+	a, ctx := storeWithLegacyProducts(t, "index.docker.io/library/nginx@"+digest,
+		"pkg:oci/nginx@"+digest+"?repository_url=index.docker.io%2Flibrary")
+
+	full, filtered := manifestsForImage("docker.io/library/nginx@" + digest)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+
+	requireProducts(t, a, ctx, full.Name, "pkg:oci/nginx@"+digest+"?repository_url=docker.io%2Flibrary%2Fnginx")
+}
+
+// A stored annotation for another image does not make its legacy IDs ours to rewrite.
+func TestAPIServerStore_updateVEX_leavesAnotherImagesLegacyProduct(t *testing.T) {
+	const digest = "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
+	legacy := "pkg:oci/redis@" + digest + "?repository_url=docker.io%2Flibrary"
+	a, ctx := storeWithLegacyProducts(t, "docker.io/library/redis@"+digest, legacy)
+
+	full, filtered := manifestsForImage("docker.io/library/nginx@" + digest)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+
+	requireProducts(t, a, ctx, full.Name, legacy)
 }
 
 // End to end through StoreVEX: a document an older kubevuln stored is rewritten on the next

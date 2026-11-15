@@ -1681,18 +1681,28 @@ func legacyImageProductID(image string) string {
 }
 
 // migrateLegacyImageProducts gives kubevuln's own statements the image product ID that
-// imageProductID gives image today, where they still carry the one every reference used to
-// get (legacyImageProductID). updateVEX keys statements on vulnerability and package purl, so
-// a document stored before the product ID changed kept the old one, which Grype matches to no
+// imageProductID gives image today, where they still carry one an earlier version wrote for it
+// (legacyImageProductIDs). updateVEX keys statements on vulnerability and package purl, so a
+// document stored before the product ID changed kept the old one, which Grype matches to no
 // image, through every later scan.
 //
-// Only a product whose ID is exactly what the old code wrote for this image is rewritten, and
-// only its ID: status, justification, statements and subcomponents stay as they are. A product
-// naming another image, a statement from another author, and a reference that does not parse
-// (whose ID is the legacy one either way) are left alone, and a second run changes nothing.
-func migrateLegacyImageProducts(statements []v1beta1.Statement, image string) {
-	legacy, current := legacyImageProductID(image), imageProductID(image)
-	if legacy == current {
+// The old IDs follow the reference's spelling, and the document may have been written for
+// another spelling of the same image than the one rescanned now (index.docker.io/library/nginx
+// and docker.io/library/nginx). storedImage is the image the stored document was written for;
+// when it resolves to the same ID today, the IDs written for it are migrated as well.
+//
+// Only a product whose ID is exactly one of those is rewritten, and only its ID: status,
+// justification, statements and subcomponents stay as they are. A product naming another
+// image, a statement from another author, and a reference that does not parse (which keeps
+// the ID it has had since #719) are left alone, and a second run changes nothing.
+func migrateLegacyImageProducts(statements []v1beta1.Statement, image, storedImage string) {
+	current := imageProductID(image)
+	legacy := legacyImageProductIDs(image)
+	if storedImage != "" && storedImage != image && imageProductID(storedImage) == current {
+		maps.Copy(legacy, legacyImageProductIDs(storedImage))
+	}
+	delete(legacy, current)
+	if len(legacy) == 0 {
 		return
 	}
 	for i := range statements {
@@ -1700,11 +1710,23 @@ func migrateLegacyImageProducts(statements []v1beta1.Statement, image string) {
 			continue
 		}
 		for j := range statements[i].Products {
-			if statements[i].Products[j].ID == legacy {
+			if legacy[statements[i].Products[j].ID] {
 				statements[i].Products[j].ID = current
 			}
 		}
 	}
+}
+
+// legacyImageProductIDs returns the IDs earlier versions gave image: legacyImageProductID, and
+// for a reference with no path, the form written before #719, which kept an empty
+// repository_url qualifier ("pkg:oci/nginx:1.25?repository_url=").
+func legacyImageProductIDs(image string) map[string]bool {
+	id := legacyImageProductID(image)
+	ids := map[string]bool{id: true}
+	if !strings.Contains(id, "?") {
+		ids[id+"?repository_url="] = true
+	}
+	return ids
 }
 
 func buildIgnoredVEXAssessmentMap(cve *domain.CVEManifest) map[vexStatementKey]ignoredVEXAssessment {
@@ -2234,8 +2256,10 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 
 	// Statements stored before the image product ID followed the oci purl type still name
 	// the image the old way, which no image matches. New statements get today's ID from
-	// newLocalStatement, the same trimming included.
-	migrateLegacyImageProducts(vexDoc.Statements, strings.TrimPrefix(imagePullable, "docker://"))
+	// newLocalStatement, the same trimming included. The container's annotation is still the
+	// one it was stored with here: the incoming annotations are merged into it further down.
+	migrateLegacyImageProducts(vexDoc.Statements, strings.TrimPrefix(imagePullable, "docker://"),
+		strings.TrimPrefix(vexContainer.Annotations[helpersv1.ImageIDMetadataKey], "docker://"))
 
 	// statementIdx tracks local statements by (vulnerability, package), built once and kept
 	// up to date as statements are appended below. It drives the Matches/IgnoredMatches dedup
