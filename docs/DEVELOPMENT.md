@@ -132,7 +132,7 @@ make
 CGO_ENABLED=0 go build -o kubevuln ./cmd/http
 
 # Build for specific platform
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln ./cmd/http
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kubevuln-amd64 ./cmd/http
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o kubevuln-arm64 ./cmd/http
 ```
 
@@ -153,8 +153,12 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ### Build Verification
 
+`make` builds the Linux/amd64 binary, which runs only on a Linux/amd64 host, so build for
+the machine you are on before running it:
+
 ```bash
-# Check the binary runs (it takes no flags, so this starts the server; Ctrl-C to stop)
+# Build for the current platform, then check it runs (it takes no flags, so this starts the server; Ctrl-C to stop)
+CGO_ENABLED=0 go build -o kubevuln ./cmd/http
 CONFIG_DIR=.dev/config KS_API_AUTH_DISABLED=true ./kubevuln
 
 # Check size
