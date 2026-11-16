@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -28,8 +29,11 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/safefetch"
 	"github.com/kubescape/kubevuln/internal/testfixture"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
+	"github.com/kubescape/kubevuln/internal/vexsource"
 	sev1beta1 "github.com/kubescape/kubevuln/pkg/securityexception/v1beta1"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -4215,4 +4219,81 @@ func TestScanService_ScanCVE_StoredSBOMWithoutGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s.ScanCVE(ctx))
 	assert.Equal(t, []domain.SBOM{sbom}, scanner.got)
+}
+
+type vexCPRecordingScanner struct {
+	ports.CVEScanner
+	vexCalls int
+	paths    []string
+}
+
+func (s *vexCPRecordingScanner) ScanSBOMWithVEX(ctx context.Context, sbom domain.SBOM, documents []vexbatch.Document) (domain.CVEManifest, error) {
+	s.vexCalls++
+	for _, document := range documents {
+		s.paths = append(s.paths, document.Path)
+		if _, err := os.Stat(document.Path); err != nil {
+			return domain.CVEManifest{}, err
+		}
+	}
+	return s.CVEScanner.ScanSBOM(ctx, sbom)
+}
+
+// TestScanService_ScanCPReusesExternalVEXSnapshot verifies full and relevant manifests
+// are evaluated against the same staged VEX document and the batch is cleaned afterward.
+func TestScanService_ScanCPReusesExternalVEXSnapshot(t *testing.T) {
+	var fetches int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&fetches, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validExternalOpenVEX))
+	}))
+	defer server.Close()
+
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string]("/usr/local/bin/kube-proxy"),
+		Wlid:          wlid,
+	}}}
+
+	scanner := &vexCPRecordingScanner{CVEScanner: adapters.NewMockCVEAdapter()}
+	service := NewScanService(
+		adapters.NewMockSBOMAdapter(false, false, false),
+		repositories.NewMemoryStorage(false, false),
+		scanner,
+		repositories.NewMemoryStorage(false, false),
+		adapters.NewMockPlatform(false, nil),
+		relevancy,
+		true, false, true, false, false,
+	)
+	service.SetVEXSources([]vexsource.Source{{URL: server.URL}})
+	service.vexIngestor = vexsource.Ingestor{
+		Fetcher: &safefetch.Fetcher{Client: server.Client(), MaxBytes: 1 << 20},
+	}
+
+	ctx, err := service.ValidateScanCP(context.Background(), domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.ScanCP(ctx))
+
+	require.EqualValues(t, 1, atomic.LoadInt32(&fetches), "one fetch per container evaluation")
+	require.Equal(t, 2, scanner.vexCalls, "full and relevant SBOM scans must both use VEX")
+	require.Len(t, scanner.paths, 2)
+	require.Equal(t, scanner.paths[0], scanner.paths[1], "both scans must receive the same staged file")
+	_, err = os.Stat(scanner.paths[0])
+	require.ErrorIs(t, err, os.ErrNotExist, "staged VEX files are cleaned after both scans")
 }

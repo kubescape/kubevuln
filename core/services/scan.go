@@ -26,8 +26,11 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
 	"github.com/kubescape/kubevuln/internal/metrics"
+	"github.com/kubescape/kubevuln/internal/safefetch"
 	"github.com/kubescape/kubevuln/internal/syftsource"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
+	"github.com/kubescape/kubevuln/internal/vexsource"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/moby/moby/api/types/registry"
@@ -58,6 +61,8 @@ type ScanService struct {
 	storeFilteredSbom bool
 	storage           bool
 	vexGeneration     bool
+	vexSources        []vexsource.Source
+	vexIngestor       vexsource.Ingestor
 	tooManyRequests   *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
@@ -79,6 +84,15 @@ func (s *ScanService) SetEventRecorder(r record.EventRecorder) {
 	s.eventRecorder = r
 }
 
+// SetVEXSources configures external VEX feeds for subsequent image scans.
+// The source list is copied so callers cannot mutate the running service configuration.
+func (s *ScanService) SetVEXSources(sources []vexsource.Source) {
+	s.vexSources = append([]vexsource.Source(nil), sources...)
+	if len(s.vexSources) > 0 {
+		s.vexIngestor = vexsource.Ingestor{Fetcher: safefetch.New()}
+	}
+}
+
 var _ ports.ScanService = (*ScanService)(nil)
 
 // NewScanService initializes the ScanService with all injected dependencies
@@ -97,6 +111,83 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		tooManyRequests:   cache.New(cleaningInterval),
 		vexGeneration:     vexGeneration,
 	}
+}
+
+type vexCapableCVEScanner interface {
+	ScanSBOMWithVEX(context.Context, domain.SBOM, []vexbatch.Document) (domain.CVEManifest, error)
+}
+
+func (s *ScanService) hasExternalVEXSources() bool {
+	return len(s.vexSources) > 0
+}
+
+// cveCacheVersion separates manifests produced with external VEX feeds from ordinary
+// Grype manifests. Feed-enabled scans bypass cache reads so changed feed contents are
+// picked up on every scan; the source configuration suffix prevents those results from
+// being reused after the feed configuration is removed or changed.
+func (s *ScanService) cveCacheVersion() string {
+	version := s.cveScanner.Version()
+	if !s.hasExternalVEXSources() {
+		return version
+	}
+	h := sha256.New()
+	for _, source := range s.vexSources {
+		sourceURL := strings.TrimSpace(source.URL)
+		format := strings.ToLower(strings.TrimSpace(string(source.Format)))
+		if format == "" {
+			format = string(vexbatch.FormatOpenVEX)
+		}
+		_, _ = fmt.Fprintf(h, "%d:%s%d:%s", len(sourceURL), sourceURL, len(format), format)
+	}
+	return fmt.Sprintf("%s-vex-%x", version, h.Sum(nil)[:8])
+}
+
+// ingestExternalVEX fetches configured sources for one scan evaluation.
+// The caller owns the returned batch and must clean it up after related SBOM scans.
+func (s *ScanService) ingestExternalVEX(ctx context.Context) *vexsource.Batch {
+	if !s.hasExternalVEXSources() {
+		return nil
+	}
+	batch := s.vexIngestor.IngestBatch(ctx, s.vexSources)
+	if err := batch.Err(); err != nil {
+		s.reportExternalVEXError(ctx, err)
+	}
+	return &batch
+}
+
+// scanSBOMWithVEX applies an existing VEX snapshot. Related SBOM evaluations reuse the
+// same documents so their vulnerability results cannot diverge by feed state.
+func (s *ScanService) scanSBOMWithVEX(ctx context.Context, sbom domain.SBOM, documents []vexbatch.Document) (domain.CVEManifest, error) {
+	if len(documents) == 0 {
+		return s.cveScanner.ScanSBOM(ctx, sbom)
+	}
+	scanner, ok := s.cveScanner.(vexCapableCVEScanner)
+	if !ok {
+		s.reportExternalVEXError(ctx, fmt.Errorf("configured VEX sources cannot be applied: CVE scanner does not support ScanSBOMWithVEX"))
+		return s.cveScanner.ScanSBOM(ctx, sbom)
+	}
+	cve, err := scanner.ScanSBOMWithVEX(ctx, sbom, documents)
+	if err != nil {
+		s.reportExternalVEXError(ctx, fmt.Errorf("applying external VEX documents: %w", err))
+		return s.cveScanner.ScanSBOM(ctx, sbom)
+	}
+	return cve, nil
+}
+
+// scanSBOM owns the VEX batch for a single-SBOM evaluation.
+func (s *ScanService) scanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	batch := s.ingestExternalVEX(ctx)
+	if batch == nil {
+		return s.cveScanner.ScanSBOM(ctx, sbom)
+	}
+	defer batch.Cleanup()
+	return s.scanSBOMWithVEX(ctx, sbom, batch.Documents)
+}
+
+// reportExternalVEXError keeps optional feed failures diagnostic-only. Platform.ReportError
+// marks the backend job as failed, so it must not be used for optional VEX errors.
+func (s *ScanService) reportExternalVEXError(ctx context.Context, err error) {
+	logger.L().Ctx(ctx).Warning("external VEX processing failed; continuing with normal vulnerability scanning", helpers.Error(err))
 }
 
 // rateLimitCacheKey returns the canonical key used to record and query registry rate-limit (429) backoffs.
@@ -278,8 +369,8 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
-		if s.storage {
-			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+		if s.storage && !s.hasExternalVEXSources() {
+			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 					helpers.String("imageSlug", slug))
@@ -325,6 +416,17 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			}
 		}
 
+		vexBatch := s.ingestExternalVEX(ctx)
+		var vexDocuments []vexbatch.Document
+		if vexBatch != nil {
+			vexDocuments = vexBatch.Documents
+		}
+		cleanupVEX := func() {
+			if vexBatch != nil {
+				vexBatch.Cleanup()
+			}
+		}
+
 		var resultErr error
 		var filteredCve domain.CVEManifest
 		var cveExceptionsComplete bool
@@ -332,7 +434,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		if cve.Content == nil {
 			domain.UpdateScanPhase(mainCtx, "cve_matching")
 			// scan for CVE
-			cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
+			cve, err = s.scanSBOMWithVEX(ctx, sbom, vexDocuments)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("scanning SBOM, skipping scan", helpers.Error(err),
 					helpers.String("imageSlug", slug))
@@ -340,6 +442,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					scanfailure.ReasonCVEMatchingFailed, err)
 				failed++
 				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning SBOM: %w", err)}
+				cleanupVEX()
 				continue // we need the CVE
 			}
 
@@ -364,6 +467,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				failed++
 				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonUnexpected, Err: fmt.Errorf("filtering SBOM: %w", err)}
+				cleanupVEX()
 				continue // we need the SBOM'
 			}
 			if s.storeFilteredSbom {
@@ -380,12 +484,13 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		cvep := domain.CVEManifest{}
 		if sbomp.Content != nil {
 			// scan for CVE'
-			cvep, err = s.cveScanner.ScanSBOM(ctx, sbomp)
+			cvep, err = s.scanSBOMWithVEX(ctx, sbomp, vexDocuments)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("scanning filtered SBOM, skipping scan", helpers.Error(err),
 					helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 				failed++
 				lastFailure = &domain.ScanError{Reason: scanfailure.ReasonCVEMatchingFailed, Err: fmt.Errorf("scanning filtered SBOM: %w", err)}
+				cleanupVEX()
 				continue // we need the CVE'
 			}
 
@@ -411,8 +516,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				scanfailure.ReasonResultUploadFailed, err)
 			failed++
 			lastFailure = &domain.ScanError{Reason: scanfailure.ReasonResultUploadFailed, Err: fmt.Errorf("submitting CVEs: %w", err)}
+			cleanupVEX()
 			continue // we need to submit the CVE
 		}
+		cleanupVEX()
 	}
 
 	if failed > 0 || persistenceErr != nil {
@@ -445,8 +552,8 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	// check if CVE manifest is already available
 	var err error
 	cve := domain.CVEManifest{}
-	if s.storage {
-		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+	if s.storage && !s.hasExternalVEXSources() {
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
@@ -486,7 +593,7 @@ func (s *ScanService) ScanCVE(ctx context.Context) error {
 	if cve.Content == nil {
 		domain.UpdateScanPhase(ctx, "cve_matching")
 		// scan for CVE
-		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
+		cve, err = s.scanSBOM(ctx, sbom)
 		if err != nil {
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE,
 				scanfailure.ReasonCVEMatchingFailed, err)
@@ -545,9 +652,9 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 	// check if CVE manifest is already available
 	cve := domain.CVEManifest{}
-	if s.storage {
+	if s.storage && !s.hasExternalVEXSources() {
 		domain.UpdateScanPhase(ctx, "cve_lookup")
-		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveScanner.Version(), s.cveScanner.DBVersion(ctx))
+		cve, err = s.cveRepository.GetCVE(ctx, workload.ImageSlug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 				helpers.String("imageSlug", workload.ImageSlug))
@@ -594,7 +701,7 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 
 		// scan for CVE
 		domain.UpdateScanPhase(ctx, "cve_matching")
-		cve, err = s.cveScanner.ScanSBOM(ctx, sbom)
+		cve, err = s.scanSBOM(ctx, sbom)
 		if err != nil {
 			repErr := s.platform.ReportError(ctx, err)
 			if repErr != nil {
@@ -669,6 +776,8 @@ func (s *ScanService) storeFilteredCVE(ctx context.Context, cve domain.CVEManife
 // With relevancy, the full image manifest has already been saved by the caller.
 func (s *ScanService) storeCVEAndSummary(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool) error {
 	domain.UpdateScanPhase(ctx, "result_storage")
+	cve.CVEScannerVersion = s.cveCacheVersion()
+	cvep.CVEScannerVersion = s.cveCacheVersion()
 	manifest := cve
 	if withRelevancy {
 		manifest = cvep

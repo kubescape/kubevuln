@@ -26,6 +26,8 @@ import (
 	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/telemetry"
 	"github.com/kubescape/kubevuln/internal/tools"
+	"github.com/kubescape/kubevuln/internal/vexbatch"
+	"github.com/kubescape/kubevuln/internal/vexsource"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
 	"github.com/kubescape/kubevuln/repositories"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -229,6 +231,17 @@ func main() {
 		relevancyProvider = adapters.NewMockRelevancyAdapter()
 	}
 	service := services.NewScanService(sbomAdapter, storage, cveAdapter, storage, platform, relevancyProvider, c.Storage, c.VexGeneration, !c.NodeSbomGeneration, c.StoreFilteredSbom, c.PartialRelevancy)
+	if len(c.VEXSources) > 0 {
+		sources := make([]vexsource.Source, 0, len(c.VEXSources))
+		for _, source := range c.VEXSources {
+			sources = append(sources, vexsource.Source{
+				URL:    source.URL,
+				Format: vexbatch.Format(source.Format),
+			})
+		}
+		service.SetVEXSources(sources)
+		logger.L().Info("external VEX ingestion enabled", helpers.Int("sources", len(sources)))
+	}
 	if eventRecorder != nil {
 		service.SetEventRecorder(eventRecorder)
 	}
