@@ -345,7 +345,8 @@ author is left alone. Nothing is rewritten for a reference that does not parse.
 
 ## External VEX ingestion status
 
-External feeds are configured in `clusterData.json` through `vexSources`. Each entry
+External feeds are configured in `clusterData.json` through `vexSources`, or with the same
+JSON array in the `VEXSOURCES` environment variable (see [CONFIGURATION.md](CONFIGURATION.md)). Each entry
 requires an HTTPS `url`; `format` is optional and defaults to `openvex`. Supported
 formats are `openvex` and `csaf`:
 

@@ -60,10 +60,11 @@ const (
 // adds false positives, so adaptive mode falls back to Grype defaults.
 var defaultTrustedVendors = []string{"echo", "chainguard", "wolfi", "minimos"}
 
-// VEXSourceConfig describes one external VEX feed configured in clusterData.json.
+// VEXSourceConfig describes one external VEX feed configured in clusterData.json
+// or, as a JSON array, in the VEXSOURCES environment variable.
 type VEXSourceConfig struct {
-	URL    string `mapstructure:"url"`
-	Format string `mapstructure:"format"`
+	URL    string `json:"url" mapstructure:"url"`
+	Format string `json:"format" mapstructure:"format"`
 }
 
 type Config struct {
@@ -161,6 +162,18 @@ func LoadConfig(path string) (Config, error) {
 	err := v.ReadInConfig()
 	if err != nil {
 		return Config{}, err
+	}
+
+	// An env-only VEXSOURCES is a JSON string, which Unmarshal neither picks up (the key
+	// is unknown without a file entry) nor decodes into []VEXSourceConfig (with a file
+	// entry it fails on the string). Parse it here and hand viper the decoded list, so
+	// the validation below applies to it exactly as to the file form.
+	if raw, ok := v.Get("vexSources").(string); ok {
+		sources, err := vexSourcesFromEnv(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		v.Set("vexSources", sources)
 	}
 
 	var config Config
@@ -322,6 +335,22 @@ func proxyRegistryMapFromViper(v *viper.Viper) (map[string]string, error) {
 		proxyMap[k] = s
 	}
 	return proxyMap, nil
+}
+
+// vexSourcesFromEnv parses a VEXSOURCES environment value, a JSON array of
+// {"url": ..., "format": ...} objects such as
+// VEXSOURCES=[{"url":"https://vex.example.com/openvex.json"}]. JSON null means no
+// sources. Anything that is not a JSON array, including a blank value, is an error
+// rather than an empty list, so a typo cannot turn the feeds off without notice.
+func vexSourcesFromEnv(raw string) ([]VEXSourceConfig, error) {
+	var sources []VEXSourceConfig
+	if err := json.Unmarshal([]byte(raw), &sources); err != nil {
+		return nil, fmt.Errorf("invalid vexSources: expected a JSON array of {\"url\", \"format\"} objects: %w", err)
+	}
+	if sources == nil {
+		sources = []VEXSourceConfig{}
+	}
+	return sources, nil
 }
 
 type clusterDataBackendServicesConfig struct {
