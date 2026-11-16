@@ -505,9 +505,10 @@ func (h *HTTPController) Ready(c *gin.Context) {
 	_, _ = problem.Of(http.StatusOK).WriteTo(c.Writer)
 }
 
-// Diagnostics reports the scan mode and backend versions resolved at startup, so
-// operators can query the running configuration directly instead of inferring it
-// from logs. See domain.Diagnostics for the excluded (credential) fields.
+// Diagnostics reports the scan mode and backend versions resolved at startup, along with
+// the controller's own scan capacity and current backlog, so operators can query the
+// running configuration directly instead of inferring it from logs. See
+// domain.Diagnostics for the excluded (credential) fields.
 func (h *HTTPController) Diagnostics(c *gin.Context) {
 	var d domain.Diagnostics
 	if h.diagnostics != nil {
@@ -515,7 +516,11 @@ func (h *HTTPController) Diagnostics(c *gin.Context) {
 	}
 	if h.workerPool != nil {
 		d.QueueDepth = h.workerPool.WaitingQueueSize()
+		d.ScanConcurrency = h.workerPool.Size()
 	}
+	// A non-positive maxQueueDepth means unbounded (see WithMaxQueueDepth), which is
+	// reported as 0 whatever value was configured.
+	d.MaxQueueDepth = max(h.maxQueueDepth, 0)
 	c.JSON(http.StatusOK, d)
 }
 

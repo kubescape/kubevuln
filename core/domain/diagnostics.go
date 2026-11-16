@@ -18,6 +18,19 @@ type Diagnostics struct {
 	// (see controllers.HTTPController.WithMetrics). Surfacing it here lets operators read
 	// current backlog directly instead of having to query Prometheus.
 	QueueDepth int `json:"queueDepth"`
+	// ScanConcurrency is the number of scans the HTTP controller's worker pool runs at
+	// once, and MaxQueueDepth the number of scans it admits (queued or running) before
+	// rejecting new ones with 503; 0 means unbounded. Together they give QueueDepth a
+	// capacity to be read against.
+	ScanConcurrency int `json:"scanConcurrency"`
+	MaxQueueDepth   int `json:"maxQueueDepth"`
+	// VEXGenerationEnabled reports whether VEX documents are actually published, which
+	// requires storage as well as the vexGeneration flag, so it can be false while the
+	// flag is set.
+	VEXGenerationEnabled bool `json:"vexGenerationEnabled"`
+	// ExternalVEXSources is the number of external VEX feeds applied to image scans.
+	// Only the count is reported: a feed URL may carry a token in its query string.
+	ExternalVEXSources int `json:"externalVEXSources"`
 }
 
 const (

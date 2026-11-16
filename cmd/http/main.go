@@ -247,18 +247,7 @@ func main() {
 	}
 	controller := controllers.NewHTTPController(service, c.ScanConcurrency)
 	controller = controller.WithMaxQueueDepth(c.MaxQueueDepth)
-	controller = controller.WithDiagnostics(func(diagCtx context.Context) domain.Diagnostics {
-		return domain.Diagnostics{
-			ScanMode:                scanMode,
-			SBOMCreatorVersion:      sbomAdapter.Version(),
-			CVEScannerVersion:       cveAdapter.Version(),
-			CVEDBVersion:            cveAdapter.DBVersion(diagCtx),
-			ScanTimeout:             c.ScanTimeout.String(),
-			ScannerReadinessTimeout: c.ScannerReadinessTimeout.String(),
-			StorageEnabled:          c.Storage,
-			RiskAcceptanceEnabled:   riskAcceptanceActive,
-		}
-	})
+	controller = controller.WithDiagnostics(diagnosticsProvider(c, scanMode, sbomAdapter, cveAdapter, riskAcceptanceActive))
 
 	service.SetMetrics(m)
 	controller, err = controller.WithMetrics(m)
@@ -343,6 +332,29 @@ func main() {
 	}
 
 	logger.L().Info("kubevuln exiting")
+}
+
+// diagnosticsProvider returns the callback /v1/diagnostics reports the startup
+// configuration through. The CVE DB version is read on every call, since the Grype
+// adapter refreshes its database in the background; everything else is fixed at startup.
+// The scan capacity and current backlog are filled in by the controller itself.
+func diagnosticsProvider(c config.Config, scanMode string, sbomCreator ports.SBOMCreator, cveScanner ports.CVEScanner, riskAcceptanceActive bool) func(context.Context) domain.Diagnostics {
+	return func(ctx context.Context) domain.Diagnostics {
+		return domain.Diagnostics{
+			ScanMode:                scanMode,
+			SBOMCreatorVersion:      sbomCreator.Version(),
+			CVEScannerVersion:       cveScanner.Version(),
+			CVEDBVersion:            cveScanner.DBVersion(ctx),
+			ScanTimeout:             c.ScanTimeout.String(),
+			ScannerReadinessTimeout: c.ScannerReadinessTimeout.String(),
+			StorageEnabled:          c.Storage,
+			RiskAcceptanceEnabled:   riskAcceptanceActive,
+			// VEX is only written on scan paths already gated on storage, so the flag
+			// alone does not publish anything (see docs/VEX.md).
+			VEXGenerationEnabled: c.Storage && c.VexGeneration,
+			ExternalVEXSources:   len(c.VEXSources),
+		}
+	}
 }
 
 // isRiskAcceptanceActive reports whether SecurityException/ClusterSecurityException

@@ -154,7 +154,7 @@ func TestHTTPController_Diagnostics(t *testing.T) {
 		{
 			name:         "not configured",
 			diagnostics:  nil,
-			expectedBody: `{"scanMode":"","sbomCreatorVersion":"","cveScannerVersion":"","cveDBVersion":"","scanTimeout":"","scannerReadinessTimeout":"","storageEnabled":false,"riskAcceptanceEnabled":false,"queueDepth":0}`,
+			expectedBody: `{"scanMode":"","sbomCreatorVersion":"","cveScannerVersion":"","cveDBVersion":"","scanTimeout":"","scannerReadinessTimeout":"","storageEnabled":false,"riskAcceptanceEnabled":false,"queueDepth":0,"scanConcurrency":1,"maxQueueDepth":0,"vexGenerationEnabled":false,"externalVEXSources":0}`,
 		},
 		{
 			name: "sidecar mode with storage and risk acceptance enabled",
@@ -168,9 +168,11 @@ func TestHTTPController_Diagnostics(t *testing.T) {
 					ScannerReadinessTimeout: "1m0s",
 					StorageEnabled:          true,
 					RiskAcceptanceEnabled:   true,
+					VEXGenerationEnabled:    true,
+					ExternalVEXSources:      2,
 				}
 			},
-			expectedBody: `{"scanMode":"sidecar","sbomCreatorVersion":"syft-1.2.3","cveScannerVersion":"grype-4.5.6-matching-adaptive","cveDBVersion":"db-2026-08-11","scanTimeout":"5m0s","scannerReadinessTimeout":"1m0s","storageEnabled":true,"riskAcceptanceEnabled":true,"queueDepth":0}`,
+			expectedBody: `{"scanMode":"sidecar","sbomCreatorVersion":"syft-1.2.3","cveScannerVersion":"grype-4.5.6-matching-adaptive","cveDBVersion":"db-2026-08-11","scanTimeout":"5m0s","scannerReadinessTimeout":"1m0s","storageEnabled":true,"riskAcceptanceEnabled":true,"queueDepth":0,"scanConcurrency":1,"maxQueueDepth":0,"vexGenerationEnabled":true,"externalVEXSources":2}`,
 		},
 	}
 	for _, tt := range tests {
@@ -220,6 +222,57 @@ func TestHTTPController_Diagnostics_QueueDepth(t *testing.T) {
 	var got domain.Diagnostics
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, 1, got.QueueDepth)
+}
+
+func TestHTTPController_Diagnostics_ScanCapacity(t *testing.T) {
+	tests := []struct {
+		name                string
+		concurrency         int
+		maxQueueDepth       int
+		wantScanConcurrency int
+		wantMaxQueueDepth   int
+	}{
+		{
+			name:                "bounded queue",
+			concurrency:         3,
+			maxQueueDepth:       25,
+			wantScanConcurrency: 3,
+			wantMaxQueueDepth:   25,
+		},
+		{
+			name:                "unbounded queue",
+			concurrency:         2,
+			maxQueueDepth:       0,
+			wantScanConcurrency: 2,
+			wantMaxQueueDepth:   0,
+		},
+		{
+			// WithMaxQueueDepth treats any non-positive value as unbounded, so it must
+			// read the same as 0 rather than as a negative capacity.
+			name:                "negative max queue depth reads as unbounded",
+			concurrency:         1,
+			maxQueueDepth:       -5,
+			wantScanConcurrency: 1,
+			wantMaxQueueDepth:   0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewHTTPController(services.NewMockScanService(true), tt.concurrency).WithMaxQueueDepth(tt.maxQueueDepth)
+			t.Cleanup(func() { c.Shutdown(5 * time.Second) })
+			router := gin.Default()
+			router.GET("/v1/diagnostics", c.Diagnostics)
+			req, _ := http.NewRequest("GET", "/v1/diagnostics", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var got domain.Diagnostics
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantScanConcurrency, got.ScanConcurrency)
+			assert.Equal(t, tt.wantMaxQueueDepth, got.MaxQueueDepth)
+		})
+	}
 }
 
 func TestHTTPController_ScanCVE(t *testing.T) {

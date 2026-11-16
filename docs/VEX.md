@@ -402,7 +402,15 @@ suppressions. Those ignored matches remain distinguishable from kubevuln's own
 
 **No `OpenVulnerabilityExchangeContainer` appears.** Check `vexGeneration` and `storage` are
 both true. With `vexGeneration` off, `storeVEX` returns before doing anything and logs
-nothing, so silence is expected rather than a symptom.
+nothing, so silence is expected rather than a symptom. On a running pod,
+`vexGenerationEnabled` in [`/v1/diagnostics`](API.md#diagnostics) reports whether both are
+in effect.
+
+**External VEX feeds seem to have no effect.** `externalVEXSources` in
+[`/v1/diagnostics`](API.md#diagnostics) is the number of feeds the pod loaded from
+`vexSources` or `VEXSOURCES`. If it is `0`, the feeds were never configured. Otherwise, look
+for `external VEX processing failed` warnings, which are logged when a feed cannot be
+fetched or applied.
 
 **A document exists but a `SecurityException` is not reflected in it.** Check
 `riskAcceptance` is enabled. With `storage` on and `riskAcceptance` off, matching CRDs are
