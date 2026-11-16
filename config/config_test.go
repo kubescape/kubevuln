@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -569,4 +570,87 @@ func TestLoadConfigProxyRegistryMapEnv_NullMember(t *testing.T) {
 	assert.Contains(t, err.Error(), "proxyRegistryMap")
 }
 
+// writeClusterDataWithVEXSources copies testdata/clusterData.json into a temp dir with a
+// vexSources entry added, for the cases where the file carries the key as well.
+func writeClusterDataWithVEXSources(t *testing.T, sources string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join("testdata", "clusterData.json"))
+	require.NoError(t, err)
+	var data map[string]interface{}
+	require.NoError(t, json.Unmarshal(content, &data))
+	var parsed interface{}
+	require.NoError(t, json.Unmarshal([]byte(sources), &parsed))
+	data["vexSources"] = parsed
+	out, err := json.Marshal(data)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "clusterData.json"), out, 0o600))
+	return dir
+}
 
+// An env-only VEXSOURCES used to be dropped by Unmarshal (the key is unknown without a
+// file entry), so kubevuln ran without external VEX feeds while looking configured.
+func TestLoadConfigVEXSourcesEnv(t *testing.T) {
+	viper.Reset()
+	t.Setenv("VEXSOURCES", `[{"url":" https://vex.example.com/openvex.json "},{"url":"https://security.example.com/csaf.json","format":"CSAF"}]`)
+	c, err := LoadConfig("testdata")
+	require.NoError(t, err)
+	assert.Equal(t, []VEXSourceConfig{
+		{URL: "https://vex.example.com/openvex.json", Format: "openvex"},
+		{URL: "https://security.example.com/csaf.json", Format: "csaf"},
+	}, c.VEXSources)
+}
+
+// With the key in clusterData.json too, the environment wins, as for every other option.
+// Before, Unmarshal failed on the string with a mapstructure error that named no variable.
+func TestLoadConfigVEXSourcesEnvOverridesFile(t *testing.T) {
+	viper.Reset()
+	dir := writeClusterDataWithVEXSources(t, `[{"url":"https://file.example.com/openvex.json"}]`)
+
+	c, err := LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []VEXSourceConfig{{URL: "https://file.example.com/openvex.json", Format: "openvex"}}, c.VEXSources)
+
+	t.Setenv("VEXSOURCES", `[{"url":"https://env.example.com/openvex.json"}]`)
+	c, err = LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []VEXSourceConfig{{URL: "https://env.example.com/openvex.json", Format: "openvex"}}, c.VEXSources)
+
+	t.Setenv("VEXSOURCES", `null`)
+	c, err = LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Empty(t, c.VEXSources)
+
+	// viper reads an empty variable as unset, as it does for every other option, so the
+	// file entry stays in effect. JSON null above is the way to clear it from the env.
+	t.Setenv("VEXSOURCES", "")
+	c, err = LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []VEXSourceConfig{{URL: "https://file.example.com/openvex.json", Format: "openvex"}}, c.VEXSources)
+}
+
+func TestLoadConfigVEXSourcesEnvInvalid(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{"truncated JSON", `[{"url":`, "invalid vexSources"},
+		{"object instead of array", `{"url":"https://vex.example.com/openvex.json"}`, "invalid vexSources"},
+		{"whitespace only", `   `, "invalid vexSources"},
+		{"comma separated URLs", `https://a.example.com/vex.json,https://b.example.com/vex.json`, "invalid vexSources"},
+		{"plain HTTP URL", `[{"url":"http://vex.example.com/openvex.json"}]`, "vexSources[0].url must be an absolute HTTPS URL"},
+		{"embedded credentials", `[{"url":"https://user:pass@vex.example.com/openvex.json"}]`, "vexSources[0].url must be an absolute HTTPS URL"},
+		{"null entry", `[null]`, "vexSources[0].url must be an absolute HTTPS URL"},
+		{"unsupported format", `[{"url":"https://vex.example.com/a.json","format":"cyclonedx"}]`, `vexSources[0].format "cyclonedx" is unsupported`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Setenv("VEXSOURCES", tt.value)
+			_, err := LoadConfig("testdata")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

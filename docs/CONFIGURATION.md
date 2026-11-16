@@ -222,6 +222,15 @@ Example external feed configuration:
 }
 ```
 
+To set the feeds through the environment instead, put the same array in `VEXSOURCES` as
+JSON. It replaces any `vexSources` in `clusterData.json`, goes through the same checks, and a
+value that is not a JSON array fails startup. As with other variables, an empty `VEXSOURCES`
+counts as unset; use `null` to clear the file's feeds from the environment:
+
+```shell
+VEXSOURCES='[{"url":"https://vex.example.com/openvex.json","format":"openvex"}]'
+```
+
 External feed URLs must use HTTPS. The fetcher blocks private, loopback, link-local, and
 other non-routable destinations, including redirect targets. Source failures are reported
 without failing the normal vulnerability scan.
