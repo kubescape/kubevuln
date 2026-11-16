@@ -45,6 +45,14 @@ jobs:
       - uses: docker/login-action@${sha} # uses: docker/login-action@v4
 EOT
 
+run_case "a flow-style step with a mutable ref next to a pinned one" 1 "different docker/login-action references" <<EOT
+jobs:
+  a:
+    steps:
+      - uses: docker/login-action@${sha}
+      - { name: flow, uses: "docker/login-action@main" }
+EOT
+
 run_case "two different pins" 1 "different docker/login-action references" <<EOT
 jobs:
   a:

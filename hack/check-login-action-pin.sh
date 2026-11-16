@@ -12,15 +12,13 @@ set -euo pipefail
 
 dir="${1:-.github/workflows}"
 
-# Drop comment lines and trailing comments, then keep the value of every `uses:`
-# that names docker/login-action, with or without quotes around it.
+# Drop comment lines and trailing comments, then take every docker/login-action
+# reference left, whatever YAML form holds it: block or flow style, quoted or not.
 refs="$(
   find "${dir}" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
-    | xargs -0 sed -nE \
-        -e '/^[[:space:]]*#/d' \
-        -e 's/[[:space:]]+#.*$//' \
-        -e "s/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[\"']?(docker\\/login-action@[^\"'[:space:]]+)[\"']?[[:space:]]*\$/\\2/p" \
-    | sort -u
+    | xargs -0 sed -E -e '/^[[:space:]]*#/d' -e 's/[[:space:]]+#.*$//' \
+    | grep -oE "docker/login-action@[^\"'[:space:],}]+" \
+    | sort -u || true
 )"
 
 count="$(printf '%s\n' "${refs}" | grep -c . || true)"
