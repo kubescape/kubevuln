@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/repositories"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +38,9 @@ func TestCachePolicyRotationAndPayloadIntegrity(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, NewProvider(other).CachedEligible(b, ref.Name(), opts))
 	require.False(t, provider.CachedEligible(b, ref.Name(), domain.RegistryOptions{Platform: "linux/arm64"}))
-	b.Content.Artifacts = nil
+	// A change to the payload is caught. An empty artifact list read back as nil is
+	// not one: storage cannot tell them apart.
+	b.Content.ArtifactRelationships = append(b.Content.ArtifactRelationships, v1beta1.SyftRelationship{Parent: "a", Child: "b", Type: "contains"})
 	require.False(t, provider.CachedEligible(b, ref.Name(), opts))
 }
 

@@ -10,7 +10,22 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
+
+// contentDigest is the digest an imported document is stored with and checked against
+// on a cache hit. It is taken over the protobuf encoding, which is what storage keeps
+// and returns: protobuf does not tell an empty list from a missing one, so the JSON of
+// a document read back from storage (null where it was []) is not the JSON it was
+// imported with, and a digest over that never matched again.
+func contentDigest(doc *v1beta1.SyftDocument) (string, error) {
+	encoded, err := doc.Marshal()
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(encoded)
+	return hex.EncodeToString(hash[:]), nil
+}
 
 // CachedEligible rechecks the current policy on every imported cache hit. Storage
 // is trusted cluster state, as with local SBOMs; the digest detects accidental
@@ -57,12 +72,17 @@ func (p *Provider) CachedEligible(b domain.SBOM, imageID string, opts domain.Reg
 			return false
 		}
 	}
-	raw, err := json.Marshal(b.Content)
-	if err != nil {
+	if hash, err := contentDigest(b.Content); err != nil || hash != b.Annotations[domain.SBOMImportContent] {
 		return false
 	}
-	hash := sha256.Sum256(raw)
-	if hex.EncodeToString(hash[:]) != b.Annotations[domain.SBOMImportContent] {
+	// Storage reads an empty list back as nil, which JSON writes as null, and an
+	// image with no packages is accepted as an empty artifact array only.
+	content := *b.Content
+	if content.Artifacts == nil {
+		content.Artifacts = []v1beta1.SyftPackage{}
+	}
+	raw, err := json.Marshal(&content)
+	if err != nil {
 		return false
 	}
 	var metadata struct {
