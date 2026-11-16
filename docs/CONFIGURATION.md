@@ -224,7 +224,8 @@ Example external feed configuration:
 
 To set the feeds through the environment instead, put the same array in `VEXSOURCES` as
 JSON. It replaces any `vexSources` in `clusterData.json`, goes through the same checks, and a
-value that is not a JSON array fails startup:
+value that is not a JSON array fails startup. As with other variables, an empty `VEXSOURCES`
+counts as unset; use `null` to clear the file's feeds from the environment:
 
 ```shell
 VEXSOURCES='[{"url":"https://vex.example.com/openvex.json","format":"openvex"}]'

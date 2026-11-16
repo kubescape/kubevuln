@@ -570,7 +570,6 @@ func TestLoadConfigProxyRegistryMapEnv_NullMember(t *testing.T) {
 	assert.Contains(t, err.Error(), "proxyRegistryMap")
 }
 
-
 // writeClusterDataWithVEXSources copies testdata/clusterData.json into a temp dir with a
 // vexSources entry added, for the cases where the file carries the key as well.
 func writeClusterDataWithVEXSources(t *testing.T, sources string) string {
@@ -621,6 +620,13 @@ func TestLoadConfigVEXSourcesEnvOverridesFile(t *testing.T) {
 	c, err = LoadConfig(dir)
 	require.NoError(t, err)
 	assert.Empty(t, c.VEXSources)
+
+	// viper reads an empty variable as unset, as it does for every other option, so the
+	// file entry stays in effect. JSON null above is the way to clear it from the env.
+	t.Setenv("VEXSOURCES", "")
+	c, err = LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []VEXSourceConfig{{URL: "https://file.example.com/openvex.json", Format: "openvex"}}, c.VEXSources)
 }
 
 func TestLoadConfigVEXSourcesEnvInvalid(t *testing.T) {
@@ -631,7 +637,7 @@ func TestLoadConfigVEXSourcesEnvInvalid(t *testing.T) {
 	}{
 		{"truncated JSON", `[{"url":`, "invalid vexSources"},
 		{"object instead of array", `{"url":"https://vex.example.com/openvex.json"}`, "invalid vexSources"},
-		{"blank", `   `, "invalid vexSources"},
+		{"whitespace only", `   `, "invalid vexSources"},
 		{"comma separated URLs", `https://a.example.com/vex.json,https://b.example.com/vex.json`, "invalid vexSources"},
 		{"plain HTTP URL", `[{"url":"http://vex.example.com/openvex.json"}]`, "vexSources[0].url must be an absolute HTTPS URL"},
 		{"embedded credentials", `[{"url":"https://user:pass@vex.example.com/openvex.json"}]`, "vexSources[0].url must be an absolute HTTPS URL"},
