@@ -61,6 +61,64 @@ jobs:
       - uses: "docker/login-action@${other}"
 EOT
 
+run_case "a quoted hash in the step name does not hide a mutable ref" 1 "different docker/login-action references" <<EOT
+jobs:
+  a:
+    steps:
+      - uses: docker/login-action@${sha}
+      - { name: "Login #1", uses: docker/login-action@main }
+EOT
+
+run_case "a quoted comma is part of the ref" 1 "full commit SHA" <<EOT
+jobs:
+  a:
+    steps:
+      - { uses: 'docker/login-action@${sha},extra', name: login }
+EOT
+
+run_case "a quoted closing brace is part of the ref" 1 "full commit SHA" <<EOT
+jobs:
+  a:
+    steps:
+      - uses: "docker/login-action@${sha}}extra"
+EOT
+
+run_case "a literal trailing newline is part of the ref" 1 "full commit SHA" <<EOT
+jobs:
+  a:
+    steps:
+      - uses: |
+          docker/login-action@${sha}
+EOT
+
+run_case "action names in other step fields are ignored" 0 "pinned to ${sha}" <<EOT
+jobs:
+  a:
+    steps:
+      - { name: 'Login #1', uses: docker/login-action@${sha} }
+      - name: docker/login-action@main
+        run: |
+          echo 'uses: docker/login-action@v4'
+EOT
+
+run_case "an alias and mixed-case workflow keys cannot hide a mutable ref" 1 "different docker/login-action references" <<EOT
+env:
+  LOGIN: &login docker/login-action@main
+Jobs:
+  a:
+    Steps:
+      - uses: docker/login-action@${sha}
+      - Uses: *login
+EOT
+
+run_case "invalid YAML with an apparent pin fails the check" 1 "a.yaml" <<EOT
+jobs:
+  a:
+    steps:
+      - uses: docker/login-action@${sha}
+      - { name: unfinished
+EOT
+
 run_case "a tag is not a pin" 1 "full commit SHA" <<EOT
 jobs:
   a:

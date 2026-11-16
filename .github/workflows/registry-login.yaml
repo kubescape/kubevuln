@@ -16,6 +16,8 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - '.github/workflows/**'
+      - 'hack/check-login-action-pin.sh'
+      - 'hack/check-login-action-pin_test.sh'
   workflow_dispatch:
 
 concurrency:
