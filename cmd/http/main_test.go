@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +13,9 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/gin-gonic/gin"
 	"github.com/kubescape/kubevuln/adapters"
+	"github.com/kubescape/kubevuln/config"
 	"github.com/kubescape/kubevuln/controllers"
+	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/services"
 	"github.com/kubescape/kubevuln/repositories"
 	"github.com/stretchr/testify/assert"
@@ -89,6 +92,85 @@ func TestIsRiskAcceptanceActive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, isRiskAcceptanceActive(tt.storage, tt.riskAcceptance))
+		})
+	}
+}
+
+func TestDiagnosticsProvider(t *testing.T) {
+	sources := []config.VEXSourceConfig{
+		{URL: "https://vex.example.com/openvex.json", Format: "openvex"},
+		{URL: "https://security.example.com/csaf.json?token=secret", Format: "csaf"},
+	}
+	base := config.Config{
+		ScanTimeout:             5 * time.Minute,
+		ScannerReadinessTimeout: time.Minute,
+	}
+
+	tests := []struct {
+		name                     string
+		storage                  bool
+		vexGeneration            bool
+		vexSources               []config.VEXSourceConfig
+		wantVEXGenerationEnabled bool
+		wantExternalVEXSources   int
+	}{
+		{
+			name:                     "VEX generation with storage",
+			storage:                  true,
+			vexGeneration:            true,
+			wantVEXGenerationEnabled: true,
+		},
+		{
+			// Every storeVEX call site is gated on storage, so the flag alone publishes
+			// nothing and must not be reported as enabled.
+			name:                     "VEX generation without storage",
+			storage:                  false,
+			vexGeneration:            true,
+			wantVEXGenerationEnabled: false,
+		},
+		{
+			name:                     "storage without VEX generation",
+			storage:                  true,
+			vexGeneration:            false,
+			wantVEXGenerationEnabled: false,
+		},
+		{
+			// External feeds are applied during matching whether or not storage is on.
+			name:                   "external VEX sources are counted without storage",
+			vexSources:             sources,
+			wantExternalVEXSources: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := base
+			c.Storage = tt.storage
+			c.VexGeneration = tt.vexGeneration
+			c.VEXSources = tt.vexSources
+
+			got := diagnosticsProvider(c, domain.ScanModeSidecar, adapters.NewMockSBOMAdapter(false, false, false), adapters.NewMockCVEAdapter(), true)(context.Background())
+
+			assert.Equal(t, domain.Diagnostics{
+				ScanMode:                domain.ScanModeSidecar,
+				SBOMCreatorVersion:      "Mock SBOM 1.0",
+				CVEScannerVersion:       "Mock CVE 1.0",
+				CVEDBVersion:            "v1.0.0",
+				ScanTimeout:             "5m0s",
+				ScannerReadinessTimeout: "1m0s",
+				StorageEnabled:          tt.storage,
+				RiskAcceptanceEnabled:   true,
+				VEXGenerationEnabled:    tt.wantVEXGenerationEnabled,
+				ExternalVEXSources:      tt.wantExternalVEXSources,
+			}, got)
+
+			// Feed URLs can carry credentials in their query string, so none of a
+			// source's configuration may reach the response.
+			body, err := json.Marshal(got)
+			require.NoError(t, err)
+			for _, source := range tt.vexSources {
+				assert.NotContains(t, string(body), source.URL)
+			}
 		})
 	}
 }

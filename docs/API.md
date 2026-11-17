@@ -190,7 +190,12 @@ Syft adapter. `scanMode` is how you tell which one is running.
   "scanTimeout": "5m0s",
   "scannerReadinessTimeout": "1m0s",
   "storageEnabled": true,
-  "riskAcceptanceEnabled": true
+  "riskAcceptanceEnabled": true,
+  "queueDepth": 0,
+  "scanConcurrency": 1,
+  "maxQueueDepth": 0,
+  "vexGenerationEnabled": true,
+  "externalVEXSources": 1
 }
 ```
 
@@ -204,10 +209,17 @@ Syft adapter. `scanMode` is how you tell which one is running.
 | `scannerReadinessTimeout` | duration | Effective `scannerReadinessTimeout` |
 | `storageEnabled` | bool | Whether SBOMs and CVE manifests are persisted as CRDs |
 | `riskAcceptanceEnabled` | bool | Whether SecurityException / ClusterSecurityException CRDs are applied |
+| `queueDepth` | int | Scan jobs currently waiting for a worker, the same value as the `kubevuln_worker_pool_queue_depth` metric |
+| `scanConcurrency` | int | Scans run at once, from `scanConcurrency` |
+| `maxQueueDepth` | int | Scans accepted but not yet finished (queued or running) before new requests are rejected with `503`, from `maxQueueDepth`; `0` means unbounded, which is also how a negative configured value is reported |
+| `vexGenerationEnabled` | bool | Whether VEX documents are published. Requires both `vexGeneration` and `storage`, so it is `false` when only the flag is set (see [VEX.md](VEX.md#enabling-it)) |
+| `externalVEXSources` | int | Number of external VEX feeds configured through `vexSources` / `VEXSOURCES`. Only the count is reported, since a feed URL may carry a token in its query string |
 
-Always returns `200` once the request is authorized. When the controller was built without a diagnostics provider the
-struct's zero value is returned, so an all-empty body means "not wired up" rather than
-"nothing configured".
+Always returns `200` once the request is authorized. `queueDepth`, `scanConcurrency` and
+`maxQueueDepth` come from the HTTP controller itself; everything else comes from the
+diagnostics provider set up at startup. When the controller was built without that provider,
+those other fields keep their zero values, so empty versions and scan mode mean "not wired up"
+rather than "nothing configured".
 
 ```bash
 curl -s http://localhost:8080/v1/diagnostics | jq
