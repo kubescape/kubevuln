@@ -55,6 +55,7 @@ SecurityException uses standard Kubernetes matching patterns to determine which 
 - **`images`**: only applies to vulnerability entries. Ignored for posture entries.
 - **Namespaced `SecurityException`**: implicitly scoped to its own namespace; `namespaceSelector` is not available
 - **Cluster-scoped `ClusterSecurityException`**: uses `namespaceSelector` to target namespaces
+- **Results shared per image**: the image-level vulnerability manifest (and its VEX document) is shared by every workload running the image, so only exceptions that apply to all of them shape it: a `ClusterSecurityException` without `namespaceSelector`, `objectSelector` or `resources`. Namespaced and workload-selecting exceptions apply to each matched workload's summary and relevancy results instead, so the shared manifest does not depend on which namespace was scanned last.
 
 #### Image Matching
 
