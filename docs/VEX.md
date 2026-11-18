@@ -408,9 +408,13 @@ in effect.
 
 **External VEX feeds seem to have no effect.** `externalVEXSources` in
 [`/v1/diagnostics`](API.md#diagnostics) is the number of feeds the pod loaded from
-`vexSources` or `VEXSOURCES`. If it is `0`, the feeds were never configured. Otherwise, look
-for `external VEX processing failed` warnings, which are logged when a feed cannot be
-fetched or applied.
+`vexSources` or `VEXSOURCES`. If it is `0`, the feeds were never configured. Otherwise,
+[`/metrics`](API.md#metrics) shows where they stop: a growing
+`kubevuln_external_vex_sources_total{result="failed"}` means a feed cannot be fetched or does
+not validate as its configured `format`, and any `kubevuln_external_vex_scans_total` outcome
+other than `applied` counts scans whose findings were produced without external VEX. The
+`external VEX processing failed` warning logged at the same time carries the error, and names
+the source for a fetch or validation failure.
 
 **A document exists but a `SecurityException` is not reflected in it.** Check
 `riskAcceptance` is enabled. With `storage` on and `riskAcceptance` off, matching CRDs are

@@ -77,6 +77,8 @@ var retryAttemptsCounter metric.Int64Counter
 var tempDirSweepCounter metric.Int64Counter
 var sbomImportCounter metric.Int64Counter
 var sbomImportBytes metric.Int64Counter
+var externalVEXSourceCounter metric.Int64Counter
+var externalVEXScanCounter metric.Int64Counter
 
 // Metrics wraps the OTel meter and Prometheus exporter used to expose kubevuln's
 // operational metrics (worker-pool backlog, scan outcomes, rejection counts) on
@@ -257,6 +259,23 @@ func New(options ...sdkmetric.Option) (*Metrics, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	externalVEXSourceMetric, err := meter.Int64Counter(
+		"kubevuln_external_vex_sources_total",
+		metric.WithDescription("Total number of external VEX source ingestions, by format and result"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	externalVEXScanMetric, err := meter.Int64Counter(
+		"kubevuln_external_vex_scans_total",
+		metric.WithDescription("Total number of SBOM evaluations run while external VEX sources are configured, by outcome"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	recorderMu.Lock()
 	sbomImportCounter = importCounter
 	sbomImportBytes = importBytes
@@ -266,6 +285,8 @@ func New(options ...sdkmetric.Option) (*Metrics, error) {
 	singleflightHitsCounter = singleflightHitsMetric
 	retryAttemptsCounter = retryAttemptsMetric
 	tempDirSweepCounter = tempDirSweepMetric
+	externalVEXSourceCounter = externalVEXSourceMetric
+	externalVEXScanCounter = externalVEXScanMetric
 	recorderMu.Unlock()
 
 	return &Metrics{
