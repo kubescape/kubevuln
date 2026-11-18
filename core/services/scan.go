@@ -157,20 +157,28 @@ func (s *ScanService) ingestExternalVEX(ctx context.Context) *vexsource.Batch {
 
 // scanSBOMWithVEX applies an existing VEX snapshot. Related SBOM evaluations reuse the
 // same documents so their vulnerability results cannot diverge by feed state.
+// While sources are configured, each evaluation records on kubevuln_external_vex_scans_total
+// whether the documents were applied or why the findings were produced without them.
 func (s *ScanService) scanSBOMWithVEX(ctx context.Context, sbom domain.SBOM, documents []vexbatch.Document) (domain.CVEManifest, error) {
 	if len(documents) == 0 {
+		if s.hasExternalVEXSources() {
+			metrics.RecordExternalVEXScan(ctx, metrics.ExternalVEXScanNoDocuments)
+		}
 		return s.cveScanner.ScanSBOM(ctx, sbom)
 	}
 	scanner, ok := s.cveScanner.(vexCapableCVEScanner)
 	if !ok {
+		metrics.RecordExternalVEXScan(ctx, metrics.ExternalVEXScanUnsupported)
 		s.reportExternalVEXError(ctx, fmt.Errorf("configured VEX sources cannot be applied: CVE scanner does not support ScanSBOMWithVEX"))
 		return s.cveScanner.ScanSBOM(ctx, sbom)
 	}
 	cve, err := scanner.ScanSBOMWithVEX(ctx, sbom, documents)
 	if err != nil {
+		metrics.RecordExternalVEXScan(ctx, metrics.ExternalVEXScanApplyFailed)
 		s.reportExternalVEXError(ctx, fmt.Errorf("applying external VEX documents: %w", err))
 		return s.cveScanner.ScanSBOM(ctx, sbom)
 	}
+	metrics.RecordExternalVEXScan(ctx, metrics.ExternalVEXScanApplied)
 	return cve, nil
 }
 

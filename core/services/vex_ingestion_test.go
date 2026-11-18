@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubevuln/adapters"
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/core/ports"
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/safefetch"
 	"github.com/kubescape/kubevuln/internal/vexbatch"
 	"github.com/kubescape/kubevuln/internal/vexsource"
@@ -172,4 +174,94 @@ func TestScanSBOMFallsBackWhenAllExternalSourcesFail(t *testing.T) {
 
 	platform := service.platform.(*vexRecordingPlatform)
 	require.Empty(t, platform.reported, "optional VEX errors must not mark the backend job failed")
+}
+
+// TestScanSBOMRecordsExternalVEXOutcome checks each way an evaluation with configured
+// sources can end is counted under its own outcome, so an operator can tell from
+// /metrics alone whether findings were produced with the configured feeds or without.
+func TestScanSBOMRecordsExternalVEXOutcome(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/unavailable" {
+			http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validExternalOpenVEX))
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name    string
+		scanner ports.CVEScanner
+		sources []vexsource.Source
+		want    string
+	}{
+		{
+			name:    "documents applied",
+			scanner: &vexAwareTestScanner{CVEScanner: adapters.NewMockCVEAdapter()},
+			sources: []vexsource.Source{{URL: server.URL + "/feed"}},
+			want:    metrics.ExternalVEXScanApplied,
+		},
+		{
+			name:    "every source failed",
+			scanner: &vexAwareTestScanner{CVEScanner: adapters.NewMockCVEAdapter()},
+			sources: []vexsource.Source{{URL: server.URL + "/unavailable"}},
+			want:    metrics.ExternalVEXScanNoDocuments,
+		},
+		{
+			name: "grype could not apply the documents",
+			scanner: &vexAwareTestScanner{
+				CVEScanner: adapters.NewMockCVEAdapter(),
+				vexErr:     errors.New("VEX processor failed"),
+			},
+			sources: []vexsource.Source{{URL: server.URL + "/feed"}},
+			want:    metrics.ExternalVEXScanApplyFailed,
+		},
+		{
+			name:    "scanner cannot apply VEX",
+			scanner: adapters.NewMockCVEAdapter(),
+			sources: []vexsource.Source{{URL: server.URL + "/feed"}},
+			want:    metrics.ExternalVEXScanUnsupported,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := metrics.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+			service := newVEXTestService(tt.scanner, server, tt.sources)
+			_, err = service.scanSBOM(context.Background(), domain.SBOM{Name: "image"})
+			require.NoError(t, err)
+
+			body := scrapeMetrics(t, m)
+			require.Contains(t, body, `kubevuln_external_vex_scans_total{outcome="`+tt.want+`"} 1`)
+			require.Equal(t, 1, strings.Count(body, "kubevuln_external_vex_scans_total{"),
+				"one evaluation must record exactly one outcome")
+		})
+	}
+}
+
+// Without configured sources there is no external VEX outcome to report, so a deployment
+// that never configured feeds must not grow kubevuln_external_vex_scans_total series.
+func TestScanSBOMWithoutExternalVEXSourcesRecordsNoOutcome(t *testing.T) {
+	m, err := metrics.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	service := NewScanService(nil, nil, adapters.NewMockCVEAdapter(), nil, adapters.NewMockPlatform(true, nil), nil, false, false, true, false, false)
+	_, err = service.scanSBOM(context.Background(), domain.SBOM{Name: "image"})
+	require.NoError(t, err)
+	_, err = service.scanSBOMWithVEX(context.Background(), domain.SBOM{Name: "image"}, nil)
+	require.NoError(t, err)
+
+	require.NotContains(t, scrapeMetrics(t, m), "kubevuln_external_vex_")
+}
+
+func scrapeMetrics(t *testing.T, m *metrics.Metrics) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	return w.Body.String()
 }

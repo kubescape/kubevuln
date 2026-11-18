@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kubescape/kubevuln/internal/metrics"
 	"github.com/kubescape/kubevuln/internal/vexbatch"
 )
 
@@ -50,7 +51,9 @@ func (b *Batch) Cleanup() {
 // Unavailable or malformed sources are recorded in Failures while valid
 // sources remain usable. This lets the scan orchestration layer report
 // individual source failures without losing valid VEX documents from the
-// same batch.
+// same batch. Each source's outcome is also recorded on
+// kubevuln_external_vex_sources_total, so a feed that keeps failing is visible
+// without reading logs.
 func (i Ingestor) IngestBatch(ctx context.Context, sources []Source) Batch {
 	batch := Batch{
 		Documents: make([]vexbatch.Document, 0, len(sources)),
@@ -65,6 +68,7 @@ func (i Ingestor) IngestBatch(ctx context.Context, sources []Source) Batch {
 				URL: source.URL,
 				Err: err,
 			})
+			metrics.RecordExternalVEXSource(ctx, string(source.Format), false)
 			continue
 		}
 
@@ -74,11 +78,13 @@ func (i Ingestor) IngestBatch(ctx context.Context, sources []Source) Batch {
 				URL: document.URL,
 				Err: err,
 			})
+			metrics.RecordExternalVEXSource(ctx, string(source.Format), false)
 			continue
 		}
 
 		batch.Documents = append(batch.Documents, staged)
 		batch.cleanups = append(batch.cleanups, cleanup)
+		metrics.RecordExternalVEXSource(ctx, string(source.Format), true)
 	}
 
 	return batch

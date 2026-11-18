@@ -122,6 +122,8 @@ still duplicate stored data and must be reconciled by the deployment owner.
 | `kubevuln_singleflight_hits_total` | Fixed operation target |
 | `kubevuln_retry_attempts_total` | Fixed operation and attempt/success/exhausted |
 | `kubevuln_exceptions_{degraded,matched,expired}_total`, `kubevuln_exceptions_active` | Degraded/active unlabeled; matched/expired allowlist `SecurityException`, `ClusterSecurityException`, or `unknown` |
+| `kubevuln_external_vex_sources_total` | `openvex`/`csaf`/`other` format and ingested/failed result; no source URL |
+| `kubevuln_external_vex_scans_total` | Applied/no documents/apply failed/unsupported outcome |
 | `kubevuln_temp_dir_sweep_removed_total` | Component only |
 | `kubevuln_runtime_heap_bytes`, `kubevuln_runtime_goroutines` | Unlabeled runtime samples; heap objects are not total container RSS |
 
