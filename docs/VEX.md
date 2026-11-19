@@ -413,9 +413,10 @@ in effect.
 `kubevuln_external_vex_sources_total{result="failed"}` means a feed failed during fetching,
 format validation, or staging; a feed can therefore be counted as failed even after it was
 fetched and validated successfully. Any `kubevuln_external_vex_scans_total` outcome other
-than `applied` counts scans whose findings were produced without external VEX. The
-`external VEX processing failed` warning logged at the same time carries the underlying
-error for diagnosis.
+than `applied` records an evaluation attempt without external VEX, not necessarily a scan
+that produced findings; a fallback `ScanSBOM` error can increment the counter before the
+caller skips the scan. The `external VEX processing failed` warning logged at the same time
+carries the underlying error for diagnosis.
 
 **A document exists but a `SecurityException` is not reflected in it.** Check
 `riskAcceptance` is enabled. With `storage` on and `riskAcceptance` off, matching CRDs are
