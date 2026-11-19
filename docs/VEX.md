@@ -71,6 +71,12 @@ The name is the part worth knowing, because it differs by flow:
 That falls out of `StoreVEX` naming the container after its `cvep` argument. Both call
 shapes are covered under [When a document is written](#when-a-document-is-written).
 
+A per-image document describes the image manifest, which every workload running the image
+shares, in every namespace. It therefore only carries exceptions that hold for all of them: a
+`ClusterSecurityException` whose match does not select namespaces, object labels or resources.
+A namespaced `SecurityException`, or a `ClusterSecurityException` that does select workloads,
+only shapes the results of the workloads it applies to, including their per-instance documents.
+
 Note that `StoreVEX`'s `withRelevancy` parameter is accepted by the port interface and
 discarded by the API server implementation. What actually distinguishes a relevancy
 document from a plain one is *which manifests are passed*, not the flag.

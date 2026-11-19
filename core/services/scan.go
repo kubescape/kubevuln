@@ -454,11 +454,12 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				continue // we need the CVE
 			}
 
-			// apply security exceptions for storage (copy — original stays intact for SubmitCVE)
-			filteredCve, cveExceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
+			// apply security exceptions for storage (copies — original stays intact for SubmitCVE)
+			var imageCve domain.CVEManifest
+			imageCve, filteredCve, cveExceptionsComplete = s.applyExceptions(ctx, cve)
 
 			if s.storage {
-				resultErr = s.storeCVEAndSummary(ctx, filteredCve, domain.CVEManifest{}, false)
+				resultErr = s.storeCVEAndSummary(ctx, imageCve, filteredCve, domain.CVEManifest{}, false)
 			}
 		} else {
 			// Publish VEX after computing the relevancy result below.
@@ -507,7 +508,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 
 			if s.storage && resultErr == nil {
 				filteredCvep.Wlid = scan.Wlid
-				resultErr = s.storeCVEAndSummary(ctx, filteredCve, filteredCvep, true)
+				resultErr = s.storeCVEAndSummary(ctx, domain.CVEManifest{}, filteredCve, filteredCvep, true)
 				persistenceErr = errors.Join(persistenceErr, resultErr)
 				if resultErr == nil && cveExceptionsComplete && cvepExceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
@@ -758,35 +759,41 @@ func (s *ScanService) ScanRegistry(ctx context.Context) error {
 }
 
 // storeFilteredCVE applies the current exception set to cve and stores what comes out: the
-// filtered manifest, its summary, and, when that exception set was complete, the VEX document
-// built from it. ScanCVE and ScanRegistry both do exactly this once matching is done. ScanCP
-// has its own variant, which carries the relevancy manifest alongside the full one.
+// image manifest and its VEX document, filtered by the exceptions that hold for every
+// workload running the image, and the workload's summary, filtered by all of its exceptions
+// (see applyExceptions). VEX is only written when that exception set was complete. ScanCVE
+// and ScanRegistry both do exactly this once matching is done. ScanCP has its own variant,
+// which carries the relevancy manifest alongside the full one.
 //
 // The exceptions are applied whether or not storage is on, since that call is also what
 // reports the degraded, expired and active exception counts for the scan.
 //
 // Required writes return errors to the scan; cloud upload is attempted independently.
 func (s *ScanService) storeFilteredCVE(ctx context.Context, cve domain.CVEManifest, imageSlug string) error {
-	filteredCve, exceptionsComplete := s.applyExceptionsToManifest(ctx, cve)
+	imageCve, filteredCve, exceptionsComplete := s.applyExceptions(ctx, cve)
 	if !s.storage {
 		return nil
 	}
-	if err := s.storeCVEAndSummary(ctx, filteredCve, domain.CVEManifest{}, false); err != nil {
+	if err := s.storeCVEAndSummary(ctx, imageCve, filteredCve, domain.CVEManifest{}, false); err != nil {
 		return err
 	}
 	if exceptionsComplete {
-		s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
+		s.storeVEX(ctx, imageCve, imageCve, false, imageSlug)
 	}
 	return nil
 }
 
 // storeCVEAndSummary publishes a summary only after its referenced manifest is saved.
-// With relevancy, the full image manifest has already been saved by the caller.
-func (s *ScanService) storeCVEAndSummary(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool) error {
+// Without relevancy it stores image, the image manifest shared by every workload running the
+// image (see applyExceptions); with relevancy that was already saved by the caller, image is
+// unused, and cvep is stored as the workload's own manifest. The summary is computed from cve
+// and cvep, the workload's results with all of its exceptions applied.
+func (s *ScanService) storeCVEAndSummary(ctx context.Context, image, cve, cvep domain.CVEManifest, withRelevancy bool) error {
 	domain.UpdateScanPhase(ctx, "result_storage")
+	image.CVEScannerVersion = s.cveCacheVersion()
 	cve.CVEScannerVersion = s.cveCacheVersion()
 	cvep.CVEScannerVersion = s.cveCacheVersion()
-	manifest := cve
+	manifest := image
 	if withRelevancy {
 		manifest = cvep
 	}
@@ -835,9 +842,15 @@ func (s *ScanService) storeVEX(ctx context.Context, cve, cvep domain.CVEManifest
 //
 // Returns the input cve with suppressed matches restored (so SubmitCVE/StoreVEX
 // receive the same unfiltered data a cache miss would produce, matching every
-// caller's existing use of the mutated cve.Content after this call), the freshly
-// storage-safe filtered copy, and whether the exception set was known-complete.
+// caller's existing use of the mutated cve.Content after this call), this workload's
+// filtered copy, and whether the exception set was known-complete.
 // A partial exception fetch cannot remove suppressions from that filtered copy.
+//
+// The cached manifest is shared by every workload running the image, so it only ever
+// carries the exceptions that hold for all of them (see applyExceptions); the
+// workload-scoped ones only shape this workload's summary. A manifest stored before
+// that rule may carry another workload's suppressions; they show up as removals here
+// and are dropped on the next scan with a complete exception set.
 //
 // When storage is enabled and the filtered result's suppressions actually changed,
 // persists the updated manifest and, if publishVEX is true, republishes its VEX
@@ -850,10 +863,13 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 	cachedCve := cve
 	prevIgnored := v1.IgnoredMatchKeys(cve.Content)
 	cve.Content = v1.RestoreSuppressedMatches(cve.Content)
-	filteredCve, exceptionsComplete = s.applyExceptionsToManifest(ctx, cve)
+	// The cached manifest is shared by every workload running the image, so it is compared
+	// with, stored and published as imageCve; filteredCve is this workload's own result.
+	var imageCve domain.CVEManifest
+	imageCve, filteredCve, exceptionsComplete = s.applyExceptions(ctx, cve)
 
 	if s.storage {
-		curIgnored := v1.IgnoredMatchKeys(filteredCve.Content)
+		curIgnored := v1.IgnoredMatchKeys(imageCve.Content)
 		preserveRelevancy := maps.Equal(prevIgnored, curIgnored)
 		if !preserveRelevancy {
 			// Persist additions freely, but never persist removals when the
@@ -868,7 +884,7 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 				}
 			}
 			if exceptionsComplete || !hasRemovals {
-				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
+				if err := s.cveRepository.StoreCVE(ctx, imageCve, false); err != nil {
 					return cve, filteredCve, exceptionsComplete, fmt.Errorf("storing cached CVE %q: %w", cve.Name, err)
 				}
 				// The stored manifest just changed, so the VEX document describing it is
@@ -883,7 +899,7 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 				// place, written when the set was complete, beats replacing it with a
 				// weaker claim, so the two can briefly disagree until a complete scan.
 				if publishVEX && exceptionsComplete {
-					s.storeVEX(ctx, filteredCve, filteredCve, false, imageSlug)
+					s.storeVEX(ctx, imageCve, imageCve, false, imageSlug)
 				}
 			} else {
 				// Summaries must describe the suppressions we retained in storage,
@@ -915,6 +931,14 @@ func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CV
 				if err != nil {
 					return fmt.Errorf("getting cached relevancy CVE %q: %w", name, err)
 				}
+				// The relevancy manifest is this workload's own, filtered by its exceptions
+				// when it was produced. A change limited to its workload-scoped exceptions
+				// leaves the image manifest unchanged, so also require that cve, the
+				// workload's current result, still suppresses the same of its findings.
+				if cvep.Content != nil && !maps.Equal(v1.IgnoredMatchKeys(cvep.Content),
+					keysWithin(v1.IgnoredMatchKeys(cve.Content), v1.FindingKeys(cvep.Content))) {
+					cvep = domain.CVEManifest{}
+				}
 			}
 		}
 	}
@@ -922,6 +946,17 @@ func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CV
 		return fmt.Errorf("storing cached CVE summary for %q: %w", cve.Name, err)
 	}
 	return nil
+}
+
+// keysWithin returns the keys of set that are also in within.
+func keysWithin(set, within map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(set))
+	for k := range set {
+		if _, ok := within[k]; ok {
+			out[k] = struct{}{}
+		}
+	}
+	return out
 }
 
 // applyExceptionsToManifest returns a filtered copy of the CVE manifest with
@@ -933,8 +968,21 @@ func (s *ScanService) refreshCachedCVESummary(ctx context.Context, cve domain.CV
 // complete=false, so callers never persist "removals" computed from an
 // incomplete set.
 func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.CVEManifest) (domain.CVEManifest, bool) {
+	_, workload, complete := s.applyExceptions(ctx, cve)
+	return workload, complete
+}
+
+// applyExceptions is applyExceptionsToManifest for a result that is also stored per image.
+// workload has every exception of the scanned workload applied. image has only those that
+// hold for every workload running the image (v1.IsWorkloadScopedPolicy). The image manifest
+// is shared by all of those workloads, in every namespace, so only image may be stored or
+// published per image: storing workload there would let one namespace's SecurityException
+// suppress findings for the others, depending on which was scanned last. The workload's own
+// results (its summary, relevancy manifest and per-instance VEX) use workload. Without a
+// workload-scoped exception the two are the same.
+func (s *ScanService) applyExceptions(ctx context.Context, cve domain.CVEManifest) (image, workload domain.CVEManifest, complete bool) {
 	if cve.Content == nil {
-		return cve, false
+		return cve, cve, false
 	}
 	exceptions, stats, err := s.platform.GetCVEExceptions(ctx)
 	degraded := errors.Is(err, domain.ErrExceptionsDegraded)
@@ -944,26 +992,37 @@ func (s *ScanService) applyExceptionsToManifest(ctx context.Context, cve domain.
 	s.recordExceptionsExpired(ctx, stats)
 	if err != nil && !degraded {
 		logger.L().Ctx(ctx).Warning("failed to get CVE exceptions for filtering", helpers.Error(err))
-		return cve, false
+		return cve, cve, false
 	}
+	workloadExceptions := v1.WorkloadPolicies(exceptions)
 	if s.metrics != nil {
-		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(exceptions)))
+		s.metrics.ExceptionsActiveGauge.Record(ctx, int64(len(workloadExceptions)))
 	}
 	if len(exceptions) == 0 {
-		return cve, !degraded
+		return cve, cve, !degraded
 	}
-	filtered := cve
+	workload = copyManifest(cve)
+	matchedBySource := v1.ApplySecurityExceptions(workload.Content, workloadExceptions, s.eventRecorder)
+	s.recordExceptionsMatched(ctx, matchedBySource)
+	if len(workloadExceptions) == len(exceptions) && !v1.HasWorkloadScopedPolicy(exceptions) {
+		return workload, workload, !degraded
+	}
+	image = copyManifest(cve)
+	v1.ApplyImageWideSecurityExceptions(image.Content, exceptions)
+	return image, workload, !degraded
+}
+
+// copyManifest returns a copy of cve that shares no mutable state with it.
+func copyManifest(cve domain.CVEManifest) domain.CVEManifest {
+	c := cve
 	if cve.Labels != nil {
-		filtered.Labels = maps.Clone(cve.Labels)
+		c.Labels = maps.Clone(cve.Labels)
 	}
 	if cve.Annotations != nil {
-		filtered.Annotations = maps.Clone(cve.Annotations)
+		c.Annotations = maps.Clone(cve.Annotations)
 	}
-	docCopy := cve.Content.DeepCopy()
-	matchedBySource := v1.ApplySecurityExceptions(docCopy, exceptions, s.eventRecorder)
-	s.recordExceptionsMatched(ctx, matchedBySource)
-	filtered.Content = docCopy
-	return filtered, !degraded
+	c.Content = cve.Content.DeepCopy()
+	return c
 }
 
 // recordExceptionsExpired reports, per SecurityException/ClusterSecurityException sourceKind,

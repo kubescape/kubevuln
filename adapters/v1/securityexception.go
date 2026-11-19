@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
+	wlidpkg "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubevuln/core/domain"
@@ -235,6 +236,10 @@ func buildSuppressionAttributes(spec sev1beta1.SecurityExceptionSpec, vuln sev1b
 		"sourceKind": src.kind,
 		"ruleId":     suppressionRuleID(src),
 	}
+	if src.kind == "ClusterSecurityException" &&
+		(spec.Match.NamespaceSelector != nil || spec.Match.ObjectSelector != nil || len(spec.Match.Resources) > 0) {
+		attrs[attrWorkloadScoped] = true
+	}
 	if status := strings.TrimSpace(string(vuln.Status)); status != "" {
 		attrs["status"] = status
 	}
@@ -345,6 +350,94 @@ func hasIgnoreAction(policies []armotypes.VulnerabilityExceptionPolicy) bool {
 // cloud-sourced exception, not a CRD) is not counted, since this return value only feeds
 // the CRD-suppression metric.
 func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder) map[string]int {
+	return applySecurityExceptions(doc, exceptions, recorder, false)
+}
+
+// ApplyImageWideSecurityExceptions applies only the policies that hold for every workload
+// running the image (see IsWorkloadScopedPolicy), for results stored per image rather than
+// per workload. It neither logs nor records events: the same suppressions are reported once
+// by the ApplySecurityExceptions call on the scanned workload's own result.
+func ApplyImageWideSecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions) {
+	var imageWide domain.CVEExceptions
+	for _, p := range exceptions {
+		if !IsWorkloadScopedPolicy(p) {
+			imageWide = append(imageWide, p)
+		}
+	}
+	applySecurityExceptions(doc, imageWide, nil, true)
+}
+
+// HasWorkloadScopedPolicy reports whether any of exceptions is workload-scoped.
+func HasWorkloadScopedPolicy(exceptions domain.CVEExceptions) bool {
+	for _, p := range exceptions {
+		if IsWorkloadScopedPolicy(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsWorkloadScopedPolicy reports whether a policy's applicability depends on which workload
+// running an image is scanned: a namespaced SecurityException applies only to its namespace,
+// a ClusterSecurityException matching namespaces, object labels or resources applies only to
+// the workloads it selects, and a backend policy is scoped by its designators (the backend is
+// queried per workload, so it returns policies narrowed to that workload's namespace, kind,
+// name, container or labels). Such a policy must not shape a result shared by every workload
+// running the image.
+func IsWorkloadScopedPolicy(p armotypes.VulnerabilityExceptionPolicy) bool {
+	if kind, _ := p.Attributes["sourceKind"].(string); kind == "SecurityException" {
+		return true
+	}
+	if scoped, _ := p.Attributes[attrWorkloadScoped].(bool); scoped {
+		return true
+	}
+	for i := range p.Designatores {
+		if designatorSelectsWorkloads(&p.Designatores[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// attrWorkloadScoped marks a ClusterSecurityException policy whose match selects workloads.
+const attrWorkloadScoped = "workloadScoped"
+
+// imageWideDesignatorLabels are designator attributes that do not narrow a policy to some of
+// the workloads running an image: the account, and the cluster or registry image it covers.
+var imageWideDesignatorLabels = map[string]bool{
+	identifiers.AttributeCustomerGUID:     true,
+	identifiers.AttributeClusterShortName: true,
+	identifiers.AttributeRegistryName:     true,
+	identifiers.AttributeRepository:       true,
+	identifiers.AttributeTag:              true,
+}
+
+// designatorSelectsWorkloads reports whether d narrows its policy to particular workloads.
+// Anything it does not recognize as account-, cluster- or image-wide counts as narrowing, so an
+// unknown scope never reaches a result shared per image.
+func designatorSelectsWorkloads(d *identifiers.PortalDesignator) bool {
+	for _, w := range []string{d.WLID, d.WildWLID} {
+		if w != "" && (wlidpkg.GetNamespaceFromWlid(w) != "" || wlidpkg.GetKindFromWlid(w) != "" || wlidpkg.GetNameFromWlid(w) != "") {
+			return true
+		}
+	}
+	if d.SID != "" || d.GetK8sResourceHash() != "" {
+		return true
+	}
+	attrs := d.DigestAttributesDesignator()
+	if attrs.GetNamespace() != "" || attrs.GetKind() != "" || attrs.GetName() != "" ||
+		attrs.GetPath() != "" || attrs.GetResourceID() != "" {
+		return true
+	}
+	for k := range attrs.GetLabels() {
+		if !imageWideDesignatorLabels[k] {
+			return true
+		}
+	}
+	return false
+}
+
+func applySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEExceptions, recorder record.EventRecorder, quiet bool) map[string]int {
 	matchedBySource := map[string]int{}
 	if doc == nil || len(exceptions) == 0 {
 		return matchedBySource
@@ -364,7 +457,9 @@ func ApplySecurityExceptions(doc *v1beta1.GrypeDocument, exceptions domain.CVEEx
 				Match:              m,
 				AppliedIgnoreRules: buildIgnoreRules(m, matched),
 			})
-			logSuppression(m, matched, recorder)
+			if !quiet {
+				logSuppression(m, matched, recorder)
+			}
 			matchedKinds := map[string]struct{}{}
 			for _, p := range suppressingPolicies(matched) {
 				if kind, ok := p.Attributes["sourceKind"].(string); ok && kind != "" {
@@ -630,14 +725,29 @@ func IgnoredMatchKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
 		return keys
 	}
 	for _, im := range doc.IgnoredMatches {
-		m := im.Match
-		if m.Vulnerability.ID != "" {
-			keys[m.Vulnerability.ID+"\x00"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
-		} else {
-			keys["\x01"+m.Artifact.Name+"\x00"+m.Artifact.Version] = struct{}{}
-		}
+		keys[matchKey(im.Match)] = struct{}{}
 	}
 	return keys
+}
+
+// FindingKeys returns the match-identity keys (see IgnoredMatchKeys) of every finding in a
+// manifest, suppressed or not.
+func FindingKeys(doc *v1beta1.GrypeDocument) map[string]struct{} {
+	keys := IgnoredMatchKeys(doc)
+	if doc == nil {
+		return keys
+	}
+	for _, m := range doc.Matches {
+		keys[matchKey(m)] = struct{}{}
+	}
+	return keys
+}
+
+func matchKey(m v1beta1.Match) string {
+	if m.Vulnerability.ID != "" {
+		return m.Vulnerability.ID + "\x00" + m.Artifact.Name + "\x00" + m.Artifact.Version
+	}
+	return "\x01" + m.Artifact.Name + "\x00" + m.Artifact.Version
 }
 
 func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []identifiers.PortalDesignator {
@@ -681,3 +791,20 @@ func buildDesignators(resources []sev1beta1.ResourceMatch, namespace string) []i
 	}
 	return designators
 }
+
+// WorkloadPolicies returns the policies that shape the scanned workload's own result: all of
+// them except those kept only for the image-level result (see excludeCloudCoveredPolicies).
+func WorkloadPolicies(exceptions domain.CVEExceptions) domain.CVEExceptions {
+	var out domain.CVEExceptions
+	for _, p := range exceptions {
+		if imageLevelOnly, _ := p.Attributes[attrImageLevelOnly].(bool); !imageLevelOnly {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// attrImageLevelOnly marks an image-wide CRD policy that a workload-scoped cloud policy takes
+// precedence over for the scanned workload. It still holds for every other workload running
+// the image, so it shapes the image-level result but not this workload's own.
+const attrImageLevelOnly = "imageLevelOnly"
