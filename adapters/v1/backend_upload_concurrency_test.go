@@ -135,6 +135,50 @@ func TestSendVulnerabilities_StopsWhenContextEndsWhileWaitingForSlot(t *testing.
 	assert.ErrorIs(t, errs[0], context.Canceled)
 }
 
+func TestSendVulnerabilities_SlotFreedAsContextEndsPostsNothing(t *testing.T) {
+	var posts atomic.Int32
+	// Repeated because, with both a slot and ctx.Done ready, select picks one at random.
+	for i := 0; i < 50; i++ {
+		a := &BackendAdapter{
+			backendClient: &MockBackendClient{
+				HttpPostFunc: func(context.Context, httputils.IHttpClient, string, map[string]string, []byte, time.Duration) (*http.Response, error) {
+					posts.Add(1)
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+				},
+			},
+		}
+		slots := a.postSlots()
+		for j := 0; j < maxConcurrentReportPosts; j++ {
+			slots <- struct{}{}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		var once sync.Once
+		// While the first chunk waits: end the context and free a slot, so both are ready.
+		a.postSlotWaitHook = func() {
+			once.Do(func() {
+				cancel()
+				<-slots
+			})
+		}
+
+		chunksChan, producerDone := chunkStream(5)
+		errChan := make(chan error, 10)
+		wg := &sync.WaitGroup{}
+		a.sendVulnerabilities(ctx, chunksChan, "https://report.invalid", 1, 5, "scan", uploadTestReport(), errChan, wg)
+		wg.Wait()
+		close(errChan)
+		<-producerDone
+		var errs []error
+		for err := range errChan {
+			errs = append(errs, err)
+		}
+		require.Len(t, errs, 1, "the cancellation is reported once")
+		assert.ErrorIs(t, errs[0], context.Canceled)
+		assert.Len(t, slots, maxConcurrentReportPosts-1, "the slot taken during cancellation is given back")
+	}
+	assert.Equal(t, int32(0), posts.Load(), "nothing is posted once the context has ended, even when a slot frees up at the same time")
+}
+
 func TestSendVulnerabilities_CancelledContextPostsNothingWithSlotsFree(t *testing.T) {
 	var posts atomic.Int32
 	a := &BackendAdapter{

@@ -127,6 +127,11 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 		case <-ctx.Done():
 			return cancelled()
 		case slots <- struct{}{}:
+			// A slot freed up as the context ended: select may pick either.
+			if ctx.Err() != nil {
+				<-slots
+				return cancelled()
+			}
 		}
 	}
 	wg.Add(1)
