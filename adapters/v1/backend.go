@@ -63,6 +63,11 @@ type BackendAdapter struct {
 	// credentialCache.onMiss.
 	exceptionsCacheMissHook func()
 	httpClient              httputils.IHttpClient
+	// reportPostSlots bounds how many result reports this adapter posts at once, across
+	// every scan it submits; see maxConcurrentReportPosts. Created on first use by
+	// postSlots, so an adapter built as a struct literal is bounded too.
+	reportPostSlots     chan struct{}
+	reportPostSlotsOnce sync.Once
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)
@@ -251,6 +256,14 @@ func shouldRetryReport(resp *http.Response) bool {
 const ActionName = "vuln scan"
 const ReporterName = "ca-vuln-scan"
 const maxBodySize int = 30000
+
+// maxConcurrentReportPosts caps the result reports in flight at once. A result is split into
+// maxBodySize chunks and each chunk is its own POST, so an image with a few thousand
+// vulnerabilities (a full Debian base image, for example) yields about a thousand of them.
+// Posted all at once, they hold a thousand streams and their goroutines for as long as the
+// event receiver takes to answer, up to the 60s client timeout plus retries, and the process
+// stops answering its liveness probe within the probe's 1s timeout.
+const maxConcurrentReportPosts = 8
 
 var details = []string{
 	"Inqueueing",

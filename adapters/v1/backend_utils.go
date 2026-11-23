@@ -77,7 +77,9 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 	nextPartNum = 1
 	//send the first chunk if it was not sent yet (because of summary size)
 	if firstVulnerabilitiesChunk != nil {
-		a.postResultsAsGoroutine(ctx,
+		// A false return already reported the error; the remaining chunks see the same
+		// cancelled context and stop too.
+		_ = a.postResultsAsGoroutine(ctx,
 			&v1.ScanResultReport{
 				PaginationInfo:  apis.PaginationMarks{ReportNumber: nextPartNum, IsLastReport: totalVulnerabilities == firstChunkVulnerabilitiesCount},
 				Vulnerabilities: firstVulnerabilitiesChunk,
@@ -90,10 +92,40 @@ func (a *BackendAdapter) sendSummaryAndVulnerabilities(ctx context.Context, repo
 	return nextPartNum, nil
 }
 
-func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
+// postSlots returns the semaphore that bounds concurrent report posts to
+// maxConcurrentReportPosts.
+func (a *BackendAdapter) postSlots() chan struct{} {
+	a.reportPostSlotsOnce.Do(func() {
+		if a.reportPostSlots == nil {
+			a.reportPostSlots = make(chan struct{}, maxConcurrentReportPosts)
+		}
+	})
+	return a.reportPostSlots
+}
+
+// postResultsAsGoroutine posts report in its own goroutine once a post slot is free, waiting
+// for one first. It returns false, after sending ctx's error to errorChan, when ctx ends
+// before a slot frees up; the report is then not posted and the caller should stop
+// dispatching.
+func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error, wg *sync.WaitGroup) bool {
+	cancelled := func() bool {
+		sendError(ctx, errorChan, fmt.Errorf("posting report %d for %s: %w", report.PaginationInfo.ReportNumber, wlid, ctx.Err()))
+		return false
+	}
+	// Checked first: with a slot free as well, select would pick between the two at random.
+	if ctx.Err() != nil {
+		return cancelled()
+	}
+	slots := a.postSlots()
+	select {
+	case <-ctx.Done():
+		return cancelled()
+	case slots <- struct{}{}:
+	}
 	wg.Add(1)
 	go func(report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
 		defer wg.Done()
+		defer func() { <-slots }()
 
 		// postResults returns errors to the caller. Since this function runs in a
 		// goroutine and nothing is synchronously waiting on the return value, it
@@ -102,6 +134,7 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 			sendError(ctx, errorChan, err)
 		}
 	}(*report, eventReceiverURL, imagetag, wlid, errorChan, wg)
+	return true
 }
 
 func (a *BackendAdapter) getRequestHeaders() map[string]string {
@@ -183,7 +216,7 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 	chunksVulnerabilitiesCount := 0
 	for vulnerabilities := range chunksChan {
 		chunksVulnerabilitiesCount += len(vulnerabilities)
-		a.postResultsAsGoroutine(ctx,
+		posted := a.postResultsAsGoroutine(ctx,
 			&v1.ScanResultReport{
 				PaginationInfo:  apis.PaginationMarks{ReportNumber: partNum, IsLastReport: chunksVulnerabilitiesCount == expectedVulnerabilitiesSum},
 				Vulnerabilities: vulnerabilities,
@@ -191,6 +224,13 @@ func (a *BackendAdapter) sendVulnerabilities(ctx context.Context, chunksChan <-c
 				Timestamp:       finalReport.Timestamp,
 				Designators:     finalReport.Designators,
 			}, eventReceiverURL, finalReport.Summary.ImageTag, finalReport.Summary.WLID, errorChan, sendWG)
+		if !posted {
+			// ctx ended while waiting for a post slot and the error is reported. Drain the
+			// rest so the SplitSlice2Chunks producer is not left blocked on its send.
+			for range chunksChan {
+			}
+			return
+		}
 		partNum++
 	}
 

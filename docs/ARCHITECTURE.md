@@ -316,7 +316,10 @@ The central business logic component implementing the `ScanService` port.
 - Daily database refresh
 
 **Backend Adapter** (`adapters/v1/backend.go`)
-- Sends scan results to Kubescape backend
+- Sends scan results to Kubescape backend: the summary first, then the vulnerabilities
+  in chunks of at most 30 KB, each its own POST. At most 8 chunk POSTs are in flight
+  at once per process (`maxConcurrentReportPosts`), so a result with thousands of
+  vulnerabilities does not open a thousand streams at once
 - Handles authentication
 - Reports errors and status updates
 
