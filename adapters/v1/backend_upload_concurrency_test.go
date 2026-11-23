@@ -89,20 +89,37 @@ func TestSendVulnerabilities_StopsWhenContextEndsWhileWaitingForSlot(t *testing.
 			},
 		},
 	}
-	// Every slot is taken by another scan's posts, then the context ends.
+	// Every slot is taken by another scan's posts. The context is live when dispatch
+	// starts and ends only once the first chunk is waiting for a slot.
 	slots := a.postSlots()
 	for i := 0; i < maxConcurrentReportPosts; i++ {
 		slots <- struct{}{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
+	var waits atomic.Int32
+	a.postSlotWaitHook = func() {
+		if waits.Add(1) == 1 {
+			cancel()
+		}
+	}
 
 	chunksChan, producerDone := chunkStream(20)
 	errChan := make(chan error, 10)
 	wg := &sync.WaitGroup{}
-	a.sendVulnerabilities(ctx, chunksChan, "https://report.invalid", 1, 20, "scan", uploadTestReport(), errChan, wg)
+	dispatched := make(chan struct{})
+	go func() {
+		defer close(dispatched)
+		a.sendVulnerabilities(ctx, chunksChan, "https://report.invalid", 1, 20, "scan", uploadTestReport(), errChan, wg)
+	}()
+	select {
+	case <-dispatched:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch did not stop when the context ended during the wait for a slot")
+	}
 	wg.Wait()
 	close(errChan)
+	assert.Equal(t, int32(1), waits.Load(), "the first chunk waited for a slot; nothing after it did")
 
 	select {
 	case <-producerDone:

@@ -68,6 +68,9 @@ type BackendAdapter struct {
 	// postSlots, so an adapter built as a struct literal is bounded too.
 	reportPostSlots     chan struct{}
 	reportPostSlotsOnce sync.Once
+	// postSlotWaitHook, if set, is called when a report post finds every slot taken and is
+	// about to wait for one. Tests use it to cancel the context during that wait.
+	postSlotWaitHook func()
 }
 
 var _ ports.Platform = (*BackendAdapter)(nil)

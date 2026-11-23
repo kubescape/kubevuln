@@ -118,9 +118,16 @@ func (a *BackendAdapter) postResultsAsGoroutine(ctx context.Context, report *v1.
 	}
 	slots := a.postSlots()
 	select {
-	case <-ctx.Done():
-		return cancelled()
 	case slots <- struct{}{}:
+	default:
+		if a.postSlotWaitHook != nil {
+			a.postSlotWaitHook()
+		}
+		select {
+		case <-ctx.Done():
+			return cancelled()
+		case slots <- struct{}{}:
+		}
 	}
 	wg.Add(1)
 	go func(report v1.ScanResultReport, eventReceiverURL, imagetag, wlid string, errorChan chan<- error, wg *sync.WaitGroup) {
