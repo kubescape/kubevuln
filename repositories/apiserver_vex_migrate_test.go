@@ -252,7 +252,9 @@ func TestAPIServerStore_updateVEX_migratesAProductStoredUnderAnotherSpelling(t *
 	requireProducts(t, a, ctx, full.Name, "pkg:oci/nginx@"+digest+"?repository_url=docker.io%2Flibrary%2Fnginx")
 }
 
-// A stored annotation for another image does not make its legacy IDs ours to rewrite.
+// A stored annotation for another image does not make its legacy IDs ours to rewrite: the
+// statements written for that image are not relabelled as this one's, they are replaced by
+// the ones this scan writes for it.
 func TestAPIServerStore_updateVEX_leavesAnotherImagesLegacyProduct(t *testing.T) {
 	const digest = "sha256:32fdf92b4e986e109e4db0865758020cb0c3b70d6ba80d02fe87bad5cc3dc228"
 	legacy := "pkg:oci/redis@" + digest + "?repository_url=docker.io%2Flibrary"
@@ -261,7 +263,77 @@ func TestAPIServerStore_updateVEX_leavesAnotherImagesLegacyProduct(t *testing.T)
 	full, filtered := manifestsForImage("docker.io/library/nginx@" + digest)
 	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
 
-	requireProducts(t, a, ctx, full.Name, legacy)
+	requireProducts(t, a, ctx, full.Name, imageProductID("docker.io/library/nginx@"+digest))
+}
+
+// The container is named after the workload instance, which keeps its name when a bare pod's
+// image is changed in place or a mutable tag resolves to another digest. After a rescan on the
+// new digest, every finding has a statement naming that digest with this scan's verdict, a
+// finding only the old image had is no longer asserted, and another author's statement stays.
+func TestAPIServerStore_updateVEX_imageChangedUnderTheSameName(t *testing.T) {
+	const (
+		imageA = "docker.io/library/nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		imageB = "docker.io/library/nginx@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	match := func(cve, purl string) v1beta1.Match {
+		return v1beta1.Match{
+			Vulnerability: v1beta1.Vulnerability{VulnerabilityMetadata: v1beta1.VulnerabilityMetadata{ID: cve, DataSource: "https://example.com/" + cve}},
+			Artifact:      v1beta1.GrypePackage{PURL: purl},
+		}
+	}
+	manifests := func(image string, matches ...v1beta1.Match) (domain.CVEManifest, domain.CVEManifest) {
+		m := domain.CVEManifest{
+			Name:        "pod-web-0-nginx-5cf6-a1fd",
+			Annotations: map[string]string{helpersv1.ImageIDMetadataKey: image},
+			Content:     &v1beta1.GrypeDocument{Matches: matches},
+		}
+		return m, m // every finding is relevant
+	}
+	openssl := match("CVE-2024-1", "pkg:deb/debian/openssl@3.0.1")
+	zlib := match("CVE-2024-2", "pkg:deb/debian/zlib@1.2")
+	curl := match("CVE-2024-3", "pkg:deb/debian/curl@8.0")
+
+	a := NewFakeAPIServerStorage("kubescape")
+	ctx := context.TODO()
+	vexClient := a.StorageClient.OpenVulnerabilityExchangeContainers(a.Namespace)
+
+	full, filtered := manifests(imageA, openssl, zlib)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+	stored, err := vexClient.Get(ctx, full.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	external := v1beta1.Statement{
+		ID:            "https://vendor.example/vex/statement/1",
+		Vulnerability: v1beta1.VexVulnerability{Name: "CVE-2099-0001"},
+		Products:      []v1beta1.Product{imageProduct(imageProductID(imageA), "pkg:deb/debian/zlib@1.2")},
+		Status:        v1beta1.Status(vex.StatusNotAffected),
+		Justification: v1beta1.Justification(vex.ComponentNotPresent),
+	}
+	stored.Spec.Statements = append(stored.Spec.Statements, external)
+	_, err = vexClient.Update(ctx, stored, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	full, filtered = manifests(imageB, openssl, curl)
+	require.NoError(t, a.StoreVEX(ctx, full, filtered, false))
+	got, err := vexClient.Get(ctx, full.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	want := imageProductID(imageB)
+	local := map[string]v1beta1.Statement{}
+	for _, s := range got.Spec.Statements {
+		if !isLocalStatement(s.ID) {
+			assert.Equal(t, external, s, "another author's statement is left as it was")
+			continue
+		}
+		require.Len(t, s.Products, 1)
+		assert.Equal(t, want, s.Products[0].ID, "statement %s names another image", s.ID)
+		local[s.Vulnerability.Name] = s
+	}
+	assert.Len(t, local, 2)
+	assert.NotContains(t, local, "CVE-2024-2", "a finding only the previous image had is not asserted")
+	for _, cve := range []string{"CVE-2024-1", "CVE-2024-3"} {
+		assert.Equal(t, v1beta1.Status(vex.StatusAffected), local[cve].Status, cve)
+	}
+	assert.Equal(t, imageB, got.Annotations[helpersv1.ImageIDMetadataKey])
 }
 
 // End to end through StoreVEX: a document an older kubevuln stored is rewritten on the next
