@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubevuln/core/domain"
 	"github.com/kubescape/kubevuln/internal/registryauth"
 	sbomscanner "github.com/kubescape/kubevuln/pkg/sbomscanner/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // ReasonRateLimitExceeded indicates image pull failed due to registry rate limiting (HTTP 429).
@@ -27,8 +28,22 @@ import (
 // shared constant, switch this to consume it directly.
 const ReasonRateLimitExceeded = "rate_limit_exceeded"
 
+// ReasonResultTooLarge identifies a CVE manifest that storage refused with HTTP 413 because
+// it exceeded the request size the API server accepts. Like ReasonRateLimitExceeded it is
+// defined locally: armoapi-go/scanfailure has no constant for it, and an unknown reason code
+// is returned as-is by scanfailure.ReasonFriendlyText, so the report itself is still
+// classified correctly until that package adds a friendly-text mapping.
+const ReasonResultTooLarge = "result_too_large"
+
 // ReasonResultStorageFailed identifies required local result writes, independently of cloud upload.
 const ReasonResultStorageFailed = "result_storage_failed"
+
+// isResultTooLargeError reports whether err is the API server rejecting a write because the
+// request body was too large (HTTP 413). IsRequestEntityTooLargeError also matches by status
+// code, which is what a 413 without a Status body looks like in client-go.
+func isResultTooLargeError(err error) bool {
+	return err != nil && apierrors.IsRequestEntityTooLargeError(err)
+}
 
 // classifySBOMError inspects the error returned by CreateSBOM and returns
 // a reason code constant. Uses errors.Is for sentinel errors (Go 1.13+),

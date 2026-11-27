@@ -64,6 +64,7 @@ type ScanService struct {
 	vexSources        []vexsource.Source
 	vexIngestor       vexsource.Ingestor
 	tooManyRequests   *cache.Cache
+	oversizedCVE      *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
 	sfGroup           singleflight.Group
@@ -109,6 +110,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		storage:           storage,
 		storeFilteredSbom: storeFilteredSbom,
 		tooManyRequests:   cache.New(cleaningInterval),
+		oversizedCVE:      cache.New(cleaningInterval),
 		vexGeneration:     vexGeneration,
 	}
 }
@@ -255,6 +257,24 @@ func (s *ScanService) checkCreateSBOM(err error, key string) {
 	}
 }
 
+// oversizedCVEKey identifies a CVE manifest by the same inputs GetCVE uses to decide whether a
+// stored manifest is still valid. Any change to the image (the slug carries its digest) or to
+// the tool/db versions produces a different key, so a remembered rejection stops applying.
+func (s *ScanService) oversizedCVEKey(ctx context.Context, imageSlug string) string {
+	return fmt.Sprintf("%s|%s|%s|%s", imageSlug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
+}
+
+// rememberOversizedCVE records that storage rejected this image's manifest as too large. A 413
+// is deterministic for a given manifest and server request limit, and ScanCP runs again for the
+// same ContainerProfile on every update, so without the marker each run repeats the full grype
+// match and backend upload only to hit the same rejection (see #1268). The entry has no expiry:
+// the version-keyed inputs cover scanner, DB and image changes, and a restart clears it.
+func (s *ScanService) rememberOversizedCVE(ctx context.Context, imageSlug string, resultErr error) {
+	if isResultTooLargeError(resultErr) {
+		s.oversizedCVE.Set(s.oversizedCVEKey(ctx, imageSlug), true, 0)
+	}
+}
+
 // GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
 // POST v1/generateSBOM here, through ValidateGenerateSBOM and the same rejection and scan
 // metrics as the other flows.
@@ -375,6 +395,21 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		}
 		ctx := enrichContext(mainCtx, subWorkload, s.Version())
 
+		// storage rejected this image's manifest as too large on an earlier pass; rescanning
+		// cannot change the size, so report the same classified failure without repeating the
+		// match and upload. Mirrors the GetCVE guard below: external VEX feeds can change a
+		// manifest between scans, so the marker does not apply while they are configured.
+		if s.storage && !s.hasExternalVEXSources() {
+			if _, remembered := s.oversizedCVE.Get(s.oversizedCVEKey(ctx, slug)); remembered {
+				logger.L().Ctx(ctx).Warning("skipping scan of an image whose CVE manifest exceeds the storage request limit",
+					helpers.String("imageSlug", slug))
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, ReasonResultTooLarge, nil)
+				failed++
+				lastFailure = &domain.ScanError{Reason: ReasonResultTooLarge, Err: fmt.Errorf("CVE manifest for %q exceeds the storage request limit", slug)}
+				continue
+			}
+		}
+
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
 		if s.storage && !s.hasExternalVEXSources() {
@@ -465,6 +500,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			cve, filteredCve, cveExceptionsComplete, resultErr = s.reconcileCachedCVE(ctx, cve, slug, false)
 		}
 		persistenceErr = errors.Join(persistenceErr, resultErr)
+		s.rememberOversizedCVE(ctx, slug, resultErr)
 
 		// generate SBOM' from SBOM and relevant files
 		sbomp := domain.SBOM{}
@@ -509,6 +545,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				filteredCvep.Wlid = scan.Wlid
 				resultErr = s.storeCVEAndSummary(ctx, filteredCve, filteredCvep, true)
 				persistenceErr = errors.Join(persistenceErr, resultErr)
+				s.rememberOversizedCVE(ctx, slug, resultErr)
 				if resultErr == nil && cveExceptionsComplete && cvepExceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
 				}
@@ -803,7 +840,11 @@ func resultStorageError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &domain.ScanError{Reason: ReasonResultStorageFailed, Err: err}
+	reason := ReasonResultStorageFailed
+	if isResultTooLargeError(err) {
+		reason = ReasonResultTooLarge
+	}
+	return &domain.ScanError{Reason: reason, Err: err}
 }
 
 // storeVEX writes the VEX document for a scanned image when VEX generation is enabled,
