@@ -61,7 +61,7 @@ VS Code and GoLand run configurations.
 
 ## Changelog
 
-Kubevuln changes are tracked on the [release](https://github.com/kubescape/kubevuln/releases) page
+Kubevuln changes are tracked on the [release](https://github.com/kubescape/kubevuln/releases) page.
 
 Operational metrics, traces, export controls, and deployment requirements are documented in
 [Operational telemetry](docs/OPERATIONAL_TELEMETRY.md).
