@@ -34,8 +34,8 @@ jobs:
       pull-requests: write
       checks: write
     steps:
-      # Before activation, verify this pinned action commit is on kubescape/workflows main.
+      # Merge pin updates only after the action commit is on kubescape/workflows main.
       # No checkout: contributor code is never executed by this privileged job.
-      - uses: kubescape/workflows/.github/actions/contribution-policy@5e37275ff09ed76e90f7ea72f07ff84a22479d8b
+      - uses: kubescape/workflows/.github/actions/contribution-policy@78b57ba1c3f366e230a2bb2e05ea302b93656696
         with:
           start: ${{ vars.CONTRIBUTION_POLICY_START }}
