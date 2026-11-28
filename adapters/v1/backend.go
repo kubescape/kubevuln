@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"strconv"
@@ -481,10 +482,30 @@ func excludeCloudCoveredPolicies(crdPolicies, cloudPolicies []armotypes.Vulnerab
 		return crdPolicies
 	}
 	cloudIndex := buildCVEExceptionIndex(cloudPolicies)
+	var imageWideCloud []armotypes.VulnerabilityExceptionPolicy
+	for _, c := range cloudPolicies {
+		if !IsWorkloadScopedPolicy(c) {
+			imageWideCloud = append(imageWideCloud, c)
+		}
+	}
+	imageWideCloudIndex := buildCVEExceptionIndex(imageWideCloud)
 
 	var filtered []armotypes.VulnerabilityExceptionPolicy
 	for _, p := range crdPolicies {
 		if !cloudCoversPolicy(p, cloudIndex) {
+			filtered = append(filtered, p)
+			continue
+		}
+		// Precedence is decided for the scanned workload only. An image-wide CRD policy that
+		// only workload-scoped cloud policies cover still holds for every other workload
+		// running the image, so keep it for the image-level result, or that result would
+		// depend on which workload was scanned last.
+		if !IsWorkloadScopedPolicy(p) && !cloudCoversPolicy(p, imageWideCloudIndex) {
+			p.Attributes = maps.Clone(p.Attributes)
+			if p.Attributes == nil {
+				p.Attributes = map[string]interface{}{}
+			}
+			p.Attributes[attrImageLevelOnly] = true
 			filtered = append(filtered, p)
 		}
 	}

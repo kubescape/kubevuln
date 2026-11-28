@@ -1259,10 +1259,13 @@ func (f *fakeCVEScannerWithVuln) ScanSBOM(ctx context.Context, sbom domain.SBOM)
 
 func TestScanService_ScanRegistry_StorageAndExceptions(t *testing.T) {
 	t.Run("ScanRegistry applies exceptions and persists to storage", func(t *testing.T) {
+		// A registry scan has no workload namespace, so production lists no namespaced
+		// SecurityException for it (only the mock ignores the namespace): the exceptions that
+		// apply to a registry image are ClusterSecurityExceptions.
 		mockRepo := &mockSecurityExceptionRepo{
-			exceptions: []sev1beta1.SecurityException{
+			clusterExceptions: []sev1beta1.ClusterSecurityException{
 				{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+					ObjectMeta: metav1.ObjectMeta{Name: "registry-exception"},
 					Spec: sev1beta1.SecurityExceptionSpec{
 						Reason: "test exception",
 						Vulnerabilities: []sev1beta1.VulnerabilityException{
