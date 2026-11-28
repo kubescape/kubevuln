@@ -264,10 +264,12 @@ func (s *ScanService) oversizedCVEKey(ctx context.Context, imageSlug string) str
 	return fmt.Sprintf("%s|%s|%s|%s", imageSlug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
 }
 
-// rememberOversizedCVE records that storage rejected this image's manifest as too large. A 413
-// is deterministic for a given manifest and server request limit, and ScanCP runs again for the
-// same ContainerProfile on every update, so without the marker each run repeats the full grype
-// match and backend upload only to hit the same rejection (see #1268). The entry has no expiry:
+// rememberOversizedCVE records that storage rejected this image's full CVE manifest as too
+// large. A 413 is deterministic for a given manifest and server request limit, and ScanCP runs
+// again for the same ContainerProfile on every update, so without the marker each run repeats
+// the full grype match and backend upload only to hit the same rejection (see #1268). Only the
+// full-manifest store calls this: the per-instance filtered manifest is a different object and
+// its size does not carry over to other workloads of the same image. The entry has no expiry:
 // the version-keyed inputs cover scanner, DB and image changes, and a restart clears it.
 func (s *ScanService) rememberOversizedCVE(ctx context.Context, imageSlug string, resultErr error) {
 	if isResultTooLargeError(resultErr) {
@@ -545,7 +547,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				filteredCvep.Wlid = scan.Wlid
 				resultErr = s.storeCVEAndSummary(ctx, filteredCve, filteredCvep, true)
 				persistenceErr = errors.Join(persistenceErr, resultErr)
-				s.rememberOversizedCVE(ctx, slug, resultErr)
+				// no rememberOversizedCVE here: this manifest is the per-instance filtered one,
+				// so a 413 says nothing about the image-wide full manifest. Marking the image
+				// would skip every other workload of the same image, whose filtered manifests
+				// can still fit. Only the full-manifest store above sets the marker.
 				if resultErr == nil && cveExceptionsComplete && cvepExceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
 				}
