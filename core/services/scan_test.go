@@ -936,6 +936,63 @@ func TestScanService_ScanCP_SummaryStoreTooLargeDoesNotSkipImage(t *testing.T) {
 	assert.Equal(t, 3, cveRepo.summaryCalls)
 }
 
+// TestScanService_RememberOversizedCVE_OnlyTagsManifestStore pins the marker's contract. Only a
+// 413 from the image-wide StoreCVE may set it. The cached-manifest rewrite in
+// reconcileCachedCVE returns a plain error on purpose: that manifest is already stored, only
+// stale, and marking the image would skip it on every later pass, so a removed exception would
+// never reach storage.
+func TestScanService_RememberOversizedCVE_OnlyTagsManifestStore(t *testing.T) {
+	tooLarge := apierrors.NewGenericServerResponse(
+		http.StatusRequestEntityTooLarge, "post",
+		schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifests"},
+		"manifest", "", 0, true)
+	s := NewScanService(
+		&countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)},
+		repositories.NewMemoryStorage(false, false),
+		&countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1"},
+		&rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)},
+		&failureRecordingPlatform{}, stubRelevancyProvider{}, true, false, true, false, false)
+	remembered := func(slug, dbVersion string) bool {
+		_, ok := s.oversizedCVE.Get(s.oversizedCVEKey(slug, dbVersion))
+		return ok
+	}
+
+	// a plain 413 is what a cached rewrite returns: no marker
+	s.rememberOversizedCVE("image-a", "v1", tooLarge)
+	assert.False(t, remembered("image-a", "v1"))
+
+	// a tagged full-manifest store 413 sets the marker for that DB version only
+	s.rememberOversizedCVE("image-b", "v1", &manifestStoreError{err: tooLarge})
+	assert.True(t, remembered("image-b", "v1"))
+	assert.False(t, remembered("image-b", "v2"))
+}
+
+// TestScanService_ReconcileCachedCVE_StoreTooLargeStaysRetryable covers the call site, not just
+// the helper: a 413 while rewriting an already-stored cached manifest must not mark the image as
+// unscannable, otherwise the skip at the top of ScanCP would keep a removed exception from ever
+// reaching storage.
+func TestScanService_ReconcileCachedCVE_StoreTooLargeStaysRetryable(t *testing.T) {
+	platform := &recordingPlatform{}
+	repo := &rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)}
+	s, _, _, dbVersion, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	cve := domain.CVEManifest{
+		Name: "imageSlug",
+		Content: &v1beta1.GrypeDocument{
+			Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+			IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+		},
+	}
+
+	_, _, _, err := s.reconcileCachedCVE(ctx, cve, "imageSlug", true)
+	require.Error(t, err)
+	assert.True(t, isResultTooLargeError(err), "the 413 must still be reported to the caller")
+
+	s.rememberOversizedCVE("imageSlug", dbVersion, err)
+	_, remembered := s.oversizedCVE.Get(s.oversizedCVEKey("imageSlug", dbVersion))
+	assert.False(t, remembered, "a cached-manifest rewrite failure must not mark the image as unscannable")
+}
+
 // TestIsRegistryRateLimitedErr is a regression test: checkCreateSBOM's rate-limit detection
 // must not rely on errors.As(err, &transport.Error{}) alone, since a real pull error never
 // reaches it in that shape. stereoscope's registry provider formats the go-containerregistry
