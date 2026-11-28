@@ -41,7 +41,9 @@ import (
 	"github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestScanService_GenerateSBOM(t *testing.T) {
@@ -684,6 +686,397 @@ func TestScanService_ScanCP_SkipsPullForAlreadyRateLimitedImage(t *testing.T) {
 	assert.Equal(t, ReasonRateLimitExceeded, scanErr.Reason)
 	assert.Equal(t, 0, sbomAdapter.calls, "ScanCP should not attempt to pull an image already known to be rate limited")
 	assert.Equal(t, []string{ReasonRateLimitExceeded}, platform.reasons, "expected ReportScanFailure to record ReasonRateLimitExceeded")
+}
+
+// rejectingCVERepository fails StoreCVE with the API server's response for an oversized
+// request body (HTTP 413) and counts the attempts, so tests can assert ScanCP stops retrying.
+type rejectingCVERepository struct {
+	*repositories.MemoryStore
+	storeCalls   int
+	fullStores   int
+	summaryCalls int
+	onlyFiltered bool
+	onlySummary  bool
+}
+
+func (r *rejectingCVERepository) StoreCVE(ctx context.Context, cve domain.CVEManifest, withRelevancy bool) error {
+	r.storeCalls++
+	if !withRelevancy {
+		r.fullStores++
+	}
+	if r.onlySummary || (r.onlyFiltered && !withRelevancy) {
+		return r.MemoryStore.StoreCVE(ctx, cve, withRelevancy)
+	}
+	return apierrors.NewGenericServerResponse(
+		http.StatusRequestEntityTooLarge, "post",
+		schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifests"},
+		"manifest", "", 0, true)
+}
+
+func (r *rejectingCVERepository) StoreCVESummary(ctx context.Context, cve, cvep domain.CVEManifest, withRelevancy bool) error {
+	r.summaryCalls++
+	if r.onlySummary {
+		return apierrors.NewGenericServerResponse(
+			http.StatusRequestEntityTooLarge, "post",
+			schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifests"},
+			"manifest", "", 0, true)
+	}
+	return r.MemoryStore.StoreCVESummary(ctx, cve, cvep, withRelevancy)
+}
+
+// countingMutableScanner lets a test change the DB version between ScanCP runs, one of the
+// inputs the too-large marker is keyed on, and counts the grype match evaluations.
+type countingMutableScanner struct {
+	ports.CVEScanner
+	dbVersion string
+	scanCalls int
+}
+
+func (m *countingMutableScanner) DBVersion(context.Context) string { return m.dbVersion }
+
+func (m *countingMutableScanner) ScanSBOM(ctx context.Context, sbom domain.SBOM) (domain.CVEManifest, error) {
+	m.scanCalls++
+	return m.CVEScanner.ScanSBOM(ctx, sbom)
+}
+
+// TestScanService_ScanCP_DoesNotRescanTooLargeCVEManifest is a regression test for #1268: a
+// CVE manifest that storage rejects with 413 used to be rescanned in full on every ScanCP of
+// the same workload, repeating the grype match and the backend upload only to hit the same
+// rejection. The rejection is deterministic for the image and tool versions, so ScanCP must
+// remember it, report it as its own reason, and only retry once one of those inputs changes.
+func TestScanService_ScanCP_DoesNotRescanTooLargeCVEManifest(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	sbomCreator := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	scanner := &countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1.0.0"}
+	cveRepo := &rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)}
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string](),
+		Wlid:          wlid,
+	}}}
+	platform := &failureRecordingPlatform{}
+	s := NewScanService(sbomCreator, repositories.NewMemoryStorage(false, false), scanner, cveRepo, platform, relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	// first pass: the store fails with 413 and the scan is classified accordingly
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	require.Equal(t, 1, cveRepo.storeCalls)
+	// the primary manifest plus the filtered one, both matched from the same SBOM
+	require.Equal(t, 2, scanner.scanCalls)
+	firstPassMatches := scanner.scanCalls
+
+	// second pass for the same image and tool versions must not repeat the match or store
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 1, cveRepo.storeCalls, "a manifest storage already rejected must not be stored again")
+	assert.Equal(t, firstPassMatches, scanner.scanCalls, "a manifest storage already rejected must not be matched again")
+	assert.Contains(t, platform.reasons, ReasonResultTooLarge)
+
+	// a new DB version changes the manifest, so the marker no longer applies
+	scanner.dbVersion = "v2.0.0"
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 2*firstPassMatches, scanner.scanCalls, "a changed DB version must be matched again")
+	assert.Equal(t, 2, cveRepo.storeCalls, "a changed DB version must be stored again")
+}
+
+// flakySubmitPlatform fails SubmitCVE a fixed number of times, then delegates to the mock.
+type flakySubmitPlatform struct {
+	failureRecordingPlatform
+	mu       sync.Mutex
+	failures int
+	submits  int
+}
+
+func (p *flakySubmitPlatform) SubmitCVE(ctx context.Context, cve, cvep domain.CVEManifest) error {
+	p.mu.Lock()
+	p.submits++
+	fail := p.failures > 0
+	if fail {
+		p.failures--
+	}
+	p.mu.Unlock()
+	if fail {
+		return errors.New("backend unavailable")
+	}
+	return p.failureRecordingPlatform.SubmitCVE(ctx, cve, cvep)
+}
+
+// TestScanService_ScanCP_FailedUploadRetriesNextPass is a regression test for the review on
+// #1289: a 413 marker set in the same pass where SubmitCVE fails must not outlive the failure.
+// Otherwise one transient backend error suppresses the upload for the image until the key
+// changes or the process restarts, and the manifest never reaches the platform.
+func TestScanService_ScanCP_FailedUploadRetriesNextPass(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	sbomCreator := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	scanner := &countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1.0.0"}
+	cveRepo := &rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)}
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string](),
+		Wlid:          wlid,
+	}}}
+	platform := &flakySubmitPlatform{failures: 1}
+	s := NewScanService(sbomCreator, repositories.NewMemoryStorage(false, false), scanner, cveRepo, platform, relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	// first pass: the store is rejected and the upload fails, so the marker must not survive
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	require.Equal(t, 1, cveRepo.fullStores)
+	require.Equal(t, 1, platform.submits)
+	firstPassMatches := scanner.scanCalls
+
+	// second pass: the upload did not land, so the image is scanned and uploaded again
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, 2, platform.submits, "a failed upload must be retried on the next pass")
+	assert.Greater(t, scanner.scanCalls, firstPassMatches, "the retry needs a fresh match")
+	assert.Equal(t, 2, cveRepo.fullStores)
+
+	// third pass: the upload landed on the second pass, so the marker holds and skips
+	matchesAfterRetry := scanner.scanCalls
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 2, platform.submits, "a successful upload leaves the marker in place")
+	assert.Equal(t, matchesAfterRetry, scanner.scanCalls)
+}
+
+// TestScanService_ScanCP_FilteredStoreTooLargeKeepsImageScannable is a regression test for the
+// review on #1289: a 413 from the per-instance filtered manifest is not an image-wide fact. The
+// full manifest stored fine, so a workload whose filtered manifest is too large must not set the
+// marker that makes every other workload of the same image report result_too_large without
+// running. The next pass has to do the work again instead of taking the skip path.
+func TestScanService_ScanCP_FilteredStoreTooLargeKeepsImageScannable(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	sbomCreator := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	scanner := &countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1.0.0"}
+	// the full manifest stores fine, only the per-instance filtered one is rejected
+	cveRepo := &rejectingCVERepository{
+		MemoryStore:  repositories.NewMemoryStorage(false, false),
+		onlyFiltered: true,
+	}
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string](),
+		Wlid:          wlid,
+	}}}
+	platform := &failureRecordingPlatform{}
+	s := NewScanService(sbomCreator, repositories.NewMemoryStorage(false, false), scanner, cveRepo, platform, relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	// first pass: the full manifest is stored, the filtered one is rejected
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 1, cveRepo.fullStores)
+	assert.Equal(t, 2, cveRepo.storeCalls)
+	firstPassMatches := scanner.scanCalls
+
+	// second pass: no image-wide marker, so the workload is scanned again rather than skipped
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 1, cveRepo.fullStores, "the full manifest stored on the first pass stays stored")
+	assert.Equal(t, 3, cveRepo.storeCalls, "a filtered-only rejection must not skip the image")
+	assert.Greater(t, scanner.scanCalls, firstPassMatches, "a filtered-only rejection must not skip the match")
+}
+
+// TestScanService_ScanCP_SummaryStoreTooLargeDoesNotSkipImage covers the other half of the same
+// review point on #1289: a 413 from StoreCVESummary, on the first store and on the
+// cached-summary refresh, must not mark the image. The full manifest is stored, so every later
+// pass has to do the work again instead of taking the skip path.
+func TestScanService_ScanCP_SummaryStoreTooLargeDoesNotSkipImage(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	sbomCreator := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	scanner := &countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1.0.0"}
+	// the manifest stores fine, only its summary is rejected
+	cveRepo := &rejectingCVERepository{
+		MemoryStore: repositories.NewMemoryStorage(false, false),
+		onlySummary: true,
+	}
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string](),
+		Wlid:          wlid,
+	}}}
+	platform := &failureRecordingPlatform{}
+	s := NewScanService(sbomCreator, repositories.NewMemoryStorage(false, false), scanner, cveRepo, platform, relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	// first pass: the manifest is stored, only the summary is refused
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 1, cveRepo.fullStores)
+	assert.Equal(t, 1, cveRepo.summaryCalls)
+	firstPassMatches := scanner.scanCalls
+
+	// second pass: the cached-summary refresh is refused too, and the image is still scanned
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 2, cveRepo.summaryCalls, "a summary-only rejection must not skip the image")
+	assert.Greater(t, scanner.scanCalls, firstPassMatches, "a summary-only rejection must not skip the match")
+
+	// third pass: still no marker, so the refresh is attempted again
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, 3, cveRepo.summaryCalls)
+}
+
+// TestScanService_RememberOversizedCVE_OnlyTagsManifestStore pins the marker's contract. Only a
+// 413 from the image-wide StoreCVE may set it. The cached-manifest rewrite in
+// reconcileCachedCVE returns a plain error on purpose: that manifest is already stored, only
+// stale, and marking the image would skip it on every later pass, so a removed exception would
+// never reach storage.
+func TestScanService_RememberOversizedCVE_OnlyTagsManifestStore(t *testing.T) {
+	tooLarge := apierrors.NewGenericServerResponse(
+		http.StatusRequestEntityTooLarge, "post",
+		schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "vulnerabilitymanifests"},
+		"manifest", "", 0, true)
+	s := NewScanService(
+		&countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)},
+		repositories.NewMemoryStorage(false, false),
+		&countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1"},
+		&rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)},
+		&failureRecordingPlatform{}, stubRelevancyProvider{}, true, false, true, false, false)
+	remembered := func(slug, dbVersion string) bool {
+		_, ok := s.oversizedCVE.Get(s.oversizedCVEKey(slug, dbVersion))
+		return ok
+	}
+
+	// a plain 413 is what a cached rewrite returns: no marker
+	s.rememberOversizedCVE("image-a", "v1", tooLarge)
+	assert.False(t, remembered("image-a", "v1"))
+
+	// a tagged full-manifest store 413 sets the marker for that DB version only
+	s.rememberOversizedCVE("image-b", "v1", &manifestStoreError{err: tooLarge})
+	assert.True(t, remembered("image-b", "v1"))
+	assert.False(t, remembered("image-b", "v2"))
+}
+
+// TestScanService_ReconcileCachedCVE_StoreTooLargeStaysRetryable covers the call site, not just
+// the helper: a 413 while rewriting an already-stored cached manifest must not mark the image as
+// unscannable, otherwise the skip at the top of ScanCP would keep a removed exception from ever
+// reaching storage.
+func TestScanService_ReconcileCachedCVE_StoreTooLargeStaysRetryable(t *testing.T) {
+	platform := &recordingPlatform{}
+	repo := &rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)}
+	s, _, _, dbVersion, ctx := newScanCVETestService(t, platform, repo, nil)
+
+	cve := domain.CVEManifest{
+		Name: "imageSlug",
+		Content: &v1beta1.GrypeDocument{
+			Matches:        []v1beta1.Match{matchForTest("CVE-B")},
+			IgnoredMatches: []v1beta1.IgnoredMatch{ignoredMatchForTest("CVE-A")},
+		},
+	}
+
+	_, _, _, err := s.reconcileCachedCVE(ctx, cve, "imageSlug", true)
+	require.Error(t, err)
+	assert.True(t, isResultTooLargeError(err), "the 413 must still be reported to the caller")
+
+	s.rememberOversizedCVE("imageSlug", dbVersion, err)
+	_, remembered := s.oversizedCVE.Get(s.oversizedCVEKey("imageSlug", dbVersion))
+	assert.False(t, remembered, "a cached-manifest rewrite failure must not mark the image as unscannable")
 }
 
 // TestIsRegistryRateLimitedErr is a regression test: checkCreateSBOM's rate-limit detection

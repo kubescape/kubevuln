@@ -64,6 +64,7 @@ type ScanService struct {
 	vexSources        []vexsource.Source
 	vexIngestor       vexsource.Ingestor
 	tooManyRequests   *cache.Cache
+	oversizedCVE      *cache.Cache
 	metrics           *metrics.Metrics
 	eventRecorder     record.EventRecorder
 	sfGroup           singleflight.Group
@@ -109,6 +110,7 @@ func NewScanService(sbomCreator ports.SBOMCreator, sbomRepository ports.SBOMRepo
 		storage:           storage,
 		storeFilteredSbom: storeFilteredSbom,
 		tooManyRequests:   cache.New(cleaningInterval),
+		oversizedCVE:      cache.New(cleaningInterval),
 		vexGeneration:     vexGeneration,
 	}
 }
@@ -255,6 +257,41 @@ func (s *ScanService) checkCreateSBOM(err error, key string) {
 	}
 }
 
+// oversizedCVEKey identifies a CVE manifest by the same inputs GetCVE uses to decide whether a
+// stored manifest is still valid. Any change to the image (the slug carries its digest) or to
+// the tool/db versions produces a different key, so a remembered rejection stops applying.
+// dbVersion is the value captured at the start of this pass, i.e. the one the match runs
+// against, so a DB reload in the middle of a scan cannot key the marker to a version that was
+// never matched.
+func (s *ScanService) oversizedCVEKey(imageSlug, dbVersion string) string {
+	return fmt.Sprintf("%s|%s|%s|%s", imageSlug, s.sbomCreator.Version(), s.cveCacheVersion(), dbVersion)
+}
+
+// rememberOversizedCVE records that storage rejected this image's full CVE manifest as too
+// large. A 413 is deterministic for a given manifest and server request limit, and ScanCP runs
+// again for the same ContainerProfile on every update, so without the marker each run repeats
+// the full grype match and backend upload only to hit the same rejection (see #1268). Only a
+// failure from the full-manifest store reaches it (manifestStoreError): the summary and the
+// per-instance filtered manifest are different objects, and either can be refused while the
+// image-wide manifest still fits. The entry has no expiry:
+// the version-keyed inputs cover scanner, DB and image changes, and a restart clears it.
+func (s *ScanService) rememberOversizedCVE(imageSlug, dbVersion string, resultErr error) {
+	var storeErr *manifestStoreError
+	if errors.As(resultErr, &storeErr) && isResultTooLargeError(resultErr) {
+		s.oversizedCVE.Set(s.oversizedCVEKey(imageSlug, dbVersion), true, 0)
+	}
+}
+
+// manifestStoreError marks a failure from storing the image-wide CVE manifest itself, as
+// opposed to its summary or a per-instance filtered copy. Only the manifest is refused for
+// every workload of the image, so only this error may set the oversized marker: a rejected
+// summary or filtered manifest leaves the image scannable.
+type manifestStoreError struct{ err error }
+
+func (e *manifestStoreError) Error() string { return e.err.Error() }
+
+func (e *manifestStoreError) Unwrap() error { return e.err }
+
 // GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
 // POST v1/generateSBOM here, through ValidateGenerateSBOM and the same rejection and scan
 // metrics as the other flows.
@@ -375,10 +412,29 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		}
 		ctx := enrichContext(mainCtx, subWorkload, s.Version())
 
+		// captured once so the marker check, the cache lookup and rememberOversizedCVE all use
+		// the DB version this pass actually matched against
+		dbVersion := s.cveScanner.DBVersion(ctx)
+
+		// storage rejected this image's manifest as too large on an earlier pass; rescanning
+		// cannot change the size, so report the same classified failure without repeating the
+		// match and upload. Mirrors the GetCVE guard below: external VEX feeds can change a
+		// manifest between scans, so the marker does not apply while they are configured.
+		if s.storage && !s.hasExternalVEXSources() {
+			if _, remembered := s.oversizedCVE.Get(s.oversizedCVEKey(slug, dbVersion)); remembered {
+				logger.L().Ctx(ctx).Warning("skipping scan of an image whose CVE manifest exceeds the storage request limit",
+					helpers.String("imageSlug", slug))
+				_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureCVE, ReasonResultTooLarge, nil)
+				failed++
+				lastFailure = &domain.ScanError{Reason: ReasonResultTooLarge, Err: fmt.Errorf("CVE manifest for %q exceeds the storage request limit", slug)}
+				continue
+			}
+		}
+
 		// check if CVE manifest is already available
 		cve := domain.CVEManifest{}
 		if s.storage && !s.hasExternalVEXSources() {
-			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveCacheVersion(), s.cveScanner.DBVersion(ctx))
+			cve, err = s.cveRepository.GetCVE(ctx, slug, s.sbomCreator.Version(), s.cveCacheVersion(), dbVersion)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("getting CVE", helpers.Error(err),
 					helpers.String("imageSlug", slug))
@@ -465,6 +521,7 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 			cve, filteredCve, cveExceptionsComplete, resultErr = s.reconcileCachedCVE(ctx, cve, slug, false)
 		}
 		persistenceErr = errors.Join(persistenceErr, resultErr)
+		s.rememberOversizedCVE(slug, dbVersion, resultErr)
 
 		// generate SBOM' from SBOM and relevant files
 		sbomp := domain.SBOM{}
@@ -509,6 +566,10 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 				filteredCvep.Wlid = scan.Wlid
 				resultErr = s.storeCVEAndSummary(ctx, filteredCve, filteredCvep, true)
 				persistenceErr = errors.Join(persistenceErr, resultErr)
+				// no rememberOversizedCVE here: this manifest is the per-instance filtered one,
+				// so a 413 says nothing about the image-wide full manifest. Marking the image
+				// would skip every other workload of the same image, whose filtered manifests
+				// can still fit. Only the full-manifest store above sets the marker.
 				if resultErr == nil && cveExceptionsComplete && cvepExceptionsComplete {
 					s.storeVEX(ctx, filteredCve, filteredCvep, true, slug)
 				}
@@ -518,6 +579,11 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		domain.UpdateScanPhase(mainCtx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, cvep)
 		if err != nil {
+			// The upload is the point of the pass: if it did not land, the marker set from
+			// the storage rejection above would suppress the retry for as long as the key
+			// lives, so drop it and let the next pass rescan and upload again. The storage
+			// rejection simply repeats, which costs the same as it did before the marker.
+			s.oversizedCVE.Delete(s.oversizedCVEKey(slug, dbVersion))
 			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),
 				helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,
@@ -791,7 +857,11 @@ func (s *ScanService) storeCVEAndSummary(ctx context.Context, cve, cvep domain.C
 		manifest = cvep
 	}
 	if err := s.cveRepository.StoreCVE(ctx, manifest, withRelevancy); err != nil {
-		return fmt.Errorf("storing CVE %q: %w", manifest.Name, err)
+		err = fmt.Errorf("storing CVE %q: %w", manifest.Name, err)
+		if !withRelevancy {
+			return &manifestStoreError{err: err}
+		}
+		return err
 	}
 	if err := s.cveRepository.StoreCVESummary(ctx, cve, cvep, withRelevancy); err != nil {
 		return fmt.Errorf("storing CVE summary for %q: %w", cve.Name, err)
@@ -803,7 +873,11 @@ func resultStorageError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &domain.ScanError{Reason: ReasonResultStorageFailed, Err: err}
+	reason := ReasonResultStorageFailed
+	if isResultTooLargeError(err) {
+		reason = ReasonResultTooLarge
+	}
+	return &domain.ScanError{Reason: reason, Err: err}
 }
 
 // storeVEX writes the VEX document for a scanned image when VEX generation is enabled,
@@ -869,6 +943,9 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 			}
 			if exceptionsComplete || !hasRemovals {
 				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
+					// not tagged as manifestStoreError: the image's manifest is already stored,
+					// only stale. Marking it would skip the image on every later pass and a
+					// removed exception would never reach the stored manifest.
 					return cve, filteredCve, exceptionsComplete, fmt.Errorf("storing cached CVE %q: %w", cve.Name, err)
 				}
 				// The stored manifest just changed, so the VEX document describing it is
