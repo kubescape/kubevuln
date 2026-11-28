@@ -579,6 +579,11 @@ func (s *ScanService) ScanCP(mainCtx context.Context) error {
 		domain.UpdateScanPhase(mainCtx, "result_upload")
 		err = s.platform.SubmitCVE(ctx, cve, cvep)
 		if err != nil {
+			// The upload is the point of the pass: if it did not land, the marker set from
+			// the storage rejection above would suppress the retry for as long as the key
+			// lives, so drop it and let the next pass rescan and upload again. The storage
+			// rejection simply repeats, which costs the same as it did before the marker.
+			s.oversizedCVE.Delete(s.oversizedCVEKey(slug, dbVersion))
 			logger.L().Ctx(ctx).Warning("submitting CVEs", helpers.Error(err),
 				helpers.String("instanceID", scan.InstanceID.GetStringFormatted()))
 			_ = s.platform.ReportScanFailure(ctx, scanfailure.ScanFailureBackendPost,

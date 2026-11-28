@@ -807,6 +807,92 @@ func TestScanService_ScanCP_DoesNotRescanTooLargeCVEManifest(t *testing.T) {
 	assert.Equal(t, 2, cveRepo.storeCalls, "a changed DB version must be stored again")
 }
 
+// flakySubmitPlatform fails SubmitCVE a fixed number of times, then delegates to the mock.
+type flakySubmitPlatform struct {
+	failureRecordingPlatform
+	mu       sync.Mutex
+	failures int
+	submits  int
+}
+
+func (p *flakySubmitPlatform) SubmitCVE(ctx context.Context, cve, cvep domain.CVEManifest) error {
+	p.mu.Lock()
+	p.submits++
+	fail := p.failures > 0
+	if fail {
+		p.failures--
+	}
+	p.mu.Unlock()
+	if fail {
+		return errors.New("backend unavailable")
+	}
+	return p.failureRecordingPlatform.SubmitCVE(ctx, cve, cvep)
+}
+
+// TestScanService_ScanCP_FailedUploadRetriesNextPass is a regression test for the review on
+// #1289: a 413 marker set in the same pass where SubmitCVE fails must not outlive the failure.
+// Otherwise one transient backend error suppresses the upload for the image until the key
+// changes or the process restarts, and the manifest never reaches the platform.
+func TestScanService_ScanCP_FailedUploadRetriesNextPass(t *testing.T) {
+	imageID := "sha256:c1b135231b5b1a6799346cd701da4b59e5b7ef8e694ec7b04fb23b8dbe144137"
+	imageTag := "k8s.gcr.io/kube-proxy:v1.24.3"
+	wlid := "wlid://cluster-minikube/namespace-kube-system/daemonset-kube-proxy"
+
+	instanceID, err := instanceidhandlerv1.GenerateInstanceIDFromString(
+		"apiVersion-apps/v1/namespace-kube-system/kind-DaemonSet/name-kube-proxy/containerName-kube-proxy")
+	require.NoError(t, err)
+
+	sbomCreator := &countingSBOMCreator{SBOMCreator: adapters.NewMockSBOMAdapter(false, false, false)}
+	scanner := &countingMutableScanner{CVEScanner: adapters.NewMockCVEAdapter(), dbVersion: "v1.0.0"}
+	cveRepo := &rejectingCVERepository{MemoryStore: repositories.NewMemoryStorage(false, false)}
+	relevancy := stubRelevancyProvider{scans: []ports.ContainerRelevancyScan{{
+		ContainerName: "kube-proxy",
+		ImageID:       imageID,
+		ImageTag:      imageTag,
+		InstanceID:    instanceID,
+		Labels:        map[string]string{},
+		RelevantFiles: mapset.NewSet[string](),
+		Wlid:          wlid,
+	}}}
+	platform := &flakySubmitPlatform{failures: 1}
+	s := NewScanService(sbomCreator, repositories.NewMemoryStorage(false, false), scanner, cveRepo, platform, relevancy, true, false, true, false, false)
+	ctx := context.TODO()
+	s.Ready(ctx)
+
+	workload := domain.ScanCommand{
+		Args: map[string]interface{}{
+			domain.ArgsName:      "daemonset-kube-proxy",
+			domain.ArgsNamespace: "kube-system",
+		},
+		Wlid: wlid,
+	}
+	ctx, err = s.ValidateScanCP(ctx, workload)
+	require.NoError(t, err)
+
+	// first pass: the store is rejected and the upload fails, so the marker must not survive
+	err = s.ScanCP(ctx)
+	var scanErr *domain.ScanError
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	require.Equal(t, 1, cveRepo.fullStores)
+	require.Equal(t, 1, platform.submits)
+	firstPassMatches := scanner.scanCalls
+
+	// second pass: the upload did not land, so the image is scanned and uploaded again
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, 2, platform.submits, "a failed upload must be retried on the next pass")
+	assert.Greater(t, scanner.scanCalls, firstPassMatches, "the retry needs a fresh match")
+	assert.Equal(t, 2, cveRepo.fullStores)
+
+	// third pass: the upload landed on the second pass, so the marker holds and skips
+	matchesAfterRetry := scanner.scanCalls
+	err = s.ScanCP(ctx)
+	require.ErrorAsf(t, err, &scanErr, "expected a *domain.ScanError, got %T: %v", err, err)
+	assert.Equal(t, ReasonResultTooLarge, scanErr.Reason)
+	assert.Equal(t, 2, platform.submits, "a successful upload leaves the marker in place")
+	assert.Equal(t, matchesAfterRetry, scanner.scanCalls)
+}
+
 // TestScanService_ScanCP_FilteredStoreTooLargeKeepsImageScannable is a regression test for the
 // review on #1289: a 413 from the per-instance filtered manifest is not an image-wide fact. The
 // full manifest stored fine, so a workload whose filtered manifest is too large must not set the
