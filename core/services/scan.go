@@ -267,15 +267,27 @@ func (s *ScanService) oversizedCVEKey(ctx context.Context, imageSlug string) str
 // rememberOversizedCVE records that storage rejected this image's full CVE manifest as too
 // large. A 413 is deterministic for a given manifest and server request limit, and ScanCP runs
 // again for the same ContainerProfile on every update, so without the marker each run repeats
-// the full grype match and backend upload only to hit the same rejection (see #1268). Only the
-// full-manifest store calls this: the per-instance filtered manifest is a different object and
-// its size does not carry over to other workloads of the same image. The entry has no expiry:
+// the full grype match and backend upload only to hit the same rejection (see #1268). Only a
+// failure from the full-manifest store reaches it (manifestStoreError): the summary and the
+// per-instance filtered manifest are different objects, and either can be refused while the
+// image-wide manifest still fits. The entry has no expiry:
 // the version-keyed inputs cover scanner, DB and image changes, and a restart clears it.
 func (s *ScanService) rememberOversizedCVE(ctx context.Context, imageSlug string, resultErr error) {
-	if isResultTooLargeError(resultErr) {
+	var storeErr *manifestStoreError
+	if errors.As(resultErr, &storeErr) && isResultTooLargeError(resultErr) {
 		s.oversizedCVE.Set(s.oversizedCVEKey(ctx, imageSlug), true, 0)
 	}
 }
+
+// manifestStoreError marks a failure from storing the image-wide CVE manifest itself, as
+// opposed to its summary or a per-instance filtered copy. Only the manifest is refused for
+// every workload of the image, so only this error may set the oversized marker: a rejected
+// summary or filtered manifest leaves the image scannable.
+type manifestStoreError struct{ err error }
+
+func (e *manifestStoreError) Error() string { return e.err.Error() }
+
+func (e *manifestStoreError) Unwrap() error { return e.err }
 
 // GenerateSBOM implements the "Generate SBOM flow". It is live: cmd/http/main.go routes
 // POST v1/generateSBOM here, through ValidateGenerateSBOM and the same rejection and scan
@@ -833,7 +845,11 @@ func (s *ScanService) storeCVEAndSummary(ctx context.Context, cve, cvep domain.C
 		manifest = cvep
 	}
 	if err := s.cveRepository.StoreCVE(ctx, manifest, withRelevancy); err != nil {
-		return fmt.Errorf("storing CVE %q: %w", manifest.Name, err)
+		err = fmt.Errorf("storing CVE %q: %w", manifest.Name, err)
+		if !withRelevancy {
+			return &manifestStoreError{err: err}
+		}
+		return err
 	}
 	if err := s.cveRepository.StoreCVESummary(ctx, cve, cvep, withRelevancy); err != nil {
 		return fmt.Errorf("storing CVE summary for %q: %w", cve.Name, err)
@@ -915,7 +931,7 @@ func (s *ScanService) reconcileCachedCVE(ctx context.Context, cve domain.CVEMani
 			}
 			if exceptionsComplete || !hasRemovals {
 				if err := s.cveRepository.StoreCVE(ctx, filteredCve, false); err != nil {
-					return cve, filteredCve, exceptionsComplete, fmt.Errorf("storing cached CVE %q: %w", cve.Name, err)
+					return cve, filteredCve, exceptionsComplete, &manifestStoreError{err: fmt.Errorf("storing cached CVE %q: %w", cve.Name, err)}
 				}
 				// The stored manifest just changed, so the VEX document describing it is
 				// now stale. Republish it, but only from a known-complete exception set,
