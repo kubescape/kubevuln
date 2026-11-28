@@ -72,7 +72,7 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 	externalStmtNoID.Justification = ""
 	externalStmtNoID.ImpactStatement = "External feed assessed this one (no ID)"
 
-	// Inject a true local kubescape statement
+	// Inject a true local kubescape statement for the scanned image
 	localStmt := v1beta1.Statement{
 		ID: "https://kubescape.io/vex/statement/CVE-LOCAL-1234/pkg%3Adeb%2Fdebian%2Flocal-pkg%401.0",
 		Vulnerability: v1beta1.VexVulnerability{
@@ -81,7 +81,7 @@ func TestAPIServerStore_updateVEX_preservesExternalStatements(t *testing.T) {
 		},
 		Products: []v1beta1.Product{
 			{
-				Component: v1beta1.Component{ID: "pkg:oci/some-image"},
+				Component: v1beta1.Component{ID: target.Products[0].ID},
 				Subcomponents: []v1beta1.Subcomponent{
 					{Component: v1beta1.Component{ID: "pkg:deb/debian/local-pkg@1.0"}},
 				},

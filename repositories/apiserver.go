@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2300,6 +2301,22 @@ func (a *APIServerStore) updateVEX(ctx context.Context, cve domain.CVEManifest, 
 	// one it was stored with here: the incoming annotations are merged into it further down.
 	migrateLegacyImageProducts(vexDoc.Statements, strings.TrimPrefix(imagePullable, "docker://"),
 		strings.TrimPrefix(vexContainer.Annotations[helpersv1.ImageIDMetadataKey], "docker://"))
+
+	// The container is named after the workload instance, which can keep its name while it
+	// runs another image: a bare pod whose image is changed in place, or a mutable tag that
+	// now resolves to another digest. Our statements are keyed on vulnerability and package
+	// only, so ones written for the previous image would satisfy the dedup below and be
+	// re-marked with this scan's verdicts while still naming that image, and no statement
+	// would name the image scanned now. Drop our statements that do not name it; the loops
+	// below write them afresh from this scan. Another author's statements are left alone.
+	if imagePullable != "" {
+		current := imageProductID(strings.TrimPrefix(imagePullable, "docker://"))
+		vexDoc.Statements = slices.DeleteFunc(vexDoc.Statements, func(s v1beta1.Statement) bool {
+			return isLocalStatement(s.ID) && !slices.ContainsFunc(s.Products, func(p v1beta1.Product) bool {
+				return p.ID == current
+			})
+		})
+	}
 
 	// statementIdx tracks local statements by (vulnerability, package), built once and kept
 	// up to date as statements are appended below. It drives the Matches/IgnoredMatches dedup
